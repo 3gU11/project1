@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import pandas as pd
 import streamlit as st
 
@@ -6,9 +5,6 @@ from config import CUSTOM_MODEL_ORDER, PLOTLY_AVAILABLE, PRESET_RATIOS, px
 from core.navigation import go_home
 from crud.inventory import get_data
 from utils.formatters import get_model_rank
-=======
-from views.common import *
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 
 
 def render_query():

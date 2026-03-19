@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import random
 import time
 from datetime import datetime, timedelta
@@ -14,9 +13,6 @@ from crud.inventory import get_data
 from crud.orders import get_orders
 from crud.planning import get_factory_plan, save_factory_plan
 from utils.formatters import get_model_rank
-=======
-from views.common import *
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 from views.components import render_archive_preview, render_file_manager, render_module_logs
 
 

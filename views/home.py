@@ -1,11 +1,7 @@
-<<<<<<< HEAD
 import streamlit as st
 
 from config import FUNC_MAP
 from core.navigation import go_page
-=======
-from views.common import *
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 
 
 def render_home():

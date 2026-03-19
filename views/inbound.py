@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import time
 from datetime import datetime
 
@@ -15,10 +14,6 @@ from views.inbound_modules import (
     render_machine_inbound_module,
     render_tracking_import_module,
 )
-=======
-from views.common import *
-from views.inbound_modules import render_machine_inbound_module, render_tracking_import_module
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 
 
 def render_inbound():

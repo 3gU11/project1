@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import re
 import time
 
@@ -11,9 +10,6 @@ from crud.inventory import get_data
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound
 from crud.planning import get_planning_records
 from utils.parsers import parse_requirements
-=======
-from views.common import *
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 
 
 def render_sales_alloc():

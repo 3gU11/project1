@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import time
 from datetime import datetime
 
@@ -6,9 +5,6 @@ import streamlit as st
 
 from core.navigation import go_home
 from crud.users import get_all_users, save_all_users
-=======
-from views.common import *
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 
 
 def render_user_management():

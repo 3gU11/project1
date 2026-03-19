@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import ast
 import time
 from datetime import datetime
@@ -15,9 +14,6 @@ from crud.orders import create_sales_order, get_orders, save_orders
 from crud.planning import get_factory_plan, save_factory_plan, save_planning_record
 from utils.formatters import get_model_rank
 from utils.parsers import parse_requirements
-=======
-from views.common import *
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 
 
 def render_boss_planning():

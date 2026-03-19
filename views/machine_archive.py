@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import os
 import re
 import time
@@ -11,11 +10,6 @@ from core.navigation import go_home
 from core.permissions import check_access
 from crud.inventory import get_data
 from views.components import render_archive_preview, render_file_manager, render_module_logs
-=======
-from views.common import *
-from views.components import render_archive_preview, render_file_manager, render_module_logs
-from views.components import render_archive_preview
->>>>>>> 88b8b5966418ed53f8a893e327b91727f9c01707
 
 
 def render_machine_archive():
