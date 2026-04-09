@@ -15,6 +15,7 @@ def search_global_summary(keyword: str):
             fp.`订单号` AS `订单号`,
             fp.`客户名` AS `客户`,
             fp.`代理商` AS `代理商`,
+            GROUP_CONCAT(DISTINCT fg.`状态` ORDER BY fg.`状态` SEPARATOR ' / ') AS `机台状态`,
             MIN(fg.`预计入库时间`) AS `预计入库时间`
         FROM factory_plan fp
         LEFT JOIN finished_goods_data fg
@@ -38,14 +39,15 @@ def search_global_summary(keyword: str):
     df = fetch_data_with_cache(query, params={"kw": f"%{keyword}%"}, ttl=30)
     return df
 
-def get_target_status_distribution(target_id: str):
+def get_target_status_distribution(target_id: str, model: str = ""):
     """
     Step 2.1: 获取精确 ID 的实时状态切片。
     """
     query = """
         SELECT `状态`, COUNT(*) AS 数量
         FROM finished_goods_data
-        WHERE `占用订单号` = :target_id
+        WHERE (
+            `占用订单号` = :target_id
            OR `占用订单号` IN (
                 SELECT DISTINCT `订单号`
                 FROM factory_plan
@@ -53,9 +55,14 @@ def get_target_status_distribution(target_id: str):
                   AND COALESCE(TRIM(`订单号`), '') <> ''
            )
            OR `订单备注` LIKE :kw
-        GROUP BY `状态`
+        )
     """
-    df = fetch_data_with_cache(query, params={"target_id": target_id, "kw": f"%{target_id}%"}, ttl=30)
+    params = {"target_id": target_id, "kw": f"%{target_id}%"}
+    if str(model).strip():
+        query += " AND `机型` = :model"
+        params["model"] = str(model).strip()
+    query += " GROUP BY `状态`"
+    df = fetch_data_with_cache(query, params=params, ttl=30)
     return df
 
 def get_target_timeline(target_id: str):

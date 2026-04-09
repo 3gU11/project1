@@ -12,8 +12,8 @@ def search_traceability(keyword: str = "", _ctx: dict = Depends(require_roles("A
     return {"data": df.to_dict(orient="records")}
 
 @router.get("/{target_id}/status")
-def target_status(target_id: str, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
-    df = get_target_status_distribution(target_id)
+def target_status(target_id: str, model: str = "", _ctx: dict = Depends(require_roles("Admin", "Boss"))):
+    df = get_target_status_distribution(target_id, model=model)
     return {"data": df.to_dict(orient="records")}
 
 @router.get("/{target_id}/timeline")

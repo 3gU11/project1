@@ -2,7 +2,7 @@
   <div class="page-header">
     <div class="left">
       <el-button v-if="showBack" class="back-btn" size="small" @click="$emit('back')">⬅ 返回</el-button>
-      <h1 class="title">{{ title }}</h1>
+      <h1 class="title" :class="{ 'title-sm': small }">{{ title }}</h1>
     </div>
     <div class="right">
       <slot name="actions" />
@@ -14,6 +14,7 @@
 defineProps<{
   title: string
   showBack?: boolean
+  small?: boolean
 }>()
 
 defineEmits<{
@@ -48,5 +49,8 @@ defineEmits<{
   color: #1f2937;
   font-weight: 800;
   line-height: 1.1;
+}
+.title-sm {
+  font-size: 34px;
 }
 </style>

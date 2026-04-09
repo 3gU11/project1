@@ -1,6 +1,6 @@
 <template>
   <div class="traceability-page">
-    <PageHeader title="🔍 汇总与追溯 (Traceability)" />
+    <PageHeader title="🔍 汇总与追溯" :small="true" />
     
     <el-card class="mb-4">
       <template #header>
@@ -24,17 +24,17 @@
       </el-row>
       
       <div v-if="hasSearched" class="mt-4">
-        <el-table :data="summaryList" v-loading="loading" border stripe max-height="300">
+        <el-table
+          :data="summaryList"
+          v-loading="loading"
+          border
+          stripe
+          max-height="300"
+          @row-click="onSummaryRowClick"
+        >
           <el-table-column prop="机型" label="机型" min-width="140" />
           <el-table-column prop="状态" label="状态" width="120" />
-          <el-table-column prop="合同号" label="合同号" width="170" />
-          <el-table-column prop="订单号" label="订单号" width="170">
-            <template #default="scope">
-              <el-button link type="primary" @click="handleTrace(getTraceTarget(scope.row))">
-                {{ scope.row.订单号 || '-' }}
-              </el-button>
-            </template>
-          </el-table-column>
+          <el-table-column prop="机台状态" label="机台状态" min-width="180" />
           <el-table-column prop="客户" label="客户" min-width="220" />
           <el-table-column prop="代理商" label="代理商" width="120" />
           <el-table-column prop="预计入库时间" label="预计入库时间" width="180" />
@@ -46,16 +46,19 @@
     <el-card v-if="targetId">
       <template #header>
         <div class="card-header">
-          <span>2. 深度追溯: {{ targetId }}</span>
+          <span>
+            2.合同号：<strong>{{ targetContractNo || '-' }}</strong>
+            <template v-if="targetOrderNo"> 订单号：<strong>{{ targetOrderNo }}</strong></template>
+          </span>
         </div>
       </template>
       
       <el-row :gutter="20" v-loading="detailLoading">
         <el-col :span="8">
-          <h4>📊 实时状态分布</h4>
+          <h4 class="status-title">📊 实时状态分布</h4>
           <div v-if="statusList.length > 0" class="status-metrics">
             <el-card v-for="item in statusList" :key="item.状态" shadow="hover" class="metric-card">
-              <el-statistic :title="item.状态" :value="item.数量" />
+              <el-statistic :title="`${selectedModel || '机型'} - ${item.状态}`" :value="item.数量" />
             </el-card>
           </div>
           <div v-else class="text-gray-500">暂无关联的机台库存状态。</div>
@@ -111,6 +114,9 @@ const loading = ref(false)
 const summaryList = ref<any[]>([])
 
 const targetId = ref('')
+const targetContractNo = ref('')
+const targetOrderNo = ref('')
+const selectedModel = ref('')
 const detailLoading = ref(false)
 const statusList = ref<any[]>([])
 const timelineList = ref<any[]>([])
@@ -138,6 +144,15 @@ const getTraceTarget = (row: any) => {
   return String(row?.合同号 || '').trim()
 }
 
+const onSummaryRowClick = (row: any) => {
+  const target = getTraceTarget(row)
+  if (!target) return
+  targetContractNo.value = String(row?.合同号 || '').trim()
+  targetOrderNo.value = String(row?.订单号 || '').trim()
+  selectedModel.value = String(row?.机型 || '').trim()
+  handleTrace(target, selectedModel.value)
+}
+
 const handleSearch = async () => {
   if (!searchKeyword.value.trim()) return
   loading.value = true
@@ -152,12 +167,12 @@ const handleSearch = async () => {
   }
 }
 
-const handleTrace = async (id: string) => {
+const handleTrace = async (id: string, model = '') => {
   targetId.value = id
   detailLoading.value = true
   try {
     const [statusRes, timelineRes] = await Promise.all([
-      apiGet(`/traceability/${encodeURIComponent(id)}/status`),
+      apiGet(`/traceability/${encodeURIComponent(id)}/status?model=${encodeURIComponent(model)}`),
       apiGet(`/traceability/${encodeURIComponent(id)}/timeline`)
     ])
     statusList.value = statusRes.data || []
@@ -201,6 +216,9 @@ const handleTrace = async (id: string) => {
   gap: 12px;
 }
 .metric-card {
+  text-align: center;
+}
+.status-title {
   text-align: center;
 }
 .group-title {
