@@ -16,10 +16,10 @@ from crud.contracts import get_contract_files
 from crud.inventory import get_data
 from crud.planning import get_factory_plan, save_factory_plan
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
-from api.routes.auth import get_current_operator_name
+from api.routes.auth import get_current_operator_name, get_current_user_token
 from utils.parsers import parse_alloc_dict
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_token)])
 
 
 def _parse_order_need_total(row: pd.Series) -> int:

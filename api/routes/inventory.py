@@ -25,7 +25,7 @@ from crud.inventory import (
 )
 from crud.logs import append_log
 from crud.orders import get_orders, revert_to_inbound
-from api.routes.auth import get_current_operator_name
+from api.routes.auth import get_current_operator_name, get_current_user_token
 from utils.parsers import (
     build_import_payload,
     diff_tracking_vs_inventory,
@@ -34,7 +34,7 @@ from utils.parsers import (
     parse_tracking_xls,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_token)])
 
 
 class LayoutPayload(BaseModel):

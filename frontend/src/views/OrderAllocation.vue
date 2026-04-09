@@ -248,7 +248,7 @@ const candidateRows = computed(() => {
     const status = String(r['状态'] || '')
     const occupied = String(r['占用订单号'] || '')
     const model = normalizeModel(r['机型'])
-    if (!['库存中', '待入库'].includes(status)) return false
+    if (!status.startsWith('库存中') && status !== '待入库') return false
     if (occupied) return false
     if (modelSet.size === 0) return true
     return modelSet.has(model)

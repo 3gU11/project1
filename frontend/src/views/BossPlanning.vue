@@ -999,7 +999,7 @@ const inventoryIndex = computed(() => {
     const status = String(i['状态'] || '')
     const serial = String(i['流水号'] || '').trim()
 
-    if (status === '库存中') {
+    if (status.startsWith('库存中')) {
       spotCountByKey.set(key, (spotCountByKey.get(key) || 0) + 1)
       if (serial) {
         if (!spotSerialsByKey.has(key)) spotSerialsByKey.set(key, [])

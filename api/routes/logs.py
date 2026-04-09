@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from crud.logs import get_transaction_logs
+from api.routes.auth import get_current_user_token
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_token)])
 
 
 @router.get("/transactions")

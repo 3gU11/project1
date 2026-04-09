@@ -1,13 +1,14 @@
 from datetime import datetime
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from crud.users import get_all_users, save_all_users, create_pending_user, user_exists
+from api.routes.auth import require_roles
 
 router = APIRouter()
 
 @router.get("/")
-def list_users():
+def list_users(_ctx: dict = Depends(require_roles("Admin", "Boss"))):
     """Get all users."""
     try:
         df = get_all_users()
@@ -17,7 +18,7 @@ def list_users():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/")
-def replace_users(data: List[Dict[str, Any]]):
+def replace_users(data: List[Dict[str, Any]], _ctx: dict = Depends(require_roles("Admin"))):
     """Replace all users."""
     import pandas as pd
     try:
@@ -36,7 +37,7 @@ from pydantic import BaseModel, Field, field_validator
 class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=128)
-    role: Literal["Boss", "Admin", "Sales", "Prod"]
+    role: Literal["Boss", "Admin", "Sales", "Prod", "Inbound"]
     name: str = Field(min_length=1, max_length=64)
 
     @field_validator("username", "password", "name")
@@ -55,7 +56,7 @@ class UserAuditPayload(BaseModel):
 
 
 class UserPatchPayload(BaseModel):
-    role: Literal["Boss", "Admin", "Sales", "Prod"] | None = None
+    role: Literal["Boss", "Admin", "Sales", "Prod", "Inbound"] | None = None
     status: Literal["active", "pending", "rejected"] | None = None
     name: str | None = None
 
@@ -84,7 +85,7 @@ def register_user(user: UserCreate):
 
 
 @router.post("/audit")
-def audit_user(payload: UserAuditPayload):
+def audit_user(payload: UserAuditPayload, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
     try:
         df = get_all_users()
         if df.empty:
@@ -107,7 +108,7 @@ def audit_user(payload: UserAuditPayload):
 
 
 @router.patch("/{username}")
-def patch_user(username: str, payload: UserPatchPayload):
+def patch_user(username: str, payload: UserPatchPayload, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
     try:
         df = get_all_users()
         if df.empty:

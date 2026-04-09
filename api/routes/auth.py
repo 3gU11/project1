@@ -46,13 +46,40 @@ def get_current_user_token(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
 
-def get_current_operator_name(token: str = Depends(oauth2_scheme)) -> str:
+def get_current_user_context(token: str = Depends(oauth2_scheme)) -> dict:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
+        username: str = str(payload.get("sub") or "").strip()
         if not username:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        name = str(payload.get("name") or "").strip()
+        return {
+            "username": username,
+            "role": str(payload.get("role") or "").strip(),
+            "name": str(payload.get("name") or "").strip(),
+        }
+    except jwt.JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+
+def require_roles(*allowed_roles: str):
+    normalized_allowed = {str(r).strip().lower() for r in allowed_roles if str(r).strip()}
+
+    def _guard(user_ctx: dict = Depends(get_current_user_context)) -> dict:
+        role = str(user_ctx.get("role") or "").strip().lower()
+        if normalized_allowed and role not in normalized_allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有操作权限")
+        return user_ctx
+
+    return _guard
+
+
+def get_current_operator_name(token: str = Depends(oauth2_scheme)) -> str:
+    try:
+        user_ctx = get_current_user_context(token)
+        username: str = user_ctx["username"]
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        name = str(user_ctx.get("name") or "").strip()
         if name:
             return name
         user_row = get_user_for_login(username)
