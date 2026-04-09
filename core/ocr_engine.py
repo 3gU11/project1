@@ -1,8 +1,12 @@
 import os
 import tempfile
-import cv2
 import streamlit as st
 from config import OCR_AVAILABLE, PaddleOCR, pdfplumber, docx
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
 class OCRProcessor:
     def __init__(self):
@@ -121,6 +125,8 @@ class OCRProcessor:
         return text_content
 
     def _ocr_image(self, path):
+        if cv2 is None:
+            return "OCR 图像处理依赖未安装: cv2"
         ocr = self.get_ocr_model()
         
         # 1. 图像预处理 (增强识别率)

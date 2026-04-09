@@ -6,9 +6,11 @@ import streamlit as st
 
 from core.navigation import go_home
 from core.permissions import check_access
-from crud.inventory import get_data, save_data
+from crud.inventory import get_data, save_data, archive_shipped_data
 from crud.orders import get_orders, revert_to_inbound
+from crud.logs import append_log
 from utils.formatters import get_model_rank
+from views.components import render_archive_preview, render_module_logs
 
 
 def render_ship_confirm():
@@ -18,15 +20,23 @@ def render_ship_confirm():
     with c_title: st.header("🚛 发货复核")
 
     df = get_data()
-    pending = df[df['状态'] == '待发货']
+    pending = df[df['状态'] == '待发货'].copy()
 
     st.metric("待发货总数", len(pending))
 
     if pending.empty: st.success("无任务")
     else:
+        # 先标准化订单号，避免历史数据空格/None 导致显示和映射失败
+        if '占用订单号' not in pending.columns:
+            pending['占用订单号'] = ""
+        pending['占用订单号'] = pending['占用订单号'].astype(str).str.strip()
+        pending.loc[pending['占用订单号'].isin(['nan', 'None', 'NaT']), '占用订单号'] = ""
+
         # 关联最新的订单备注
         orders_df = get_orders()
         if not orders_df.empty:
+            orders_df = orders_df.copy()
+            orders_df['订单号'] = orders_df['订单号'].astype(str).str.strip()
             # map order note
             note_map = orders_df.set_index('订单号')['备注'].to_dict()
             # map delivery time
@@ -34,15 +44,14 @@ def render_ship_confirm():
             
             # 更新订单备注 (如果订单中有备注则使用订单的，否则保留原样)
             if '订单备注' not in pending.columns: pending['订单备注'] = ""
-            # 使用 map 更新，注意要处理 NaN
             mapped_notes = pending['占用订单号'].map(note_map)
             pending['订单备注'] = mapped_notes.fillna(pending['订单备注'])
             
-            # 更新发货时间
+            # 更新发货时间（统一转成字符串，避免日期列类型不一致导致空白显示）
             raw_dates = pending['占用订单号'].map(date_map)
-            pending['发货时间'] = pd.to_datetime(raw_dates, errors='coerce').dt.date
+            pending['发货时间'] = pd.to_datetime(raw_dates, errors='coerce').dt.strftime('%Y-%m-%d').fillna("")
         else:
-            if '发货时间' not in pending.columns: pending['发货时间'] = None
+            if '发货时间' not in pending.columns: pending['发货时间'] = ""
 
         # 按机型排序
         pending = pending.copy()
@@ -62,7 +71,7 @@ def render_ship_confirm():
             hide_index=True, 
             use_container_width=True,
             column_config={
-                "发货时间": st.column_config.DateColumn("发货时间", format="YYYY-MM-DD", width="small"),
+                "发货时间": st.column_config.TextColumn("发货时间", width="small"),
                 "订单备注": st.column_config.TextColumn("订单备注", width="medium"),
                 "机台备注/配置": st.column_config.TextColumn("机台备注", width="medium")
             }

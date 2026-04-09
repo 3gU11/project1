@@ -1,0 +1,21 @@
+<service>
+  <id>V7exBackend</id>
+  <name>V7ex Backend Service</name>
+  <description>V7ex FastAPI backend service</description>
+  <executable>C:\Python310\python.exe</executable>
+  <arguments>run_api.py</arguments>
+  <workingdirectory>D:\trae_projects\V7改\V7ex</workingdirectory>
+
+  <env name="UVICORN_HOST" value="0.0.0.0" />
+  <env name="UVICORN_PORT" value="8000" />
+  <env name="UVICORN_RELOAD" value="false" />
+  <env name="UVICORN_LOG_LEVEL" value="info" />
+  <env name="UVICORN_WORKERS" value="2" />
+
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyyMMdd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+    <keepFiles>14</keepFiles>
+  </log>
+</service>

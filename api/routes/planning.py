@@ -1,0 +1,637 @@
+from typing import List, Dict, Any
+from urllib.parse import unquote
+import re
+
+import os
+import uuid
+from datetime import datetime
+import pandas as pd
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from config import BASE_DIR
+from core.file_manager import delete_contract_file, save_contract_file
+from crud.contracts import get_contract_files
+from crud.inventory import get_data
+from crud.planning import get_factory_plan, save_factory_plan
+from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
+from api.routes.auth import get_current_operator_name
+from utils.parsers import parse_alloc_dict
+
+router = APIRouter()
+
+
+def _parse_order_need_total(row: pd.Series) -> int:
+    raw = str(row.get("需求机型", "") or "")
+    total = 0
+    for token_raw in raw.split(";"):
+        token = token_raw.strip()
+        if not token:
+            continue
+        # 兼容 x3 / ×3 / :3
+        m = re.search(r"(?:[x×:：]\s*)(\d+)\s*$", token, flags=re.IGNORECASE)
+        if m:
+            total += int(m.group(1))
+    if total > 0:
+        return total
+    try:
+        fallback = int(row.get("需求数量", 0) or 0)
+    except Exception:
+        fallback = 0
+    return max(0, fallback)
+
+
+def _reconcile_completed_orders(df_orders: pd.DataFrame) -> pd.DataFrame:
+    if df_orders.empty:
+        return df_orders
+    inv_df = get_data()
+    if inv_df.empty:
+        return df_orders
+
+    shipped_by_order: Dict[str, int] = {}
+    shipped_rows = inv_df[inv_df["状态"].astype(str) == "已出库"]
+    for _, r in shipped_rows.iterrows():
+        oid = str(r.get("占用订单号", "") or "").strip()
+        if not oid:
+            continue
+        shipped_by_order[oid] = shipped_by_order.get(oid, 0) + 1
+
+    changed = False
+    for idx, row in df_orders.iterrows():
+        oid = str(row.get("订单号", "") or "").strip()
+        if not oid:
+            continue
+        status = str(row.get("status", "active") or "active")
+        if status in ("deleted", "done"):
+            continue
+        need = _parse_order_need_total(row)
+        shipped = shipped_by_order.get(oid, 0)
+        if need > 0 and shipped >= need:
+            df_orders.at[idx, "status"] = "done"
+            changed = True
+
+    if changed:
+        save_orders(df_orders)
+    return df_orders
+
+
+class ContractItem(BaseModel):
+    机型: str
+    排产数量: int = Field(gt=0)
+    备注: str = ""
+
+
+class ContractEditPayload(BaseModel):
+    客户名: str
+    代理商: str
+    要求交期: str
+    items: List[ContractItem]
+
+
+class StatusPayload(BaseModel):
+    status: str
+
+
+class PlanRowPayload(BaseModel):
+    row_index: int
+    allocation: Dict[str, int] = Field(default_factory=dict)
+
+
+class PlanSavePayload(BaseModel):
+    rows: List[PlanRowPayload]
+    mark_to_planned: bool = True
+
+
+class SalesOrderCreatePayload(BaseModel):
+    客户名: str
+    代理商: str = ""
+    需求机型: str
+    需求数量: int = Field(gt=0)
+    备注: str = ""
+    包装选项: str = ""
+    发货时间: str = ""
+
+
+class SalesOrderUpdatePayload(BaseModel):
+    客户名: str | None = None
+    代理商: str | None = None
+    需求机型: str | None = None
+    需求数量: int | None = None
+    备注: str | None = None
+    包装选项: str | None = None
+    发货时间: str | None = None
+    status: str | None = None
+
+
+class OrderAllocatePayload(BaseModel):
+    selected_serial_nos: List[str] = Field(default_factory=list)
+
+
+class OrderReleasePayload(BaseModel):
+    selected_serial_nos: List[str] = Field(default_factory=list)
+    all: bool = False
+
+
+class BatchContractRowPayload(BaseModel):
+    合同号: str
+    客户名: str
+    代理商: str = ""
+    机型: str
+    排产数量: int = Field(gt=0)
+    要求交期: str
+    备注: str = ""
+
+
+class BatchContractCreatePayload(BaseModel):
+    rows: List[BatchContractRowPayload]
+
+
+class LinkOrderPayload(BaseModel):
+    order_id: str
+
+@router.get("/")
+def get_planning_data():
+    try:
+        df_plan = get_factory_plan()
+        df_plan = df_plan.reset_index(drop=False).rename(columns={"index": "_idx"})
+        df_plan = df_plan.where(df_plan.notnull(), None)
+        return {"data": df_plan.to_dict(orient="records")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/orders")
+def get_sales_orders():
+    try:
+        df_orders = get_orders()
+        df_orders = _reconcile_completed_orders(df_orders)
+        df_orders = df_orders.where(df_orders.notnull(), None)
+        return {"data": df_orders.to_dict(orient="records")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/orders")
+def create_sales_order_api(payload: SalesOrderCreatePayload):
+    try:
+        df_orders = get_orders()
+        order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
+        new_row = {
+            "订单号": order_id,
+            "客户名": str(payload.客户名 or ""),
+            "代理商": str(payload.代理商 or ""),
+            "需求机型": str(payload.需求机型 or ""),
+            "需求数量": int(payload.需求数量),
+            "下单时间": datetime.now(),
+            "备注": str(payload.备注 or ""),
+            "包装选项": str(payload.包装选项 or ""),
+            "发货时间": pd.to_datetime(payload.发货时间, errors="coerce") if payload.发货时间 else None,
+            "指定批次/来源": {},
+            "status": "active",
+            "delete_reason": "",
+        }
+        df_orders = pd.concat([df_orders, pd.DataFrame([new_row])], ignore_index=True)
+        save_orders(df_orders)
+        return {"message": "订单创建成功", "order_id": order_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建订单失败: {e}")
+
+
+@router.put("/orders/{order_id}")
+def update_sales_order_api(order_id: str, payload: SalesOrderUpdatePayload):
+    try:
+        df_orders = get_orders()
+        mask = df_orders["订单号"].astype(str) == str(order_id)
+        if not mask.any():
+            raise HTTPException(status_code=404, detail="订单不存在")
+
+        updates = payload.model_dump(exclude_unset=True)
+        for key, value in updates.items():
+            if key == "需求数量" and value is not None:
+                df_orders.loc[mask, key] = int(value)
+            elif key == "发货时间":
+                df_orders.loc[mask, key] = pd.to_datetime(value, errors="coerce") if value else None
+            else:
+                df_orders.loc[mask, key] = "" if value is None else str(value)
+        save_orders(df_orders)
+        return {"message": "订单更新成功"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新订单失败: {e}")
+
+
+@router.get("/orders/{order_id}/allocations")
+def get_order_allocations_api(order_id: str):
+    try:
+        order_id = str(order_id).strip()
+        if not order_id:
+            raise HTTPException(status_code=422, detail="订单号不能为空")
+        inv_df = get_data()
+        rows = inv_df[
+            (inv_df["占用订单号"].astype(str) == order_id)
+            & (inv_df["状态"].astype(str) != "已出库")
+        ].copy()
+        rows = rows.where(rows.notnull(), None)
+        return {"data": rows.to_dict(orient="records")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取配货记录失败: {e}")
+
+
+@router.post("/orders/{order_id}/allocate")
+def allocate_order_inventory_api(
+    order_id: str,
+    payload: OrderAllocatePayload,
+    current_operator: str = Depends(get_current_operator_name),
+):
+    try:
+        selected = [str(x).strip() for x in (payload.selected_serial_nos or []) if str(x).strip()]
+        if not selected:
+            raise HTTPException(status_code=422, detail="请先选择要配货的机台")
+
+        orders_df = get_orders()
+        hit = orders_df[orders_df["订单号"].astype(str) == str(order_id)]
+        if hit.empty:
+            raise HTTPException(status_code=404, detail="订单不存在")
+        first = hit.iloc[0]
+        customer = str(first.get("客户名", "") or "")
+        agent = str(first.get("代理商", "") or "")
+        allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
+        return {"message": f"配货成功，已锁定 {len(selected)} 台机台"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"配货失败: {e}")
+
+
+@router.post("/orders/{order_id}/release")
+def release_order_inventory_api(
+    order_id: str,
+    payload: OrderReleasePayload,
+    current_operator: str = Depends(get_current_operator_name),
+):
+    try:
+        order_id = str(order_id).strip()
+        if not order_id:
+            raise HTTPException(status_code=422, detail="订单号不能为空")
+
+        inv_df = get_data()
+        allocated_df = inv_df[
+            (inv_df["占用订单号"].astype(str) == order_id)
+            & (inv_df["状态"].astype(str) != "已出库")
+        ]
+        if allocated_df.empty:
+            return {"message": "该订单当前没有可释放的配货机台", "released": 0}
+
+        if payload.all:
+            target_sns = allocated_df["流水号"].astype(str).tolist()
+        else:
+            selected = [str(x).strip() for x in (payload.selected_serial_nos or []) if str(x).strip()]
+            if not selected:
+                raise HTTPException(status_code=422, detail="请先选择要释放的机台")
+            target_sns = allocated_df[allocated_df["流水号"].astype(str).isin(selected)]["流水号"].astype(str).tolist()
+            if not target_sns:
+                raise HTTPException(status_code=422, detail="所选机台不属于当前订单或已不可释放")
+
+        revert_to_inbound(target_sns, reason=f"订单配货释放-{order_id}", operator=current_operator)
+        return {"message": f"已释放 {len(target_sns)} 台机台", "released": len(target_sns)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"释放配货失败: {e}")
+
+
+@router.post("/contract/{contract_id}/status")
+def update_contract_status(contract_id: str, payload: StatusPayload):
+    try:
+        new_status = str(payload.status or "").strip()
+        if not new_status:
+            raise HTTPException(status_code=422, detail="status 不能为空")
+        df_plan = get_factory_plan()
+        mask = df_plan["合同号"].astype(str) == str(contract_id)
+        if not mask.any():
+            raise HTTPException(status_code=404, detail="合同不存在")
+        df_plan.loc[mask, "状态"] = new_status
+        save_factory_plan(df_plan)
+        return {"message": f"合同状态已更新为 {new_status}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"状态更新失败: {e}")
+
+
+@router.post("/contract/{contract_id}/link-order")
+def link_contract_to_order(contract_id: str, payload: LinkOrderPayload):
+    try:
+        order_id = str(payload.order_id or "").strip()
+        if not order_id:
+            raise HTTPException(status_code=422, detail="订单号不能为空")
+
+        # 验证订单号是否存在
+        orders_df = get_orders()
+        if orders_df.empty or order_id not in orders_df["订单号"].values:
+            raise HTTPException(status_code=404, detail=f"订单号 {order_id} 不存在")
+
+        df_plan = get_factory_plan()
+        mask = df_plan["合同号"].astype(str) == str(contract_id)
+        if not mask.any():
+            raise HTTPException(status_code=404, detail="合同不存在")
+
+        # 检查合同是否已经关联了其他订单
+        existing_order = df_plan.loc[mask, "订单号"].iloc[0]
+        if existing_order and str(existing_order).strip():
+            raise HTTPException(status_code=400, detail=f"合同已关联订单 {existing_order}，请先解除关联")
+
+        # 更新合同状态为"已转订单"并设置订单号
+        df_plan.loc[mask, "状态"] = "已转订单"
+        df_plan.loc[mask, "订单号"] = order_id
+        save_factory_plan(df_plan)
+
+        return {"message": f"已成功将合同 {contract_id} 与订单 {order_id} 关联"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"关联订单失败: {e}")
+
+
+@router.post("/contracts/batch-create")
+def create_contracts_batch(payload: BatchContractCreatePayload):
+    try:
+        rows = payload.rows or []
+        if not rows:
+            raise HTTPException(status_code=422, detail="请至少提供 1 条合同记录")
+
+        df_plan = get_factory_plan()
+        now_status = "未下单"
+        add_list: List[Dict[str, Any]] = []
+        existed = 0
+        for item in rows:
+            cid = str(item.合同号 or "").strip()
+            customer = str(item.客户名 or "").strip()
+            model = str(item.机型 or "").strip()
+            due = str(item.要求交期 or "").strip()
+            if not cid or not customer or not model or not due:
+                continue
+            qty = int(item.排产数量)
+            dup_mask = (df_plan["合同号"].astype(str) == cid) & (df_plan["机型"].astype(str) == model)
+            if dup_mask.any():
+                existed += 1
+                continue
+            add_list.append(
+                {
+                    "合同号": cid,
+                    "机型": model,
+                    "排产数量": qty,
+                    "要求交期": due,
+                    "状态": now_status,
+                    "备注": str(item.备注 or "").strip(),
+                    "客户名": customer,
+                    "代理商": str(item.代理商 or "").strip(),
+                    "指定批次/来源": {},
+                    "订单号": "",
+                }
+            )
+
+        if not add_list:
+            raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
+
+        df_plan = pd.concat([df_plan, pd.DataFrame(add_list)], ignore_index=True)
+        save_factory_plan(df_plan)
+        return {
+            "message": f"批量录入完成，新增 {len(add_list)} 条，跳过重复 {existed} 条",
+            "inserted": len(add_list),
+            "skipped": existed,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"批量录入失败: {e}")
+
+
+@router.put("/contract/{contract_id}")
+def edit_contract(contract_id: str, payload: ContractEditPayload):
+    try:
+        if not payload.items:
+            raise HTTPException(status_code=422, detail="至少保留一条机型明细")
+
+        df_plan = get_factory_plan()
+        target_mask = df_plan["合同号"].astype(str) == str(contract_id)
+        if not target_mask.any():
+            raise HTTPException(status_code=404, detail="合同不存在")
+
+        existing = df_plan[target_mask]
+        status_now = str(existing.iloc[0].get("状态", "未下单"))
+        order_id = str(existing.iloc[0].get("订单号", "") or "")
+
+        # 删除旧行并重建
+        df_plan = df_plan[~target_mask].copy()
+        new_rows: List[Dict[str, Any]] = []
+        for item in payload.items:
+            model = str(item.机型 or "").strip()
+            qty = int(item.排产数量)
+            if not model:
+                continue
+            new_rows.append(
+                {
+                    "合同号": str(contract_id),
+                    "机型": model,
+                    "排产数量": qty,
+                    "要求交期": str(payload.要求交期),
+                    "状态": status_now,
+                    "备注": str(item.备注 or ""),
+                    "客户名": str(payload.客户名 or ""),
+                    "代理商": str(payload.代理商 or ""),
+                    "指定批次/来源": {},
+                    "订单号": order_id,
+                }
+            )
+
+        if not new_rows:
+            raise HTTPException(status_code=422, detail="机型明细无有效数据")
+
+        df_plan = pd.concat([df_plan, pd.DataFrame(new_rows)], ignore_index=True)
+        save_factory_plan(df_plan)
+        return {"message": "合同修改已保存"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"合同编辑失败: {e}")
+
+
+@router.get("/contract/{contract_id}/files")
+def get_contract_files_api(contract_id: str):
+    try:
+        df = get_contract_files(contract_id)
+        df = df.where(df.notnull(), None)
+        return {"data": df.to_dict(orient="records")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取附件失败: {e}")
+
+
+@router.post("/contract/{contract_id}/files")
+async def upload_contract_file_api(
+    contract_id: str,
+    file: UploadFile = File(...),
+    customer_name: str = "",
+    uploader_name: str = "API",
+):
+    try:
+        content = await file.read()
+
+        class _UploadWrapper:
+            def __init__(self, filename: str, data: bytes):
+                self.name = filename
+                self.size = len(data)
+                self._data = data
+
+            def getvalue(self):
+                return self._data
+
+        wrap = _UploadWrapper(file.filename or "upload.bin", content)
+        ok, msg = save_contract_file(
+            wrap,
+            customer_name=customer_name or str(contract_id),
+            contract_id=contract_id,
+            uploader_name=uploader_name or "API",
+            convert_to_docx=True,
+        )
+        if not ok:
+            raise HTTPException(status_code=422, detail=msg)
+        return {"message": msg}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"上传附件失败: {e}")
+
+
+@router.delete("/contract/{contract_id}/files/{file_name}")
+def delete_contract_file_api(contract_id: str, file_name: str):
+    try:
+        decoded_name = unquote(file_name)
+        ok, msg = delete_contract_file(contract_id, decoded_name, operator="API")
+        if not ok:
+            raise HTTPException(status_code=422, detail=msg)
+        return {"message": msg}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除附件失败: {e}")
+
+
+@router.get("/contract/{contract_id}/files/{file_name}/download")
+def download_contract_file_api(contract_id: str, file_name: str):
+    try:
+        decoded_name = unquote(file_name)
+        df = get_contract_files(contract_id)
+        if df.empty:
+            raise HTTPException(status_code=404, detail="附件不存在")
+        hit = df[df["file_name"].astype(str) == decoded_name]
+        if hit.empty:
+            raise HTTPException(status_code=404, detail="附件不存在")
+        rel_path = str(hit.iloc[0].get("file_path", "")).strip()
+        if not rel_path:
+            raise HTTPException(status_code=404, detail="附件路径无效")
+        abs_path = os.path.join(BASE_DIR, rel_path)
+        if not os.path.exists(abs_path):
+            raise HTTPException(status_code=404, detail="附件文件不存在")
+        return FileResponse(path=abs_path, filename=decoded_name)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"下载附件失败: {e}")
+
+
+@router.get("/contract/{contract_id}/files/{file_name}/preview")
+def preview_contract_file_api(contract_id: str, file_name: str):
+    try:
+        decoded_name = unquote(file_name)
+        df = get_contract_files(contract_id)
+        if df.empty:
+            raise HTTPException(status_code=404, detail="附件不存在")
+        hit = df[df["file_name"].astype(str) == decoded_name]
+        if hit.empty:
+            raise HTTPException(status_code=404, detail="附件不存在")
+        rel_path = str(hit.iloc[0].get("file_path", "")).strip()
+        if not rel_path:
+            raise HTTPException(status_code=404, detail="附件路径无效")
+        abs_path = os.path.join(BASE_DIR, rel_path)
+        if not os.path.exists(abs_path):
+            raise HTTPException(status_code=404, detail="附件文件不存在")
+
+        ext = os.path.splitext(decoded_name)[1].lower()
+        if ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"]:
+            # 直接走下载路由进行内嵌预览
+            return {
+                "type": "url",
+                "url": f"/api/v1/planning/contract/{contract_id}/files/{file_name}/download",
+                "ext": ext,
+            }
+
+        if ext in [".docx", ".doc"]:
+            try:
+                import mammoth  # lazy import, avoid hard dependency at module import time
+                with open(abs_path, "rb") as docx_file:
+                    result = mammoth.convert_to_html(docx_file)
+                html = result.value or ""
+                return {"type": "html", "html": html}
+            except Exception as e:
+                raise HTTPException(status_code=422, detail=f"Word 预览失败: {e}")
+
+        raise HTTPException(status_code=422, detail="该文件类型暂不支持在线预览")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"预览附件失败: {e}")
+
+
+@router.post("/contract/{contract_id}/save-plan")
+def save_contract_plan(contract_id: str, payload: PlanSavePayload):
+    try:
+        df_plan = get_factory_plan()
+        mask = df_plan["合同号"].astype(str) == str(contract_id)
+        if not mask.any():
+            raise HTTPException(status_code=404, detail="合同不存在")
+
+        if not payload.rows:
+            raise HTTPException(status_code=422, detail="缺少规划数据")
+
+        # 保存逐行规划
+        for row_payload in payload.rows:
+            idx = int(row_payload.row_index)
+            if idx not in df_plan.index:
+                continue
+            alloc = {}
+            for k, v in (row_payload.allocation or {}).items():
+                qty = int(v or 0)
+                if qty > 0:
+                    alloc[str(k)] = qty
+            df_plan.at[idx, "指定批次/来源"] = alloc
+            if payload.mark_to_planned and str(df_plan.at[idx, "状态"]) == "待规划":
+                df_plan.at[idx, "状态"] = "已规划"
+
+        save_factory_plan(df_plan)
+
+        # 若有订单号，同步写回 sales_orders 的 指定批次/来源
+        contract_rows = df_plan[df_plan["合同号"].astype(str) == str(contract_id)]
+        order_id = str(contract_rows.iloc[0].get("订单号", "") or "").strip() if not contract_rows.empty else ""
+        if order_id:
+            all_plans: Dict[str, Dict[str, int]] = {}
+            for _, row in contract_rows.iterrows():
+                model_name = str(row.get("机型", "")).strip()
+                alloc_data = parse_alloc_dict(row.get("指定批次/来源", {}))
+                if model_name and alloc_data:
+                    all_plans[model_name] = alloc_data
+            if all_plans:
+                orders_df = get_orders()
+                hit = orders_df["订单号"].astype(str) == order_id
+                if hit.any():
+                    orders_df.loc[hit, "指定批次/来源"] = [all_plans]
+                    save_orders(orders_df)
+
+        return {"message": "规划保存成功"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"规划保存失败: {e}")

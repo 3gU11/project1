@@ -1,0 +1,510 @@
+<template>
+  <div class="contract-page">
+    <PageHeader title="🏢 合同管理" show-back @back="goBack" />
+
+    <div class="notice">💡 在录入未来合同、老板审批后，将流转至到当下单环节。</div>
+
+    <div class="new-row">
+      <button type="button" class="new-row-toggle" @click="batchPanelOpen = !batchPanelOpen">
+        {{ batchPanelOpen ? '▾' : '▸' }} ➕ 新增合同 (批量录入)
+      </button>
+    </div>
+
+    <div v-if="batchPanelOpen" class="batch-panel">
+      <div class="batch-grid">
+        <div>
+          <div class="ops-label">合同号将自动生成</div>
+          <div class="auto-id">{{ batchForm.contractId }}</div>
+          <div class="tip">格式: HT + 日期 + 随机4位</div>
+        </div>
+        <div>
+          <div class="ops-label">要求交期</div>
+          <el-date-picker v-model="batchForm.deadline" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+        </div>
+        <div>
+          <div class="ops-label">客户名 (Customer)</div>
+          <el-input v-model="batchForm.customer" />
+        </div>
+        <div>
+          <div class="ops-label">代理商 (Agent)</div>
+          <el-input v-model="batchForm.agent" />
+        </div>
+      </div>
+
+      <el-divider />
+      <div class="ops-label">📎 合同附件 (可选)</div>
+      <el-upload
+        :auto-upload="false"
+        :show-file-list="true"
+        multiple
+        :on-change="onBatchFileChange"
+        :on-remove="onBatchFileRemove"
+      >
+        <el-button>选择文件</el-button>
+      </el-upload>
+
+      <el-divider />
+      <div class="tip">请在下方表格中添加机型，支持同一机型添加多行（例如一行标准、一行加高）。</div>
+      <el-table :data="batchItems" border stripe size="small">
+        <el-table-column label="#" width="46">
+          <template #default="scope">{{ scope.$index + 1 }}</template>
+        </el-table-column>
+        <el-table-column label="机型">
+          <template #default="scope">
+            <el-input v-model="scope.row.model" />
+          </template>
+        </el-table-column>
+        <el-table-column label="数量" width="120">
+          <template #default="scope">
+            <el-input-number v-model="scope.row.qty" :min="1" controls-position="right" />
+          </template>
+        </el-table-column>
+        <el-table-column label="加高?" width="90">
+          <template #default="scope">
+            <el-checkbox v-model="scope.row.high" />
+          </template>
+        </el-table-column>
+        <el-table-column label="单行备注">
+          <template #default="scope">
+            <el-input v-model="scope.row.rowNote" />
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="batch-row-actions">
+        <el-button link type="primary" @click="addBatchItem">+ 添加机型行</el-button>
+      </div>
+
+      <div class="ops-label">合同总备注</div>
+      <el-input v-model="batchForm.contractNote" placeholder="可选，应用于所有条目" />
+
+      <div class="batch-save">
+        <el-button type="danger" :loading="batchSaving" @click="submitBatchContracts">💾 保存所有合同条目</el-button>
+      </div>
+    </div>
+
+    <div class="view-tabs">
+      <button type="button" class="view-tab" :class="{ active: viewMode === 'urgent' }" @click="viewMode = 'urgent'">
+        🔥 紧急处理 [2月内]
+      </button>
+      <button type="button" class="view-tab" :class="{ active: viewMode === 'recent' }" @click="viewMode = 'recent'">
+        📘 近期规划 [2月内]
+      </button>
+      <button type="button" class="view-tab" :class="{ active: viewMode === 'all' }" @click="viewMode = 'all'">
+        📋 全景视图
+      </button>
+    </div>
+
+    <el-table
+      :data="displayRows"
+      border
+      stripe
+      size="small"
+      height="430"
+      @current-change="onCurrentRowChange"
+      highlight-current-row
+    >
+      <el-table-column prop="合同号" label="合同号" width="120" />
+      <el-table-column prop="客户名" label="客户名" min-width="260" />
+      <el-table-column prop="代理商" label="代理商" width="90" />
+      <el-table-column prop="机型" label="机型" width="90" />
+      <el-table-column prop="排产数量" label="排产数量" width="90" />
+      <el-table-column prop="要求交期" label="要求交期" width="100" />
+      <el-table-column prop="状态" label="状态" width="90" />
+      <el-table-column prop="备注" label="备注" min-width="120" />
+    </el-table>
+
+    <div class="ops-panel">
+      <div class="ops-left">
+        <div class="ops-label">选择合同号进行操作</div>
+        <el-select v-model="selectedContractId" filterable placeholder="请选择合同号">
+          <el-option v-for="id in selectableContractIds" :key="id" :label="id" :value="id" />
+        </el-select>
+      </div>
+
+      <div class="ops-right">
+        <el-radio-group v-model="operationType">
+          <el-radio value="ordered">标记已下单</el-radio>
+          <el-radio value="cancelled">取消计划</el-radio>
+          <el-radio value="done">标记已完工</el-radio>
+          <el-radio value="linked">关联现有订单(核销)</el-radio>
+        </el-radio-group>
+        <el-button type="primary" :loading="executing" @click="executeOperation">执行</el-button>
+      </div>
+    </div>
+
+    <!-- 订单号输入框 - 只在关联订单时显示 -->
+    <div v-if="operationType === 'linked'" class="link-order-panel">
+      <div class="ops-label">输入已存在的订单号</div>
+      <el-input v-model="linkOrderId" placeholder="例如: SO-2026..." style="width: 300px" />
+    </div>
+
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { apiPost, getApiErrorMessage } from '../utils/request'
+import { useFormSubmit } from '../composables/useFormSubmit'
+import { useContractsStore } from '../store/contracts'
+import { useRefFormDraft } from '../composables/useFormDraft'
+import { hasText, isPositiveInteger } from '../utils/formRules'
+import PageHeader from '../components/PageHeader.vue'
+
+type ViewMode = 'urgent' | 'recent' | 'all'
+type OperationType = 'ordered' | 'cancelled' | 'done' | 'linked'
+type MessageResponse = { message?: string }
+
+const router = useRouter()
+const loading = ref(false)
+const executing = ref(false)
+const batchSaving = ref(false)
+const batchPanelOpen = ref(false)
+const allRows = ref<any[]>([])
+const selectedContractId = ref('')
+const viewMode = ref<ViewMode>('urgent')
+const operationType = ref<OperationType>('ordered')
+const batchPickedFiles = ref<File[]>([])
+const linkOrderId = ref('')
+const { submitWithLock } = useFormSubmit()
+const contractsStore = useContractsStore()
+const batchForm = ref({
+  contractId: '',
+  deadline: '',
+  customer: '',
+  agent: '',
+  contractNote: '',
+})
+const batchItems = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([
+  { model: 'FH-260C', qty: 1, high: false, rowNote: '' },
+])
+
+const todayYmd = () => new Date().toISOString().slice(0, 10)
+const genContractId = () => {
+  const now = new Date()
+  const y = now.getFullYear().toString()
+  const m = `${now.getMonth() + 1}`.padStart(2, '0')
+  const d = `${now.getDate()}`.padStart(2, '0')
+  const rnd = Math.floor(Math.random() * 9000 + 1000)
+  return `HT${y}${m}${d}${rnd}`
+}
+
+const resetBatchForm = () => {
+  batchForm.value = {
+    contractId: genContractId(),
+    deadline: todayYmd(),
+    customer: '',
+    agent: '',
+    contractNote: '',
+  }
+  batchItems.value = [{ model: 'FH-260C', qty: 1, high: false, rowNote: '' }]
+  batchPickedFiles.value = []
+}
+
+const parseDate = (v: string) => {
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return null
+  return d
+}
+
+const isWithinDays = (v: string, days: number) => {
+  const d = parseDate(v)
+  if (!d) return false
+  const now = new Date()
+  const diff = d.getTime() - now.getTime()
+  return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000
+}
+
+const filteredRows = computed(() => {
+  if (viewMode.value === 'all') return allRows.value
+  if (viewMode.value === 'recent') {
+    return allRows.value.filter((r: any) => isWithinDays(String(r['要求交期'] || ''), 60))
+  }
+  return allRows.value.filter((r: any) => {
+    const status = String(r['状态'] || '')
+    const near = isWithinDays(String(r['要求交期'] || ''), 60)
+    return status === '未下单' && near
+  })
+})
+
+const displayRows = computed(() => {
+  const rows = [...filteredRows.value]
+  return rows.sort((a: any, b: any) => String(a['合同号'] || '').localeCompare(String(b['合同号'] || '')))
+})
+
+const selectableContractIds = computed(() => {
+  const set = new Set<string>()
+  for (const row of filteredRows.value) {
+    const id = String(row['合同号'] || '')
+    if (id) set.add(id)
+  }
+  return Array.from(set)
+})
+
+const statusByOperation: Record<OperationType, string> = {
+  ordered: '已下单',
+  cancelled: '已取消',
+  done: '已完工',
+  linked: '已转订单',
+}
+
+const fetchContracts = async () => {
+  loading.value = true
+  try {
+    allRows.value = await contractsStore.fetchPlanningContracts()
+    if (!selectedContractId.value && selectableContractIds.value.length > 0) {
+      selectedContractId.value = selectableContractIds.value[0]
+    }
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '读取合同数据失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+const onCurrentRowChange = (row: any) => {
+  if (!row) return
+  const id = String(row['合同号'] || '')
+  if (id) selectedContractId.value = id
+}
+
+const executeOperation = async () => {
+  if (!selectedContractId.value) {
+    ElMessage.warning('请先选择合同号')
+    return
+  }
+
+  if (operationType.value === 'linked') {
+    // 关联订单操作
+    const orderId = linkOrderId.value.trim()
+    if (!orderId) {
+      ElMessage.warning('请输入要关联的订单号')
+      return
+    }
+    await submitWithLock(executing, async () => {
+      const res = await apiPost<MessageResponse>(
+        `/planning/contract/${encodeURIComponent(selectedContractId.value)}/link-order`,
+        { order_id: orderId }
+      )
+      ElMessage.success(res.message || '关联成功')
+      linkOrderId.value = ''
+      await fetchContracts()
+    }, { errorMessage: '关联订单失败' })
+  } else {
+    // 其他状态更新操作
+    await submitWithLock(executing, async () => {
+      await apiPost(`/planning/contract/${encodeURIComponent(selectedContractId.value)}/status`, {
+        status: statusByOperation[operationType.value],
+      })
+      await fetchContracts()
+    }, { successMessage: '操作成功', errorMessage: '操作失败' })
+  }
+}
+
+const addBatchItem = () => {
+  batchItems.value.push({ model: '', qty: 1, high: false, rowNote: '' })
+}
+
+const onBatchFileChange = (uploadFile: any) => {
+  const raw = uploadFile.raw as File | undefined
+  if (!raw) return
+  batchPickedFiles.value.push(raw)
+}
+
+const onBatchFileRemove = (uploadFile: any) => {
+  const raw = uploadFile.raw as File | undefined
+  if (!raw) return
+  batchPickedFiles.value = batchPickedFiles.value.filter((f) => !(f.name === raw.name && f.size === raw.size))
+}
+
+const submitBatchContracts = async () => {
+  const cid = batchForm.value.contractId.trim()
+  const customer = batchForm.value.customer.trim()
+  const deadline = batchForm.value.deadline.trim()
+  if (!hasText(cid) || !hasText(customer) || !hasText(deadline)) {
+    ElMessage.warning('请先完整填写合同号/客户名/要求交期')
+    return
+  }
+  const validRows = batchItems.value.filter((r) => hasText(r.model) && isPositiveInteger(r.qty))
+  if (validRows.length === 0) {
+    ElMessage.warning('请至少填写 1 条机型明细')
+    return
+  }
+
+  await submitWithLock(batchSaving, async () => {
+    const payloadRows = validRows.map((r) => ({
+      合同号: cid,
+      客户名: customer,
+      代理商: batchForm.value.agent.trim(),
+      机型: `${r.model.trim()}${r.high ? '(加高)' : ''}`,
+      排产数量: Number(r.qty),
+      要求交期: deadline,
+      备注: [batchForm.value.contractNote.trim(), r.rowNote.trim()].filter(Boolean).join(' | '),
+    }))
+    const res = await apiPost<MessageResponse>('/planning/contracts/batch-create', { rows: payloadRows })
+
+    if (batchPickedFiles.value.length > 0) {
+      for (const f of batchPickedFiles.value) {
+        const fd = new FormData()
+        fd.append('file', f)
+        await apiPost(`/planning/contract/${encodeURIComponent(cid)}/files`, fd, {
+          params: { customer_name: customer, uploader_name: 'Web' },
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+      }
+    }
+    ElMessage.success(res.message || '批量录入成功')
+    batchPanelOpen.value = false
+    resetBatchForm()
+    batchFormDraft.clearDraft()
+    batchItemsDraft.clearDraft()
+    await fetchContracts()
+  }, { errorMessage: '批量录入失败' })
+}
+
+const goBack = () => {
+  router.back()
+}
+
+const batchFormDraft = useRefFormDraft('contracts:batch-form', batchForm)
+const batchItemsDraft = useRefFormDraft('contracts:batch-items', batchItems)
+
+onMounted(() => {
+  resetBatchForm()
+  fetchContracts()
+})
+</script>
+
+<style scoped>
+.contract-page {
+  padding-right: 6px;
+}
+.head-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.back-btn {
+  padding: 4px 12px;
+}
+.title {
+  margin: 0;
+  font-size: 40px;
+  color: #1f2937;
+  font-weight: 800;
+}
+.notice {
+  margin-top: 12px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.new-row {
+  margin-top: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0 10px;
+}
+.new-row-toggle {
+  border: none;
+  background: transparent;
+  color: #334155;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 10px 0;
+}
+.batch-panel {
+  margin-top: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+.batch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.auto-id {
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
+}
+.batch-row-actions {
+  margin-top: 6px;
+}
+.batch-save {
+  margin-top: 10px;
+}
+.view-tabs {
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+}
+.view-tab {
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.view-tab.active {
+  color: #ef4444;
+  font-weight: 700;
+}
+:deep(.el-table) {
+  margin-top: 8px;
+}
+.ops-panel {
+  margin-top: 10px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ops-left {
+  flex: 1;
+}
+.ops-left :deep(.el-select) {
+  width: 100%;
+}
+.ops-label {
+  font-size: 12px;
+  color: #111827;
+  margin-bottom: 4px;
+}
+.ops-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+.tip {
+  color: #64748b;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.link-order-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f9fafb;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.link-order-panel .ops-label {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+</style>

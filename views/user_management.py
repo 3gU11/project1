@@ -43,7 +43,7 @@ def render_user_management():
                 with st.container(border=True):
                     c_info, c_act = st.columns([3, 1])
                     with c_info:
-                        role_map_audit = {"Sales": "销售员", "Prod": "生产/仓管", "Boss": "老板/管理", "Admin": "管理员"}
+                        role_map_audit = {"Sales": "销售员", "Prod": "生产/仓管", "Boss": "老板/管理", "Admin": "管理员", "Inbound": "入库员"}
                         role_cn = role_map_audit.get(row['role'], row['role'])
                         st.markdown(f"**申请人:** {row['name']} (`{row['username']}`)")
                         st.caption(f"申请角色: **{role_cn}** | 申请时间: {row['register_time']}")

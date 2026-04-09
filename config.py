@@ -7,7 +7,7 @@ os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 MYSQL_HOST = os.environ.get("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
 MYSQL_USER = os.environ.get("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "123456")
+MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "030705")
 MYSQL_DB = os.environ.get("MYSQL_DB", "rjfinshed")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "888")
 
@@ -59,12 +59,14 @@ DEFAULT_USERS = {
     "admin": {"password": "888", "role": "Admin", "name": "系统管理员"},
     "sales": {"password": "123", "role": "Sales", "name": "销售员"},
     "prod": {"password": "123", "role": "Prod", "name": "仓管/生产"},
+    "inbound": {"password": "123", "role": "Inbound", "name": "入库员"},    
 }
 
 DEFAULT_ROLE_PERMISSIONS = {
-    "Boss": ["PLANNING", "CONTRACT", "QUERY", "ARCHIVE"],
-    "Sales": ["PLANNING", "CONTRACT", "SALES_CREATE", "SALES_ALLOC", "INBOUND", "QUERY"],
-    "Prod": ["INBOUND", "SHIP_CONFIRM", "QUERY", "MACHINE_EDIT", "ARCHIVE"],
+    "Boss": ["PLANNING", "CONTRACT", "QUERY", "ARCHIVE", "WAREHOUSE_MAP"],
+    "Sales": ["PLANNING", "CONTRACT", "SALES_CREATE", "SALES_ALLOC", "INBOUND", "QUERY", "WAREHOUSE_MAP"],
+    "Prod": ["INBOUND", "SHIP_CONFIRM", "QUERY", "MACHINE_EDIT", "MACHINE_EDIT_MODEL", "ARCHIVE", "WAREHOUSE_MAP"],
+    "Inbound": ["INBOUND", "WAREHOUSE_MAP"],
 }
 
 PRESET_RATIOS = {
@@ -98,6 +100,7 @@ FUNC_MAP = {
     "SALES_ALLOC": {"label": "📦 订单配货", "page": "sales_alloc", "class": "sales-alloc-btn"},
     "SHIP_CONFIRM": {"label": "🚛 发货复核", "page": "ship_confirm", "class": "ship-btn"},
     "MACHINE_EDIT": {"label": "🛠️ 机台编辑", "page": "machine_edit", "class": "machine-edit-btn"},
+    "WAREHOUSE_MAP": {"label": "🗺️ 库位大屏", "page": "warehouse_dashboard", "class": "inbound-btn"},
 }
 
 GLOBAL_CSS = """

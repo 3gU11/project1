@@ -239,215 +239,115 @@ def render_sales_create():
         if planned_contracts.empty:
             st.info("暂无已规划的合同")
         else:
-            # 显示列表
             st.dataframe(planned_contracts[["合同号", "客户名", "机型", "排产数量", "要求交期", "备注"]], use_container_width=True, hide_index=True)
-            
             st.divider()
-            
-            # --- 新逻辑：按合同号聚合 ---
-            # 1. 获取唯一合同号
             unique_contracts = planned_contracts['合同号'].unique()
-            
-            # 2. 构建选项
             contract_opts = []
-            contract_map = {} # label -> contract_id
-            
+            contract_map = {}
             for cid in unique_contracts:
                 c_rows = planned_contracts[planned_contracts['合同号'] == cid]
                 cust = c_rows.iloc[0]['客户名']
-                # 汇总机型
                 models_list = c_rows['机型'].unique()
                 total_qty = c_rows['排产数量'].astype(float).sum()
-                
                 label = f"{cid} | {cust} | 共 {int(total_qty)} 台 ({len(models_list)} 款机型)"
                 contract_opts.append(label)
                 contract_map[label] = cid
-
-            # --- V7.3 Update: 支持多选合并 ---
             sel_strs = st.multiselect("选择要转换/合并的合同 (支持多选)", contract_opts)
-            
             if sel_strs:
                 sel_cids = [contract_map[s] for s in sel_strs]
-                
-                # 获取所有选中合同的行
                 all_target_rows = planned_contracts[planned_contracts['合同号'].isin(sel_cids)]
-                
-                # 基础信息取第一个合同的作为默认值
                 first_row = all_target_rows.iloc[0]
-                
-                # 检查客户是否一致
                 unique_customers = all_target_rows['客户名'].unique()
                 if len(unique_customers) > 1:
                     st.warning(f"⚠️ 注意：您选择了不同客户的合同进行合并 ({', '.join(unique_customers)})，请确认是否正确。")
-                
                 st.markdown("#### 📝 确认合并订单信息 (可修改)")
                 with st.form("confirm_planned_order"):
                     c1, c2 = st.columns(2)
-                    with c1: 
+                    with c1:
                         new_cust = st.text_input("客户名", value=first_row.get('客户名', ''))
                         new_agent = st.text_input("代理商", value=first_row.get('代理商', ''))
                     with c2:
                         new_delivery = st.text_input("发货时间/交期", value=first_row.get('要求交期', ''))
                         new_pack = st.checkbox("需要包装", value=False)
-                    
                     st.write("**包含机型及数量 (合并汇总):**")
-                    
-                    # --- 准备合并数据 ---
                     model_lines = []
-                    # 这里的 target_rows 包含所有选中的合同行
                     for idx, row in all_target_rows.iterrows():
                         raw_model = row['机型']
                         is_h = "(加高)" in raw_model
                         base_m = raw_model.replace("(加高)", "")
-                        
-                        # 查找是否已存在该机型 (为了UI合并显示，避免列表太长，但为了保留原始备注，最好还是列出来?)
-                        # 用户需求是合并出货。
-                        # 如果我们把相同机型合并成一行，备注怎么处理？
-                        # 方案：不合并行，罗列所有行，用户确认总数。或者：按机型合并，备注拼接。
-                        # 这里选择：不合并行，让用户看到每一笔来源，这样更清晰。
-                        # 但为了方便，可以在表格里加一列 "来源合同"
-                        
-                        model_lines.append({
-                            "来源合同": row['合同号'],
-                            "机型": base_m,
-                            "加高?": is_h,
-                            "数量": int(float(row['排产数量'])),
-                            "原备注": row.get('备注', ''),
-                            "__idx": idx
-                        })
-                    
-                    # 使用 data_editor
+                        model_lines.append({"来源合同": row['合同号'], "机型": base_m, "加高?": is_h, "数量": int(float(row['排产数量'])), "原备注": row.get('备注', ''), "__idx": idx})
                     df_models_confirm = pd.DataFrame(model_lines)
                     edited_models = st.data_editor(
                         df_models_confirm[['来源合同', '机型', '加高?', '数量', '原备注']],
-                        key="editor_contract_models",
-                        use_container_width=True,
+                        key="editor_contract_models", use_container_width=True,
                         disabled=["来源合同", "机型", "原备注"],
-                        column_config={
-                            "加高?": st.column_config.CheckboxColumn(
-                                "加高?",
-                                help="勾选后将自动添加 (加高) 后缀",
-                                default=False,
-                            ),
-                            "数量": st.column_config.NumberColumn("数量", min_value=1)
-                        }
+                        column_config={"加高?": st.column_config.CheckboxColumn("加高?", default=False), "数量": st.column_config.NumberColumn("数量", min_value=1)}
                     )
-                    
-                    # 构建默认备注（包含各机型的备注）
                     default_note = ""
-                    # 简单的去重合并备注
                     seen_notes = set()
                     for idx, row in all_target_rows.iterrows():
-                         r_note = str(row.get('备注', '')).strip()
-                         if r_note and r_note not in seen_notes:
-                             cid_prefix = f"[{row['合同号']}] " if len(sel_cids) > 1 else ""
-                             default_note += f"{cid_prefix}{r_note} "
-                             seen_notes.add(r_note)
-
+                        r_note = str(row.get('备注', '')).strip()
+                        if r_note and r_note not in seen_notes:
+                            cid_prefix = f"[{row['合同号']}] " if len(sel_cids) > 1 else ""
+                            default_note += f"{cid_prefix}{r_note} "
+                            seen_notes.add(r_note)
                     new_note = st.text_area("订单总备注", value=default_note.strip())
-                    
                     if st.form_submit_button("🚀 确认生成合并订单 (Confirm Merge)", type="primary"):
                         pack_opt = "需要包装" if new_pack else "不包装"
-                        
-                        # 1. 收集机型数据 (合并同类项)
                         final_model_data = {}
-                        
                         for _, m_row in edited_models.iterrows():
-                            m_name = m_row['机型']
-                            is_h = m_row['加高?']
+                            m_name = m_row['机型']; is_h = m_row['加高?']
                             final_name = f"{m_name}(加高)" if is_h else m_name
-                            
-                            m_qty = int(m_row['数量'])
-                            final_model_data[final_name] = final_model_data.get(final_name, 0) + m_qty
-                        
-                        # 2. 合并 Source Batch (Plan String)
-                        # 必须解析 -> 合并 -> 序列化，防止覆盖
+                            final_model_data[final_name] = final_model_data.get(final_name, 0) + int(m_row['数量'])
                         merged_plan_map = {}
-                        
                         for idx, row in all_target_rows.iterrows():
                             m_key = str(row.get('机型', '')).strip()
                             alloc_dict = parse_alloc_dict(row.get('指定批次/来源', {}))
-                            if not m_key or not alloc_dict:
-                                continue
-                            if m_key not in merged_plan_map:
-                                merged_plan_map[m_key] = {}
+                            if not m_key or not alloc_dict: continue
+                            if m_key not in merged_plan_map: merged_plan_map[m_key] = {}
                             for batch, qty in alloc_dict.items():
                                 merged_plan_map[m_key][batch] = merged_plan_map[m_key].get(batch, 0) + int(qty)
-                        
-                        # 3. 创建订单
-                        new_oid = create_sales_order(
-                            customer=new_cust,
-                            agent=new_agent,
-                            model_data=final_model_data,
-                            note=new_note,
-                            pack_option=pack_opt,
-                            delivery_time=new_delivery,
-                            source_batch=merged_plan_map
-                        )
-                        
-                        # 4. 更新所有合同状态
+                        new_oid = create_sales_order(customer=new_cust, agent=new_agent, model_data=final_model_data, note=new_note, pack_option=pack_opt, delivery_time=new_delivery, source_batch=merged_plan_map)
                         fp_df.loc[fp_df['合同号'].isin(sel_cids), '状态'] = '已转订单'
                         fp_df.loc[fp_df['合同号'].isin(sel_cids), '订单号'] = new_oid
                         save_factory_plan(fp_df)
-                        
                         st.success(f"已生成合并订单: {new_oid}！包含 {len(sel_cids)} 份合同。"); time.sleep(1); st.rerun()
 
     with tab_manage:
-        # 1. 获取数据
         q_orders = get_orders()
         df_inv = get_data()
-        
-        # 2. 计算订单完成度
         if not df_inv.empty:
             shipped_stats = df_inv[df_inv['状态'] == '已出库'].groupby('占用订单号').size().to_dict()
         else: shipped_stats = {}
-        
+
         def check_order_status(oid, req_qty_str, db_status):
-            # 优先判断数据库标记的状态
             if str(db_status) == 'deleted': return 'deleted'
-            
             if not oid: return "unknown"
             s_qty = shipped_stats.get(oid, 0)
             try: r_qty = int(float(req_qty_str))
             except: r_qty = 999999
-            
             if s_qty >= r_qty and r_qty > 0: return "completed"
             return "active"
 
-        # 3. 筛选器
         st.markdown("#### 🔍 订单查询与管理")
-        
-        # 4. 过滤数据
         if not q_orders.empty:
-            # 添加状态列辅助筛选
             q_orders['__status'] = q_orders.apply(lambda r: check_order_status(r['订单号'], r['需求数量'], r.get('status', '')), axis=1)
-            
-            # --- V7.2 新增：按月份筛选 ---
-            # 确保下单时间为 datetime
             q_orders['下单时间_dt'] = pd.to_datetime(q_orders['下单时间'], errors='coerce')
             q_orders['month_str'] = q_orders['下单时间_dt'].dt.strftime('%Y-%m')
-            
             available_months = sorted(q_orders['month_str'].dropna().unique().tolist(), reverse=True)
             month_opts = ["全部"] + available_months
-            
             c_f1, c_f2 = st.columns([3, 1])
             with c_f1:
                 filter_status = st.radio("订单状态筛选", ["进行中 (Active)", "往期/已完结 (Completed)", "已删除 (Deleted)"], horizontal=True)
             with c_f2:
                 sel_month = st.selectbox("📅 按下单月份筛选", month_opts)
-            
             target_status = "active"
             if "已完结" in filter_status: target_status = "completed"
             elif "已删除" in filter_status: target_status = "deleted"
-            
-            # 构建过滤掩码
             mask = (q_orders['__status'] == target_status)
             if sel_month != "全部":
                 mask = mask & (q_orders['month_str'] == sel_month)
-            
             view_df = q_orders[mask].copy()
-            
-            # 搜索框
             search_txt = st.text_input("搜索订单 (订单号/客户/代理)", key="manage_search")
             if search_txt:
                 s = search_txt.lower()
@@ -456,95 +356,141 @@ def render_sales_create():
                     view_df['客户名'].str.lower().str.contains(s, na=False) |
                     view_df['代理商'].str.lower().str.contains(s, na=False)
                 ]
-            
-            # 5. 显示与编辑
             if view_df.empty:
                 st.info("无相关订单数据")
             else:
-                # 倒序显示
                 view_df = view_df.iloc[::-1]
-                
-                # 如果是“进行中”订单，允许编辑
+                view_df['发货时间'] = pd.to_datetime(view_df['发货时间'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
+                view_df['下单时间'] = pd.to_datetime(view_df['下单时间'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M').fillna('')
                 if target_status == "active":
-                    st.caption(f"共找到 {len(view_df)} 个进行中订单。支持直接编辑【备注】和【发货时间】，勾选后可删除。")
+                    st.caption(f"共找到 {len(view_df)} 个进行中订单。勾选一行后下方会出现编辑/删除区域。")
+                    view_df.insert(0, "✅", False)
+                    del_editor = st.data_editor(
+                        view_df[["✅", "订单号", "客户名", "代理商", "需求机型", "需求数量", "发货时间", "备注", "下单时间"]],
+                        hide_index=True, use_container_width=True,
+                        column_config={
+                            "✅": st.column_config.CheckboxColumn("选择", default=False),
+                            "订单号": st.column_config.TextColumn(disabled=True),
+                            "客户名": st.column_config.TextColumn(disabled=True),
+                            "代理商": st.column_config.TextColumn(disabled=True),
+                            "需求机型": st.column_config.TextColumn(disabled=True),
+                            "需求数量": st.column_config.TextColumn(disabled=True),
+                            "发货时间": st.column_config.TextColumn(disabled=True),
+                            "备注": st.column_config.TextColumn(disabled=True),
+                            "下单时间": st.column_config.TextColumn(disabled=True),
+                        },
+                        key="order_manage_del_editor"
+                    )
+                    checked_rows = del_editor[del_editor['✅'] == True]
+                    if not checked_rows.empty:
+                        sel_oid = checked_rows.iloc[0]['订单号']
+                        sel_row = q_orders[q_orders['订单号'] == sel_oid].iloc[0]
+                        st.divider()
+                        st.markdown(f"#### ✏️ 编辑订单：{sel_oid} | {sel_row.get('客户名', '')}")
+                        with st.form("edit_order_form"):
+                            ec1, ec2 = st.columns(2)
+                            with ec1:
+                                e_cust = st.text_input("客户名", value=str(sel_row.get('客户名', '')))
+                                e_agent = st.text_input("代理商", value=str(sel_row.get('代理商', '')))
+                            with ec2:
+                                raw_del = sel_row.get('发货时间', None)
+                                try:
+                                    default_date = pd.to_datetime(raw_del).date() if pd.notna(raw_del) and str(raw_del).strip() else None
+                                except:
+                                    default_date = None
+                                e_delivery = st.date_input("发货时间", value=default_date)
+                                e_pack = st.checkbox("需要包装", value=(str(sel_row.get('包装选项', '')) == '需要包装'))
+                            st.markdown("**需求机型（可修改数量/加高，或增删行）**")
+                            st.caption("若不想改机型，保持原样提交即可。")
+                            cur_reqs = parse_requirements(sel_row['需求机型'], sel_row['需求数量'])
+                            init_rows = []
+                            for mk, mq in cur_reqs.items():
+                                is_h = "(加高)" in mk
+                                base = mk.replace("(加高)", "").strip()
+                                init_rows.append({"机型": base, "数量": mq, "加高?": is_h, "备注": ""})
+                            if not init_rows:
+                                init_rows = [{"机型": available_models[0] if available_models else "", "数量": 1, "加高?": False, "备注": ""}]
+                            e_model_df = st.data_editor(
+                                pd.DataFrame(init_rows), num_rows="dynamic", use_container_width=True,
+                                column_config={
+                                    "机型": st.column_config.SelectboxColumn("机型", options=available_models, required=True),
+                                    "数量": st.column_config.NumberColumn("数量", min_value=1, default=1, required=True),
+                                    "加高?": st.column_config.CheckboxColumn("加高?", default=False),
+                                    "备注": st.column_config.TextColumn("单行备注"),
+                                },
+                                key="edit_order_model_editor"
+                            )
+                            e_note = st.text_input("订单总备注", value=str(sel_row.get('备注', '')))
+                            src_val = sel_row.get('指定批次/来源', '')
+                            e_source = st.text_input("指定批次/来源", value=str(src_val) if isinstance(src_val, str) else "")
+                            st.divider()
+                            del_reason = st.text_input("删除原因（填写后点删除按钮）", placeholder="例如：客户取消、重复下单等")
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                do_save = st.form_submit_button("💾 保存修改", type="primary", use_container_width=True)
+                            with fc2:
+                                do_delete = st.form_submit_button("🗑️ 删除此订单", type="secondary", use_container_width=True)
+
+                            if do_save:
+                                update_data = {'客户名': e_cust, '代理商': e_agent, '发货时间': e_delivery.strftime("%Y-%m-%d") if e_delivery else "", '包装选项': '需要包装' if e_pack else '不包装', '备注': e_note}
+                                if e_source.strip(): update_data['指定批次/来源'] = e_source.strip()
+                                new_model_map = {}; new_notes_parts = [e_note.strip()] if e_note.strip() else []; has_model_rows = False
+                                for _, mrow in e_model_df.iterrows():
+                                    m = mrow.get('机型')
+                                    if not m: continue
+                                    has_model_rows = True
+                                    q = int(mrow.get('数量', 1)); is_h = mrow.get('加高?', False); rn = str(mrow.get('备注', '')).strip()
+                                    fk = f"{m}(加高)" if is_h else m
+                                    new_model_map[fk] = new_model_map.get(fk, 0) + q
+                                    if rn: new_notes_parts.append(f"[{fk}: {rn}]")
+                                if has_model_rows:
+                                    update_data['需求机型'] = ";".join([f"{mk}:{mq}" for mk, mq in new_model_map.items()])
+                                    update_data['需求数量'] = sum(new_model_map.values())
+                                    update_data['备注'] = " ".join(new_notes_parts)
+                                mask_upd = q_orders['订单号'] == sel_oid
+                                for col, val in update_data.items():
+                                    if col in q_orders.columns: q_orders.loc[mask_upd, col] = val
+                                for c in ['__status', 'month_str', '下单时间_dt']:
+                                    if c in q_orders.columns: del q_orders[c]
+                                save_orders(q_orders)
+                                st.success(f"订单 {sel_oid} 已更新！"); time.sleep(1); st.rerun()
+
+                            if do_delete:
+                                if not del_reason.strip():
+                                    st.error("❌ 必须填写删除原因才能删除！")
+                                else:
+                                    q_orders.loc[q_orders['订单号'] == sel_oid, 'status'] = 'deleted'
+                                    q_orders.loc[q_orders['订单号'] == sel_oid, 'delete_reason'] = del_reason
+                                    for c in ['__status', 'month_str', '下单时间_dt']:
+                                        if c in q_orders.columns: del q_orders[c]
+                                    save_orders(q_orders)
+                                    st.success(f"订单 {sel_oid} 已删除！"); time.sleep(1); st.rerun()
+
                 elif target_status == "deleted":
                     st.caption(f"共找到 {len(view_df)} 个已删除订单。")
+                    if "delete_reason" not in view_df.columns: view_df['delete_reason'] = ""
+                    st.dataframe(view_df[["订单号", "客户名", "代理商", "需求机型", "需求数量", "发货时间", "备注", "下单时间", "delete_reason"]], hide_index=True, use_container_width=True)
+
                 else:
                     st.caption(f"共找到 {len(view_df)} 个已完结订单。")
-                    
-                # 预处理：确保 '发货时间' 是 datetime 类型
-                view_df['发货时间'] = pd.to_datetime(view_df['发货时间'], errors='coerce').dt.date
-                
-                # 需要显示的列
-                disp_cols = ["订单号", "客户名", "代理商", "需求机型", "需求数量", "发货时间", "备注", "下单时间"]
-                
-                # 如果是已删除，显示删除原因
-                if target_status == "deleted":
-                    if "delete_reason" not in view_df.columns: view_df['delete_reason'] = ""
-                    disp_cols.append("delete_reason")
-                
-                # 允许删除的操作列 (仅 Active/Completed)
-                if target_status != "deleted":
                     view_df.insert(0, "✅", False)
-                    final_cols = ["✅"] + disp_cols
-                else:
-                    final_cols = disp_cols
-                
-                # 配置 column config
-                column_config = {
-                    "订单号": st.column_config.TextColumn(disabled=True),
-                    "客户名": st.column_config.TextColumn(disabled=True),
-                    "代理商": st.column_config.TextColumn(disabled=True),
-                    "需求机型": st.column_config.TextColumn(disabled=True),
-                    "需求数量": st.column_config.TextColumn(disabled=True),
-                    "下单时间": st.column_config.TextColumn(disabled=True),
-                    "发货时间": st.column_config.DateColumn("发货时间", format="YYYY-MM-DD"),
-                    "备注": st.column_config.TextColumn("备注 (可编辑)"),
-                    "delete_reason": st.column_config.TextColumn("删除原因", disabled=True),
-                    "✅": st.column_config.CheckboxColumn("选择", default=False)
-                }
-                
-                # data_editor
-                edited_df = st.data_editor(
-                    view_df[final_cols],
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config=column_config,
-                    key="order_manage_editor"
-                )
-                
-                # --- 保存修改逻辑 (仅针对备注/时间) ---
-                if target_status == "active": # 只有 Active 状态通常允许改这些，Completed 也可以但这里限制一下？原逻辑是 Active 允许
-                    if st.button("💾 保存信息修改", type="primary"):
-                        changed_count = 0
-                        for idx, row in edited_df.iterrows():
-                            oid = row['订单号']
-                            new_note = row['备注']
-                            new_date = row['发货时间'].strftime("%Y-%m-%d") if row['发货时间'] else ""
-                            
-                            mask = q_orders['订单号'] == oid
-                            if not q_orders[mask].empty:
-                                org_row = q_orders[mask].iloc[0]
-                                org_note = org_row['备注']
-                                org_date = org_row['发货时间']
-                                
-                                if str(new_note) != str(org_note) or str(new_date) != str(org_date):
-                                    q_orders.loc[mask, '备注'] = new_note
-                                    q_orders.loc[mask, '发货时间'] = new_date
-                                    changed_count += 1
-                        
-                        if changed_count > 0:
-                            # 清理临时列
-                            for c in ['__status', 'month_str', '下单时间_dt']: 
-                                if c in q_orders.columns: del q_orders[c]
-                            save_orders(q_orders)
-                            st.success(f"已更新 {changed_count} 条订单信息！"); time.sleep(1); st.rerun()
-                        else:
-                            st.info("未检测到修改")
-
-                # --- 删除逻辑 ---
-                if target_status != "deleted":
-                    to_delete = edited_df[edited_df['✅'] == True]
+                    comp_editor = st.data_editor(
+                        view_df[["✅", "订单号", "客户名", "代理商", "需求机型", "需求数量", "发货时间", "备注", "下单时间"]],
+                        hide_index=True, use_container_width=True,
+                        column_config={
+                            "✅": st.column_config.CheckboxColumn("选择", default=False),
+                            "订单号": st.column_config.TextColumn(disabled=True),
+                            "客户名": st.column_config.TextColumn(disabled=True),
+                            "代理商": st.column_config.TextColumn(disabled=True),
+                            "需求机型": st.column_config.TextColumn(disabled=True),
+                            "需求数量": st.column_config.TextColumn(disabled=True),
+                            "发货时间": st.column_config.TextColumn(disabled=True),
+                            "备注": st.column_config.TextColumn(disabled=True),
+                            "下单时间": st.column_config.TextColumn(disabled=True),
+                        },
+                        key="order_manage_editor"
+                    )
+                    to_delete = comp_editor[comp_editor['✅'] == True]
                     if not to_delete.empty:
                         st.divider()
                         st.markdown(f"#### 🗑️ 删除订单操作 (选中 {len(to_delete)} 个)")
@@ -555,17 +501,11 @@ def render_sales_create():
                                     st.error("❌ 必须填写删除原因才能删除！")
                                 else:
                                     oids_to_del = to_delete['订单号'].tolist()
-                                    # Update Status
                                     q_orders.loc[q_orders['订单号'].isin(oids_to_del), 'status'] = 'deleted'
                                     q_orders.loc[q_orders['订单号'].isin(oids_to_del), 'delete_reason'] = del_reason
-                                    
-                                    # Cleanup and Save
-                                    for c in ['__status', 'month_str', '下单时间_dt']: 
+                                    for c in ['__status', 'month_str', '下单时间_dt']:
                                         if c in q_orders.columns: del q_orders[c]
                                     save_orders(q_orders)
                                     st.success(f"已删除 {len(oids_to_del)} 个订单！"); time.sleep(1); st.rerun()
-
         else:
             st.info("暂无订单记录")
-
-    # --- 📦 订单配货 (升级版：显示老板指示) ---

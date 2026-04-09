@@ -190,11 +190,28 @@ def render_file_manager(contract_id, customer_name, default_expanded=True, key_s
                             st.markdown(pdf_display, unsafe_allow_html=True)
                         elif ext == '.docx':
                             if MAMMOTH_AVAILABLE:
-                                with open(abs_path, "rb") as docx_file:
-                                    result = mammoth.convert_to_html(docx_file)
-                                    st.markdown(result.value, unsafe_allow_html=True)
+                                try:
+                                    with open(abs_path, "rb") as docx_file:
+                                        result = mammoth.convert_to_html(docx_file)
+                                    html = (result.value or "").strip()
+                                    if html:
+                                        st.markdown(html, unsafe_allow_html=True)
+                                        if result.messages:
+                                            st.warning(f"文档已预览，但存在 {len(result.messages)} 条兼容性提示，部分格式可能与原文档不完全一致。")
+                                    else:
+                                        st.warning("docx 已加载，但未提取到可预览内容，请下载原文件查看。")
+                                except Exception as e:
+                                    import logging
+                                    logging.error(f"docx 解析异常: {e}", exc_info=True)
+                                    st.error(f"docx 预览解析失败，已记录日志。错误信息: {e}")
+                                    with open(abs_path, "rb") as f:
+                                        st.download_button("下载原文件", f.read(), file_name=target_file_name, key=f"dl_docx_fallback_{contract_id}{key_suffix}")
                             else:
-                                st.warning("缺少 mammoth 库，无法预览 docx")
+                                import logging
+                                logging.error("依赖缺失: mammoth 库未安装，无法进行 docx 预览。")
+                                st.warning("系统缺少 mammoth 依赖库，无法在线预览 docx 文件。请联系管理员安装。")
+                                with open(abs_path, "rb") as f:
+                                    st.download_button("直接下载", f.read(), file_name=target_file_name, key=f"dl_docx_fallback_no_mammoth_{contract_id}{key_suffix}")
                         else:
                             st.info("此格式不支持在线预览，请下载查看")
                     else:

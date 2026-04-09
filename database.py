@@ -15,6 +15,26 @@ from config import (
 )
 
 
+def get_schema_rollback_sql():
+    return [
+        "ALTER TABLE role_permissions DROP FOREIGN KEY fk_role_permissions_role",
+        "ALTER TABLE users DROP FOREIGN KEY fk_users_role",
+        "DROP INDEX uq_role_permissions_role_func ON role_permissions",
+        "DROP INDEX idx_fg_status_model_order ON finished_goods_data",
+        "DROP INDEX idx_fg_batch_status ON finished_goods_data",
+        "DROP INDEX idx_fg_updated_at ON finished_goods_data",
+        "DROP INDEX idx_orders_status_time ON sales_orders",
+        "DROP INDEX idx_orders_delivery ON sales_orders",
+        "DROP INDEX idx_fp_contract_status_due ON factory_plan",
+        "DROP INDEX idx_fp_due_date ON factory_plan",
+        "DROP INDEX idx_log_time ON transaction_log",
+        "DROP INDEX idx_import_batch_model ON plan_import",
+        "DROP INDEX idx_ship_month_time ON shipping_history",
+        "DROP INDEX uq_contract_path ON contract_records",
+        "DROP TABLE IF EXISTS roles",
+    ]
+
+
 @st.cache_resource
 def get_engine():
     """返回 SQLAlchemy Engine（全局缓存，整个 Streamlit session 复用）"""
@@ -23,7 +43,12 @@ def get_engine():
         f"@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
         f"?charset=utf8mb4"
     )
-    return create_engine(url, pool_pre_ping=True, pool_recycle=3600)
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        connect_args={"auth_plugin_map": {"caching_sha2_password": "mysql_native_password", "sha256_password": "mysql_native_password"}},
+    )
 
 
 def init_mysql_tables():
@@ -141,6 +166,20 @@ def init_mysql_tables():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            `id`         BIGINT NOT NULL AUTO_INCREMENT,
+            `username`   VARCHAR(100) NOT NULL,
+            `token_hash` VARCHAR(128) NOT NULL,
+            `expires_at` DATETIME NOT NULL,
+            `revoked`    TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` DATETIME NULL,
+            `revoked_at` DATETIME NULL,
+            PRIMARY KEY (`id`),
+            INDEX `idx_user_sessions_username` (`username`),
+            UNIQUE KEY `uq_user_sessions_token_hash` (`token_hash`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
         CREATE TABLE IF NOT EXISTS role_permissions (
             `id`        INT NOT NULL AUTO_INCREMENT,
             `role_id`   VARCHAR(50)  DEFAULT '',
@@ -177,8 +216,39 @@ def init_mysql_tables():
             PRIMARY KEY (`流水号`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
+        """
+        CREATE TABLE IF NOT EXISTS warehouse_layout (
+            `layout_id`    VARCHAR(100) NOT NULL,
+            `layout_json`  LONGTEXT,
+            `update_time`  DATETIME NULL,
+            PRIMARY KEY (`layout_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
     ]
     with engine.begin() as conn:
+        def _index_exists(table_name, index_name):
+            return conn.execute(text(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS "
+                "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND INDEX_NAME=:i"
+            ), {"db": MYSQL_DB, "t": table_name, "i": index_name}).scalar() > 0
+
+        def _constraint_exists(table_name, constraint_name):
+            return conn.execute(text(
+                "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS "
+                "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND CONSTRAINT_NAME=:c"
+            ), {"db": MYSQL_DB, "t": table_name, "c": constraint_name}).scalar() > 0
+
+        def _add_index_if_missing(table_name, index_name, columns_sql, unique=False):
+            if not _index_exists(table_name, index_name):
+                index_type = "UNIQUE INDEX" if unique else "INDEX"
+                conn.execute(text(
+                    f"ALTER TABLE `{table_name}` ADD {index_type} `{index_name}` ({columns_sql})"
+                ))
+
+        def _drop_fk_if_exists(table_name, fk_name):
+            if _constraint_exists(table_name, fk_name):
+                conn.execute(text(f"ALTER TABLE `{table_name}` DROP FOREIGN KEY `{fk_name}`"))
+
         def _to_int_qty(value):
             try:
                 return int(float(value))
@@ -271,7 +341,11 @@ def init_mysql_tables():
             ("plan_import", "预计入库时间"),
         ]
         for table_name, col_name in date_columns:
-            conn.execute(text(f"UPDATE `{table_name}` SET `{col_name}`=NULL WHERE `{col_name}`=''"))
+            try:
+                # 只在列类型是VARCHAR/TEXT时处理空字符串，否则可能会因为严格模式报错
+                conn.execute(text(f"UPDATE `{table_name}` SET `{col_name}`=NULL WHERE `{col_name}`=''"))
+            except Exception:
+                pass
 
         sales_rows = conn.execute(text("SELECT `订单号`, `指定批次/来源` FROM sales_orders")).fetchall()
         for order_id, source_val in sales_rows:
@@ -281,13 +355,23 @@ def init_mysql_tables():
                 {"v": json.dumps(normalized, ensure_ascii=False), "oid": order_id},
             )
 
-        plan_rows = conn.execute(text("SELECT `id`, `指定批次/来源` FROM factory_plan")).fetchall()
-        for row_id, source_val in plan_rows:
-            normalized = _parse_alloc(source_val)
-            conn.execute(
-                text("UPDATE factory_plan SET `指定批次/来源`=:v WHERE `id`=:rid"),
-                {"v": json.dumps(normalized, ensure_ascii=False), "rid": row_id},
-            )
+        try:
+            result = conn.execute(text("SHOW COLUMNS FROM factory_plan LIKE 'id'"))
+            if result.fetchone() is None:
+                conn.execute(text("ALTER TABLE factory_plan ADD COLUMN `id` INT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST"))
+        except Exception:
+            pass
+
+        try:
+            plan_rows = conn.execute(text("SELECT `id`, `指定批次/来源` FROM factory_plan")).fetchall()
+            for row_id, source_val in plan_rows:
+                normalized = _parse_alloc(source_val)
+                conn.execute(
+                    text("UPDATE factory_plan SET `指定批次/来源`=:v WHERE `id`=:rid"),
+                    {"v": json.dumps(normalized, ensure_ascii=False), "rid": row_id},
+                )
+        except Exception:
+            pass
 
         migration_sql = [
             "ALTER TABLE finished_goods_data MODIFY COLUMN `预计入库时间` DATETIME NULL",
@@ -347,19 +431,125 @@ def init_mysql_tables():
         except Exception:
             pass
 
+        try:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS roles ("
+                "`role_id` VARCHAR(50) NOT NULL,"
+                "`role_name` VARCHAR(100) DEFAULT '',"
+                "PRIMARY KEY (`role_id`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ))
+        except Exception:
+            pass
+
+        known_roles = {}
+        for _, info in DEFAULT_USERS.items():
+            role_id = str(info.get("role", "")).strip()
+            if role_id:
+                known_roles[role_id] = role_id
+        for role_id in DEFAULT_ROLE_PERMISSIONS.keys():
+            rid = str(role_id).strip()
+            if rid:
+                known_roles[rid] = rid
+
+        for role_id, role_name in known_roles.items():
+            conn.execute(
+                text("INSERT IGNORE INTO roles (role_id, role_name) VALUES (:rid, :rname)"),
+                {"rid": role_id, "rname": role_name},
+            )
+
+        try:
+            role_values = conn.execute(text("SELECT DISTINCT role FROM users WHERE TRIM(COALESCE(role, '')) <> ''")).fetchall()
+            for (role_id,) in role_values:
+                rid = str(role_id).strip()
+                conn.execute(
+                    text("INSERT IGNORE INTO roles (role_id, role_name) VALUES (:rid, :rname)"),
+                    {"rid": rid, "rname": rid},
+                )
+        except Exception:
+            pass
+
+        try:
+            role_values_perm = conn.execute(text("SELECT DISTINCT role_id FROM role_permissions WHERE TRIM(COALESCE(role_id, '')) <> ''")).fetchall()
+            for (role_id,) in role_values_perm:
+                rid = str(role_id).strip()
+                conn.execute(
+                    text("INSERT IGNORE INTO roles (role_id, role_name) VALUES (:rid, :rname)"),
+                    {"rid": rid, "rname": rid},
+                )
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text(
+                "DELETE rp1 FROM role_permissions rp1 "
+                "INNER JOIN role_permissions rp2 "
+                "ON rp1.role_id=rp2.role_id AND rp1.func_code=rp2.func_code AND rp1.id > rp2.id"
+            ))
+            conn.execute(text("DELETE FROM role_permissions WHERE TRIM(COALESCE(role_id, ''))='' OR TRIM(COALESCE(func_code, ''))=''"))
+        except Exception:
+            pass
+
+        _add_index_if_missing("role_permissions", "uq_role_permissions_role_func", "`role_id`, `func_code`", unique=True)
+
+        try:
+            conn.execute(text(
+                "DELETE c1 FROM contract_records c1 "
+                "INNER JOIN contract_records c2 "
+                "ON c1.contract_id=c2.contract_id AND c1.file_path=c2.file_path AND c1.id > c2.id "
+                "WHERE TRIM(COALESCE(c1.file_path, '')) <> ''"
+            ))
+            _add_index_if_missing("contract_records", "uq_contract_path", "`contract_id`, `file_path`(255)", unique=True)
+        except Exception:
+            pass
+
+        _add_index_if_missing("finished_goods_data", "idx_fg_status_model_order", "`状态`, `机型`, `占用订单号`")
+        _add_index_if_missing("finished_goods_data", "idx_fg_batch_status", "`批次号`, `状态`")
+        _add_index_if_missing("finished_goods_data", "idx_fg_updated_at", "`更新时间`")
+        _add_index_if_missing("sales_orders", "idx_orders_status_time", "`status`, `下单时间`")
+        _add_index_if_missing("sales_orders", "idx_orders_delivery", "`发货时间`")
+        _add_index_if_missing("factory_plan", "idx_fp_contract_status_due", "`合同号`, `状态`, `要求交期`")
+        _add_index_if_missing("factory_plan", "idx_fp_due_date", "`要求交期`")
+        _add_index_if_missing("transaction_log", "idx_log_time", "`时间`")
+        _add_index_if_missing("plan_import", "idx_import_batch_model", "`批次号`, `机型`")
+        _add_index_if_missing("shipping_history", "idx_ship_month_time", "`archive_month`, `更新时间`")
+
+        _drop_fk_if_exists("users", "fk_users_role")
+        _drop_fk_if_exists("role_permissions", "fk_role_permissions_role")
+
+        if not _constraint_exists("users", "fk_users_role"):
+            try:
+                conn.execute(text(
+                    "ALTER TABLE users "
+                    "ADD CONSTRAINT fk_users_role "
+                    "FOREIGN KEY (`role`) REFERENCES roles(`role_id`) "
+                    "ON UPDATE CASCADE ON DELETE RESTRICT"
+                ))
+            except Exception:
+                pass
+
+        if not _constraint_exists("role_permissions", "fk_role_permissions_role"):
+            try:
+                conn.execute(text(
+                    "ALTER TABLE role_permissions "
+                    "ADD CONSTRAINT fk_role_permissions_role "
+                    "FOREIGN KEY (`role_id`) REFERENCES roles(`role_id`) "
+                    "ON UPDATE CASCADE ON DELETE CASCADE"
+                ))
+            except Exception:
+                pass
+
         result = conn.execute(text("SHOW COLUMNS FROM finished_goods_data LIKE 'Location_Code'"))
         if result.fetchone() is None:
             conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `Location_Code` VARCHAR(100) DEFAULT ''"))
 
-        result = conn.execute(text("SELECT COUNT(*) FROM users"))
-        if result.fetchone()[0] == 0:
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            for uid, info in DEFAULT_USERS.items():
-                conn.execute(text(
-                    "INSERT IGNORE INTO users "
-                    "(username, password, role, name, status, register_time, audit_time, auditor) "
-                    "VALUES (:u, :p, :r, :n, 'active', :t, :t, 'System')"
-                ), {"u": uid, "p": info["password"], "r": info["role"], "n": info["name"], "t": current_time})
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for uid, info in DEFAULT_USERS.items():
+            conn.execute(text(
+                "INSERT IGNORE INTO users "
+                "(username, password, role, name, status, register_time, audit_time, auditor) "
+                "VALUES (:u, :p, :r, :n, 'active', :t, :t, 'System')"
+            ), {"u": uid, "p": info["password"], "r": info["role"], "n": info["name"], "t": current_time})
 
         result = conn.execute(text("SELECT COUNT(*) FROM role_permissions"))
         if result.fetchone()[0] == 0:
@@ -369,6 +559,12 @@ def init_mysql_tables():
                         text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:r, :f)"),
                         {"r": role_id, "f": func_code},
                     )
+        for role_id, func_codes in DEFAULT_ROLE_PERMISSIONS.items():
+            for func_code in func_codes:
+                conn.execute(
+                    text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:r, :f)"),
+                    {"r": role_id, "f": func_code},
+                )
         sales_perms = DEFAULT_ROLE_PERMISSIONS.get("Sales", [])
         conn.execute(text("DELETE FROM role_permissions WHERE role_id='Sales'"))
         for func_code in sales_perms:

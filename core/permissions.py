@@ -13,7 +13,8 @@ def get_role_permissions(role):
         return [
             "PLANNING", "CONTRACT", "QUERY", "ARCHIVE",
             "SALES_CREATE", "INBOUND", "SALES_ALLOC",
-            "SHIP_CONFIRM", "MACHINE_EDIT",
+            "SHIP_CONFIRM", "MACHINE_EDIT", "MACHINE_EDIT_MODEL",
+            "WAREHOUSE_MAP",
         ]
     perms = []
     try:

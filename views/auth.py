@@ -2,8 +2,15 @@ import time
 
 import streamlit as st
 
-from core.auth import register_user, verify_login
+from core.auth import (
+    COOKIE_COMPONENT_AVAILABLE,
+    create_remember_session,
+    register_user,
+    set_remember_cookie,
+    verify_login,
+)
 from core.permissions import get_role_permissions
+
 
 def login_form():
     """显示登录表单 (支持注册)"""
@@ -20,12 +27,15 @@ def login_form():
             with st.form("login_form"):
                 username = st.text_input("账号")
                 password = st.text_input("密码", type="password")
+                remember_me = st.checkbox("30天内免登录", disabled=not COOKIE_COMPONENT_AVAILABLE)
+                if not COOKIE_COMPONENT_AVAILABLE:
+                    st.caption("提示：未安装会话组件，当前环境仅支持本次会话登录。")
                 submitted = st.form_submit_button("登录", use_container_width=True)
                 
                 if submitted:
                     ok, msg, user_row = verify_login(username, password)
                     if ok:
-                        st.session_state.current_user = username
+                        st.session_state.current_user = user_row["username"]
                         st.session_state.role = user_row["role"]
                         st.session_state.operator_name = user_row["name"]
                         st.session_state.is_admin = (user_row["role"] == "Admin")
@@ -33,6 +43,10 @@ def login_form():
                         # --- Load Permissions ---
                         perms = get_role_permissions(user_row["role"])
                         st.session_state.permissions = perms
+
+                        if remember_me:
+                            token = create_remember_session(user_row["username"], days=30)
+                            set_remember_cookie(token, days=30)
                         
                         st.success(f"{msg}！欢迎 {user_row['name']}")
                         time.sleep(0.5)
@@ -47,7 +61,7 @@ def login_form():
                 r_name = st.text_input("您的姓名 (真实姓名)")
                 
                 # Role mapping for display
-                role_display_map = {"销售员": "Sales", "生产/仓管": "Prod", "老板/管理": "Boss"}
+                role_display_map = {"销售员": "Sales", "生产/仓管": "Prod", "老板/管理": "Boss", "入库员": "Inbound"}
                 r_role_display = st.selectbox("申请角色", list(role_display_map.keys()))
                 r_role = role_display_map[r_role_display]
                 

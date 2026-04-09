@@ -3,6 +3,7 @@ import json
 import uuid
 
 import pandas as pd
+import streamlit as st
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
@@ -47,6 +48,7 @@ def _normalize_source_json(value):
     return {"note": raw}
 
 
+@st.cache_data(ttl=30)
 def get_orders():
     try:
         with get_engine().connect() as conn:
@@ -77,6 +79,7 @@ def get_orders():
 
 
 def save_orders(df):
+    get_orders.clear()
     try:
         df = df.copy()
         for col in ORDER_COLS:
@@ -105,6 +108,7 @@ def save_orders(df):
 
 
 def create_sales_order(customer, agent, model_data, note, pack_option="", delivery_time="", source_batch=""):
+    get_orders.clear()
     odf = get_orders()
     order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
     final_model_str = ""
@@ -136,7 +140,7 @@ def create_sales_order(customer, agent, model_data, note, pack_option="", delive
     return order_id
 
 
-def allocate_inventory(order_id, customer, agent, selected_sns):
+def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     df = get_data()
     orders = get_orders()
     order_note = ""
@@ -147,7 +151,7 @@ def allocate_inventory(order_id, customer, agent, selected_sns):
     current_status_df = df[df['流水号'].isin(selected_sns)]
     pending_inbound_sns = current_status_df[current_status_df['状态'] == '待入库']['流水号'].tolist()
     if pending_inbound_sns:
-        append_log("直接配货-自动入库", pending_inbound_sns)
+        append_log("直接配货-自动入库", pending_inbound_sns, operator=operator)
 
     mask = df['流水号'].isin(selected_sns)
     df.loc[mask, '状态'] = '待发货'
@@ -158,10 +162,10 @@ def allocate_inventory(order_id, customer, agent, selected_sns):
     df.loc[mask, '更新时间'] = datetime.now()
 
     save_data(df)
-    append_log(f"配货锁定-{order_id}", selected_sns)
+    append_log(f"配货锁定-{order_id}", selected_sns, operator=operator)
 
 
-def revert_to_inbound(selected_sns, reason="撤回操作"):
+def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
     df = get_data()
     mask = df['流水号'].isin(selected_sns)
     df.loc[mask, '状态'] = '待入库'
@@ -171,7 +175,7 @@ def revert_to_inbound(selected_sns, reason="撤回操作"):
     df.loc[mask, '订单备注'] = ""
     df.loc[mask, '更新时间'] = datetime.now()
     save_data(df)
-    append_log(f"{reason}-退回待入库", selected_sns)
+    append_log(f"{reason}-退回待入库", selected_sns, operator=operator)
 
 
 def update_sales_order(order_id, new_data, force_unbind=False):

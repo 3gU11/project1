@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import pandas as pd
+import streamlit as st
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError
 
@@ -8,6 +9,7 @@ from database import get_engine
 from utils.parsers import parse_alloc_dict, to_json_text
 
 
+@st.cache_data(ttl=30)
 def get_planning_records():
     try:
         with get_engine().connect() as conn:
@@ -18,6 +20,7 @@ def get_planning_records():
 
 
 def save_planning_record(order_id, model, plan_info):
+    get_planning_records.clear()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with get_engine().begin() as conn:
@@ -40,6 +43,7 @@ def save_planning_record(order_id, model, plan_info):
         raise
 
 
+@st.cache_data(ttl=30)
 def get_factory_plan():
     cols = ["合同号", "机型", "排产数量", "要求交期", "状态", "备注", "客户名", "代理商", "指定批次/来源", "订单号"]
     try:
@@ -59,6 +63,7 @@ def get_factory_plan():
 
 
 def save_factory_plan(df):
+    get_factory_plan.clear()
     cols = ["合同号", "机型", "排产数量", "要求交期", "状态", "备注", "客户名", "代理商", "指定批次/来源", "订单号"]
     try:
         df = df.copy()

@@ -8,6 +8,7 @@ import streamlit as st
 from config import CUSTOM_MODEL_ORDER
 from core.file_manager import save_contract_file
 from core.navigation import go_home
+from core.ocr_engine import OCRProcessor
 from core.permissions import check_access
 from crud.inventory import get_data
 from crud.orders import get_orders

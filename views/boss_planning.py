@@ -13,6 +13,7 @@ from crud.orders import create_sales_order, get_orders, save_orders
 from crud.planning import get_factory_plan, save_factory_plan, save_planning_record
 from utils.formatters import get_model_rank
 from utils.parsers import parse_alloc_dict, parse_plan_map, parse_requirements, to_json_text
+from views.components import render_file_manager
 
 
 def render_boss_planning():
@@ -45,8 +46,6 @@ def render_boss_planning():
                     
                     # 按合同号聚合
                     pending_df = fp_df[fp_df['状态'] == '未下单'].copy()
-                    known_contract_ids = pending_df['合同号'].dropna().astype(str).tolist()
-                    orphan_df = get_unlinked_contract_folders(known_contract_ids)
                     
                     if search_txt:
                         s_term = search_txt.lower()
@@ -54,60 +53,41 @@ def render_boss_planning():
                             pending_df['合同号'].str.lower().str.contains(s_term, na=False) |
                             pending_df['客户名'].str.lower().str.contains(s_term, na=False)
                         ]
-                        if not orphan_df.empty:
-                            orphan_df = orphan_df[
-                                orphan_df['合同号'].astype(str).str.lower().str.contains(s_term, na=False) |
-                                orphan_df['客户名'].astype(str).str.lower().str.contains(s_term, na=False)
-                            ]
                     
-                    if pending_df.empty and orphan_df.empty:
+                    if pending_df.empty:
                         st.info("无待审合同")
                     else:
-                        if not pending_df.empty:
-                            pending_df['temp_date'] = pd.to_datetime(pending_df['要求交期'], errors='coerce')
-                            pending_df = pending_df.sort_values('temp_date')
-                            pending_df['month_key'] = pending_df['temp_date'].apply(lambda x: x.strftime('%Y-%m') if pd.notnull(x) else 'Unknown')
-                            months = sorted([m for m in pending_df['month_key'].unique() if m != 'Unknown'], reverse=False)
-                            if 'Unknown' in pending_df['month_key'].unique():
-                                months.append('Unknown')
+                        pending_df['temp_date'] = pd.to_datetime(pending_df['要求交期'], errors='coerce')
+                        pending_df = pending_df.sort_values('temp_date')
+                        pending_df['month_key'] = pending_df['temp_date'].apply(lambda x: x.strftime('%Y-%m') if pd.notnull(x) else 'Unknown')
+                        months = sorted([m for m in pending_df['month_key'].unique() if m != 'Unknown'], reverse=False)
+                        if 'Unknown' in pending_df['month_key'].unique():
+                            months.append('Unknown')
 
-                            for m_key in months:
-                                m_rows = pending_df[pending_df['month_key'] == m_key]
-                                unique_contracts = m_rows['合同号'].unique()
-                                count = len(unique_contracts)
-                                is_expanded = (m_key == months[0])
+                        for m_key in months:
+                            m_rows = pending_df[pending_df['month_key'] == m_key]
+                            unique_contracts = m_rows['合同号'].unique()
+                            count = len(unique_contracts)
+                            is_expanded = st.session_state.get('boss_pending_month', months[0]) == m_key
 
-                                with st.expander(f"📅 {m_key} ({count} 单)", expanded=is_expanded):
-                                    for cid in unique_contracts:
-                                        c_rows = m_rows[m_rows['合同号'] == cid]
-                                        cust = c_rows.iloc[0]['客户名']
-                                        model_counts = c_rows.groupby('机型')['排产数量'].apply(lambda x: sum(int(float(i)) for i in x))
-                                        models_display = []
-                                        for m, q in model_counts.items():
-                                            models_display.append(f"{m} x{q}")
-                                        models_str = "\n".join(models_display)
+                            with st.expander(f"📅 {m_key} ({count} 单)", expanded=is_expanded):
+                                for cid in unique_contracts:
+                                    c_rows = m_rows[m_rows['合同号'] == cid]
+                                    cust = c_rows.iloc[0]['客户名']
+                                    model_counts = c_rows.groupby('机型')['排产数量'].apply(lambda x: sum(int(float(i)) for i in x))
+                                    models_display = []
+                                    for m, q in model_counts.items():
+                                        models_display.append(f"{m} x{q}")
+                                    models_str = "\n".join(models_display)
 
-                                        label = f"🏢 {cust}\n{models_str}"
-                                        btn_type = "primary" if (st.session_state.boss_selected_id == cid and st.session_state.boss_selected_type == 'contract') else "secondary"
+                                    label = f"🏢 {cust}\n{models_str}"
+                                    btn_type = "primary" if (st.session_state.boss_selected_id == cid and st.session_state.boss_selected_type == 'contract') else "secondary"
 
-                                        if st.button(label, key=f"btn_con_{cid}_{m_key}", type=btn_type, use_container_width=True):
-                                            st.session_state.boss_selected_id = cid
-                                            st.session_state.boss_selected_type = 'contract'
-                                            st.rerun()
-
-                        if not orphan_df.empty:
-                            st.caption("📎 仅附件合同")
-                            for idx, row in orphan_df.iterrows():
-                                cid = str(row['合同号'])
-                                cust = str(row['客户名'])
-                                fcnt = int(row['文件数']) if str(row['文件数']).isdigit() else row['文件数']
-                                ts = str(row['最近更新时间'])
-                                label = f"📎 {cust}\n{cid} | {fcnt}个文件"
-                                btn_type = "primary" if (st.session_state.boss_selected_id == cid and st.session_state.boss_selected_type == 'orphan_contract') else "secondary"
-                                if st.button(label, key=f"btn_orphan_{cid}_{idx}", type=btn_type, use_container_width=True, help=f"最近更新: {ts}"):
-                                    st.session_state.boss_selected_id = cid
-                                    st.session_state.boss_selected_type = 'orphan_contract'
-                                    st.rerun()
+                                    if st.button(label, key=f"btn_con_{cid}_{m_key}", type=btn_type, use_container_width=True):
+                                        st.session_state.boss_selected_id = cid
+                                        st.session_state.boss_selected_type = 'contract'
+                                        st.session_state.boss_pending_month = m_key
+                                        st.rerun()
 
                 # --- 2. 待规划 (Pending Planning) ---
                 with tab_planning:
@@ -271,12 +251,9 @@ def render_boss_planning():
                                     cust = c_rows.iloc[0]['客户名']
                                     oid = c_rows.iloc[0].get('订单号', '')
                                     status = c_rows.iloc[0]['状态']
-                                    
-                                label = f"📦 {cid} ({status})\n{cust}" + (f" | {oid}" if oid else "")
-                                btn_type = "primary" if (st.session_state.boss_selected_id == cid and st.session_state.boss_selected_type == 'done') else "secondary"
-                                    
-                                    # 👇 在这里加上 _{m_key}
-                                if st.button(label, key=f"btn_done_{cid}_{m_key}", type=btn_type, use_container_width=True):
+                                    label = f"📦 {cid} ({status})\n{cust}" + (f" | {oid}" if oid else "")
+                                    btn_type = "primary" if (st.session_state.boss_selected_id == cid and st.session_state.boss_selected_type == 'done') else "secondary"
+                                    if st.button(label, key=f"btn_done_{cid}_{m_key}", type=btn_type, use_container_width=True):
                                         st.session_state.boss_selected_id = cid
                                         st.session_state.boss_selected_type = 'done'
                                         st.rerun()
@@ -415,6 +392,24 @@ def render_boss_planning():
                                         # st.session_state[f"edit_mode_{sel_id}"] = False # toggle 无法直接通过代码关闭，只能 rerun
                                         time.sleep(1); st.rerun()
 
+                            st.divider()
+                            c_act1, c_act2 = st.columns(2)
+                            with c_act1:
+                                if st.button("🚀 前往规划", type="primary", use_container_width=True, key=f"to_planning_edit_{sel_id}"):
+                                    # 将该合同下所有条目状态改为 '待规划'
+                                    fp_df.loc[fp_df['合同号'] == sel_id, '状态'] = '待规划'
+                                    save_factory_plan(fp_df)
+                                    st.session_state.boss_selected_type = 'planning'
+                                    st.success("已批准！进入规划阶段。")
+                                    st.rerun()
+                            with c_act2:
+                                if st.button("❌ 驳回/取消", use_container_width=True, key=f"reject_contract_edit_{sel_id}"):
+                                    fp_df.loc[fp_df['合同号'] == sel_id, '状态'] = '已取消'
+                                    save_factory_plan(fp_df)
+                                    st.warning("合同已取消")
+                                    st.session_state.boss_selected_id = None
+                                    st.rerun()
+
                         else:
                             # --- 阅读模式 (原显示逻辑) ---
                             st.markdown(f"""
@@ -428,9 +423,6 @@ def render_boss_planning():
                             st.write("**包含机型:**")
                             st.dataframe(target_rows[['机型', '排产数量', '要求交期', '备注']], use_container_width=True, hide_index=True)
                         
-                        # --- V7.5 File Preview & Download (Enhanced UI) ---
-                        render_file_manager(sel_id, first_row['客户名'], default_expanded=True)
-
                         st.divider()
                         c_act1, c_act2 = st.columns(2)
                         with c_act1:
@@ -448,6 +440,9 @@ def render_boss_planning():
                                 st.warning("合同已取消")
                                 st.session_state.boss_selected_id = None
                                 st.rerun()
+
+                        # --- V7.5 File Preview & Download (Enhanced UI) ---
+                        render_file_manager(sel_id, first_row['客户名'], default_expanded=True)
 
                 elif sel_type == 'orphan_contract':
                     orphan_id = str(sel_id)
@@ -532,7 +527,7 @@ def render_boss_planning():
                                         else: new_alloc[b] = c
                                     
                                     # 1. 更新当前行的 '指定批次/来源'
-                                    fp_df.loc[idx, '指定批次/来源'] = new_alloc
+                                    fp_df.at[idx, '指定批次/来源'] = to_json_text(new_alloc)
                                     save_factory_plan(fp_df)
                                     
                                     # 2. 如果关联了订单，同步更新 Sales Order
@@ -636,7 +631,7 @@ def render_boss_planning():
 
                         if st.button("💾 保存规划 (Save Plan)", type="primary"):
                             for idx, plan_obj in changes_map.items():
-                                fp_df.loc[idx, '指定批次/来源'] = plan_obj
+                                fp_df.at[idx, '指定批次/来源'] = to_json_text(plan_obj)
                                 
                                 if oid_now:
                                     try:
@@ -689,7 +684,10 @@ def render_boss_planning():
                                 fp_df.loc[fp_df['合同号'] == sel_id, '订单号'] = new_oid
                                 fp_df.loc[fp_df['合同号'] == sel_id, '状态'] = '已转订单'
                                 save_factory_plan(fp_df)
-                                st.success(f"已自动生成订单 {new_oid}！"); time.sleep(1); st.rerun()
+                                st.success(f"已自动生成订单 {new_oid}！")
+                                time.sleep(1)
+                                st.session_state.page = 'sales_alloc'
+                                st.rerun()
 
                 # --- 场景3: 独立手动订单 (Manual Orders) ---
                 elif sel_type == 'manual_order':

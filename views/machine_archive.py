@@ -6,6 +6,7 @@ from datetime import datetime
 import streamlit as st
 
 from config import MACHINE_ARCHIVE_ABS_DIR
+from core.file_manager import audit_log
 from core.navigation import go_home
 from core.permissions import check_access
 from crud.inventory import get_data
@@ -62,14 +63,59 @@ def render_machine_archive():
             
         if image_files:
             st.markdown(f"#### 🖼️ 现有照片 ({len(image_files)} 张)")
-            
+
+            # 批量选择控制
+            for img_name in image_files:
+                ck_key = f"img_ck_{selected_sn}_{img_name}"
+                if ck_key not in st.session_state:
+                    st.session_state[ck_key] = False
+
+            c_sel_all, c_del = st.columns([1, 1])
+            with c_sel_all:
+                if st.button("✅ 一键全选", use_container_width=True):
+                    for img_name in image_files:
+                        st.session_state[f"img_ck_{selected_sn}_{img_name}"] = True
+                    st.rerun()
+
+            selected_count = sum(1 for img_name in image_files if st.session_state.get(f"img_ck_{selected_sn}_{img_name}", False))
+            if selected_count > 0:
+                st.caption(f"已选择 {selected_count}/{len(image_files)} 张")
+
+            with c_del:
+                if st.button("🗑️ 删除已选照片", type="secondary", use_container_width=True):
+                    selected_to_delete = []
+                    for img_name in image_files:
+                        ck_key = f"img_ck_{selected_sn}_{img_name}"
+                        if st.session_state.get(ck_key, False):
+                            selected_to_delete.append(img_name)
+
+                    if not selected_to_delete:
+                        st.warning("请先选择要删除的照片")
+                    else:
+                        deleted_count = 0
+                        for img_name in selected_to_delete:
+                            img_path = os.path.join(sn_dir, img_name)
+                            try:
+                                if os.path.exists(img_path):
+                                    os.remove(img_path)
+                                    deleted_count += 1
+                            except Exception as e:
+                                st.error(f"删除 {img_name} 失败: {e}")
+
+                        if deleted_count > 0:
+                            audit_log("Batch Delete Archive Photo", f"Deleted {deleted_count} photos from {selected_sn}")
+                            st.success(f"成功删除 {deleted_count} 张照片")
+                            st.rerun()
+
             # 每行显示 4 张
             cols = st.columns(4)
             for idx, img_name in enumerate(image_files):
                 img_path = os.path.join(sn_dir, img_name)
+                ck_key = f"img_ck_{selected_sn}_{img_name}"
                 with cols[idx % 4]:
+                    st.checkbox("选择", key=ck_key)
                     st.image(img_path, caption=img_name, use_container_width=True)
-                    # 删除按钮
+                    # 单张删除按钮（保留）
                     if st.button("🗑️", key=f"del_img_{selected_sn}_{img_name}", help="删除此照片"):
                         try:
                             os.remove(img_path)

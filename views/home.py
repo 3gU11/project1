@@ -30,7 +30,7 @@ def render_home():
 
     # 2. 核心业务按钮
     # 按照业务流顺序: INBOUND -> SALES_CREATE -> SALES_ALLOC -> SHIP_CONFIRM -> QUERY -> MACHINE_EDIT
-    flow_order = ["INBOUND", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "QUERY", "MACHINE_EDIT", "ARCHIVE"]
+    flow_order = ["INBOUND", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "QUERY", "MACHINE_EDIT", "ARCHIVE", "WAREHOUSE_MAP"]
 
     core_buttons = []
     for code in flow_order:

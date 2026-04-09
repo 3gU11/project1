@@ -14,8 +14,14 @@ def render_query():
 
     # --- Dashboard Mode ---
     df = get_data()
-    # 始终包含 '库存中' 和 '待入库'
-    valid_df = df[df['状态'].isin(['库存中', '待入库'])].copy()
+    status_series = df['状态'].astype(str) if not df.empty and '状态' in df.columns else pd.Series(dtype=str)
+
+    # 兼容状态写法：库存中、库存中（A01）等都视为“在库”；待入库保持原逻辑
+    in_stock_mask = status_series.str.startswith('库存中', na=False)
+    pending_mask = status_series.eq('待入库')
+
+    # 始终包含 “库存中*” 和 “待入库”
+    valid_df = df[in_stock_mask | pending_mask].copy()
 
     # --- 1. 机型筛选 (Optional) ---
     all_known_models = set(CUSTOM_MODEL_ORDER)
@@ -68,7 +74,7 @@ def render_query():
         total_all = len(display_df)
         
         # --- V7.4 Display Breakdown ---
-        cnt_instock = len(display_df[display_df['状态'] == '库存中'])
+        cnt_instock = len(display_df[display_df['状态'].astype(str).str.startswith('库存中', na=False)])
         cnt_pending = len(display_df[display_df['状态'] == '待入库'])
         
         st.metric("📦 当前总库存 (Total)", f"{total_all} 台")
@@ -81,12 +87,16 @@ def render_query():
         if PLOTLY_AVAILABLE and not display_df.empty and px:
             fig = px.pie(display_df, names='机型', hole=0.4, title="机型分布")
             st.plotly_chart(fig, use_container_width=True)
+        elif not PLOTLY_AVAILABLE:
+            st.info("机型分布图未显示：当前环境未安装 `plotly`。安装后刷新页面即可恢复。")
 
     with c_table:
         # 计算三列数据
         # Group by Model and Status
         if not display_df.empty:
-            stats = display_df.groupby(['机型', '状态']).size().unstack(fill_value=0)
+            stats_df = display_df.copy()
+            stats_df['__状态归一'] = stats_df['状态'].astype(str).apply(lambda s: '库存中' if s.startswith('库存中') else s)
+            stats = stats_df.groupby(['机型', '__状态归一']).size().unstack(fill_value=0)
             if '库存中' not in stats.columns: stats['库存中'] = 0
             if '待入库' not in stats.columns: stats['待入库'] = 0
         else:

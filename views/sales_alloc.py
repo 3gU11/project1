@@ -10,6 +10,7 @@ from crud.inventory import get_data
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound
 from crud.planning import get_planning_records
 from utils.parsers import parse_alloc_dict, parse_plan_map, parse_requirements
+from views.components import render_module_logs
 
 
 def render_sales_alloc():
@@ -36,6 +37,12 @@ def render_sales_alloc():
         # 增加筛选：仅显示有老板指示的订单
         filter_has_plan = st.checkbox("🔍 仅显示有老板指示的订单", value=False)
 
+        # 提前加载全部规划记录，避免在循环内重复查询数据库
+        try:
+            all_plan_records = get_planning_records()
+        except Exception:
+            all_plan_records = pd.DataFrame(columns=["order_id", "model", "plan_info", "updated_at"])
+
         for idx, row in active_orders.iterrows():
             oid = row['订单号']
             customer = row['客户名']; agent = row['代理商']; note = str(row['备注'])
@@ -48,7 +55,7 @@ def render_sales_alloc():
             # V7.2: 优先从 CSV 读取规划记录，解决覆盖更新问题
             source_plan = {}
             try:
-                plan_records = get_planning_records()
+                plan_records = all_plan_records
                 order_plans = plan_records[plan_records['order_id'] == oid]
                 
                 if not order_plans.empty:
@@ -147,17 +154,20 @@ def render_sales_alloc():
 
                     if remaining > 0:
                         # --- V7.1 库存过滤核心 ---
+                        # 占用订单号为空：兼容 None/nan/空字符串/纯空格
+                        order_empty = inventory['占用订单号'].astype(str).str.strip().isin(["", "nan", "None", "none"])
+                        # 机型匹配：去除前后空格后比较
+                        model_match = inventory['机型'].astype(str).str.strip() == str(real_model).strip()
                         mask = (
-                            (inventory['机型'] == real_model) & 
-                            (inventory['状态'].isin(['待入库', '库存中'])) & 
-                            (inventory['占用订单号'] == "")
+                            model_match &
+                            (inventory['状态'].str.contains('待入库|库存中', na=False)) &
+                            order_empty
                         )
                         # --- V7.3 统一加高判断逻辑 ---
                         # 定义：任何字段包含 "加高" 即视为加高库存
                         is_stock_high = (
                             inventory['机型'].str.contains("加高", na=False) |
-                            inventory['机台备注/配置'].str.contains("加高", na=False) |
-                            inventory['订单备注'].str.contains("加高", na=False)
+                            inventory['机台备注/配置'].str.contains("加高", na=False)
                         )
 
                         if is_high_req:
