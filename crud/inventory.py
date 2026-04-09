@@ -1,13 +1,14 @@
 import json
 import logging
 from datetime import datetime
+from functools import lru_cache
 
 import pandas as pd
-import streamlit as st
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from database import get_engine
+from utils.cache import fetch_data_with_cache
 
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def _normalize_import_df(df):
     return normalized[IMPORT_COLS]
 
 
-@st.cache_data(ttl=30)
+@lru_cache(maxsize=1)
 def get_data():
     try:
         with get_engine().connect() as conn:
@@ -77,7 +78,7 @@ def get_data():
 
 
 def save_data(df):
-    get_data.clear()
+    get_data.cache_clear()
     try:
         df = df.drop_duplicates(subset=['流水号'], keep='last')
         df = df.copy()
@@ -191,6 +192,43 @@ def append_import_staging_transactional(df):
         if conn is not None:
             conn.close()
 
+def get_inventory_summary():
+    """按机型、状态分组汇总库存数据（SQL下推聚合）"""
+    query = """
+        SELECT `机型`, `状态`, COUNT(*) as count 
+        FROM finished_goods_data 
+        GROUP BY `机型`, `状态`
+    """
+    return fetch_data_with_cache(query, ttl=30)
+
+def get_inventory_by_status(status_list: list, prefix_list: list = None):
+    """获取指定状态或状态前缀的库存数据（避免全表扫描）"""
+    if not status_list and not prefix_list:
+        return pd.DataFrame(columns=INVENTORY_COLS)
+    
+    conditions = []
+    params = {}
+    
+    if status_list:
+        placeholders = ", ".join([f":s{i}" for i in range(len(status_list))])
+        conditions.append(f"`状态` IN ({placeholders})")
+        for i, status in enumerate(status_list):
+            params[f"s{i}"] = status
+            
+    if prefix_list:
+        for i, prefix in enumerate(prefix_list):
+            conditions.append(f"`状态` LIKE :p{i}")
+            params[f"p{i}"] = f"{prefix}%"
+            
+    where_clause = " OR ".join(conditions)
+    query = f"SELECT * FROM finished_goods_data WHERE {where_clause}"
+    
+    df = fetch_data_with_cache(query, params, ttl=30)
+    if df.empty:
+        return pd.DataFrame(columns=INVENTORY_COLS)
+    return df
+
+
 
 def clear_import_staging():
     try:
@@ -293,7 +331,7 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False):
             {"status": f"库存中（{slot_code}）", "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
         )
         trans.commit()
-        get_data.clear()  # 清除缓存，确保下次读取到最新库存状态
+        get_data.cache_clear()  # 清除缓存，确保下次读取到最新库存状态
         try:
             import asyncio
             from api.websockets.manager import manager

@@ -33,6 +33,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/logs', name: 'Logs', label: '📜 交易日志', title: '交易日志', roles: ['Admin', 'Boss', 'Sales'], component: () => import('../views/LogViewer.vue') },
   { path: '/inventory', name: 'Inventory', label: '🔎 库存查询', title: '库存查询', roles: ['Admin', 'Boss', 'Sales', 'Prod', 'Inbound'], component: () => import('../views/InventoryQuery.vue') },
   { path: '/inbound', name: 'Inbound', label: '📦 成品入库', title: '成品入库', roles: ['Admin', 'Prod', 'Inbound'], component: () => import('../views/Inbound.vue') },
+  { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', roles: ['Admin', 'Boss'], component: () => import('../views/Traceability.vue') },
 ]
 
 export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({

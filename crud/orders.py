@@ -1,15 +1,16 @@
 from datetime import datetime
+from functools import lru_cache
 import json
 import uuid
 
 import pandas as pd
-import streamlit as st
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from crud.inventory import get_data, save_data
 from crud.logs import append_log
 from database import get_engine
+from utils.cache import fetch_data_with_cache
 from utils.parsers import parse_plan_map
 
 
@@ -48,7 +49,7 @@ def _normalize_source_json(value):
     return {"note": raw}
 
 
-@st.cache_data(ttl=30)
+@lru_cache(maxsize=1)
 def get_orders():
     try:
         with get_engine().connect() as conn:
@@ -79,7 +80,7 @@ def get_orders():
 
 
 def save_orders(df):
-    get_orders.clear()
+    get_orders.cache_clear()
     try:
         df = df.copy()
         for col in ORDER_COLS:
@@ -108,7 +109,7 @@ def save_orders(df):
 
 
 def create_sales_order(customer, agent, model_data, note, pack_option="", delivery_time="", source_batch=""):
-    get_orders.clear()
+    get_orders.cache_clear()
     odf = get_orders()
     order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
     final_model_str = ""
@@ -207,3 +208,13 @@ def update_sales_order(order_id, new_data, force_unbind=False):
         msg_extra = f"已解绑 {len(sns_to_unbind)} 台关联机器。" if (has_allocation and force_unbind) else ""
         return True, f"订单更新成功！{msg_extra}"
     return False, "订单未找到"
+
+
+def get_active_orders_summary():
+    """按状态和机型拉取未完结订单的基础信息（SQL下推聚合）"""
+    query = """
+        SELECT `订单号`, `需求机型`, `需求数量`, `status`, `下单时间`
+        FROM sales_orders
+        WHERE `status` NOT IN ('deleted', 'done')
+    """
+    return fetch_data_with_cache(query, ttl=30)

@@ -1,4 +1,4 @@
-import streamlit as st
+from functools import lru_cache
 import json
 from datetime import datetime
 from sqlalchemy import create_engine, text
@@ -35,9 +35,9 @@ def get_schema_rollback_sql():
     ]
 
 
-@st.cache_resource
+@lru_cache(maxsize=1)
 def get_engine():
-    """返回 SQLAlchemy Engine（全局缓存，整个 Streamlit session 复用）"""
+    """返回全局复用的 SQLAlchemy Engine。"""
     url = (
         f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}"
         f"@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"

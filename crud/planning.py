@@ -1,15 +1,16 @@
 from datetime import datetime
+from functools import lru_cache
 
 import pandas as pd
-import streamlit as st
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from database import get_engine
+from utils.cache import fetch_data_with_cache
 from utils.parsers import parse_alloc_dict, to_json_text
 
 
-@st.cache_data(ttl=30)
+@lru_cache(maxsize=1)
 def get_planning_records():
     try:
         with get_engine().connect() as conn:
@@ -20,7 +21,7 @@ def get_planning_records():
 
 
 def save_planning_record(order_id, model, plan_info):
-    get_planning_records.clear()
+    get_planning_records.cache_clear()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         with get_engine().begin() as conn:
@@ -43,7 +44,7 @@ def save_planning_record(order_id, model, plan_info):
         raise
 
 
-@st.cache_data(ttl=30)
+@lru_cache(maxsize=1)
 def get_factory_plan():
     cols = ["合同号", "机型", "排产数量", "要求交期", "状态", "备注", "客户名", "代理商", "指定批次/来源", "订单号"]
     try:
@@ -63,7 +64,7 @@ def get_factory_plan():
 
 
 def save_factory_plan(df):
-    get_factory_plan.clear()
+    get_factory_plan.cache_clear()
     cols = ["合同号", "机型", "排产数量", "要求交期", "状态", "备注", "客户名", "代理商", "指定批次/来源", "订单号"]
     try:
         df = df.copy()
@@ -81,3 +82,20 @@ def save_factory_plan(df):
                 df[cols].to_sql('factory_plan', conn, if_exists='append', index=False, method='multi', chunksize=500)
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"排产计划保存失败: {e}") from e
+
+def get_plans_by_status(status: str):
+    """获取指定状态的排产计划（SQL下推过滤）"""
+    query = "SELECT * FROM factory_plan WHERE `状态` = :status"
+    df = fetch_data_with_cache(query, params={"status": status}, ttl=30)
+    
+    if df.empty:
+        return df
+        
+    if "指定批次/来源" in df.columns:
+        df["指定批次/来源"] = df["指定批次/来源"].apply(parse_alloc_dict)
+    
+    fill_cols = [c for c in df.columns if c != "指定批次/来源"]
+    for col in fill_cols:
+        df[col] = df[col].fillna("")
+        
+    return df.drop(columns=['id'], errors='ignore')
