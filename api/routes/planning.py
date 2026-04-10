@@ -10,6 +10,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import json
 from sqlalchemy import text
 
 from config import BASE_DIR
@@ -585,93 +586,75 @@ def download_contract_file_api(contract_id: str, file_name: str):
         raise HTTPException(status_code=500, detail=f"下载附件失败: {e}")
 
 
-@router.get("/contract/{contract_id}/files/{file_name}/preview")
-def preview_contract_file_api(contract_id: str, file_name: str):
-    try:
-        decoded_name = unquote(file_name)
-        df = get_contract_files(contract_id)
-        if df.empty:
-            raise HTTPException(status_code=404, detail="附件不存在")
-        hit = df[df["file_name"].astype(str) == decoded_name]
-        if hit.empty:
-            raise HTTPException(status_code=404, detail="附件不存在")
-        rel_path = str(hit.iloc[0].get("file_path", "")).strip()
-        if not rel_path:
-            raise HTTPException(status_code=404, detail="附件路径无效")
-        abs_path = os.path.join(BASE_DIR, rel_path)
-        if not os.path.exists(abs_path):
-            raise HTTPException(status_code=404, detail="附件文件不存在")
-
-        ext = os.path.splitext(decoded_name)[1].lower()
-        if ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"]:
-            # 直接走下载路由进行内嵌预览
-            return {
-                "type": "url",
-                "url": f"/api/v1/planning/contract/{contract_id}/files/{file_name}/download",
-                "ext": ext,
-            }
-
-        if ext in [".docx", ".doc"]:
-            try:
-                import mammoth  # lazy import, avoid hard dependency at module import time
-                with open(abs_path, "rb") as docx_file:
-                    result = mammoth.convert_to_html(docx_file)
-                html = result.value or ""
-                return {"type": "html", "html": html}
-            except Exception as e:
-                raise HTTPException(status_code=422, detail=f"Word 预览失败: {e}")
-
-        raise HTTPException(status_code=422, detail="该文件类型暂不支持在线预览")
-    except HTTPException:
-        raise
+@router.post("/contract/{contract_id}/save-plan")
 def save_contract_plan(contract_id: str, payload: PlanSavePayload):
     try:
-        df_plan = get_factory_plan()
-        mask = df_plan["合同号"].astype(str) == str(contract_id)
-        if not mask.any():
-            raise HTTPException(status_code=404, detail="合同不存在")
-
         if not payload.rows:
             raise HTTPException(status_code=422, detail="缺少规划数据")
 
-        # 保存逐行规划
-        for row_payload in payload.rows:
-            idx = int(row_payload.row_index)
-            row_mask = None
-            if idx in df_plan.index:
-                row_mask = df_plan.index == idx
-            elif "id" in df_plan.columns:
-                row_mask = df_plan["id"].astype(int) == idx
-            else:
-                continue
-            alloc = {}
-            for k, v in (row_payload.allocation or {}).items():
-                qty = int(v or 0)
-                if qty > 0:
-                    alloc[str(k)] = qty
-            df_plan.loc[row_mask, "指定批次/来源"] = [alloc] * int(row_mask.sum())
-            if payload.mark_to_planned:
-                wait_mask = row_mask & (df_plan["状态"].astype(str) == "待规划")
-                if wait_mask.any():
-                    df_plan.loc[wait_mask, "状态"] = "已规划"
+        # 1. 采用 SQL 精准 UPDATE，避免依赖 get_factory_plan 丢失主键及全表重写
+        with get_engine().begin() as conn:
+            # 验证合同是否存在
+            res = conn.execute(
+                text("SELECT 1 FROM factory_plan WHERE `合同号` = :cid LIMIT 1"),
+                {"cid": str(contract_id)}
+            )
+            if not res.fetchone():
+                raise HTTPException(status_code=404, detail="合同不存在")
 
-        save_factory_plan(df_plan)
+            for row_payload in payload.rows:
+                idx = int(row_payload.row_index)
+                alloc = {}
+                for k, v in (row_payload.allocation or {}).items():
+                    qty = int(v or 0)
+                    if qty > 0:
+                        alloc[str(k)] = qty
+                alloc_json = json.dumps(alloc, ensure_ascii=False)
+                
+                # 更新指定批次和状态
+                if payload.mark_to_planned:
+                    conn.execute(
+                        text("""
+                            UPDATE factory_plan 
+                            SET `指定批次/来源` = :alloc,
+                                `状态` = CASE WHEN `状态` = '待规划' THEN '已规划' ELSE `状态` END
+                            WHERE id = :id AND `合同号` = :cid
+                        """),
+                        {"alloc": alloc_json, "id": idx, "cid": str(contract_id)}
+                    )
+                else:
+                    conn.execute(
+                        text("""
+                            UPDATE factory_plan 
+                            SET `指定批次/来源` = :alloc
+                            WHERE id = :id AND `合同号` = :cid
+                        """),
+                        {"alloc": alloc_json, "id": idx, "cid": str(contract_id)}
+                    )
+        
+        # 2. 清理缓存，确保下一次读取获取到最新数据
+        from crud.planning import get_factory_plan
+        get_factory_plan.cache_clear()
 
-        # 若有订单号，同步写回 sales_orders 的 指定批次/来源
+        # 3. 同步写回 sales_orders 的指定批次/来源（保持原有逻辑）
+        df_plan = get_factory_plan()
         contract_rows = df_plan[df_plan["合同号"].astype(str) == str(contract_id)]
         order_id = str(contract_rows.iloc[0].get("订单号", "") or "").strip() if not contract_rows.empty else ""
+        
         if order_id:
             all_plans: Dict[str, Dict[str, int]] = {}
             for _, row in contract_rows.iterrows():
                 model_name = str(row.get("机型", "")).strip()
-                alloc_data = parse_alloc_dict(row.get("指定批次/来源", {}))
+                alloc_data = row.get("指定批次/来源", {})
+                if isinstance(alloc_data, str):
+                    alloc_data = parse_alloc_dict(alloc_data)
                 if model_name and alloc_data:
                     all_plans[model_name] = alloc_data
             if all_plans:
                 orders_df = get_orders()
                 hit = orders_df["订单号"].astype(str) == order_id
                 if hit.any():
-                    orders_df.loc[hit, "指定批次/来源"] = [all_plans]
+                    orders_df.loc[hit, "指定批次/来源"] = [all_plans] * int(hit.sum())
                     save_orders(orders_df)
 
         return {"message": "规划保存成功"}
