@@ -2,7 +2,7 @@
   <div class="page">
     <div class="head">
       <h1>🛠️ 机台信息编辑</h1>
-      <el-button type="primary" :loading="loading" @click="loadData">刷新</el-button>
+      <el-button type="primary" :loading="loading" @click="loadData">刷新数据</el-button>
     </div>
 
     <el-row :gutter="10">
@@ -15,7 +15,7 @@
       <el-checkbox
         :model-value="allVisibleSelected"
         :indeterminate="isVisibleIndeterminate"
-        @change="(v) => toggleAllVisible(Boolean(v))"
+        @change="(v: any) => toggleAllVisible(Boolean(v))"
       >
         全选当前筛选结果
       </el-checkbox>
@@ -37,7 +37,7 @@
         <template #default="{ item: row }">
           <div class="vrow">
             <div class="c ck">
-              <el-checkbox :model-value="isSelected(row)" @change="(v) => toggleRow(row, Boolean(v))" />
+              <el-checkbox :model-value="isSelected(row)" @change="(v: any) => toggleRow(row, Boolean(v))" />
             </div>
             <div class="c bno">{{ row['批次号'] || '-' }}</div>
             <div class="c sn">{{ row['流水号'] || '-' }}</div>
@@ -208,21 +208,21 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.head { display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--space-2); }
 .head h1 { margin:0; font-size:30px; }
-.label { font-size:12px; color:#6b7280; margin-bottom:4px; }
-.ops { margin-top:10px; }
+.label { font-size: var(--font-size-sm); color:var(--color-gray-500); margin-bottom:4px; }
+.ops { margin-top: var(--space-2); }
 .selection-bar {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
-  color: #64748b;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-500);
 }
 .vtable {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 .vhead, .vrow {
@@ -231,17 +231,17 @@ onMounted(() => {
   align-items: center;
 }
 .vhead {
-  background: #f8fafc;
-  border-bottom: 1px solid #e5e7eb;
-  font-size: 12px;
-  color: #475569;
+  background: var(--color-gray-50);
+  border-bottom: 1px solid var(--color-gray-200);
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
   font-weight: 600;
   height: 40px;
 }
 .vrow {
   height: 44px;
   border-bottom: 1px solid #f1f5f9;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .c {
   padding: 0 8px;

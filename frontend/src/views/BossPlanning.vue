@@ -3,8 +3,8 @@
     <el-card class="box-card" shadow="hover">
       <template #header>
         <div class="card-header">
-          <span class="title">👑 生产统筹 & 订单资源分配</span>
-          <el-button type="primary" :icon="Refresh" @click="fetchData(true)" :loading="loading">刷新</el-button>
+          <span class="title">👑 生产统筹与订单资源分配</span>
+          <el-button type="primary" :icon="Refresh" @click="fetchData(true)" :loading="loading">刷新数据</el-button>
         </div>
       </template>
       <el-alert
@@ -184,7 +184,7 @@
                   <div class="plan-left">
                     <el-input-number
                       :model-value="item.spotValue"
-                      @update:model-value="(v) => updateContractSpot(item.row, v)"
+                      @update:model-value="(v: any) => updateContractSpot(item.row, v)"
                       :min="0"
                       :max="item.maxSpot"
                       :disabled="item.spotLocked"
@@ -201,7 +201,7 @@
                       <span class="batch-label">{{ batch.name }} (余{{ batch.count }})</span>
                       <el-input-number
                         :model-value="batch.value"
-                        @update:model-value="(v) => updateContractBatch(item.row, batch.name, batch.count, v)"
+                        @update:model-value="(v: any) => updateContractBatch(item.row, batch.name, batch.count, v)"
                         :min="0"
                         :max="batch.max"
                         :disabled="batch.locked"
@@ -313,7 +313,7 @@
                   <div>现货 (余{{ item.spotAvailable }})</div>
                   <el-input-number
                     :model-value="item.spotValue"
-                    @update:model-value="(v) => updateOrderSpot(item.row, v)"
+                    @update:model-value="(v: any) => updateOrderSpot(item.row, v)"
                     :min="0"
                     :max="item.maxSpot"
                     :disabled="item.spotLocked"
@@ -331,7 +331,7 @@
                       <span class="batch-label">{{ batch.name }} (余{{ batch.count }})</span>
                       <el-input-number
                         :model-value="batch.value"
-                        @update:model-value="(v) => updateOrderBatch(item.row, batch.name, batch.count, v)"
+                        @update:model-value="(v: any) => updateOrderBatch(item.row, batch.name, batch.count, v)"
                         :min="0"
                         :max="batch.max"
                         :disabled="batch.locked"
@@ -1326,7 +1326,6 @@ const savePlanning = async () => {
       mark_to_planned: true,
     })
     await fetchData(true)
-    initPlanDraft()
   }, { successMessage: '规划已保存', errorMessage: '保存规划失败' })
 }
 
@@ -1371,7 +1370,7 @@ const goDirectAllocation = async () => {
       需求机型: demandParts.join(';'),
       需求数量: totalNeed,
       发货时间: due || '',
-      备注: `合同${selectedId.value}自动生成；${note}`.slice(0, 500),
+      备注: note.slice(0, 500),
       包装选项: '',
     })
     const orderId = String(createRes.order_id || '').trim()
@@ -1403,27 +1402,27 @@ onMounted(() => {
 .title {
   font-size: 18px;
   font-weight: bold;
-  color: #303133;
+  color: var(--text-color-primary);
 }
 .load-error {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .month-list {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   max-height: 650px;
   overflow: auto;
 }
 .filter-tip {
   margin-top: 6px;
   margin-bottom: 2px;
-  color: #64748b;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .orders-block-title {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   margin-bottom: 4px;
-  color: #334155;
-  font-size: 13px;
+  color: var(--color-gray-700);
+  font-size: var(--font-size-sm);
   font-weight: 700;
 }
 .item-list {
@@ -1433,62 +1432,62 @@ onMounted(() => {
 .item-btn {
   width: 100%;
   text-align: left;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  background: var(--panel-bg);
   padding: 8px 10px;
-  color: #334155;
+  color: var(--color-gray-700);
   cursor: pointer;
 }
 .item-btn.active {
   border-color: #ef4444;
   background: #ef4444;
-  color: #fff;
+  color: var(--panel-bg);
 }
 .item-sub {
   margin-top: 4px;
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .item-btn.active .item-sub {
-  color: #fff;
+  color: var(--panel-bg);
 }
 .detail-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .detail-card {
   border: 1px solid #fef3c7;
-  background: #fffbeb;
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
+  background: var(--panel-bg)beb;
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
 }
 .ops-row {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
 }
 .ops-row.major :deep(.el-button) {
   min-width: 128px;
 }
 .plan-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px;
-  margin-bottom: 10px;
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 .plan-title {
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .plan-grid {
   display: grid;
   grid-template-columns: 220px 1fr;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 .plan-left {
   display: grid;
@@ -1496,8 +1495,8 @@ onMounted(() => {
   align-content: start;
 }
 .plan-hint {
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .plan-right {
   display: grid;
@@ -1510,26 +1509,26 @@ onMounted(() => {
   gap: 8px;
 }
 .batch-label {
-  color: #334155;
-  font-size: 13px;
+  color: var(--color-gray-700);
+  font-size: var(--font-size-sm);
 }
 .preview-empty {
   margin-top: 6px;
   border: 1px dashed #d1d5db;
-  border-radius: 8px;
-  padding: 10px 12px;
-  color: #6b7280;
-  font-size: 13px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .preview-wrap {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 .preview-head {
-  background: #eff6ff;
+  background: var(--color-primary-50);
   color: #1e40af;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   padding: 8px 10px;
 }
 .preview-frame {
@@ -1547,7 +1546,7 @@ onMounted(() => {
   max-height: 560px;
   overflow: auto;
   padding: 12px;
-  background: #fff;
-  color: #111827;
+  background: var(--panel-bg);
+  color: var(--color-gray-900);
 }
 </style>

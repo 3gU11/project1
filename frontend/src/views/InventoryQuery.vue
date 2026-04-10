@@ -3,7 +3,7 @@
     <el-card shadow="hover">
       <template #header>
         <div class="card-header">
-          <span class="title">📊 库存比例(看板)</span>
+          <span class="title">📊 实时库存比例分布</span>
           <div class="actions">
             <el-select
               v-model="selectedModels"
@@ -15,8 +15,8 @@
             >
               <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
             </el-select>
-            <el-checkbox v-model="highOnly" style="margin-right: 10px">仅显示加高 (High Only)</el-checkbox>
-            <el-button type="primary" :icon="Refresh" @click="fetchData(true)" :loading="loading">刷新</el-button>
+            <el-checkbox v-model="highOnly" style="margin-right: 10px">仅查看加高型号</el-checkbox>
+            <el-button type="primary" :icon="Refresh" @click="fetchData(true)" :loading="loading">刷新数据</el-button>
           </div>
         </div>
       </template>
@@ -341,7 +341,7 @@ onActivated(() => {
 .title {
   font-size: 26px;
   font-weight: bold;
-  color: #303133;
+  color: var(--text-color-primary);
 }
 .actions {
   display: flex;
@@ -350,43 +350,43 @@ onActivated(() => {
 .ratio-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(140px, 1fr));
-  gap: 14px;
-  margin-bottom: 8px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 .ratio-item {
-  border: 1px solid #eef2f7;
-  border-radius: 8px;
-  padding: 10px 12px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
 }
 .ratio-label {
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .ratio-value {
   font-size: 34px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--color-gray-800);
   line-height: 1.15;
 }
 .ratio-sub {
   color: #16a34a;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .summary-top {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .summary-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(160px, 1fr));
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
   max-width: 620px;
 }
 .summary-block {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .summary-title {
-  color: #374151;
+  color: var(--color-gray-700);
   font-size: 18px;
   margin-bottom: 3px;
   font-weight: 700;
@@ -394,10 +394,10 @@ onActivated(() => {
 .summary-value {
   font-size: 54px;
   line-height: 1;
-  color: #111827;
+  color: var(--color-gray-900);
 }
 .summary-row .summary-title {
-  font-size: 16px;
+  font-size: var(--font-size-lg);
 }
 .summary-row .summary-value {
   font-size: 48px;
@@ -437,7 +437,7 @@ onActivated(() => {
     drop-shadow(0 2px 6px rgba(15, 23, 42, 0.08));
 }
 .donut-seg.with-decor {
-  stroke: #dbeafe;
+  stroke: var(--color-primary-100);
   stroke-width: 1.4;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
@@ -449,32 +449,32 @@ onActivated(() => {
   top: -8px;
   transform: translate(-50%, -100%);
   background: rgba(15, 23, 42, 0.88);
-  color: #fff;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 6px;
+  color: var(--panel-bg);
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
   white-space: nowrap;
   pointer-events: none;
 }
 .donut-hole {
   position: absolute;
   inset: 26%;
-  background: #ffffff;
+  background: var(--panel-bg);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .donut-hole.with-decor {
-  border: 1.4px solid #dbeafe;
+  border: 1.4px solid var(--color-primary-100);
   box-shadow:
     inset 0 2px 8px rgba(15, 23, 42, 0.06),
     0 2px 6px rgba(15, 23, 42, 0.06),
     0 0 0 1px rgba(219, 234, 254, 0.65);
 }
 .donut-center-label {
-  font-size: 14px;
-  color: #475569;
+  font-size: var(--font-size-base);
+  color: var(--color-gray-700);
   font-weight: 700;
   letter-spacing: 0.2px;
 }
@@ -489,7 +489,7 @@ onActivated(() => {
   align-items: center;
   gap: 8px;
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   position: relative;
 }
 .legend-dot {
@@ -499,22 +499,22 @@ onActivated(() => {
 }
 .legend-link {
   height: 0;
-  border-top: 1.5px solid #cbd5e1;
+  border-top: 1.5px solid var(--color-gray-300);
 }
 .legend-arrow {
-  color: #9ca3af;
-  font-size: 12px;
+  color: var(--color-gray-400);
+  font-size: var(--font-size-sm);
 }
 .legend-model {
-  font-size: 13px;
-  color: #374151;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .legend-val {
-  font-size: 13px;
-  color: #374151;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
 }
 .legend-row.hover {
   background: #e0f2fe;
@@ -529,8 +529,8 @@ onActivated(() => {
   top: 4px;
   bottom: 4px;
   width: 4px;
-  border-radius: 4px;
-  background: linear-gradient(180deg, #0ea5e9, #2563eb);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #0ea5e9, var(--color-primary-600));
 }
 .legend-row.hover .legend-model,
 .legend-row.hover .legend-val {
@@ -541,8 +541,8 @@ onActivated(() => {
   color: #0369a1;
 }
 .chart-empty {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .detail-collapse {
   margin-top: 2px;

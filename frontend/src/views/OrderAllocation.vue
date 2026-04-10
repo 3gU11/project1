@@ -2,7 +2,7 @@
   <div class="alloc-page">
     <PageHeader title="📦 订单配货">
       <template #actions>
-        <el-button type="primary" :loading="loading" @click="loadData(true)">刷新</el-button>
+        <el-button type="primary" :loading="loading" @click="loadData(true)">刷新数据</el-button>
       </template>
     </PageHeader>
 
@@ -23,8 +23,8 @@
                   :class="{ active: selectedOrderId === String(o['订单号'] || '') }"
                   @click="selectOrder(o)"
                 >
-                  <div>{{ o['订单号'] }}</div>
-                  <div class="sub">{{ o['客户名'] }} | {{ o['需求机型'] }}</div>
+                  <div class="order-customer">{{ o['客户名'] }}</div>
+                  <div class="sub">{{ o['订单号'] }} | {{ o['需求机型'] }}</div>
                 </button>
               </template>
             </VirtualScrollList>
@@ -415,7 +415,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .title {
   margin: 0;
@@ -426,13 +426,13 @@ onMounted(() => {
   font-weight: 700;
 }
 .order-list {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   max-height: 710px;
 }
 .order-item {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  background: var(--panel-bg);
   padding: 8px;
   height: 56px;
   text-align: left;
@@ -441,20 +441,23 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  width: 100%;
 }
 .order-item.active {
   border-color: #ef4444;
   background: #fee2e2;
 }
-.order-item > div:first-child {
+.order-customer {
+  font-weight: 600;
+  color: var(--color-gray-900);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .sub {
   margin-top: 4px;
-  color: #64748b;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -463,15 +466,15 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 10px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .field-label {
   margin-bottom: 6px;
-  font-size: 12px;
-  color: #334155;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
 }
 .ops {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   display: flex;
   gap: 8px;
 }

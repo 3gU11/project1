@@ -3,9 +3,8 @@
     <div class="card">
       <div class="code">403</div>
       <h2>无权限访问</h2>
-      <p>当前账号没有访问该模块的权限，请联系管理员或返回首页。</p>
+      <p>当前账号没有访问该模块的权限，请联系管理员或通过侧边栏返回首页。</p>
       <div class="actions">
-        <el-button @click="goBack">返回上一页</el-button>
         <el-button type="primary" @click="goHome">回到首页</el-button>
       </div>
     </div>
@@ -16,7 +15,6 @@
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const goBack = () => router.back()
 const goHome = () => router.push('/')
 </script>
 

@@ -25,15 +25,15 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/contracts', name: 'Contracts', label: '📊 合同管理', title: '合同管理', roles: ['Admin', 'Boss', 'Sales'], isManagement: true, component: () => import('../views/ContractManage.vue') },
   { path: '/users', name: 'Users', label: '👤 用户管理', title: '用户管理', roles: ['Admin'], isManagement: true, component: () => import('../views/UserManagement.vue') },
   { path: '/sales-orders', name: 'SalesOrders', label: '📌 销售下单', title: '销售下单', roles: ['Admin', 'Boss', 'Sales'], component: () => import('../views/SalesOrder.vue') },
-  { path: '/order-allocation', name: 'OrderAllocation', label: '📦 订单配货', title: '订单配货', roles: ['Admin', 'Boss', 'Sales', 'Prod'], component: () => import('../views/OrderAllocation.vue') },
+  { path: '/order-allocation', name: 'OrderAllocation', label: '📦 订单配货', title: '订单配货', roles: ['Admin', 'Boss', 'Sales'], component: () => import('../views/OrderAllocation.vue') },
   { path: '/shipping-review', name: 'ShippingReview', label: '📗 发货复核', title: '发货复核', roles: ['Admin', 'Boss', 'Prod'], component: () => import('../views/ShippingReview.vue') },
   { path: '/machine-archive', name: 'MachineArchive', label: '🔧 机台档案', title: '机台档案', roles: ['Admin', 'Boss', 'Prod'], component: () => import('../views/MachineArchive.vue') },
   { path: '/machine-edit', name: 'MachineEdit', label: '🛠️ 机台编辑', title: '机台编辑', roles: ['Admin', 'Boss', 'Prod'], component: () => import('../views/MachineEdit.vue') },
   { path: '/warehouse-dashboard', name: 'WarehouseDashboard', label: '🖥️ 库位大屏', title: '库位大屏', roles: ['Admin', 'Boss', 'Prod', 'Inbound', 'Sales'], component: () => import('../views/WarehouseDashboard.vue') },
-  { path: '/logs', name: 'Logs', label: '📜 交易日志', title: '交易日志', roles: ['Admin', 'Boss', 'Sales'], component: () => import('../views/LogViewer.vue') },
-  { path: '/inventory', name: 'Inventory', label: '🔎 库存查询', title: '库存查询', roles: ['Admin', 'Boss', 'Sales', 'Prod', 'Inbound'], component: () => import('../views/InventoryQuery.vue') },
-  { path: '/inbound', name: 'Inbound', label: '📦 成品入库', title: '成品入库', roles: ['Admin', 'Prod', 'Inbound'], component: () => import('../views/Inbound.vue') },
-  { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', roles: ['Admin', 'Boss'], component: () => import('../views/Traceability.vue') },
+  { path: '/logs', name: 'Logs', label: '📜 交易日志', title: '交易日志', roles: ['Admin', 'Boss', 'Prod', 'Sales'], component: () => import('../views/LogViewer.vue') },
+  { path: '/inventory', name: 'Inventory', label: '🔎 库存查询', title: '库存查询', roles: ['Admin', 'Boss', 'Sales', 'Prod'], component: () => import('../views/InventoryQuery.vue') },
+  { path: '/inbound', name: 'Inbound', label: '📦 成品入库', title: '成品入库', roles: ['Admin', 'Boss', 'Prod', 'Inbound'], component: () => import('../views/Inbound.vue') },
+  { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', roles: ['Admin', 'Boss'], isManagement: true, component: () => import('../views/Traceability.vue') },
 ]
 
 export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({
@@ -104,6 +104,10 @@ const routes: Array<RouteRecordRaw> = [
     name: 'Login',
     component: () => import('../views/Login.vue'),
     meta: { title: '登录' }
+  },
+  {
+    path: '/planing',
+    redirect: '/planning',
   },
   {
     path: '/403',

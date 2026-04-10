@@ -1,6 +1,6 @@
 <template>
   <div class="sales-page">
-    <PageHeader title="📝 销售订单管理" show-back @back="goBack" />
+    <PageHeader title="📝 销售订单管理" />
 
     <div class="tabs-row">
       <button type="button" class="tab-btn" :class="{ active: activeTab === 'manual' }" @click="activeTab = 'manual'">➕ 手动下单</button>
@@ -41,7 +41,9 @@
         </el-table-column>
         <el-table-column label="机型">
           <template #default="scope">
-            <el-input v-model="scope.row.model" />
+            <el-select v-model="scope.row.model" filterable allow-create placeholder="选择或输入机型" style="width: 100%">
+              <el-option v-for="m in availableModels" :key="m" :label="m" :value="m" />
+            </el-select>
           </template>
         </el-table-column>
         <el-table-column label="数量" width="180">
@@ -146,7 +148,9 @@
           <el-table-column prop="sourceContract" label="来源合同" width="140" />
           <el-table-column label="机型" min-width="160">
             <template #default="scope">
-              <el-input v-model="scope.row.model" />
+              <el-select v-model="scope.row.model" filterable allow-create placeholder="选择或输入机型" style="width: 100%">
+                <el-option v-for="m in availableModels" :key="m" :label="m" :value="m" />
+              </el-select>
             </template>
           </el-table-column>
           <el-table-column label="加高?" width="90">
@@ -206,7 +210,7 @@
           <template #default="scope">
             <el-checkbox
               :model-value="selectedManageOrderId === String(scope.row['订单号'] || '')"
-              @change="(val) => onManageSelectChange(scope.row, Boolean(val))"
+              @change="(val: any) => onManageSelectChange(scope.row, Boolean(val))"
             />
           </template>
         </el-table-column>
@@ -262,7 +266,9 @@
           </el-table-column>
           <el-table-column label="机型">
             <template #default="scope">
-              <el-input v-model="scope.row.model" />
+              <el-select v-model="scope.row.model" filterable allow-create placeholder="选择或输入机型" style="width: 100%;">
+                <el-option v-for="m in availableModels" :key="m" :label="m" :value="m" />
+              </el-select>
             </template>
           </el-table-column>
           <el-table-column label="数量" width="120">
@@ -307,14 +313,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
 import { apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
 type RowData = Record<string, any>
 
-const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
@@ -373,6 +377,19 @@ const monthOptions = computed(() => {
     if (s.length >= 7) set.add(s.slice(0, 7))
   }
   return Array.from(set).sort().reverse()
+})
+
+const availableModels = computed(() => {
+  const set = new Set<string>()
+  for (const r of inventoryRows.value) {
+    const m = String(r['机型'] || '').trim()
+    if (m) set.add(m.replace('(加高)', '').trim())
+  }
+  for (const r of planRows.value) {
+    const m = String(r['机型'] || '').trim()
+    if (m) set.add(m.replace('(加高)', '').trim())
+  }
+  return Array.from(set).sort()
 })
 
 const parseOrderDemandTotal = (order: RowData) => {
@@ -463,10 +480,6 @@ const mergeWarningText = computed(() => {
   return '提示：请确认合并后的客户、代理、交期、机型数量与备注。'
 })
 const showInitialSkeleton = computed(() => loading.value && !loadedOnce.value && !loadError.value)
-
-const goBack = () => {
-  router.back()
-}
 
 const addManualRow = () => {
   manualRows.value.push({ model: '', qty: 1, high: false, rowNote: '' })
@@ -780,8 +793,8 @@ watch([keyword, statusFilter, monthFilter], () => {
 .head-row {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 10px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 .back-btn {
   padding: 4px 12px;
@@ -792,13 +805,13 @@ watch([keyword, statusFilter, monthFilter], () => {
   gap: 8px;
 }
 .load-error {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .tab-btn {
   border: none;
   background: transparent;
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
   cursor: pointer;
   padding: 2px 0;
 }
@@ -811,17 +824,17 @@ watch([keyword, statusFilter, monthFilter], () => {
   margin: 0;
   font-size: 44px;
   font-weight: 800;
-  color: #1f2937;
+  color: var(--color-gray-800);
 }
 .section-title {
   font-size: 32px;
   font-weight: 800;
-  color: #111827;
+  color: var(--color-gray-900);
   margin: 6px 0 8px;
 }
 .field-label {
-  font-size: 12px;
-  color: #334155;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
   margin-bottom: 4px;
 }
 .row-actions {
@@ -838,30 +851,30 @@ watch([keyword, statusFilter, monthFilter], () => {
 .filter-grid {
   display: grid;
   grid-template-columns: 1fr 220px;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 .hint {
   margin: 6px 0;
   color: #94a3b8;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .merge-alert {
-  margin-top: 10px;
+  margin-top: var(--space-2);
 }
 .merge-title {
   margin: 10px 0 8px;
   font-size: 22px;
   font-weight: 800;
-  color: #1f2937;
+  color: var(--color-gray-800);
 }
 .edit-actions {
   margin-top: 12px;
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .pager-wrap {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   display: flex;
   justify-content: flex-end;
 }

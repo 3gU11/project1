@@ -1,7 +1,6 @@
 <template>
   <div class="archive-page">
     <div class="head-row">
-      <el-button class="back-btn" size="small" @click="goBack">⬅ 返回</el-button>
       <h1 class="title">📁 机台档案</h1>
     </div>
 
@@ -82,11 +81,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type UploadUserFile } from 'element-plus'
-import { useRouter } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 type ListResponse<T = any> = { data: T[] }
 
-const router = useRouter()
 const loadingSerials = ref(false)
 const saving = ref(false)
 const serials = ref<string[]>([])
@@ -112,10 +109,6 @@ const partFiles = reactive<{
 })
 const otherLabel = ref('')
 const otherFiles = ref<File[]>([])
-
-const goBack = () => {
-  router.back()
-}
 
 const loadSerials = async () => {
   loadingSerials.value = true
@@ -242,8 +235,8 @@ onMounted(() => {
 .head-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 .back-btn {
   padding: 4px 12px;
@@ -252,14 +245,14 @@ onMounted(() => {
   margin: 0;
   font-size: 42px;
   font-weight: 800;
-  color: #1f2937;
+  color: var(--color-gray-800);
 }
 .query-row {
-  margin-top: 10px;
+  margin-top: var(--space-2);
 }
 .field-label {
-  color: #334155;
-  font-size: 12px;
+  color: var(--color-gray-700);
+  font-size: var(--font-size-sm);
   margin-bottom: 4px;
 }
 .machine-meta {
@@ -270,37 +263,37 @@ onMounted(() => {
 .sn-title {
   font-size: 32px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-gray-900);
   line-height: 1.1;
 }
 .sn-sub {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   color: #94a3b8;
 }
 .empty-bar {
-  border: 1px solid #dbeafe;
-  background: #eff6ff;
-  border-radius: 8px;
-  color: #1d4ed8;
-  font-size: 13px;
-  padding: 8px 12px;
+  border: 1px solid var(--color-primary-100);
+  background: var(--color-primary-50);
+  border-radius: var(--radius-lg);
+  color: var(--color-primary-700);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) var(--space-3);
 }
 .section-title {
   margin: 0 0 8px;
   font-size: 34px;
   font-weight: 800;
-  color: #111827;
+  color: var(--color-gray-900);
 }
 .upload-card {
-  margin-top: 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px;
+  margin-top: var(--space-2);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
 }
 .small-title {
-  font-size: 12px;
-  color: #334155;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-700);
   margin-bottom: 4px;
   margin-top: 2px;
 }

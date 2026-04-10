@@ -1,38 +1,38 @@
 <template>
   <div class="contract-page">
-    <PageHeader title="🏢 合同管理" show-back @back="goBack" />
+    <PageHeader title="🏢 销售合同管理" />
 
-    <div class="notice">💡 在录入未来合同、老板审批后，将流转至到当下单环节。</div>
+    <div class="notice">💡 提示：录入的新合同在审批通过后，将自动流转至生产统筹与下单环节。</div>
 
     <div class="new-row">
       <button type="button" class="new-row-toggle" @click="batchPanelOpen = !batchPanelOpen">
-        {{ batchPanelOpen ? '▾' : '▸' }} ➕ 新增合同 (批量录入)
+        {{ batchPanelOpen ? '▾' : '▸' }} ➕ 录入新合同 (批量)
       </button>
     </div>
 
     <div v-if="batchPanelOpen" class="batch-panel">
       <div class="batch-grid">
         <div>
-          <div class="ops-label">合同号将自动生成</div>
+          <div class="ops-label">系统自动生成合同号</div>
           <div class="auto-id">{{ batchForm.contractId }}</div>
           <div class="tip">格式: HT + 日期 + 随机4位</div>
         </div>
         <div>
-          <div class="ops-label">要求交期</div>
+          <div class="ops-label">期望交付日期</div>
           <el-date-picker v-model="batchForm.deadline" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </div>
         <div>
-          <div class="ops-label">客户名 (Customer)</div>
+          <div class="ops-label">客户名称</div>
           <el-input v-model="batchForm.customer" />
         </div>
         <div>
-          <div class="ops-label">代理商 (Agent)</div>
+          <div class="ops-label">代理商名称</div>
           <el-input v-model="batchForm.agent" />
         </div>
       </div>
 
       <el-divider />
-      <div class="ops-label">📎 合同附件 (可选)</div>
+      <div class="ops-label">📎 附加合同文件 (可选)</div>
       <el-upload
         :auto-upload="false"
         :show-file-list="true"
@@ -44,7 +44,7 @@
       </el-upload>
 
       <el-divider />
-      <div class="tip">请在下方表格中添加机型，支持同一机型添加多行（例如一行标准、一行加高）。</div>
+      <div class="tip">请在下方清单中添加设备机型。支持同一机型添加多条记录（例如：标准版与加高版分开录入）。</div>
       <el-table :data="batchItems" border stripe size="small">
         <el-table-column label="#" width="46">
           <template #default="scope">{{ scope.$index + 1 }}</template>
@@ -144,7 +144,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
 import { apiPost, getApiErrorMessage } from '../utils/request'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
@@ -156,7 +155,6 @@ type ViewMode = 'urgent' | 'recent' | 'all'
 type OperationType = 'ordered' | 'cancelled' | 'done' | 'linked'
 type MessageResponse = { message?: string }
 
-const router = useRouter()
 const loading = ref(false)
 const executing = ref(false)
 const batchSaving = ref(false)
@@ -363,10 +361,6 @@ const submitBatchContracts = async () => {
   }, { errorMessage: '批量录入失败' })
 }
 
-const goBack = () => {
-  router.back()
-}
-
 const batchFormDraft = useRefFormDraft('contracts:batch-form', batchForm)
 const batchItemsDraft = useRefFormDraft('contracts:batch-items', batchItems)
 
@@ -383,7 +377,7 @@ onMounted(() => {
 .head-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-3);
 }
 .back-btn {
   padding: 4px 12px;
@@ -391,69 +385,69 @@ onMounted(() => {
 .title {
   margin: 0;
   font-size: 40px;
-  color: #1f2937;
+  color: var(--color-gray-800);
   font-weight: 800;
 }
 .notice {
   margin-top: 12px;
-  border: 1px solid #dbeafe;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 14px;
+  border: 1px solid var(--color-primary-100);
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-base);
 }
 .new-row {
-  margin-top: 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
+  margin-top: var(--space-2);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-md);
   padding: 0 10px;
 }
 .new-row-toggle {
   border: none;
   background: transparent;
-  color: #334155;
-  font-size: 16px;
+  color: var(--color-gray-700);
+  font-size: var(--font-size-lg);
   font-weight: 700;
   cursor: pointer;
-  padding: 10px 0;
+  padding: var(--space-2) 0;
 }
 .batch-panel {
-  margin-top: 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px;
+  margin-top: var(--space-2);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
 }
 .batch-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--space-2);
 }
 .auto-id {
-  border: 1px solid #e5e7eb;
-  background: #f8fafc;
-  border-radius: 8px;
+  border: 1px solid var(--color-gray-200);
+  background: var(--color-gray-50);
+  border-radius: var(--radius-lg);
   padding: 8px 10px;
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   font-weight: 700;
-  color: #1f2937;
+  color: var(--color-gray-800);
 }
 .batch-row-actions {
   margin-top: 6px;
 }
 .batch-save {
-  margin-top: 10px;
+  margin-top: var(--space-2);
 }
 .view-tabs {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .view-tab {
   border: none;
   background: transparent;
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
   cursor: pointer;
   padding: 2px 0;
 }
@@ -462,14 +456,14 @@ onMounted(() => {
   font-weight: 700;
 }
 :deep(.el-table) {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .ops-panel {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .ops-left {
   flex: 1;
@@ -478,30 +472,30 @@ onMounted(() => {
   width: 100%;
 }
 .ops-label {
-  font-size: 12px;
-  color: #111827;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-900);
   margin-bottom: 4px;
 }
 .ops-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   white-space: nowrap;
 }
 .tip {
-  color: #64748b;
-  font-size: 12px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
   margin-bottom: 6px;
 }
 .link-order-panel {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #f9fafb;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-md);
+  background: var(--color-gray-50);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 .link-order-panel .ops-label {
   margin-bottom: 0;

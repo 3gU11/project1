@@ -1,21 +1,21 @@
 <template>
   <div class="inbound">
-    <h2>📥 入库作业</h2>
+    <h2>📥 设备入库作业</h2>
     <el-tabs v-model="activeTab">
-      <el-tab-pane label="🏭 机台入库 (Machine Inbound)" name="machine">
-        <h3 class="machine-title">🏭 机台入库模块 (扫描入库)</h3>
+      <el-tab-pane label="🏭 设备扫描入库" name="machine">
+        <h3 class="machine-title">设备入库登记</h3>
         <div class="machine-filter-row">
           <el-input
             v-model="pendingKeywordRaw"
             @input="onPendingKeywordInput"
-            placeholder="扫描批次号/流水号"
+            placeholder="请输入批次号或流水号进行检索"
             clearable
             style="max-width: 420px"
           />
-          <el-button size="small" @click="fetchInventory">刷新</el-button>
+          <el-button size="small" @click="fetchInventory">刷新数据</el-button>
         </div>
 
-        <div class="list-caption">待入库清单 ({{ pendingRows.length }} 台)</div>
+        <div class="list-caption">待入库设备清单 ({{ pendingRows.length }} 台)</div>
         <el-table
           ref="pendingTableRef"
           :data="pendingRows"
@@ -32,12 +32,12 @@
           <el-table-column prop="流水号" label="流水号" width="170" />
           <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="200" show-overflow-tooltip />
         </el-table>
-        <div class="selection-hint">当前已勾选：{{ selectedPendingRows.length }} 台</div>
+        <div class="selection-hint">已选择入库设备：{{ selectedPendingRows.length }} 台</div>
 
         <div v-if="selectedPendingRows.length > 0">
-          <div class="slot-section-title">💟 请选择目标库位进行入库(点击库位按钮确认)</div>
+          <div class="slot-section-title">🎯 请选择目标库位（点击下方库位即确认入库）</div>
           <div class="machine-filter-row">
-            <el-input v-model="slotKeyword" placeholder="快速定位库位，如 A03 / B12" style="max-width: 320px" clearable />
+            <el-input v-model="slotKeyword" placeholder="请输入库位编号快速检索（例如：A03）" style="max-width: 320px" clearable />
             <span class="selected-tip">已勾选 {{ selectedPendingRows.length }} 台</span>
           </div>
           <div class="slot-btn-grid">
@@ -54,11 +54,11 @@
             </button>
           </div>
         </div>
-        <div v-else class="slot-hidden-tip">请先在上方勾选待入库机台，库位按钮将自动显示。</div>
+        <div v-else class="slot-hidden-tip">请先从上方清单中勾选需要入库的设备，系统将自动显示可用库位。</div>
       </el-tab-pane>
-      <el-tab-pane label="📋 跟踪单导入 (Tracking Import)" name="import">
+      <el-tab-pane label="📋 批量导入跟踪单" name="import">
         <el-card shadow="never" class="import-section">
-          <template #header>📤 上传新跟踪单</template>
+          <template #header>📤 上传跟踪单据</template>
           <input ref="trackingFileRef" type="file" accept=".xls,.xlsx" />
           <el-button style="margin-left: 10px" type="primary" :loading="uploading" @click="uploadTracking">
             🔍 解析并追加到待入库清单
@@ -548,8 +548,8 @@ onMounted(async () => {
 <style scoped>
 .inbound {
   background: white;
-  padding: 20px;
-  border-radius: 8px;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 .toolbar {
@@ -562,43 +562,43 @@ onMounted(async () => {
 }
 .machine-filter-row {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .list-caption {
   margin: 10px 0 8px;
   background: #eef6ff;
-  color: #1d4ed8;
+  color: var(--color-primary-700);
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-weight: 600;
 }
 .slot-section-title {
   margin: 14px 0 8px;
   padding: 8px 10px;
-  border: 1px solid #eef2f7;
-  border-radius: 6px;
-  color: #334155;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  color: var(--color-gray-700);
   font-weight: 600;
 }
 .selected-tip {
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .selection-hint {
-  margin-top: 8px;
-  color: #6b7280;
-  font-size: 13px;
+  margin-top: var(--space-2);
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .slot-hidden-tip {
   margin-top: 12px;
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 1px dashed #d1d5db;
-  border-radius: 8px;
-  color: #6b7280;
+  border-radius: var(--radius-lg);
+  color: var(--color-gray-500);
   background: #fafafa;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 .slot-btn-grid {
   display: grid;
@@ -608,17 +608,17 @@ onMounted(async () => {
 .slot-btn {
   background: #ef4444;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: white;
   height: 34px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   cursor: pointer;
 }
 .slot-btn.full {
   background: #f59e0b;
 }
 .slot-btn.overflow {
-  background: #9ca3af;
+  background: var(--color-gray-400);
 }
 .import-section {
   margin-bottom: 12px;
@@ -627,23 +627,23 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .import-actions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .pagination-container {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
   justify-content: flex-end;
 }
 .confirm-row {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
 }
 .auto-grid {
@@ -652,16 +652,16 @@ onMounted(async () => {
   gap: 8px;
 }
 .auto-actions {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
 }
 button {
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border: none;
-  border-radius: 4px;
-  background: #409eff;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-500);
   color: white;
   cursor: pointer;
 }

@@ -1,16 +1,239 @@
 :root {
-  --bg-color: #f5f7fa;
-  --text-color: #111827;
+  /* =========================================
+     Color System (Tailwind-inspired)
+     ========================================= */
+  /* Primary (Brand Blue) */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+
+  /* Neutral (Grays for text, borders, bg) */
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+
+  /* Semantic Variables */
+  --bg-color: var(--color-gray-50);
+  --text-color-primary: var(--color-gray-900);
+  --text-color-secondary: var(--color-gray-500);
+  --border-color-light: var(--color-gray-200);
+  --border-color-focus: var(--color-primary-500);
   --panel-bg: #ffffff;
+
+  /* =========================================
+     Typography System (WCAG 2.2 Compliant)
+     ========================================= */
+  /* 多语言基线对齐字体栈 */
+  --font-family-base: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  
+  /* 响应式三层字号变量 (基于 14px 基准) */
+  --font-size-base: 14px;
+  --font-size-sm: 12px;
+  --font-size-lg: 16px;
+
+  /* 层级衍生 */
+  --text-xs: var(--font-size-sm);      /* 12px */
+  --text-sm: var(--font-size-base);    /* 14px */
+  --text-base: var(--font-size-lg);    /* 16px */
+  --text-lg: 1.125rem;    /* 18px */
+  --text-xl: 1.25rem;     /* 20px */
+  --text-2xl: 1.5rem;     /* 24px */
+  --text-3xl: 1.875rem;   /* 30px */
+  --text-4xl: 2.25rem;    /* 36px */
+  
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5; /* WCAG 行高要求 1.5倍 */
+  --leading-relaxed: 1.625;
+
+  /* =========================================
+     8pt Grid System & Spacing
+     ========================================= */
+  --grid-unit: 8px;
+  --space-1: calc(var(--grid-unit) * 0.5); /* 4px */
+  --space-2: calc(var(--grid-unit) * 1);   /* 8px */
+  --space-3: calc(var(--grid-unit) * 1.5); /* 12px */
+  --space-4: calc(var(--grid-unit) * 2);   /* 16px */
+  --space-6: calc(var(--grid-unit) * 3);   /* 24px */
+  --space-8: calc(var(--grid-unit) * 4);   /* 32px */
+  --space-12: calc(var(--grid-unit) * 6);  /* 48px */
+
+  /* =========================================
+     Component Radii & Shadows
+     ========================================= */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-focus: 0 0 0 3px rgba(59, 130, 246, 0.3); /* Focus ring */
+
+  /* =========================================
+     Button Scale Ratios
+     ========================================= */
+  --button-scale-ratio: 1;
+  --button-hover-scale: 1.02; /* Slightly reduced for smoother feel */
+  
+  /* Button Heights (Base) */
+  --btn-height-primary: calc(44px * var(--button-scale-ratio));
+  --btn-height-secondary: calc(36px * var(--button-scale-ratio));
+  --btn-height-icon: calc(32px * var(--button-scale-ratio));
+  
+  /* Button Padding (24px horizontal, 12px vertical) */
+  --btn-padding-x: calc(24px * var(--button-scale-ratio));
+  --btn-padding-y: calc(12px * var(--button-scale-ratio));
+}
+
+@media (max-width: 1440px) {
+  :root {
+    /* 中屏 (Laptop) 字号缩放 */
+    --font-size-base: 14px;
+    --font-size-sm: 12px;
+    --font-size-lg: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  :root {
+    --button-scale-ratio: 1.1;
+    /* 小屏 (Mobile/Tablet) 字号适度放大提升触屏可读性 */
+    --font-size-base: 15px;
+    --font-size-sm: 13px;
+    --font-size-lg: 17px;
+  }
+}
+
+@media (max-width: 375px) {
+  :root {
+    --button-scale-ratio: 1.2; 
+  }
 }
 
 body {
   margin: 0;
   padding: 0;
   background-color: var(--bg-color);
-  color: var(--text-color);
+  color: var(--text-color-primary);
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-base);
+  font-weight: 400; /* 正文基准字重 */
+  line-height: var(--leading-normal); /* 强制 1.5 行高 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, .page-title, .main-title {
+  font-size: max(20px, var(--text-xl));
+  font-weight: 600; /* 主标题 600 */
+  line-height: var(--leading-snug);
+  color: var(--color-gray-900);
+}
+
+h4, h5, h6, .section-title, .panel-title, .card-head {
+  font-size: 15px; /* 次级标签 15px */
+  font-weight: 500; /* 次级标签 500 */
+  color: var(--color-gray-800);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Ensure Minimum Touch Target on Mobile Devices */
+@media (max-width: 768px) {
+  .btn-base {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  .btn-base:hover,
+  .btn-base:focus {
+    /* Disable scaling on touch devices */
+    transform: none;
+  }
+}
+
+/* =========================================
+   Element Plus Global Overrides
+   ========================================= */
+:root {
+  --el-color-primary: var(--color-primary-500);
+  --el-color-primary-light-3: var(--color-primary-100);
+  --el-color-primary-light-5: var(--color-primary-50);
+  --el-color-primary-light-7: #eff6ff;
+  --el-color-primary-light-9: #f8fafc;
+  --el-color-primary-dark-2: var(--color-primary-700);
+
+  --el-border-radius-base: var(--radius-md);
+  --el-border-radius-small: var(--radius-sm);
+  --el-border-radius-round: var(--radius-xl);
+
+  --el-box-shadow-light: var(--shadow-sm);
+  --el-box-shadow-base: var(--shadow-md);
+  
+  --el-font-family: var(--font-family-base);
+  --el-text-color-primary: var(--text-color-primary);
+  --el-text-color-regular: var(--color-gray-700);
+  --el-text-color-secondary: var(--text-color-secondary);
+  --el-border-color-light: var(--border-color-light);
+  --el-border-color-lighter: var(--color-gray-100);
+
+  --el-fill-color-blank: var(--panel-bg);
+  --el-fill-color-light: var(--color-gray-50);
+}
+
+/* 增强 Element Plus 组件的交互与圆角 */
+.el-button, button.btn-base, button.item-btn, button.slot-btn {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  font-size: var(--font-size-lg) !important; /* 关键按钮 16px */
+  font-weight: 500;
+}
+.el-button:hover, button.btn-base:hover, button.item-btn:hover, button.slot-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+  filter: brightness(0.9); /* hover 颜色加深 10% */
+}
+.el-button:active, button.btn-base:active, button.item-btn:active, button.slot-btn:active {
+  transform: translateY(0) scale(0.98); /* active 缩小 1px */
+  letter-spacing: 0.15em; /* 字距加 0.15em */
+}
+.el-button:focus-visible, button.btn-base:focus-visible, button.item-btn:focus-visible, button.slot-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--panel-bg), 0 0 0 4px var(--color-primary-600) !important; /* focus 2px 高对比描边 */
+}
+.el-card {
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid var(--border-color-light) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.el-input__wrapper, .el-select-v2__wrapper {
+  border-radius: var(--radius-md) !important;
+  box-shadow: inset 0 0 0 1px var(--border-color-light) !important;
+  transition: all 0.2s ease !important;
+  font-size: var(--font-size-base) !important;
+}
+.el-input__wrapper.is-focus, .el-select-v2__wrapper.is-focus {
+  box-shadow: inset 0 0 0 1px var(--color-primary-500), 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+}
+.el-table {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-size: var(--font-size-base) !important;
+}
+.el-table th.el-table__cell {
+  background-color: var(--color-gray-50) !important;
+  color: var(--color-gray-700) !important;
+  font-weight: 600 !important;
+  font-size: 15px !important; /* 次级标签 15px */
 }

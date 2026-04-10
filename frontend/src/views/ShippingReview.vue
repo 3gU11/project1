@@ -2,7 +2,7 @@
   <div class="ship-page">
     <div class="head-row">
       <h1 class="title">🚛 发货复核</h1>
-      <el-button type="primary" :loading="loading" @click="loadPending">刷新</el-button>
+      <el-button type="primary" :loading="loading" @click="loadPending">刷新数据</el-button>
     </div>
 
     <el-alert :closable="false" type="info" :title="`待发货总数：${pendingRows.length}`" />
@@ -108,17 +108,17 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 .title {
   margin: 0;
   font-size: 30px;
   font-weight: 800;
-  color: #1f2937;
+  color: var(--color-gray-800);
 }
 .ops {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
 }
 </style>

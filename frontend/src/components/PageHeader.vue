@@ -1,7 +1,6 @@
 <template>
   <div class="page-header">
     <div class="left">
-      <el-button v-if="showBack" class="back-btn" size="small" @click="$emit('back')">⬅ 返回</el-button>
       <h1 class="title" :class="{ 'title-sm': small }">{{ title }}</h1>
     </div>
     <div class="right">
@@ -13,12 +12,7 @@
 <script setup lang="ts">
 defineProps<{
   title: string
-  showBack?: boolean
   small?: boolean
-}>()
-
-defineEmits<{
-  (e: 'back'): void
 }>()
 </script>
 

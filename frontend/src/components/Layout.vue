@@ -58,7 +58,11 @@ let warmupHandle: number | null = null
 const visibleMenus = computed(() => {
   const onHome = router.currentRoute.value.path === '/'
   return getAccessibleMenus(userStore.userInfo?.role).filter((m) => {
-    if (onHome) return Boolean(m.isManagement) || ['/warehouse-dashboard', '/logs'].includes(m.path)
+    if (onHome) {
+      // 在首页时，侧边栏仅保留这 4 个菜单
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability']
+      return allowedInHome.includes(m.path)
+    }
     return true
   })
 })

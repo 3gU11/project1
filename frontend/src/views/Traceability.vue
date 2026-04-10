@@ -199,7 +199,7 @@ const handleTrace = async (id: string, model = '') => {
   margin-top: 16px;
 }
 .mt-2 {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .text-gray-500 {
   color: #909399;
@@ -208,12 +208,12 @@ const handleTrace = async (id: string, model = '') => {
   color: #c0c4cc;
 }
 .text-xs {
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 .status-metrics {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .metric-card {
   text-align: center;
@@ -223,15 +223,15 @@ const handleTrace = async (id: string, model = '') => {
 }
 .group-title {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
 }
 .group-action {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-gray-800);
 }
 .group-meta {
-  font-size: 12px;
-  color: #6b7280;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-500);
 }
 </style>

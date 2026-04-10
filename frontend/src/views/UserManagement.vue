@@ -1,18 +1,18 @@
 <template>
   <div class="page">
     <div class="head">
-      <h1>👥 用户注册审核与管理</h1>
-      <el-button type="primary" :loading="loading" @click="loadUsers">刷新</el-button>
+      <h1>👥 账号与权限管理</h1>
+      <el-button type="primary" :loading="loading" @click="loadUsers">刷新数据</el-button>
     </div>
 
     <el-row :gutter="10" class="metrics">
-      <el-col :span="8"><el-statistic title="总用户数" :value="users.length" /></el-col>
-      <el-col :span="8"><el-statistic title="活跃用户" :value="activeCount" /></el-col>
+      <el-col :span="8"><el-statistic title="总账号数" :value="users.length" /></el-col>
+      <el-col :span="8"><el-statistic title="活跃账号" :value="activeCount" /></el-col>
       <el-col :span="8"><el-statistic title="待审核" :value="pendingCount" /></el-col>
     </el-row>
 
     <el-tabs>
-      <el-tab-pane label="所有用户列表">
+      <el-tab-pane label="系统账号列表">
         <el-table :data="users" border stripe size="small" height="540">
           <el-table-column prop="username" label="用户名" width="140" />
           <el-table-column prop="name" label="姓名" width="120" />
@@ -20,10 +20,10 @@
             <template #default="scope">
               <el-select v-model="scope.row.role" @change="patchUser(scope.row)">
                 <el-option label="老板 (Boss)" value="Boss" />
-                <el-option label="管理员 (Admin)" value="Admin" />
-                <el-option label="销售 (Sales)" value="Sales" />
-                <el-option label="生产 (Prod)" value="Prod" />
-                <el-option label="库管 (Inbound)" value="Inbound" />
+                <el-option label="系统管理员 (Admin)" value="Admin" />
+                <el-option label="销售专员 (Sales)" value="Sales" />
+                <el-option label="生产专员 (Prod)" value="Prod" />
+                <el-option label="仓库管理员 (Inbound)" value="Inbound" />
               </el-select>
             </template>
           </el-table-column>
@@ -123,11 +123,11 @@ loadUsers()
 </script>
 
 <style scoped>
-.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.head h1{margin:0;font-size:30px}
-.metrics{margin-bottom:10px}
-.pending-card{margin-bottom:8px}
+.head{display:flex;justify-content:space-between;align-items:center;margin-bottom: var(--space-2)}.head h1{margin:0;font-size:30px}
+.metrics{margin-bottom: var(--space-2)}
+.pending-card{margin-bottom: var(--space-2)}
 .pending-row{display:flex;justify-content:space-between;align-items:center}
-.sub{font-size:12px;color:#64748b;margin-top:3px}
+.sub{font-size: var(--font-size-sm);color:var(--color-gray-500);margin-top:3px}
 .actions{display:flex;gap:8px}
 .empty{padding:16px;color:#94a3b8}
 </style>
