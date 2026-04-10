@@ -48,21 +48,42 @@
             </div>
           </div>
           <div class="summary-title chart-title">机型分布</div>
-          <div class="bar-chart-wrap">
-            <div v-for="(item, idx) in distBarData" :key="item.model" class="bar-row">
-              <div class="bar-label">{{ item.model }}</div>
-              <div class="bar-track">
-                <div
-                  class="bar-fill"
-                  :style="{
-                    width: `${item.percent}%`,
-                    background: palette[idx % palette.length]
-                  }"
-                ></div>
+          <div class="donut-wrap" v-if="top10Dist.length > 0">
+            <div class="donut-chart" :class="{ 'with-decor': donutDecorReady }">
+              <svg class="donut-svg" :class="{ 'with-decor': donutDecorReady }" viewBox="0 0 220 220" aria-label="机型分布环形图">
+                <path
+                  v-for="seg in donutSegments"
+                  :key="`seg-${seg.idx}`"
+                  :d="describeDonutSlice(seg.startDeg, seg.endDeg, hoveredSegIdx === seg.idx ? 1.06 : 1)"
+                  :fill="palette[seg.idx % palette.length]"
+                  :class="['donut-seg', { 'with-decor': donutDecorReady }]"
+                  @mouseenter="hoveredSegIdx = seg.idx"
+                  @mouseleave="hoveredSegIdx = null"
+                />
+              </svg>
+              <div v-if="hoveredSegment" class="donut-tooltip">
+                {{ hoveredSegment.model }} {{ hoveredSegment.percent.toFixed(1) }}%
               </div>
-              <div class="bar-value">{{ item.percent.toFixed(1) }}%</div>
+              <div class="donut-hole" :class="{ 'with-decor': donutDecorReady }">
+                <div class="donut-center-label">Top10</div>
+              </div>
+            </div>
+            <div class="donut-legend">
+              <div
+                v-for="(item, idx) in top10Dist"
+                :key="item.model"
+                class="legend-row"
+                :class="{ hover: hoveredModel === item.model }"
+              >
+                <span class="legend-dot" :style="{ background: palette[idx % palette.length] }"></span>
+                <span class="legend-link"></span>
+                <span class="legend-model">{{ item.model }}</span>
+                <span class="legend-arrow">↗</span>
+                <span class="legend-val">{{ item.percent.toFixed(1) }}%</span>
+              </div>
             </div>
           </div>
+          <div v-else class="chart-empty">暂无机型分布数据</div>
         </el-col>
         <el-col :span="9">
           <el-table :data="modelSummary" border stripe size="small" class="model-summary-table" height="620">
@@ -117,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useInventoryStore } from '../store/inventory'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
@@ -129,7 +150,10 @@ const searchQuery = ref('')
 const statusFilter = ref('')
 const selectedModels = ref<string[]>([])
 const highOnly = ref(false)
-const activePanels = ref<string[]>(['detail'])
+const activePanels = ref<string[]>([])
+const donutProgress = ref(0)
+const donutDecorReady = computed(() => donutProgress.value >= 0.999)
+const hoveredSegIdx = ref<number | null>(null)
 
 const currentPage = ref(1)
 const pageSize = ref(50)
@@ -207,16 +231,101 @@ const ratioBoard = computed(() => {
 
 const palette = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1', '#06b6d4', '#f97316', '#a855f7', '#14b8a6', '#fb7185']
 
-const distBarData = computed(() => {
-  return modelSummary.value.map((row) => ({
+const top10Dist = computed(() => {
+  return modelSummary.value.slice(0, 10).map((row) => ({
     model: row.机型,
     count: row.全部,
     percent: totalCount.value > 0 ? (row.全部 / totalCount.value) * 100 : 0,
   }))
 })
 
-onMounted(() => {
-  fetchData()
+const top10DistNormalized = computed(() => {
+  const sum = top10Dist.value.reduce((acc, item) => acc + item.count, 0)
+  if (sum <= 0) return []
+  return top10Dist.value.map((item) => ({
+    ...item,
+    normPercent: (item.count / sum) * 100,
+  }))
+})
+
+const donutSegments = computed(() => {
+  const result: Array<{ idx: number; model: string; percent: number; startDeg: number; endDeg: number }> = []
+  if (top10DistNormalized.value.length === 0) return result
+  const sweepDeg = Math.max(0, Math.min(360, donutProgress.value * 360))
+  let cursor = 0
+  top10DistNormalized.value.forEach((item, idx) => {
+    const segDeg = item.normPercent * 3.6
+    const drawDeg = Math.min(segDeg, Math.max(0, sweepDeg - cursor))
+    if (drawDeg > 0) {
+      result.push({
+        idx,
+        model: item.model,
+        percent: item.percent,
+        startDeg: cursor,
+        endDeg: cursor + drawDeg,
+      })
+    }
+    cursor += segDeg
+  })
+  return result
+})
+
+const hoveredSegment = computed(() => {
+  if (hoveredSegIdx.value === null) return null
+  return donutSegments.value.find((s) => s.idx === hoveredSegIdx.value) || null
+})
+
+const hoveredModel = computed(() => hoveredSegment.value?.model || '')
+
+const polar = (cx: number, cy: number, r: number, deg: number) => {
+  const rad = ((deg - 90) * Math.PI) / 180
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
+}
+
+const describeDonutSlice = (startDeg: number, endDeg: number, scale = 1) => {
+  if (endDeg <= startDeg) return ''
+  const cx = 110
+  const cy = 110
+  const outerR = 108 * scale
+  const innerR = 58 * scale
+  const p1 = polar(cx, cy, outerR, startDeg)
+  const p2 = polar(cx, cy, outerR, endDeg)
+  const p3 = polar(cx, cy, innerR, endDeg)
+  const p4 = polar(cx, cy, innerR, startDeg)
+  const largeArc = endDeg - startDeg > 180 ? 1 : 0
+  return [
+    `M ${p1.x} ${p1.y}`,
+    `A ${outerR} ${outerR} 0 ${largeArc} 1 ${p2.x} ${p2.y}`,
+    `L ${p3.x} ${p3.y}`,
+    `A ${innerR} ${innerR} 0 ${largeArc} 0 ${p4.x} ${p4.y}`,
+    'Z',
+  ].join(' ')
+}
+
+const runDonutBuildAnimation = () => {
+  const duration = 1000
+  const start = performance.now()
+  donutProgress.value = 0
+  const tick = (now: number) => {
+    const p = Math.min(1, (now - start) / duration)
+    // ease-in: 从无到有，前慢后快（逐渐加速）
+    donutProgress.value = p * p * p
+    if (p < 1) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
+watch(top10DistNormalized, () => {
+  runDonutBuildAnimation()
+})
+
+onMounted(async () => {
+  await fetchData()
+  runDonutBuildAnimation()
+})
+
+onActivated(() => {
+  runDonutBuildAnimation()
 })
 </script>
 
@@ -297,42 +406,143 @@ onMounted(() => {
   margin-top: 2px;
   margin-bottom: 6px;
 }
-.bar-chart-wrap {
+.donut-wrap {
+  display: flex;
+  gap: 18px;
+  align-items: center;
   max-width: 760px;
-  max-height: 360px;
-  overflow: auto;
-  padding-right: 4px;
 }
-.bar-row {
+.donut-chart {
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+  overflow: visible;
+}
+.donut-svg {
+  width: 220px;
+  height: 220px;
+  display: block;
+}
+.donut-seg {
+  transition: opacity 0.12s ease;
+}
+.donut-chart.with-decor {
+  box-shadow: none;
+}
+.donut-svg.with-decor {
+  filter:
+    drop-shadow(0 10px 24px rgba(59, 130, 246, 0.16))
+    drop-shadow(0 2px 6px rgba(15, 23, 42, 0.08));
+}
+.donut-seg.with-decor {
+  stroke: #dbeafe;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  paint-order: stroke fill;
+}
+.donut-tooltip {
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  transform: translate(-50%, -100%);
+  background: rgba(15, 23, 42, 0.88);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.donut-hole {
+  position: absolute;
+  inset: 26%;
+  background: #ffffff;
+  border-radius: 50%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
+  justify-content: center;
 }
-.bar-label {
-  width: 150px;
+.donut-hole.with-decor {
+  border: 1.4px solid #dbeafe;
+  box-shadow:
+    inset 0 2px 8px rgba(15, 23, 42, 0.06),
+    0 2px 6px rgba(15, 23, 42, 0.06),
+    0 0 0 1px rgba(219, 234, 254, 0.65);
+}
+.donut-center-label {
+  font-size: 14px;
+  color: #475569;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.donut-legend {
+  display: grid;
+  gap: 6px;
+  min-width: 360px;
+}
+.legend-row {
+  display: grid;
+  grid-template-columns: 12px 34px 1fr 18px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  position: relative;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.legend-link {
+  height: 0;
+  border-top: 1.5px solid #cbd5e1;
+}
+.legend-arrow {
+  color: #9ca3af;
+  font-size: 12px;
+}
+.legend-model {
   font-size: 13px;
   color: #374151;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.bar-track {
-  flex: 1;
-  height: 16px;
-  background: #eef2f7;
-  border-radius: 10px;
-  overflow: hidden;
-}
-.bar-fill {
-  height: 100%;
-  border-radius: 10px;
-}
-.bar-value {
-  width: 56px;
-  text-align: right;
+.legend-val {
   font-size: 13px;
   color: #374151;
+}
+.legend-row.hover {
+  background: #e0f2fe;
+  box-shadow:
+    inset 0 0 0 1px #38bdf8,
+    0 2px 8px rgba(14, 165, 233, 0.22);
+}
+.legend-row.hover::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #0ea5e9, #2563eb);
+}
+.legend-row.hover .legend-model,
+.legend-row.hover .legend-val {
+  color: #0f172a;
+  font-weight: 700;
+}
+.legend-row.hover .legend-arrow {
+  color: #0369a1;
+}
+.chart-empty {
+  color: #6b7280;
+  font-size: 13px;
 }
 .detail-collapse {
   margin-top: 2px;

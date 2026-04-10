@@ -504,13 +504,19 @@ def init_mysql_tables():
             pass
 
         _add_index_if_missing("finished_goods_data", "idx_fg_status_model_order", "`状态`, `机型`, `占用订单号`")
+        _add_index_if_missing("finished_goods_data", "idx_fg_status_model", "`状态`, `机型`")
+        _add_index_if_missing("finished_goods_data", "idx_fg_status_location", "`状态`, `Location_Code`")
         _add_index_if_missing("finished_goods_data", "idx_fg_batch_status", "`批次号`, `状态`")
         _add_index_if_missing("finished_goods_data", "idx_fg_updated_at", "`更新时间`")
         _add_index_if_missing("sales_orders", "idx_orders_status_time", "`status`, `下单时间`")
+        _add_index_if_missing("sales_orders", "idx_orders_customer", "`客户名`")
+        _add_index_if_missing("sales_orders", "idx_orders_customer_time", "`客户名`, `下单时间`")
         _add_index_if_missing("sales_orders", "idx_orders_delivery", "`发货时间`")
         _add_index_if_missing("factory_plan", "idx_fp_contract_status_due", "`合同号`, `状态`, `要求交期`")
         _add_index_if_missing("factory_plan", "idx_fp_due_date", "`要求交期`")
         _add_index_if_missing("transaction_log", "idx_log_time", "`时间`")
+        _add_index_if_missing("contract_records", "idx_contract_id", "`contract_id`")
+        _add_index_if_missing("contract_records", "idx_contract_upload_time", "`upload_time`")
         _add_index_if_missing("plan_import", "idx_import_batch_model", "`批次号`, `机型`")
         _add_index_if_missing("shipping_history", "idx_ship_month_time", "`archive_month`, `更新时间`")
 

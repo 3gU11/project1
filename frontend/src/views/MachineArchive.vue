@@ -83,7 +83,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type UploadUserFile } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 type ListResponse<T = any> = { data: T[] }
 
 const router = useRouter()
@@ -120,10 +120,13 @@ const goBack = () => {
 const loadSerials = async () => {
   loadingSerials.value = true
   try {
-    const [snRes, invRes] = await Promise.all([apiGet<ListResponse>('/inventory/machine-archive/serials'), apiGet<ListResponse>('/inventory/')])
+    const [snRes, invRows] = await Promise.all([
+      apiGet<ListResponse>('/inventory/machine-archive/serials'),
+      apiGetAll<any>('/inventory/'),
+    ])
     serials.value = snRes.data || []
     const map: Record<string, { model: string; status: string }> = {}
-    for (const row of invRes.data || []) {
+    for (const row of invRows) {
       const sn = String(row['流水号'] || '').trim()
       if (!sn) continue
       map[sn] = {

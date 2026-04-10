@@ -308,12 +308,10 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { apiGet, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
+import { apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
-type ListResponse<T = any> = { data: T[] }
-
 type RowData = Record<string, any>
 
 const router = useRouter()
@@ -478,14 +476,14 @@ const fetchData = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    const [orderRes, planRes, invRes] = await Promise.all([
-      apiGet<ListResponse>('/planning/orders'),
-      apiGet<ListResponse>('/planning/'),
-      apiGet<ListResponse>('/inventory/'),
+    const [nextOrders, nextPlans, nextInventory] = await Promise.all([
+      apiGetAll<RowData>('/planning/orders'),
+      apiGetAll<RowData>('/planning/'),
+      apiGetAll<RowData>('/inventory/'),
     ])
-    rows.value = orderRes.data || []
-    planRows.value = planRes.data || []
-    inventoryRows.value = invRes.data || []
+    rows.value = nextOrders
+    planRows.value = nextPlans
+    inventoryRows.value = nextInventory
   } catch (err: any) {
     loadError.value = getApiErrorMessage(err) || '读取数据失败'
     ElMessage.error(loadError.value)

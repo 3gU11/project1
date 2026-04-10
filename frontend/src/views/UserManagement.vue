@@ -12,6 +12,34 @@
     </el-row>
 
     <el-tabs>
+      <el-tab-pane label="所有用户列表">
+        <el-table :data="users" border stripe size="small" height="540">
+          <el-table-column prop="username" label="用户名" width="140" />
+          <el-table-column prop="name" label="姓名" width="120" />
+          <el-table-column label="角色" width="120">
+            <template #default="scope">
+              <el-select v-model="scope.row.role" @change="patchUser(scope.row)">
+                <el-option label="老板 (Boss)" value="Boss" />
+                <el-option label="管理员 (Admin)" value="Admin" />
+                <el-option label="销售 (Sales)" value="Sales" />
+                <el-option label="生产 (Prod)" value="Prod" />
+                <el-option label="库管 (Inbound)" value="Inbound" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="130">
+            <template #default="scope">
+              <el-select v-model="scope.row.status" @change="patchUser(scope.row)">
+                <el-option label="活跃 (active)" value="active" />
+                <el-option label="待审核 (pending)" value="pending" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column prop="register_time" label="注册时间" width="170" />
+          <el-table-column prop="audit_time" label="审核时间" width="170" />
+          <el-table-column prop="auditor" label="审核人" width="120" />
+        </el-table>
+      </el-tab-pane>
       <el-tab-pane :label="`待审核申请 (${pendingCount})`">
         <div v-if="pendingUsers.length === 0" class="empty">暂无待审核申请</div>
         <el-card v-for="u in pendingUsers" :key="u.username" class="pending-card">
@@ -27,35 +55,6 @@
           </div>
         </el-card>
       </el-tab-pane>
-      <el-tab-pane label="所有用户列表">
-        <el-table :data="users" border stripe size="small" height="540">
-          <el-table-column prop="username" label="用户名" width="140" />
-          <el-table-column prop="name" label="姓名" width="120" />
-          <el-table-column label="角色" width="120">
-            <template #default="scope">
-              <el-select v-model="scope.row.role" @change="patchUser(scope.row)">
-                <el-option label="Boss" value="Boss" />
-                <el-option label="Admin" value="Admin" />
-                <el-option label="Sales" value="Sales" />
-                <el-option label="Prod" value="Prod" />
-                <el-option label="Inbound" value="Inbound" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="130">
-            <template #default="scope">
-              <el-select v-model="scope.row.status" @change="patchUser(scope.row)">
-                <el-option label="active" value="active" />
-                <el-option label="pending" value="pending" />
-                <el-option label="rejected" value="rejected" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column prop="register_time" label="注册时间" width="170" />
-          <el-table-column prop="audit_time" label="审核时间" width="170" />
-          <el-table-column prop="auditor" label="审核人" width="120" />
-        </el-table>
-      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -64,8 +63,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../store/user'
-import { apiGet, apiPost, apiPatch, getApiErrorMessage } from '../utils/request'
-type ListResponse<T = any> = { data: T[] }
+import { apiGetAll, apiPost, apiPatch, getApiErrorMessage } from '../utils/request'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -79,8 +77,7 @@ const activeCount = computed(() => users.value.filter((u) => String(u.status || 
 const loadUsers = async () => {
   loading.value = true
   try {
-    const res = await apiGet<ListResponse>('/users/')
-    users.value = res.data || []
+    users.value = await apiGetAll<any>('/users/')
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取用户失败')
   } finally {

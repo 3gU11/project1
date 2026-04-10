@@ -66,6 +66,23 @@ export const apiGet = async <T = any>(url: string, config?: ApiConfig): Promise<
   const response = await request.get<T>(url, config)
   return response.data
 }
+export const apiGetAll = async <T = any>(url: string, pageSize = 1000): Promise<T[]> => {
+  let skip = 0
+  let total = Number.POSITIVE_INFINITY
+  const rows: T[] = []
+  const sep = url.includes('?') ? '&' : '?'
+  while (skip < total) {
+    const res = await apiGet<{ data?: T[]; total?: number }>(`${url}${sep}skip=${skip}&limit=${pageSize}`)
+    const chunk = res.data || []
+    rows.push(...chunk)
+    const safeTotal = Number.isFinite(Number(res.total)) ? Number(res.total) : chunk.length
+    total = safeTotal
+    if (chunk.length === 0) break
+    skip += chunk.length
+    if (chunk.length < pageSize) break
+  }
+  return rows
+}
 export const apiPost = async <T = any>(url: string, data?: any, config?: ApiConfig): Promise<T> => {
   const response = await request.post<T>(url, data, config)
   return response.data

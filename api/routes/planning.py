@@ -1,14 +1,16 @@
 from typing import List, Dict, Any
 from urllib.parse import unquote
 import re
+import asyncio
 
 import os
 import uuid
 from datetime import datetime
 import pandas as pd
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from config import BASE_DIR
 from core.file_manager import delete_contract_file, save_contract_file
@@ -18,6 +20,7 @@ from crud.planning import get_factory_plan, save_factory_plan
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_token
 from utils.parsers import parse_alloc_dict
+from database import get_engine
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
 
@@ -151,22 +154,72 @@ class LinkOrderPayload(BaseModel):
     order_id: str
 
 @router.get("/")
-def get_planning_data():
+def get_planning_data(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=2000),
+    status: str = Query(""),
+    contract_id: str = Query(""),
+):
     try:
-        df_plan = get_factory_plan()
-        df_plan = df_plan.reset_index(drop=False).rename(columns={"index": "_idx"})
+        where_clauses = []
+        params: Dict[str, Any] = {"skip": skip, "limit": limit}
+        if str(status).strip():
+            where_clauses.append("`状态` = :status")
+            params["status"] = str(status).strip()
+        if str(contract_id).strip():
+            where_clauses.append("`合同号` = :contract_id")
+            params["contract_id"] = str(contract_id).strip()
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        count_sql = f"SELECT COUNT(*) AS total FROM factory_plan{where_sql}"
+        data_sql = (
+            "SELECT `id` AS `_idx`, `合同号`, `机型`, `排产数量`, `要求交期`, `状态`, `备注`, `客户名`, `代理商`, `指定批次/来源`, `订单号` "
+            f"FROM factory_plan{where_sql} "
+            "ORDER BY `id` DESC LIMIT :limit OFFSET :skip"
+        )
+        with get_engine().connect() as conn:
+            total_df = pd.read_sql(text(count_sql), conn, params=params)
+            total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
+            df_plan = pd.read_sql(text(data_sql), conn, params=params)
+
+        if "指定批次/来源" in df_plan.columns:
+            df_plan["指定批次/来源"] = df_plan["指定批次/来源"].apply(parse_alloc_dict)
         df_plan = df_plan.where(df_plan.notnull(), None)
-        return {"data": df_plan.to_dict(orient="records")}
+        return {"data": df_plan.to_dict(orient="records"), "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/orders")
-def get_sales_orders():
+def get_sales_orders(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=2000),
+    status: str = Query(""),
+    keyword: str = Query(""),
+):
     try:
-        df_orders = get_orders()
-        df_orders = _reconcile_completed_orders(df_orders)
+        where_clauses = []
+        params: Dict[str, Any] = {"skip": skip, "limit": limit}
+        if str(status).strip():
+            where_clauses.append("`status` = :status")
+            params["status"] = str(status).strip()
+        if str(keyword).strip():
+            where_clauses.append("(`订单号` LIKE :kw OR `客户名` LIKE :kw OR `代理商` LIKE :kw)")
+            params["kw"] = f"%{str(keyword).strip()}%"
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        count_sql = f"SELECT COUNT(*) AS total FROM sales_orders{where_sql}"
+        data_sql = (
+            "SELECT * FROM sales_orders"
+            f"{where_sql} "
+            "ORDER BY `下单时间` DESC LIMIT :limit OFFSET :skip"
+        )
+        with get_engine().connect() as conn:
+            total_df = pd.read_sql(text(count_sql), conn, params=params)
+            total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
+            df_orders = pd.read_sql(text(data_sql), conn, params=params)
+
         df_orders = df_orders.where(df_orders.notnull(), None)
-        return {"data": df_orders.to_dict(orient="records")}
+        return {"data": df_orders.to_dict(orient="records"), "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -478,24 +531,13 @@ async def upload_contract_file_api(
     uploader_name: str = "API",
 ):
     try:
-        content = await file.read()
-
-        class _UploadWrapper:
-            def __init__(self, filename: str, data: bytes):
-                self.name = filename
-                self.size = len(data)
-                self._data = data
-
-            def getvalue(self):
-                return self._data
-
-        wrap = _UploadWrapper(file.filename or "upload.bin", content)
-        ok, msg = save_contract_file(
-            wrap,
-            customer_name=customer_name or str(contract_id),
-            contract_id=contract_id,
-            uploader_name=uploader_name or "API",
-            convert_to_docx=True,
+        ok, msg = await asyncio.to_thread(
+            save_contract_file,
+            file,
+            customer_name or str(contract_id),
+            contract_id,
+            uploader_name or "API",
+            True,
         )
         if not ok:
             raise HTTPException(status_code=422, detail=msg)
@@ -600,16 +642,23 @@ def save_contract_plan(contract_id: str, payload: PlanSavePayload):
         # 保存逐行规划
         for row_payload in payload.rows:
             idx = int(row_payload.row_index)
-            if idx not in df_plan.index:
+            row_mask = None
+            if idx in df_plan.index:
+                row_mask = df_plan.index == idx
+            elif "id" in df_plan.columns:
+                row_mask = df_plan["id"].astype(int) == idx
+            else:
                 continue
             alloc = {}
             for k, v in (row_payload.allocation or {}).items():
                 qty = int(v or 0)
                 if qty > 0:
                     alloc[str(k)] = qty
-            df_plan.at[idx, "指定批次/来源"] = alloc
-            if payload.mark_to_planned and str(df_plan.at[idx, "状态"]) == "待规划":
-                df_plan.at[idx, "状态"] = "已规划"
+            df_plan.loc[row_mask, "指定批次/来源"] = [alloc] * int(row_mask.sum())
+            if payload.mark_to_planned:
+                wait_mask = row_mask & (df_plan["状态"].astype(str) == "待规划")
+                if wait_mask.any():
+                    df_plan.loc[wait_mask, "状态"] = "已规划"
 
         save_factory_plan(df_plan)
 

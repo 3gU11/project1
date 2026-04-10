@@ -220,7 +220,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
-import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import { useCacheStore } from '../store/cache'
 import {
@@ -234,7 +234,6 @@ import {
 type Slot = Record<string, any>
 type Row = Record<string, any>
 type LayoutResponse = { layout_json?: { slots?: Slot[] } }
-type InventoryResponse = { data: Row[] }
 const router = useRouter()
 const maxCap = 5
 const cacheStore = useCacheStore()
@@ -382,9 +381,11 @@ const loadData = async (force = false) => {
       }
     }
 
-    const [layoutRes, invRes] = await Promise.all([apiGet<LayoutResponse>('/inventory/layout/default'), apiGet<InventoryResponse>('/inventory/')])
+    const [layoutRes, nextInventory] = await Promise.all([
+      apiGet<LayoutResponse>('/inventory/layout/default'),
+      apiGetAll<Row>('/inventory/'),
+    ])
     const nextSlots = layoutRes.layout_json?.slots || []
-    const nextInventory = invRes.data || []
     slots.value = nextSlots
     inventory.value = nextInventory
     cacheStore.set(CACHE_LAYOUT, nextSlots, 10_000)

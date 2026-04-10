@@ -6,12 +6,12 @@
         <h3 class="machine-title">🏭 机台入库模块 (扫描入库)</h3>
         <div class="machine-filter-row">
           <el-input
-            v-model="pendingKeyword"
+            v-model="pendingKeywordRaw"
+            @input="onPendingKeywordInput"
             placeholder="扫描批次号/流水号"
             clearable
             style="max-width: 420px"
           />
-          <el-checkbox v-model="showAllPending">显示全时待入库</el-checkbox>
           <el-button size="small" @click="fetchInventory">刷新</el-button>
         </div>
 
@@ -184,7 +184,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { ElMessage } from 'element-plus'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import {
@@ -194,8 +194,6 @@ import {
   restoreLayoutFromLocal,
   type WarehouseSlot
 } from './inboundLayout'
-type InventoryResponse = { data: any[] }
-type ImportStagingResponse = { data: any[] }
 type LayoutResponse = { layout_json?: { slots?: WarehouseSlot[] } }
 type MessageResponse = { message?: string }
 type ImportConfirmResponse = { success_count?: number; failed_count?: number }
@@ -208,9 +206,17 @@ const error = ref('')
 const inventory = ref<any[]>([])
 const slots = ref<WarehouseSlot[]>([])
 const pendingTableRef = ref()
+const pendingKeywordRaw = ref('')
 const pendingKeyword = ref('')
-const showAllPending = ref(true)
 const slotKeyword = ref('')
+let pendingKeywordTimer: any = null
+
+const onPendingKeywordInput = (val: string) => {
+  if (pendingKeywordTimer) clearTimeout(pendingKeywordTimer)
+  pendingKeywordTimer = setTimeout(() => {
+    pendingKeyword.value = val
+  }, 300)
+}
 const selectedPendingRows = ref<any[]>([])
 const selectedPendingSerialNos = ref<string[]>([])
 const trackingFileRef = ref<HTMLInputElement | null>(null)
@@ -238,11 +244,16 @@ const autoGen = reactive({
 
 const pendingRows = computed(() => {
   let rows = inventory.value.filter((item) => String(item['状态'] || '').includes('待入库'))
-  if (!showAllPending.value) {
-    rows = rows.filter((item) => !String(item['机台备注/配置'] || '').includes('暂缓'))
-  }
   const kw = pendingKeyword.value.trim().toLowerCase()
   if (kw) {
+    // 1. 尝试完全精确匹配“批次号”
+    const exactBatchRows = rows.filter((item) => String(item['批次号'] || '').toLowerCase() === kw)
+    if (exactBatchRows.length > 0) {
+      // 如果有精确匹配的批次号，优先返回该批次所有机台
+      return exactBatchRows
+    }
+    
+    // 2. 如果没有精确匹配的批次，则进行默认的模糊匹配
     rows = rows.filter((item) =>
       String(item['流水号'] || '').toLowerCase().includes(kw) ||
       String(item['批次号'] || '').toLowerCase().includes(kw) ||
@@ -258,16 +269,20 @@ const slotStats = computed(() => {
 
 const slotButtons = computed(() => {
   const kw = slotKeyword.value.trim().toLowerCase()
-  if (!kw) return slots.value
-  return slots.value.filter((s) => String(s.code || '').toLowerCase().includes(kw))
+  // 过滤掉已满（或溢出）的库位
+  const availableSlots = slots.value.filter((s) => {
+    const stats = slotStats.value[s.code]
+    return !(stats?.isFull || stats?.isOverflow)
+  })
+  if (!kw) return availableSlots
+  return availableSlots.filter((s) => String(s.code || '').toLowerCase().includes(kw))
 })
 
 const fetchInventory = async () => {
   loading.value = true
   error.value = ''
   try {
-    const response = await apiGet<InventoryResponse>('/inventory/')
-    inventory.value = response.data || []
+    inventory.value = await apiGetAll<any>('/inventory/')
     await nextTick()
     syncPendingSelectionBySerial()
   } catch (err: any) {
@@ -279,8 +294,8 @@ const fetchInventory = async () => {
 
 const fetchImportStaging = async () => {
   try {
-    const response = await apiGet<ImportStagingResponse>('/inventory/import-staging')
-    stagingRows.value = (response.data || []).map((r: any) => ({
+    const stagingAllRows = await apiGetAll<any>('/inventory/import-staging')
+    stagingRows.value = stagingAllRows.map((r: any) => ({
       流水号: String(r['流水号'] || '').trim(),
       批次号: String(r['批次号'] || '').trim(),
       机型: String(r['机型'] || '').trim(),

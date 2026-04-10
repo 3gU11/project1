@@ -1,19 +1,49 @@
 from datetime import datetime
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
+import pandas as pd
+from sqlalchemy import text
 
 from crud.users import get_all_users, save_all_users, create_pending_user, user_exists
 from api.routes.auth import require_roles
+from database import get_engine
 
 router = APIRouter()
 
 @router.get("/")
-def list_users(_ctx: dict = Depends(require_roles("Admin", "Boss"))):
+def list_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    status: str = Query(""),
+    role: str = Query(""),
+    keyword: str = Query(""),
+    _ctx: dict = Depends(require_roles("Admin", "Boss")),
+):
     """Get all users."""
     try:
-        df = get_all_users()
+        where_clauses = []
+        params: Dict[str, Any] = {"skip": skip, "limit": limit}
+        if str(status).strip():
+            where_clauses.append("`status` = :status")
+            params["status"] = str(status).strip()
+        if str(role).strip():
+            where_clauses.append("`role` = :role")
+            params["role"] = str(role).strip()
+        if str(keyword).strip():
+            where_clauses.append("(`username` LIKE :kw OR `name` LIKE :kw)")
+            params["kw"] = f"%{str(keyword).strip()}%"
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        with get_engine().connect() as conn:
+            total_df = pd.read_sql(text(f"SELECT COUNT(*) AS total FROM users{where_sql}"), conn, params=params)
+            total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
+            df = pd.read_sql(
+                text(f"SELECT * FROM users{where_sql} ORDER BY register_time DESC LIMIT :limit OFFSET :skip"),
+                conn,
+                params=params,
+            )
         df = df.where(df.notnull(), None)
-        return {"data": df.to_dict(orient="records")}
+        return {"data": df.to_dict(orient="records"), "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -94,13 +124,21 @@ def audit_user(payload: UserAuditPayload, _ctx: dict = Depends(require_roles("Ad
         mask = df["username"].astype(str).str.strip().str.lower() == username
         if not mask.any():
             raise HTTPException(status_code=404, detail="用户不存在")
-        new_status = "active" if payload.action == "approve" else "rejected"
-        df.loc[mask, "status"] = new_status
-        df.loc[mask, "audit_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        df.loc[mask, "auditor"] = str(payload.auditor or "system").strip()
+            
+        if payload.action == "reject":
+            # 拒绝时直接删除该用户
+            df = df[~mask]
+            msg = "用户已被拒绝并删除"
+        else:
+            # 批准时修改状态
+            df.loc[mask, "status"] = "active"
+            df.loc[mask, "audit_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            df.loc[mask, "auditor"] = str(payload.auditor or "system").strip()
+            msg = "审核成功"
+            
         if not save_all_users(df):
             raise HTTPException(status_code=500, detail="保存失败")
-        return {"message": "审核成功"}
+        return {"message": msg}
     except HTTPException:
         raise
     except Exception as e:

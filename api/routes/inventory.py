@@ -1,12 +1,16 @@
 from io import BytesIO
 from typing import List, Dict, Any
 from datetime import datetime
+import asyncio
 import pandas as pd
 import os
 import re
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+import tempfile
+import aiofiles
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from config import MACHINE_ARCHIVE_ABS_DIR
 from core.file_manager import audit_log
@@ -26,6 +30,7 @@ from crud.inventory import (
 from crud.logs import append_log
 from crud.orders import get_orders, revert_to_inbound
 from api.routes.auth import get_current_operator_name, get_current_user_token
+from database import get_engine
 from utils.parsers import (
     build_import_payload,
     diff_tracking_vs_inventory,
@@ -90,13 +95,48 @@ class MachineBatchUpdatePayload(BaseModel):
     back_cond: bool = False
 
 @router.get("/")
-def get_inventory():
-    """Get all inventory data."""
+def get_inventory(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=2000),
+    status: str = Query("", description="按状态过滤"),
+    model: str = Query("", description="按机型过滤"),
+    order_id: str = Query("", description="按占用订单号过滤"),
+):
+    """分页获取库存数据。"""
     try:
-        df = get_data()
-        # Convert NaN/NaT to None for JSON serialization
+        where_clauses = []
+        params: Dict[str, Any] = {"skip": skip, "limit": limit}
+
+        if str(status).strip():
+            where_clauses.append("`状态` = :status")
+            params["status"] = str(status).strip()
+        if str(model).strip():
+            where_clauses.append("`机型` = :model")
+            params["model"] = str(model).strip()
+        if str(order_id).strip():
+            where_clauses.append("`占用订单号` = :order_id")
+            params["order_id"] = str(order_id).strip()
+
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        count_sql = f"SELECT COUNT(*) AS total FROM finished_goods_data{where_sql}"
+        data_sql = (
+            "SELECT * FROM finished_goods_data"
+            f"{where_sql} "
+            "ORDER BY `更新时间` DESC LIMIT :limit OFFSET :skip"
+        )
+
+        with get_engine().connect() as conn:
+            total_df = pd.read_sql(text(count_sql), conn, params=params)
+            total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
+            df = pd.read_sql(text(data_sql), conn, params=params)
+
         df = df.where(df.notnull(), None)
-        return {"data": df.to_dict(orient="records")}
+        return {
+            "data": df.to_dict(orient="records"),
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -222,11 +262,21 @@ def inbound_machine_to_slot(payload: InboundSlotPayload):
 
 
 @router.get("/import-staging")
-def get_import_staging_rows():
+def get_import_staging_rows(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=2000),
+):
     try:
-        df = get_import_staging()
+        with get_engine().connect() as conn:
+            total_df = pd.read_sql(text("SELECT COUNT(*) AS total FROM plan_import"), conn)
+            total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
+            df = pd.read_sql(
+                text("SELECT * FROM plan_import ORDER BY `流水号` DESC LIMIT :limit OFFSET :skip"),
+                conn,
+                params={"limit": limit, "skip": skip},
+            )
         df = df.where(df.notnull(), None)
-        return {"data": df.to_dict(orient="records")}
+        return {"data": df.to_dict(orient="records"), "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -240,30 +290,48 @@ async def upload_tracking_sheet(file: UploadFile = File(...)):
         if not (lower_name.endswith(".xls") or lower_name.endswith(".xlsx")):
             raise HTTPException(status_code=400, detail="仅支持 .xls / .xlsx 文件")
 
-        content = await file.read()
+        suffix = os.path.splitext(file.filename)[1].lower() or ".xlsx"
+        fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+        os.close(fd)
+        try:
+            async with aiofiles.open(tmp_path, "wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    await out.write(chunk)
+        finally:
+            await file.close()
 
-        class _SimpleUpload:
-            def __init__(self, name: str, data: bytes):
+        class _DiskUpload:
+            def __init__(self, name: str, path: str):
                 self.name = name
-                self._data = data
+                self._path = path
 
             def read(self):
-                return self._data
+                with open(self._path, "rb") as f:
+                    return f.read()
 
-        code, msg, parsed_df = parse_tracking_xls(_SimpleUpload(file.filename, content))
+        code, msg, parsed_df = await asyncio.to_thread(parse_tracking_xls, _DiskUpload(file.filename, tmp_path))
         if code != 1:
             raise HTTPException(status_code=422, detail=msg)
 
-        diff_df = diff_tracking_vs_inventory(parsed_df)
+        diff_df = await asyncio.to_thread(diff_tracking_vs_inventory, parsed_df)
         if diff_df.empty:
             return {"message": "所有解析到的流水号均已在库存中，无需导入。", "appended": 0}
 
-        appended = append_import_staging(diff_df)
+        appended = await asyncio.to_thread(append_import_staging, diff_df)
         return {"message": f"解析成功！已追加 {appended} 条记录到待入库清单。", "appended": appended}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"上传解析失败: {e}")
+    finally:
+        try:
+            if "tmp_path" in locals() and tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 @router.post("/import-staging/save")
@@ -478,10 +546,15 @@ async def machine_archive_upload(serial_no: str, label: str = Form(""), files: L
                 continue
             final_name = f"{safe_label}_{idx}_{ts}{ext}"
             save_path = os.path.join(sn_dir, final_name)
-            content = await up.read()
-            with open(save_path, "wb") as f:
-                f.write(content)
+            await up.seek(0)
+            async with aiofiles.open(save_path, "wb") as f:
+                while True:
+                    chunk = await up.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    await f.write(chunk)
             saved += 1
+            await up.close()
         if saved <= 0:
             raise HTTPException(status_code=422, detail="没有可保存的有效文件")
         audit_log("Upload Machine Archive", f"{serial_no}: uploaded {saved} files")

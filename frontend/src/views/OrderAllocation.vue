@@ -115,7 +115,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
-import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from '../store/cache'
 import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
@@ -270,9 +270,10 @@ const loadData = async (force = false) => {
         return
       }
     }
-    const [ordersRes, invRes] = await Promise.all([apiGet<ListResponse>('/planning/orders'), apiGet<ListResponse>('/inventory/')])
-    const nextOrders = ordersRes.data || []
-    const nextInventoryRows = invRes.data || []
+    const [nextOrders, nextInventoryRows] = await Promise.all([
+      apiGetAll<Row>('/planning/orders'),
+      apiGetAll<Row>('/inventory/'),
+    ])
     orders.value = nextOrders
     inventoryRows.value = nextInventoryRows
     cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)

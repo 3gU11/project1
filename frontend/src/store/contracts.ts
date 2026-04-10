@@ -1,9 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiGet, getApiErrorMessage } from '../utils/request'
+import { apiGetAll, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from './cache'
-
-type ListResponse<T = any> = { data: T[] }
 
 export const useContractsStore = defineStore('contracts', () => {
   const planningContracts = ref<any[]>([])
@@ -23,8 +21,7 @@ export const useContractsStore = defineStore('contracts', () => {
           return planningContracts.value
         }
       }
-      const res = await apiGet<ListResponse>('/planning/')
-      planningContracts.value = res.data || []
+      planningContracts.value = await apiGetAll<any>('/planning/')
       cacheStore.set(CACHE_KEY, planningContracts.value, 10_000)
       return planningContracts.value
     } catch (err: any) {

@@ -30,16 +30,11 @@ def audit_log(action, details, user="System"):
 
 
 def save_contract_file(uploaded_file, customer_name, contract_id, uploader_name, convert_to_docx=True):
-    if uploaded_file.size > 50 * 1024 * 1024:
-        return False, "文件超过 50MB 限制"
-
-    fname = uploaded_file.name
+    max_size = 50 * 1024 * 1024
+    fname = getattr(uploaded_file, "name", None) or getattr(uploaded_file, "filename", None) or "upload.bin"
     ext = os.path.splitext(fname)[1].lower()
     if ext not in ['.pdf', '.doc', '.docx', '.jpg', '.jpeg']:
         return False, "不支持的文件格式 (仅限 PDF, Word, JPG)"
-
-    file_bytes = uploaded_file.getvalue()
-    file_hash = hashlib.sha256(file_bytes).hexdigest()
 
     safe_cust = re.sub(r'[\/*?:"<>|]', "", str(customer_name)).strip() or "Unknown"
     if contract_id:
@@ -55,8 +50,47 @@ def save_contract_file(uploaded_file, customer_name, contract_id, uploader_name,
     save_path = os.path.join(abs_dir, fname)
     rel_save_path = os.path.join(rel_dir, fname)
     try:
-        with open(save_path, "wb") as f:
-            f.write(file_bytes)
+        file_hash_obj = hashlib.sha256()
+        source_size = getattr(uploaded_file, "size", None)
+
+        if hasattr(uploaded_file, "file"):
+            src = uploaded_file.file
+            src.seek(0)
+            written = 0
+            with open(save_path, "wb") as f:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_size:
+                        try:
+                            os.remove(save_path)
+                        except Exception:
+                            pass
+                        return False, "文件超过 50MB 限制"
+                    file_hash_obj.update(chunk)
+                    f.write(chunk)
+            if source_size is None:
+                source_size = written
+        elif hasattr(uploaded_file, "getvalue"):
+            file_bytes = uploaded_file.getvalue()
+            source_size = len(file_bytes)
+            if source_size > max_size:
+                return False, "文件超过 50MB 限制"
+            file_hash_obj.update(file_bytes)
+            with open(save_path, "wb") as f:
+                f.write(file_bytes)
+        else:
+            return False, "上传对象不支持读取"
+
+        if source_size is not None and source_size > max_size:
+            try:
+                os.remove(save_path)
+            except Exception:
+                pass
+            return False, "文件超过 50MB 限制"
+        file_hash = file_hash_obj.hexdigest()
     except Exception as e:
         return False, f"保存文件失败: {e}"
 

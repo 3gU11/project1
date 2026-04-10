@@ -80,9 +80,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
+import { apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
-type InventoryResponse = { data: any[] }
 type MessageResponse = { message?: string }
 
 type Row = Record<string, any>
@@ -128,8 +127,7 @@ const modelOptions = computed(() => {
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await apiGet<InventoryResponse>('/inventory/')
-    const list = res.data || []
+    const list = await apiGetAll<Row>('/inventory/')
     rows.value = list.map((x: Row) => ({
       ...x,
       __draftModel: String(x['机型'] || ''),

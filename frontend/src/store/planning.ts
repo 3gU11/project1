@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { apiGet, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from './cache'
 
-type ListResponse<T = any> = { data: T[] }
+type ListResponse<T = any> = { data: T[]; total?: number; skip?: number; limit?: number }
 
 export const usePlanningStore = defineStore('planning', () => {
   const planList = ref<any[]>([])
@@ -12,6 +12,24 @@ export const usePlanningStore = defineStore('planning', () => {
   const loading = ref(false)
   const error = ref('')
   const cacheStore = useCacheStore()
+  const PAGE_SIZE = 1000
+
+  const fetchAllPages = async (path: string) => {
+    let skip = 0
+    let total = Number.POSITIVE_INFINITY
+    const rows: any[] = []
+    while (skip < total) {
+      const res = await apiGet<ListResponse>(`${path}?skip=${skip}&limit=${PAGE_SIZE}`)
+      const chunk = res.data || []
+      const safeTotal = Number.isFinite(Number(res.total)) ? Number(res.total) : chunk.length
+      total = safeTotal
+      rows.push(...chunk)
+      if (chunk.length === 0) break
+      skip += chunk.length
+      if (chunk.length < PAGE_SIZE) break
+    }
+    return rows
+  }
 
   const fetchPlanningDashboard = async (force = false) => {
     loading.value = true
@@ -28,14 +46,14 @@ export const usePlanningStore = defineStore('planning', () => {
           return { planList: planList.value, orderList: orderList.value, inventoryList: inventoryList.value }
         }
       }
-      const [planRes, orderRes, invRes] = await Promise.all([
-        apiGet<ListResponse>('/planning/'),
-        apiGet<ListResponse>('/planning/orders'),
-        apiGet<ListResponse>('/inventory/'),
+      const [planRows, orderRows, invRows] = await Promise.all([
+        fetchAllPages('/planning/'),
+        fetchAllPages('/planning/orders'),
+        fetchAllPages('/inventory/'),
       ])
-      planList.value = planRes.data || []
-      orderList.value = orderRes.data || []
-      inventoryList.value = invRes.data || []
+      planList.value = planRows
+      orderList.value = orderRows
+      inventoryList.value = invRows
       cacheStore.set('planning:list', planList.value, 10_000)
       cacheStore.set('planning:orders', orderList.value, 10_000)
       cacheStore.set('planning:inventory', inventoryList.value, 8_000)
