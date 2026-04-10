@@ -1289,45 +1289,55 @@ watch(editMode, (v) => {
 
 const savePlanning = async () => {
   if (!selectedId.value) return
+
+  let isFullyAllocated = true
+
   for (const row of selectedContractRows.value) {
     const key = String(row._idx)
     const draft = planDraft[key] || { spot: 0, batches: {} }
     let allocated = toInt(draft.spot)
-    for (const qty of Object.values(draft.batches || {})) allocated += toInt(qty)
+    for (const qty of Object.values(draft.batches || {})) {
+      allocated += toInt(qty)
+    }
     const need = toInt(row['排产数量'])
+
     if (allocated > need) {
       ElMessage.error(`机型 ${row['机型']} 分配超量：${allocated}/${need}`)
       return
     }
+    // 如果任何一个机型的分配量小于需求量，标记为未全部分配，但不阻断保存流程
     if (allocated < need) {
-      ElMessage.error(`机型 ${row['机型']} 规划未完成：${allocated}/${need}`)
-      return
-    }
-    if (allocated <= 0) {
-      ElMessage.error(`机型 ${row['机型']} 还未分配来源`)
-      return
+      isFullyAllocated = false
     }
   }
 
+  const rows = selectedContractRows.value.map((row: any) => {
+    const key = String(row._idx)
+    const draft = planDraft[key] || { spot: 0, batches: {} }
+    const allocation: Record<string, number> = {}
+    if (toInt(draft.spot) > 0) allocation['现货(Spot)'] = toInt(draft.spot)
+    for (const [k, v] of Object.entries(draft.batches || {})) {
+      const qty = toInt(v)
+      if (qty > 0) allocation[k] = qty
+    }
+    return {
+      row_index: Number(row._idx),
+      allocation
+    }
+  })
+
   await submitWithLock(savingPlan, async () => {
-    const rows = selectedContractRows.value.map((row: any) => {
-      const key = String(row._idx)
-      const draft = planDraft[key] || { spot: 0, batches: {} }
-      const allocation: Record<string, number> = {}
-      if (toInt(draft.spot) > 0) allocation['现货(Spot)'] = toInt(draft.spot)
-      for (const [k, v] of Object.entries(draft.batches || {})) {
-        const qty = toInt(v)
-        if (qty > 0) allocation[k] = qty
-      }
-      return { row_index: Number(row._idx), allocation }
-    })
     await apiPost(`/planning/contract/${encodeURIComponent(selectedId.value)}/save-plan`, {
       rows,
-      mark_to_planned: true,
+      mark_to_planned: isFullyAllocated // 动态传递：只有全部分配才为 true
     })
     await fetchData(true)
     initPlanDraft()
-  }, { successMessage: '规划已保存', errorMessage: '保存规划失败' })
+  }, {
+    // 根据是否全部分配动态提示
+    successMessage: isFullyAllocated ? '规划已保存' : '规划进度已保存 (部分分配)',
+    errorMessage: '保存规划失败'
+  })
 }
 
 const goDirectAllocation = async () => {

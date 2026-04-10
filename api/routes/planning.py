@@ -615,7 +615,7 @@ def save_contract_plan(contract_id: str, payload: PlanSavePayload):
                 if payload.mark_to_planned:
                     conn.execute(
                         text("""
-                            UPDATE factory_plan 
+                            UPDATE factory_plan
                             SET `指定批次/来源` = :alloc,
                                 `状态` = CASE WHEN `状态` = '待规划' THEN '已规划' ELSE `状态` END
                             WHERE id = :id AND `合同号` = :cid
@@ -623,10 +623,13 @@ def save_contract_plan(contract_id: str, payload: PlanSavePayload):
                         {"alloc": alloc_json, "id": idx, "cid": str(contract_id)}
                     )
                 else:
+                    # 核心改动：如果未全部分配（mark_to_planned 为 False），
+                    # 且数据库中该行状态已是"已规划"，则将其回退为"待规划"
                     conn.execute(
                         text("""
-                            UPDATE factory_plan 
-                            SET `指定批次/来源` = :alloc
+                            UPDATE factory_plan
+                            SET `指定批次/来源` = :alloc,
+                                `状态` = CASE WHEN `状态` = '已规划' THEN '待规划' ELSE `状态` END
                             WHERE id = :id AND `合同号` = :cid
                         """),
                         {"alloc": alloc_json, "id": idx, "cid": str(contract_id)}
