@@ -1326,6 +1326,7 @@ const savePlanning = async () => {
       mark_to_planned: true,
     })
     await fetchData(true)
+    initPlanDraft()
   }, { successMessage: '规划已保存', errorMessage: '保存规划失败' })
 }
 

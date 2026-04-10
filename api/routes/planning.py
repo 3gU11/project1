@@ -624,11 +624,6 @@ def preview_contract_file_api(contract_id: str, file_name: str):
         raise HTTPException(status_code=422, detail="该文件类型暂不支持在线预览")
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"预览附件失败: {e}")
-
-
-@router.post("/contract/{contract_id}/save-plan")
 def save_contract_plan(contract_id: str, payload: PlanSavePayload):
     try:
         df_plan = get_factory_plan()

@@ -106,10 +106,6 @@ const routes: Array<RouteRecordRaw> = [
     meta: { title: '登录' }
   },
   {
-    path: '/planing',
-    redirect: '/planning',
-  },
-  {
     path: '/403',
     name: 'Forbidden',
     component: () => import('../views/Forbidden.vue'),

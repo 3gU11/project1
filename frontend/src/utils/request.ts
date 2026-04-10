@@ -3,14 +3,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '../store/user'
 import router from '../router'
 
-const normalizeApiBaseUrl = (raw: string) => {
-  const val = String(raw || '').trim()
-  if (!val) return '/api/v1'
-  if (val.startsWith('http://') || val.startsWith('https://')) return val
-  return val.startsWith('/') ? val : `/${val}`
-}
-
-const API_BASE_URL = normalizeApiBaseUrl(String(import.meta.env.VITE_API_BASE_URL || '/api/v1'))
+const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '/api/v1')
 
 const request = axios.create({
   baseURL: API_BASE_URL,
