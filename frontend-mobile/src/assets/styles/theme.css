@@ -1,0 +1,24 @@
+:root {
+  --v7-primary: #1989fa;
+  --v7-bg: #f7f8fa;
+  --v7-card: #ffffff;
+  --v7-text: #1f2329;
+  --v7-sub: #7d8590;
+}
+
+body {
+  background: var(--v7-bg);
+  color: var(--v7-text);
+}
+
+.page {
+  padding: 12px;
+  padding-bottom: 72px;
+}
+
+.card {
+  background: var(--v7-card);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
