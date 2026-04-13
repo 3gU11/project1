@@ -30,4 +30,31 @@ request.interceptors.response.use(
   }
 )
 
+export const apiGetAll = async <T = any>(url: string, params: Record<string, any> = {}, pageSize = 1000): Promise<T[]> => {
+  let skip = 0
+  let total = Number.POSITIVE_INFINITY
+  const rows: T[] = []
+
+  while (skip < total) {
+    const res = await request.get<any, { data?: T[]; total?: number }>(url, {
+      params: {
+        ...params,
+        skip,
+        limit: pageSize,
+      },
+    })
+    const chunk = Array.isArray(res?.data) ? res.data : []
+    rows.push(...chunk)
+
+    const nextTotal = Number(res?.total)
+    total = Number.isFinite(nextTotal) ? nextTotal : chunk.length
+
+    if (chunk.length === 0) break
+    skip += chunk.length
+    if (chunk.length < pageSize) break
+  }
+
+  return rows
+}
+
 export default request

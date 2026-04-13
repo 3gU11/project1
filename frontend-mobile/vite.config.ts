@@ -1,9 +1,15 @@
 import { defineConfig } from 'vite'
+import legacy from '@vitejs/plugin-legacy'
 import vue from '@vitejs/plugin-vue'
 import path from 'node:path'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    legacy({
+      targets: ['defaults', 'Safari >= 12', 'iOS >= 12'],
+    }),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -18,8 +24,5 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-  },
-  build: {
-    target: 'es2018',
   },
 })

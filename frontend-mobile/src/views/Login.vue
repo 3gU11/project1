@@ -63,7 +63,7 @@ const onSubmit = async () => {
   try {
     await userStore.login(username.value, password.value)
     showToast('登录成功')
-    router.replace('/inbound')
+    router.replace('/query')
   } finally {
     loading.value = false
   }
