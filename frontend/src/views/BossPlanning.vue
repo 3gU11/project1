@@ -825,12 +825,24 @@ const contractPlanSaved = computed(() => {
   const s = String(contractFirst.value?.['状态'] || '')
   return ['已规划', '已转订单', '已下单', '已配货'].includes(s)
 })
+const persistedContractRowProgress = (row: any) => {
+  const need = Math.max(1, toInt(row['排产数量']))
+  const src = (row['指定批次/来源'] || {}) as Record<string, any>
+  let total = 0
+  for (const qty of Object.values(src)) total += toInt(qty)
+  return Math.min(100, Math.round((total / need) * 100))
+}
+const contractPlanSavedReady = computed(() => {
+  if (!isContractSelected.value) return false
+  if (selectedContractRows.value.length === 0) return false
+  return selectedContractRows.value.every((r: any) => persistedContractRowProgress(r) >= 100)
+})
 const contractPlanReady = computed(() => {
   if (!isContractSelected.value) return false
   if (selectedContractRows.value.length === 0) return false
   return selectedContractRows.value.every((r: any) => rowProgress(r) >= 100)
 })
-const canShowDirectAllocation = computed(() => contractPlanSaved.value && contractPlanReady.value)
+const canShowDirectAllocation = computed(() => contractPlanSaved.value && contractPlanSavedReady.value)
 
 const loadEditForm = () => {
   const first = contractFirst.value

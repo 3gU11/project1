@@ -120,7 +120,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type UploadUserFile } from 'element-plus'
-import request, { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
+import { getMachineArchivePreviewObjectUrl } from '../utils/machineArchivePreview'
+import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 type ListResponse<T = any> = { data: T[] }
 
 const loadingSerials = ref(false)
@@ -160,16 +161,11 @@ const loadRenderedImages = async () => {
   const next: Array<{ file_name: string; size: number; update_time: string; objectUrl: string }> = []
   for (const file of imageFiles.value) {
     try {
-      const response = await request.get(
-        `/inventory/machine-archive/${encodeURIComponent(selectedSerial.value)}/files/${encodeURIComponent(String(file.file_name || ''))}/preview`,
-        { responseType: 'blob' }
-      )
-      const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
       next.push({
         file_name: String(file.file_name || ''),
         size: Number(file.size || 0),
         update_time: String(file.update_time || ''),
-        objectUrl: URL.createObjectURL(blob),
+        objectUrl: await getMachineArchivePreviewObjectUrl(selectedSerial.value, String(file.file_name || '')),
       })
     } catch {
       // Skip broken image entries so the page can still render remaining images.
