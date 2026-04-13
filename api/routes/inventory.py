@@ -519,7 +519,7 @@ def machine_archive_files(serial_no: str):
                 files.append({
                     "file_name": name,
                     "ext": ext,
-                    "is_image": ext in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"],
+                    "is_image": ext in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".heic", ".heif"],
                     "size": os.path.getsize(abs_path),
                     "update_time": datetime.fromtimestamp(os.path.getmtime(abs_path)).strftime("%Y-%m-%d %H:%M:%S"),
                 })
@@ -542,7 +542,7 @@ async def machine_archive_upload(serial_no: str, label: str = Form(""), files: L
         safe_label = _safe_name(label) or "档案"
         for idx, up in enumerate(files, start=1):
             ext = os.path.splitext(str(up.filename or ""))[1].lower() or ".jpg"
-            if ext not in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".pdf", ".doc", ".docx", ".txt"]:
+            if ext not in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".heic", ".heif", ".pdf", ".doc", ".docx", ".txt"]:
                 continue
             final_name = f"{safe_label}_{idx}_{ts}{ext}"
             save_path = os.path.join(sn_dir, final_name)
