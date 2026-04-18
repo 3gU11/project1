@@ -238,6 +238,23 @@ def clear_import_staging():
         raise RuntimeError(f"清空待入库数据失败: {e}") from e
 
 
+def delete_import_staging_by_serials(serial_nos):
+    cleaned = [str(sn).strip() for sn in (serial_nos or []) if str(sn).strip()]
+    if not cleaned:
+        return 0
+    try:
+        with get_engine().begin() as conn:
+            placeholders = ", ".join([f":sn{i}" for i in range(len(cleaned))])
+            params = {f"sn{i}": sn for i, sn in enumerate(cleaned)}
+            result = conn.execute(
+                text(f"DELETE FROM plan_import WHERE `流水号` IN ({placeholders})"),
+                params,
+            )
+            return int(result.rowcount or 0)
+    except (OperationalError, Exception) as e:
+        raise RuntimeError(f"删除待入库数据失败: {e}") from e
+
+
 def get_warehouse_layout(layout_id="default"):
     try:
         with get_engine().connect() as conn:

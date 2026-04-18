@@ -142,6 +142,7 @@ import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useInventoryStore } from '../store/inventory'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
+import { compareModels, getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 
 const loading = ref(false)
 const inventoryList = ref<any[]>([])
@@ -175,12 +176,7 @@ const handleSearch = () => {
 }
 
 const modelOptions = computed(() => {
-  const set = new Set<string>()
-  for (const row of inventoryList.value) {
-    const model = String(row['机型'] || '').trim()
-    if (model) set.add(model)
-  }
-  return Array.from(set)
+  return getModelOrderList()
 })
 
 const indexedRows = computed(() => buildInventoryIndex(inventoryList.value))
@@ -207,10 +203,11 @@ const totalCount = computed(() => filteredForStats.value.length)
 const inStockCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '').startsWith('库存中')).length)
 const pendingCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '') === '待入库').length)
 
-const modelSummary = computed(() => {
+const modelSummarySource = computed(() => {
   const map = new Map<string, { 机型: string; 库存中: number; 待入库: number; 全部: number }>()
   for (const row of filteredForStats.value) {
     const model = String(row['机型'] || '未知')
+    if (!isModelInDictionary(model)) continue
     if (!map.has(model)) map.set(model, { 机型: model, 库存中: 0, 待入库: 0, 全部: 0 })
     const hit = map.get(model)!
     const s = String(row['状态'] || '')
@@ -218,11 +215,19 @@ const modelSummary = computed(() => {
     if (s === '待入库') hit.待入库 += 1
     hit.全部 += 1
   }
-  return Array.from(map.values()).sort((a, b) => b.全部 - a.全部)
+  return Array.from(map.values())
+})
+
+const modelSummary = computed(() => {
+  return [...modelSummarySource.value].sort((a, b) => compareModels(a.机型, b.机型))
+})
+
+const modelSummaryByCount = computed(() => {
+  return [...modelSummarySource.value].sort((a, b) => (b.全部 - a.全部) || compareModels(a.机型, b.机型))
 })
 
 const ratioBoard = computed(() => {
-  return modelSummary.value.slice(0, 8).map((row) => ({
+  return modelSummaryByCount.value.slice(0, 8).map((row) => ({
     model: row.机型,
     count: row.全部,
     percent: totalCount.value > 0 ? ((row.全部 / totalCount.value) * 100).toFixed(1) : '0.0',
@@ -232,7 +237,7 @@ const ratioBoard = computed(() => {
 const palette = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#6366f1', '#06b6d4', '#f97316', '#a855f7', '#14b8a6', '#fb7185']
 
 const top10Dist = computed(() => {
-  return modelSummary.value.slice(0, 10).map((row) => ({
+  return modelSummaryByCount.value.slice(0, 10).map((row) => ({
     model: row.机型,
     count: row.全部,
     percent: totalCount.value > 0 ? (row.全部 / totalCount.value) * 100 : 0,

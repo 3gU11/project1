@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 from urllib.parse import unquote
+import base64
 import re
 import asyncio
 
@@ -17,6 +18,7 @@ from config import BASE_DIR
 from core.file_manager import delete_contract_file, save_contract_file
 from crud.contracts import get_contract_files
 from crud.inventory import get_data
+from crud.model_dictionary import is_model_enabled
 from crud.planning import get_factory_plan, save_factory_plan
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_token
@@ -44,6 +46,32 @@ def _parse_order_need_total(row: pd.Series) -> int:
     except Exception:
         fallback = 0
     return max(0, fallback)
+
+
+def _extract_models_from_demand_text(raw_text: str) -> list[str]:
+    models: list[str] = []
+    raw = str(raw_text or "")
+    for token_raw in raw.split(";"):
+        token = token_raw.strip()
+        if not token:
+            continue
+        model_part = re.sub(r"(?:[x×:：]\s*)\d+\s*$", "", token, flags=re.IGNORECASE).strip()
+        model_name = model_part.replace("(加高)", "").strip()
+        if model_name:
+            models.append(model_name)
+    return models
+
+
+def _assert_models_in_dictionary(models: list[str]) -> None:
+    invalid = [m for m in models if m and not is_model_enabled(m)]
+    if invalid:
+        unique_invalid = []
+        seen = set()
+        for item in invalid:
+            if item not in seen:
+                seen.add(item)
+                unique_invalid.append(item)
+        raise HTTPException(status_code=422, detail=f"机型不在字典中或未启用: {'，'.join(unique_invalid)}")
 
 
 def _reconcile_completed_orders(df_orders: pd.DataFrame) -> pd.DataFrame:
@@ -228,6 +256,7 @@ def get_sales_orders(
 @router.post("/orders")
 def create_sales_order_api(payload: SalesOrderCreatePayload):
     try:
+        _assert_models_in_dictionary(_extract_models_from_demand_text(str(payload.需求机型 or "")))
         df_orders = get_orders()
         order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
         new_row = {
@@ -260,6 +289,8 @@ def update_sales_order_api(order_id: str, payload: SalesOrderUpdatePayload):
             raise HTTPException(status_code=404, detail="订单不存在")
 
         updates = payload.model_dump(exclude_unset=True)
+        if "需求机型" in updates:
+            _assert_models_in_dictionary(_extract_models_from_demand_text(str(updates.get("需求机型") or "")))
         for key, value in updates.items():
             if key == "需求数量" and value is not None:
                 df_orders.loc[mask, key] = int(value)
@@ -416,6 +447,7 @@ def create_contracts_batch(payload: BatchContractCreatePayload):
         rows = payload.rows or []
         if not rows:
             raise HTTPException(status_code=422, detail="请至少提供 1 条合同记录")
+        _assert_models_in_dictionary([str(item.机型 or "").strip() for item in rows])
 
         df_plan = get_factory_plan()
         now_status = "未下单"
@@ -469,6 +501,7 @@ def edit_contract(contract_id: str, payload: ContractEditPayload):
     try:
         if not payload.items:
             raise HTTPException(status_code=422, detail="至少保留一条机型明细")
+        _assert_models_in_dictionary([str(item.机型 or "").strip() for item in payload.items])
 
         df_plan = get_factory_plan()
         target_mask = df_plan["合同号"].astype(str) == str(contract_id)
@@ -584,6 +617,63 @@ def download_contract_file_api(contract_id: str, file_name: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"下载附件失败: {e}")
+
+
+@router.get("/contract/{contract_id}/files/{file_name}/preview")
+def preview_contract_file_api(contract_id: str, file_name: str):
+    try:
+        decoded_name = unquote(file_name)
+        df = get_contract_files(contract_id)
+        if df.empty:
+            raise HTTPException(status_code=404, detail="附件不存在")
+        hit = df[df["file_name"].astype(str) == decoded_name]
+        if hit.empty:
+            raise HTTPException(status_code=404, detail="附件不存在")
+
+        rel_path = str(hit.iloc[0].get("file_path", "")).strip()
+        if not rel_path:
+            raise HTTPException(status_code=404, detail="附件路径无效")
+        abs_path = os.path.join(BASE_DIR, rel_path)
+        if not os.path.exists(abs_path):
+            raise HTTPException(status_code=404, detail="附件文件不存在")
+
+        ext = os.path.splitext(decoded_name)[1].lower()
+        if ext in {".pdf", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}:
+            mime_map = {
+                ".pdf": "application/pdf",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+                ".bmp": "image/bmp",
+                ".webp": "image/webp",
+            }
+            with open(abs_path, "rb") as f:
+                encoded = base64.b64encode(f.read()).decode("ascii")
+            return {
+                "type": "url",
+                "url": f"data:{mime_map[ext]};base64,{encoded}",
+                "ext": ext,
+            }
+
+        if ext == ".docx":
+            try:
+                import mammoth
+            except ImportError:
+                raise HTTPException(status_code=422, detail="服务端缺少 mammoth，暂不支持 DOCX 在线预览")
+            with open(abs_path, "rb") as f:
+                result = mammoth.convert_to_html(f)
+            return {
+                "type": "html",
+                "html": result.value or "",
+                "ext": ext,
+            }
+
+        return {"type": "", "ext": ext}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"预览附件失败: {e}")
 
 
 @router.post("/contract/{contract_id}/save-plan")

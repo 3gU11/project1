@@ -17,6 +17,7 @@ from core.file_manager import audit_log
 from crud.inventory import (
     INVENTORY_COLS,
     append_import_staging,
+    delete_import_staging_by_serials,
     get_data,
     get_import_staging,
     get_warehouse_layout,
@@ -28,6 +29,7 @@ from crud.inventory import (
     archive_shipped_data,
 )
 from crud.logs import append_log
+from crud.model_dictionary import is_model_enabled
 from crud.orders import get_orders, revert_to_inbound
 from api.routes.auth import get_current_operator_name, get_current_user_token
 from database import get_engine
@@ -40,6 +42,14 @@ from utils.parsers import (
 )
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
+
+
+def _assert_model_enabled(model_name: str) -> None:
+    model = str(model_name or "").replace("(加高)", "").strip()
+    if not model:
+        raise HTTPException(status_code=422, detail="机型不能为空")
+    if not is_model_enabled(model):
+        raise HTTPException(status_code=422, detail=f"机型不在字典中或未启用: {model}")
 
 
 class LayoutPayload(BaseModel):
@@ -64,6 +74,10 @@ class ImportStagingSavePayload(BaseModel):
 class ImportConfirmPayload(BaseModel):
     selected_track_nos: List[str] = Field(default_factory=list)
     expected_inbound_date: str
+
+
+class ImportStagingDeletePayload(BaseModel):
+    serial_nos: List[str] = Field(default_factory=list)
 
 
 class AutoGeneratePayload(BaseModel):
@@ -152,6 +166,9 @@ def update_inventory(data: List[Dict[str, Any]]):
             missing_sn = [idx for idx, item in enumerate(data) if not str(item.get("流水号", "")).strip()]
             if missing_sn:
                 raise HTTPException(status_code=422, detail=f"第 {missing_sn[:10]} 条记录缺少必填字段: 流水号")
+            for item in data:
+                if "机型" in item and str(item.get("机型", "")).strip():
+                    _assert_model_enabled(str(item.get("机型", "")))
         df = pd.DataFrame(data)
         unknown_cols = [c for c in df.columns if c not in INVENTORY_COLS]
         if unknown_cols:
@@ -178,8 +195,7 @@ def machine_inline_update(serial_no: str, payload: MachineInlineUpdatePayload):
             raise HTTPException(status_code=404, detail="机台不存在")
         if payload.model is not None:
             model = str(payload.model).strip()
-            if not model:
-                raise HTTPException(status_code=422, detail="机型不能为空")
+            _assert_model_enabled(model)
             df.loc[mask, "机型"] = model
         if payload.note is not None:
             df.loc[mask, "机台备注/配置"] = str(payload.note).strip()
@@ -204,6 +220,7 @@ def machine_batch_update(payload: MachineBatchUpdatePayload):
             raise HTTPException(status_code=404, detail="未找到对应机台")
 
         if payload.model is not None and str(payload.model).strip():
+            _assert_model_enabled(str(payload.model).strip())
             df.loc[mask, "机型"] = str(payload.model).strip()
 
         note_parts = []
@@ -319,6 +336,9 @@ async def upload_tracking_sheet(file: UploadFile = File(...)):
         diff_df = await asyncio.to_thread(diff_tracking_vs_inventory, parsed_df)
         if diff_df.empty:
             return {"message": "所有解析到的流水号均已在库存中，无需导入。", "appended": 0}
+        for model in diff_df.get("机型", pd.Series(dtype=str)).astype(str).tolist():
+            if model.strip():
+                _assert_model_enabled(model)
 
         appended = await asyncio.to_thread(append_import_staging, diff_df)
         return {"message": f"解析成功！已追加 {appended} 条记录到待入库清单。", "appended": appended}
@@ -340,10 +360,28 @@ def save_import_staging_rows(payload: ImportStagingSavePayload):
 
     try:
         df = pd.DataFrame(payload.rows or [])
+        if not df.empty and "机型" in df.columns:
+            for model in df["机型"].astype(str).tolist():
+                if model.strip():
+                    _assert_model_enabled(model)
         save_import_staging(df)
         return {"message": "待入库清单保存成功"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存失败: {e}")
+
+
+@router.post("/import-staging/delete")
+def delete_import_staging_rows(payload: ImportStagingDeletePayload):
+    try:
+        serial_nos = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
+        if not serial_nos:
+            raise HTTPException(status_code=422, detail="请先勾选至少 1 条数据")
+        deleted = delete_import_staging_by_serials(serial_nos)
+        return {"message": f"已删除 {deleted} 条待入库数据", "deleted": deleted}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
 
 
 @router.post("/import-staging/import-confirm")
@@ -385,6 +423,7 @@ def import_confirm(payload: ImportConfirmPayload):
 @router.post("/import-staging/auto-generate")
 def auto_generate_import_rows(payload: AutoGeneratePayload):
     try:
+        _assert_model_enabled(payload.model)
         code, msg = generate_auto_inbound(
             payload.batch,
             payload.model,

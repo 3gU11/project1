@@ -224,6 +224,18 @@ def init_mysql_tables():
             PRIMARY KEY (`layout_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
+        """
+        CREATE TABLE IF NOT EXISTS model_dictionary (
+            `id`         INT NOT NULL AUTO_INCREMENT,
+            `model_name` VARCHAR(100) NOT NULL,
+            `sort_order` INT NOT NULL DEFAULT 0,
+            `enabled`    TINYINT(1) NOT NULL DEFAULT 1,
+            `remark`     VARCHAR(255) DEFAULT '',
+            `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_model_dictionary_name` (`model_name`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
     ]
     with engine.begin() as conn:
         def _index_exists(table_name, index_name):

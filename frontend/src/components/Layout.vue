@@ -44,11 +44,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../store/user'
+import { useModelDictionaryStore } from '../store/modelDictionary'
 import { getAccessibleMenus } from '../router'
 import { cancelIdleRun, runWhenIdle } from '../utils/compat'
 import { normalizeRole } from '../utils/roles'
 
 const userStore = useUserStore()
+const modelDictionaryStore = useModelDictionaryStore()
 const router = useRouter()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
@@ -60,7 +62,7 @@ const visibleMenus = computed(() => {
   return getAccessibleMenus(userStore.userInfo?.role).filter((m) => {
     if (onHome) {
       // 在首页时，侧边栏仅保留这 4 个菜单
-      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability']
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary']
       return allowedInHome.includes(m.path)
     }
     return true
@@ -85,8 +87,8 @@ const warmupByRole = () => {
   const role = normalizeRole(userStore.userInfo?.role || '')
   const common = ['/inventory', '/warehouse-dashboard']
   const byRole: Record<string, string[]> = {
-    Admin: ['/users', '/logs', '/planning', '/contracts'],
-    Boss: ['/planning', '/contracts', '/sales-orders', '/order-allocation'],
+    Admin: ['/users', '/logs', '/planning', '/contracts', '/model-dictionary'],
+    Boss: ['/planning', '/contracts', '/sales-orders', '/order-allocation', '/model-dictionary'],
     Sales: ['/sales-orders', '/order-allocation', '/contracts'],
     Prod: ['/inbound', '/machine-archive', '/machine-edit', '/shipping-review'],
     Inbound: ['/inbound', '/warehouse-dashboard', '/inventory'],
@@ -127,6 +129,11 @@ onMounted(() => {
   syncViewport()
   window.addEventListener('resize', syncViewport)
   warmupHandle = runWhenIdle(() => warmupByRole(), 400)
+  if (userStore.isAuthenticated) {
+    modelDictionaryStore.ensureLoaded().catch(() => {
+      // Keep default order when dictionary API is temporarily unavailable.
+    })
+  }
 })
 onBeforeUnmount(() => {
   cancelIdleRun(warmupHandle)

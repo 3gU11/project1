@@ -23,6 +23,7 @@ type AppRouteDef = {
 const appRouteDefs: AppRouteDef[] = [
   { path: '/planning', name: 'Planning', label: '👑 生产统筹/订单规划', title: '生产统筹', roles: ['Admin', 'Boss', 'Sales'], isManagement: true, component: () => import('../views/BossPlanning.vue') },
   { path: '/contracts', name: 'Contracts', label: '📊 合同管理', title: '合同管理', roles: ['Admin', 'Boss', 'Sales'], isManagement: true, component: () => import('../views/ContractManage.vue') },
+  { path: '/model-dictionary', name: 'ModelDictionary', label: '📚 机型字典', title: '机型字典', roles: ['Admin', 'Boss'], isManagement: true, component: () => import('../views/ModelDictionary.vue') },
   { path: '/users', name: 'Users', label: '👤 用户管理', title: '用户管理', roles: ['Admin'], isManagement: true, component: () => import('../views/UserManagement.vue') },
   { path: '/sales-orders', name: 'SalesOrders', label: '📌 销售下单', title: '销售下单', roles: ['Admin', 'Boss', 'Sales'], component: () => import('../views/SalesOrder.vue') },
   { path: '/order-allocation', name: 'OrderAllocation', label: '📦 订单配货', title: '订单配货', roles: ['Admin', 'Boss', 'Sales'], component: () => import('../views/OrderAllocation.vue') },

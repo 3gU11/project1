@@ -51,7 +51,9 @@
         </el-table-column>
         <el-table-column label="机型">
           <template #default="scope">
-            <el-input v-model="scope.row.model" />
+            <el-select v-model="scope.row.model" filterable placeholder="请选择机型" style="width: 100%">
+              <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+            </el-select>
           </template>
         </el-table-column>
         <el-table-column label="数量" width="120">
@@ -149,6 +151,7 @@ import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
+import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
 
 type ViewMode = 'urgent' | 'recent' | 'all'
@@ -175,8 +178,9 @@ const batchForm = ref({
   contractNote: '',
 })
 const batchItems = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([
-  { model: 'FH-260C', qty: 1, high: false, rowNote: '' },
+  { model: '', qty: 1, high: false, rowNote: '' },
 ])
+const modelOptions = computed(() => getModelOrderList())
 
 const todayYmd = () => new Date().toISOString().slice(0, 10)
 const genContractId = () => {
@@ -196,7 +200,7 @@ const resetBatchForm = () => {
     agent: '',
     contractNote: '',
   }
-  batchItems.value = [{ model: 'FH-260C', qty: 1, high: false, rowNote: '' }]
+  batchItems.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
   batchPickedFiles.value = []
 }
 
@@ -327,6 +331,11 @@ const submitBatchContracts = async () => {
   const validRows = batchItems.value.filter((r) => hasText(r.model) && isPositiveInteger(r.qty))
   if (validRows.length === 0) {
     ElMessage.warning('请至少填写 1 条机型明细')
+    return
+  }
+  const invalidModels = validRows.map((r) => String(r.model || '').trim()).filter((m) => !isModelInDictionary(m))
+  if (invalidModels.length > 0) {
+    ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
     return
   }
 

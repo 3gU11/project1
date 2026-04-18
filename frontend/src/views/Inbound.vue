@@ -85,9 +85,12 @@
           </div>
 
           <div class="import-actions">
-            <el-checkbox v-model="selectAllCurrentPage">全选/取消全选</el-checkbox>
-            <span>已选 {{ selectedCountCurrentPage }} 条</span>
+            <el-checkbox v-model="selectAllTable">全选/取消全选（全表）</el-checkbox>
+            <span>已选 {{ selectedCountAll }} 条</span>
             <el-button size="small" @click="saveCurrentPageEdits">💾 保存本页编辑</el-button>
+            <el-button size="small" type="danger" :disabled="selectedCountAll === 0" @click="deleteSelectedStagingRows">
+              🗑 删除勾选项
+            </el-button>
           </div>
 
           <el-table :data="stagingPagedRows" border stripe>
@@ -108,7 +111,9 @@
             </el-table-column>
             <el-table-column prop="机型" label="机型" width="130">
               <template #default="scope">
-                <el-input v-model="scope.row['机型']" />
+                <el-select v-model="scope.row['机型']" filterable placeholder="请选择机型" style="width: 100%">
+                  <el-option v-for="model in autoGenModelOptions" :key="model" :label="model" :value="model" />
+                </el-select>
               </template>
             </el-table-column>
             <el-table-column prop="状态" label="状态" width="100">
@@ -156,7 +161,19 @@
           <template #header>⚡ 辅助功能：自动生成流水号 (Auto Generate)</template>
           <div class="auto-grid">
             <el-input v-model="autoGen.batch" placeholder="批次号" />
-            <el-input v-model="autoGen.model" placeholder="机型" />
+            <el-select
+              v-model="autoGen.model"
+              filterable
+              clearable
+              placeholder="请选择机型"
+            >
+              <el-option
+                v-for="model in autoGenModelOptions"
+                :key="model"
+                :label="model"
+                :value="model"
+              />
+            </el-select>
             <el-input-number v-model="autoGen.qty" :min="1" />
             <el-date-picker v-model="autoGen.expectedDate" type="date" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
           </div>
@@ -187,6 +204,7 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { ElMessage } from 'element-plus'
 import { useFormSubmit } from '../composables/useFormSubmit'
+import { compareModels, getModelOrderList, sortRowsByModel } from '../utils/modelOrder'
 import {
   buildSlotStats,
   defaultSlots,
@@ -242,6 +260,10 @@ const autoGen = reactive({
   confirmed: false,
 })
 
+const autoGenModelOptions = computed(() => {
+  return getModelOrderList()
+})
+
 const pendingRows = computed(() => {
   let rows = inventory.value.filter((item) => String(item['状态'] || '').includes('待入库'))
   const kw = pendingKeyword.value.trim().toLowerCase()
@@ -260,7 +282,7 @@ const pendingRows = computed(() => {
       String(item['机型'] || '').toLowerCase().includes(kw)
     )
   }
-  return rows
+  return sortRowsByModel(rows, (item) => String(item['机型'] || ''))
 })
 
 const slotStats = computed(() => {
@@ -295,7 +317,7 @@ const fetchInventory = async () => {
 const fetchImportStaging = async () => {
   try {
     const stagingAllRows = await apiGetAll<any>('/inventory/import-staging')
-    stagingRows.value = stagingAllRows.map((r: any) => ({
+    const nextRows = stagingAllRows.map((r: any) => ({
       流水号: String(r['流水号'] || '').trim(),
       批次号: String(r['批次号'] || '').trim(),
       机型: String(r['机型'] || '').trim(),
@@ -303,6 +325,15 @@ const fetchImportStaging = async () => {
       预计入库时间: String(r['预计入库时间'] || '').slice(0, 10),
       '机台备注/配置': String(r['机台备注/配置'] || ''),
     }))
+    stagingRows.value = nextRows
+    const validSerials = new Set(nextRows.map((r: any) => String(r['流水号'] || '').trim()).filter((sn: string) => !!sn))
+    const nextSelected: Record<string, boolean> = {}
+    for (const sn of Object.keys(stagingSelectedMap.value)) {
+      if (validSerials.has(sn) && stagingSelectedMap.value[sn]) {
+        nextSelected[sn] = true
+      }
+    }
+    stagingSelectedMap.value = nextSelected
   } catch (err: any) {
     error.value = getApiErrorMessage(err) || `读取待入库清单失败: ${err.message || err}`
   }
@@ -341,6 +372,9 @@ const stagingFilteredRows = computed(() => {
   rows.sort((a, b) => {
     const av = String(a[stagingSortCol.value] || '')
     const bv = String(b[stagingSortCol.value] || '')
+    if (stagingSortCol.value === '机型') {
+      return stagingSortAsc.value ? compareModels(av, bv) : compareModels(bv, av)
+    }
     return stagingSortAsc.value ? av.localeCompare(bv) : bv.localeCompare(av)
   })
   return rows
@@ -352,22 +386,31 @@ const stagingPagedRows = computed(() => {
   return stagingFilteredRows.value.slice(start, end)
 })
 
-const selectedCountCurrentPage = computed(() => {
+const selectedStagingSerialNos = computed(() => {
+  const serialNos: string[] = []
+  for (const row of stagingRows.value) {
+    const sn = String(row['流水号'] || '').trim()
+    if (sn && stagingSelectedMap.value[sn]) serialNos.push(sn)
+  }
+  return serialNos
+})
+
+const selectedCountAll = computed(() => {
   let count = 0
-  for (const row of stagingPagedRows.value) {
+  for (const row of stagingRows.value) {
     const sn = String(row['流水号'] || '').trim()
     if (sn && stagingSelectedMap.value[sn]) count += 1
   }
   return count
 })
 
-const selectAllCurrentPage = computed({
+const selectAllTable = computed({
   get() {
-    if (stagingPagedRows.value.length === 0) return false
-    return stagingPagedRows.value.every((row) => stagingSelectedMap.value[String(row['流水号'] || '').trim()])
+    if (stagingRows.value.length === 0) return false
+    return stagingRows.value.every((row) => stagingSelectedMap.value[String(row['流水号'] || '').trim()])
   },
   set(v: boolean) {
-    for (const row of stagingPagedRows.value) {
+    for (const row of stagingRows.value) {
       const sn = String(row['流水号'] || '').trim()
       if (sn) stagingSelectedMap.value[sn] = v
     }
@@ -375,7 +418,7 @@ const selectAllCurrentPage = computed({
 })
 
 const canConfirmImport = computed(() => {
-  return selectedCountCurrentPage.value > 0 && !!selectedInboundDate.value
+  return selectedCountAll.value > 0 && !!selectedInboundDate.value
 })
 
 const saveCurrentPageEdits = async () => {
@@ -390,6 +433,27 @@ const saveCurrentPageEdits = async () => {
     await fetchImportStaging()
   } catch (err: any) {
     error.value = `保存失败: ${err.message || err}`
+  }
+}
+
+const deleteSelectedStagingRows = async () => {
+  const serialNos = [...selectedStagingSerialNos.value]
+  if (serialNos.length === 0) {
+    ElMessage.warning('请先勾选至少 1 条数据')
+    return
+  }
+
+  try {
+    const response = await apiPost<MessageResponse & { deleted?: number }>('/inventory/import-staging/delete', {
+      serial_nos: serialNos,
+    })
+    for (const sn of serialNos) {
+      delete stagingSelectedMap.value[sn]
+    }
+    ElMessage.success(response.message || `已删除 ${serialNos.length} 条数据`)
+    await fetchImportStaging()
+  } catch (err: any) {
+    error.value = getApiErrorMessage(err) || `删除失败: ${err.message || err}`
   }
 }
 
@@ -414,11 +478,7 @@ const uploadTracking = async () => {
 }
 
 const confirmImport = async () => {
-  const selectedTrackNos: string[] = []
-  for (const row of stagingPagedRows.value) {
-    const sn = String(row['流水号'] || '').trim()
-    if (sn && stagingSelectedMap.value[sn]) selectedTrackNos.push(sn)
-  }
+  const selectedTrackNos = [...selectedStagingSerialNos.value]
   if (selectedTrackNos.length === 0) {
     ElMessage.warning('请先勾选至少 1 条数据')
     return

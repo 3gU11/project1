@@ -152,7 +152,11 @@
             </el-table>
             <el-table v-else :data="editForm.items" border stripe>
               <el-table-column label="机型">
-                <template #default="scope"><el-input v-model="scope.row.机型" /></template>
+                <template #default="scope">
+                  <el-select v-model="scope.row.机型" filterable placeholder="请选择机型" style="width: 100%">
+                    <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+                  </el-select>
+                </template>
               </el-table-column>
               <el-table-column label="数量" width="120">
                 <template #default="scope"><el-input-number v-model="scope.row.排产数量" :min="1" /></template>
@@ -374,6 +378,7 @@ import EditModePanel from '../components/EditModePanel.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { usePlanningStore } from '../store/planning'
 import { formatYearMonth, toTimestampSafe } from '../utils/compat'
+import { compareModels, getModelOrderList, isModelInDictionary, normalizeModelName, sortRowsByModel } from '../utils/modelOrder'
 type FileListResponse = { data: any[] }
 type PreviewResponse = { type?: '' | 'url' | 'html'; url?: string; html?: string; ext?: string }
 
@@ -433,6 +438,7 @@ const editForm = reactive({
   deadline: '',
   items: [] as Array<{ 机型: string; 排产数量: number; 备注: string }>,
 })
+const modelOptions = computed(() => getModelOrderList())
 
 const hasRenderableData = computed(
   () => planList.value.length > 0 || orderList.value.length > 0 || inventoryList.value.length > 0,
@@ -576,7 +582,9 @@ const pendingMonthGroups = computed(() => {
     const first = rs[0]
     const customer = String(first['客户名'] || '-')
     if (term && !id.toLowerCase().includes(term) && !customer.toLowerCase().includes(term)) continue
-    const modelSummary = rs.map((x) => `${x['机型']} x${x['排产数量']}`).join(' / ')
+    const modelSummary = sortRowsByModel(rs, (x) => String(x['机型'] || ''))
+      .map((x) => `${x['机型']} x${x['排产数量']}`)
+      .join(' / ')
     list.push({ id, customer, modelSummary, month: monthKey(String(first['要求交期'] || '')) })
   }
   const grouped = groupByMonth(list)
@@ -596,7 +604,9 @@ const planningMonthGroups = computed(() => {
     const first = rs[0]
     const customer = String(first['客户名'] || '-')
     if (term && !id.toLowerCase().includes(term) && !customer.toLowerCase().includes(term)) continue
-    const modelSummary = rs.map((x) => String(x['机型'] || '')).join(', ')
+    const modelSummary = sortRowsByModel(rs, (x) => String(x['机型'] || ''))
+      .map((x) => String(x['机型'] || ''))
+      .join(', ')
     list.push({ id, customer, modelSummary, month: monthKey(String(first['要求交期'] || '')) })
   }
   const grouped = groupByMonth(list)
@@ -695,7 +705,12 @@ const selectOrder = (id: string) => {
   selectedId.value = id
 }
 
-const selectedContractRows = computed(() => planList.value.filter((r: any) => String(r['合同号'] || '') === selectedId.value))
+const selectedContractRows = computed(() =>
+  sortRowsByModel(
+    planList.value.filter((r: any) => String(r['合同号'] || '') === selectedId.value),
+    (r) => String(r['机型'] || '')
+  )
+)
 const selectedOrderRows = computed(() => orderList.value.filter((r: any) => String(r['订单号'] || '') === selectedId.value))
 const expandedOrderPlanRows = computed(() => {
   const rows: any[] = []
@@ -710,13 +725,13 @@ const expandedOrderPlanRows = computed(() => {
       const m2 = p.match(/[x×]\s*(\d+)\s*$/i)
       const qty = m1 ? toInt(m1[1]) : m2 ? toInt(m2[1]) : 1
       const high = String(p).includes('加高') || String(rawModel).includes('加高')
-      const model = normalizeModel(
+      const model = normalizeModelName(
         p.replace(/[:：]\s*\d+\s*$/, '').replace(/[x×]\s*\d+\s*$/i, '').replace(/\[[^\]]*]/g, '').trim(),
       )
       if (model) parsed.push({ model, qty: Math.max(1, qty), high })
     }
     if (parsed.length === 0) {
-      parsed.push({ model: normalizeModel(rawModel), qty: totalNeed, high: String(rawModel).includes('加高') })
+      parsed.push({ model: normalizeModelName(rawModel), qty: totalNeed, high: String(rawModel).includes('加高') })
     }
     const sumQty = parsed.reduce((s, x) => s + x.qty, 0)
     // 若拆分数量异常，退回总数量，避免规划总量与订单不一致
@@ -731,7 +746,7 @@ const expandedOrderPlanRows = computed(() => {
       })
     })
   }
-  return rows
+  return rows.sort((a, b) => compareModels(String(a._planModel || ''), String(b._planModel || '')))
 })
 const contractFirst = computed(() => selectedContractRows.value[0] || null)
 const selectedOrderFirst = computed(() => selectedOrderRows.value[0] || null)
@@ -990,9 +1005,8 @@ const toInt = (v: any) => {
 }
 
 const isHighModel = (model: string) => String(model || '').includes('(加高)')
-const normalizeModel = (model: string) => String(model || '').replace('(加高)', '').trim()
 const inventoryModelKey = (real: string, high: boolean) => `${real}::${high ? 1 : 0}`
-const modelKeyFromRowModel = (model: string) => inventoryModelKey(normalizeModel(model), isHighModel(model))
+const modelKeyFromRowModel = (model: string) => inventoryModelKey(normalizeModelName(model), isHighModel(model))
 const modelKeyFromOrderRow = (row: any) =>
   inventoryModelKey(String(row._planModel || modelOfOrderRow(row) || ''), Boolean(row._planHigh))
 
@@ -1004,7 +1018,7 @@ const inventoryIndex = computed(() => {
 
   for (const i of inventoryList.value) {
     if (String(i['占用订单号'] || '') !== '') continue
-    const real = normalizeModel(String(i['机型'] || ''))
+    const real = normalizeModelName(String(i['机型'] || ''))
     if (!real) continue
     const high = String(i['机台备注/配置'] || '').includes('加高')
     const key = inventoryModelKey(real, high)
@@ -1040,7 +1054,7 @@ const inventoryIndex = computed(() => {
 const orderAllocationsByKey = computed(() => {
   const map = new Map<string, number>()
   for (const i of orderAllocations.value) {
-    const real = normalizeModel(String(i['机型'] || ''))
+    const real = normalizeModelName(String(i['机型'] || ''))
     if (!real) continue
     const high = String(i['机台备注/配置'] || '').includes('加高')
     const key = inventoryModelKey(real, high)
@@ -1116,6 +1130,13 @@ const removeEditItem = (idx: number) => {
 
 const saveContractEdit = async () => {
   if (!selectedId.value) return
+  const invalidModels = editForm.items
+    .map((item) => String(item.机型 || '').trim())
+    .filter((model) => model && !isModelInDictionary(model))
+  if (invalidModels.length > 0) {
+    ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
+    return
+  }
   await submitWithLock(saving, async () => {
     await apiPut(`/planning/contract/${encodeURIComponent(selectedId.value)}`, {
       客户名: editForm.customer,

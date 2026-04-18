@@ -41,7 +41,7 @@
         </el-table-column>
         <el-table-column label="机型">
           <template #default="scope">
-            <el-select v-model="scope.row.model" filterable allow-create placeholder="选择或输入机型" style="width: 100%">
+            <el-select v-model="scope.row.model" filterable placeholder="请选择机型" style="width: 100%">
               <el-option v-for="m in availableModels" :key="m" :label="m" :value="m" />
             </el-select>
           </template>
@@ -148,7 +148,7 @@
           <el-table-column prop="sourceContract" label="来源合同" width="140" />
           <el-table-column label="机型" min-width="160">
             <template #default="scope">
-              <el-select v-model="scope.row.model" filterable allow-create placeholder="选择或输入机型" style="width: 100%">
+              <el-select v-model="scope.row.model" filterable placeholder="请选择机型" style="width: 100%">
                 <el-option v-for="m in availableModels" :key="m" :label="m" :value="m" />
               </el-select>
             </template>
@@ -266,7 +266,7 @@
           </el-table-column>
           <el-table-column label="机型">
             <template #default="scope">
-              <el-select v-model="scope.row.model" filterable allow-create placeholder="选择或输入机型" style="width: 100%;">
+              <el-select v-model="scope.row.model" filterable placeholder="请选择机型" style="width: 100%;">
                 <el-option v-for="m in availableModels" :key="m" :label="m" :value="m" />
               </el-select>
             </template>
@@ -317,6 +317,7 @@ import { apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
+import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 type RowData = Record<string, any>
 
 const loading = ref(false)
@@ -353,7 +354,7 @@ const manualForm = reactive({
   source: '',
   needPack: false,
 })
-const manualRows = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([{ model: 'FH-260C', qty: 1, high: false, rowNote: '' }])
+const manualRows = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([{ model: '', qty: 1, high: false, rowNote: '' }])
 
 const editingId = ref('')
 const editNeedPack = ref(false)
@@ -380,16 +381,7 @@ const monthOptions = computed(() => {
 })
 
 const availableModels = computed(() => {
-  const set = new Set<string>()
-  for (const r of inventoryRows.value) {
-    const m = String(r['机型'] || '').trim()
-    if (m) set.add(m.replace('(加高)', '').trim())
-  }
-  for (const r of planRows.value) {
-    const m = String(r['机型'] || '').trim()
-    if (m) set.add(m.replace('(加高)', '').trim())
-  }
-  return Array.from(set).sort()
+  return getModelOrderList()
 })
 
 const parseOrderDemandTotal = (order: RowData) => {
@@ -519,6 +511,11 @@ const createManualOrder = async () => {
     ElMessage.warning('请至少填写一条有效机型')
     return
   }
+  const invalidModels = validRows.map((r) => String(r.model || '').trim()).filter((m) => !isModelInDictionary(m))
+  if (invalidModels.length > 0) {
+    ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
+    return
+  }
 
   const modelTokens = validRows.map((r) => `${r.model.trim()}${r.high ? '(加高)' : ''}x${r.qty}`)
   const totalQty = validRows.reduce((sum, r) => sum + Number(r.qty || 0), 0)
@@ -563,6 +560,13 @@ const createOrderFromPlanned = async () => {
     if (!model || qty <= 0) continue
     modelTokens.push(`${model}${r.high ? '(加高)' : ''}x${qty}`)
     totalQty += qty
+  }
+  const invalidModels = mergeRows.value
+    .map((r) => String(r.model || '').trim())
+    .filter((m) => m && !isModelInDictionary(m))
+  if (invalidModels.length > 0) {
+    ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
+    return
   }
   if (totalQty <= 0) {
     ElMessage.warning('合同机型数量无效')
@@ -737,6 +741,11 @@ const saveEdit = async () => {
   const validRows = editModelRows.value.filter((r) => r.model.trim() && Number(r.qty) > 0)
   if (validRows.length === 0) {
     ElMessage.warning('客户名和需求机型不能为空')
+    return
+  }
+  const invalidModels = validRows.map((r) => String(r.model || '').trim()).filter((m) => !isModelInDictionary(m))
+  if (invalidModels.length > 0) {
+    ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
     return
   }
   const modelTokens = validRows.map((r) => `${r.model.trim()}${r.high ? '(加高)' : ''}x${r.qty}`)

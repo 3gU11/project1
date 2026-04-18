@@ -117,6 +117,7 @@ import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from '../store/cache'
+import { compareModels, normalizeModelName, sortRowsByModel } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type ListResponse<T = any> = { data: T[] }
@@ -137,8 +138,6 @@ const selectedOrder = ref<Row | null>(null)
 const selectedCandidateSerials = ref<string[]>([])
 const selectedAllocatedSerials = ref<string[]>([])
 
-const normalizeModel = (v: unknown) => String(v || '').replace('(加高)', '').trim()
-
 const parseDemandEntries = (order: Row | null) => {
   const entries: Array<{ model: string; qty: number }> = []
   if (!order) return entries
@@ -148,12 +147,12 @@ const parseDemandEntries = (order: Row | null) => {
     const part = partRaw.replace(/\[[^\]]*]/g, '').trim()
     const m = part.match(/(?:[x×:：]\s*)(\d+)\s*$/i)
     const qty = m ? Number(m[1]) || 0 : 0
-    const model = normalizeModel(part.replace(/(?:[x×:：]\s*)\d+\s*$/i, '').trim())
+    const model = normalizeModelName(part.replace(/(?:[x×:：]\s*)\d+\s*$/i, '').trim())
     if (!model) continue
     entries.push({ model, qty: Math.max(0, qty) })
   }
   if (entries.length === 0) {
-    const fallbackModel = normalizeModel(raw)
+    const fallbackModel = normalizeModelName(raw)
     const fallbackQty = Number(order['需求数量'] || 0)
     if (fallbackModel) entries.push({ model: fallbackModel, qty: Number.isFinite(fallbackQty) ? Math.max(0, fallbackQty) : 0 })
   }
@@ -220,7 +219,7 @@ const requiredModels = computed(() => {
 const allocationModelCountMap = computed(() => {
   const map = new Map<string, number>()
   for (const r of allocations.value) {
-    const model = String(r['机型'] || '').trim()
+    const model = normalizeModelName(r['机型'])
     if (!model) continue
     map.set(model, (map.get(model) || 0) + 1)
   }
@@ -238,21 +237,21 @@ const demandRows = computed(() => {
       pending: Math.max(0, need - allocated),
     })
   }
-  return rows
+  return rows.sort((a, b) => compareModels(a.model, b.model))
 })
 
 const candidateRows = computed(() => {
   if (!selectedOrderId.value) return []
   const modelSet = new Set(requiredModels.value)
-  return inventoryRows.value.filter((r) => {
+  return sortRowsByModel(inventoryRows.value.filter((r) => {
     const status = String(r['状态'] || '')
     const occupied = String(r['占用订单号'] || '')
-    const model = normalizeModel(r['机型'])
+    const model = normalizeModelName(r['机型'])
     if (!status.startsWith('库存中') && status !== '待入库') return false
     if (occupied) return false
     if (modelSet.size === 0) return true
     return modelSet.has(model)
-  })
+  }), (r) => String(r['机型'] || ''))
 })
 
 const CACHE_ORDERS = 'allocation:orders'
@@ -347,7 +346,7 @@ const allocateSelected = async () => {
   const selectedRows = candidateRows.value.filter((r) => selectedCandidateSerials.value.includes(String(r['流水号'] || '')))
   const selectedModelMap = new Map<string, number>()
   for (const r of selectedRows) {
-    const model = String(r['机型'] || '').trim()
+    const model = normalizeModelName(r['机型'])
     if (!model) continue
     selectedModelMap.set(model, (selectedModelMap.get(model) || 0) + 1)
   }

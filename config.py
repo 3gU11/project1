@@ -80,16 +80,6 @@ PRESET_RATIOS = {
     "大机": (["FR-7055XS(PRO)", "FR-8055XS(PRO)", "FR-8060XS(PRO)"], ["FR-400XS(PRO)", "FR-500XS(PRO)", "FR-600XS(PRO)", "FR-7055XS(PRO)", "FR-8055XS(PRO)", "FR-8060XS(PRO)"]),
 }
 
-CUSTOM_MODEL_ORDER = [
-    "FH-260C", "FH-300C",
-    "FR-400G", "FR-400XS(PRO)", "FR-400AUTO",
-    "FR-500G", "FR-500XS(PRO)", "FR-500AUTO",
-    "FR-600G", "FR-600XS(PRO)", "FR-600AUTO",
-    "FR-7055AUTO", "FR-7055XS(PRO)",
-    "FR-8055XS(PRO)", "FR-8055AUTO", "FR-8060XS(PRO)",
-    "FR-1100XS(PRO)", "FL-1390XS(PRO)", "FL-1610XS", "FR-1080Y",
-]
-
 FUNC_MAP = {
     "PLANNING": {"label": "👑 生产统筹", "page": "boss_planning", "class": "boss-btn"},
     "CONTRACT": {"label": "🏭 合同管理", "page": "production", "class": "production-btn"},

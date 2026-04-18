@@ -82,6 +82,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
+import { getModelOrderList } from '../utils/modelOrder'
 type MessageResponse = { message?: string }
 
 type Row = Record<string, any>
@@ -116,12 +117,7 @@ watch(keyword, (v) => {
 })
 
 const modelOptions = computed(() => {
-  const set = new Set<string>()
-  for (const r of rows.value) {
-    const m = String(r['机型'] || '').trim()
-    if (m) set.add(m)
-  }
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+  return getModelOrderList()
 })
 
 const loadData = async () => {
