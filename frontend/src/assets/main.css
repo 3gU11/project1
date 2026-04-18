@@ -237,3 +237,82 @@ h4, h5, h6, .section-title, .panel-title, .card-head {
   font-weight: 600 !important;
   font-size: 15px !important; /* 次级标签 15px */
 }
+
+.el-message {
+  position: fixed !important;
+  top: 72px !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
+  transform: translate3d(-50%, 0, 0) !important;
+  min-width: 220px !important;
+  max-width: min(420px, calc(100vw - 32px)) !important;
+  padding: 10px 14px !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12) !important;
+  z-index: 3000 !important;
+}
+
+.el-message .el-message__content {
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+  font-weight: 500 !important;
+}
+
+.el-message .el-message__icon {
+  font-size: 16px !important;
+  margin-right: 8px !important;
+}
+
+.el-message--success {
+  background: #eefbf3 !important;
+  border-color: #b7ebc6 !important;
+}
+
+.el-message--success .el-message__content,
+.el-message--success .el-message__icon {
+  color: #15803d !important;
+}
+
+.el-message--warning {
+  background: #fff8eb !important;
+  border-color: #f5d089 !important;
+}
+
+.el-message--warning .el-message__content,
+.el-message--warning .el-message__icon {
+  color: #b45309 !important;
+}
+
+.el-message--error {
+  background: #fef2f2 !important;
+  border-color: #fecaca !important;
+}
+
+.el-message--error .el-message__content,
+.el-message--error .el-message__icon {
+  color: #dc2626 !important;
+}
+
+.el-message--info {
+  background: #eff6ff !important;
+  border-color: #bfdbfe !important;
+}
+
+.el-message--info .el-message__content,
+.el-message--info .el-message__icon {
+  color: #2563eb !important;
+}
+
+.el-message-fade-enter-from,
+.el-message-fade-leave-to {
+  opacity: 0 !important;
+  transform: translate3d(-50%, -12px, 0) !important;
+}
+
+.el-message-fade-enter-active,
+.el-message-fade-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease !important;
+}

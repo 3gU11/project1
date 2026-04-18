@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import OperationalError
 
 from database import get_engine
@@ -79,17 +79,18 @@ def save_model_dictionary(rows: Iterable[dict]) -> int:
         for idx, row in enumerate(rows or []):
             model_name = _clean_name(row.get("model_name"))
             if not model_name:
-                continue
+                raise RuntimeError("机型名称不能为空")
             if model_name in seen:
-                continue
+                raise RuntimeError("机型名称不能重复")
             seen.add(model_name)
-            sort_order = int(row.get("sort_order", idx))
+            item_id = int(row.get("id")) if row.get("id") is not None and str(row.get("id")).strip() else None
             enabled = 1 if bool(row.get("enabled", True)) else 0
             remark = str(row.get("remark") or "").strip()
             cleaned.append(
                 {
+                    "id": item_id,
                     "model_name": model_name,
-                    "sort_order": sort_order,
+                    "sort_order": idx,
                     "enabled": enabled,
                     "remark": remark,
                 }
@@ -97,14 +98,46 @@ def save_model_dictionary(rows: Iterable[dict]) -> int:
 
         with get_engine().begin() as conn:
             ensure_model_dictionary_table()
-            conn.execute(text("DELETE FROM model_dictionary"))
-            if cleaned:
+            existing_ids = {
+                int(v)
+                for v in conn.execute(text("SELECT `id` FROM model_dictionary")).scalars().all()
+                if v is not None
+            }
+            incoming_ids = [row["id"] for row in cleaned if row["id"] in existing_ids]
+
+            if incoming_ids:
+                delete_stmt = text("DELETE FROM model_dictionary WHERE `id` NOT IN :ids").bindparams(
+                    bindparam("ids", expanding=True)
+                )
+                conn.execute(delete_stmt, {"ids": incoming_ids})
+            else:
+                conn.execute(text("DELETE FROM model_dictionary"))
+
+            for row in cleaned:
+                item_id = row["id"]
+                if item_id in existing_ids:
+                    result = conn.execute(
+                        text(
+                            "UPDATE model_dictionary "
+                            "SET `model_name`=:model_name, `sort_order`=:sort_order, `enabled`=:enabled, `remark`=:remark "
+                            "WHERE `id`=:id"
+                        ),
+                        row,
+                    )
+                    if int(result.rowcount or 0) > 0:
+                        continue
+
                 conn.execute(
                     text(
                         "INSERT INTO model_dictionary (`model_name`, `sort_order`, `enabled`, `remark`) "
                         "VALUES (:model_name, :sort_order, :enabled, :remark)"
                     ),
-                    cleaned,
+                    {
+                        "model_name": row["model_name"],
+                        "sort_order": row["sort_order"],
+                        "enabled": row["enabled"],
+                        "remark": row["remark"],
+                    },
                 )
         return len(cleaned)
     except (OperationalError, Exception) as e:
