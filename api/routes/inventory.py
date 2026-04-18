@@ -29,7 +29,7 @@ from crud.inventory import (
     archive_shipped_data,
 )
 from crud.logs import append_log
-from crud.model_dictionary import is_model_enabled
+from crud.model_dictionary import find_disabled_models, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound
 from api.routes.auth import get_current_operator_name, get_current_user_token
 from database import get_engine
@@ -42,6 +42,7 @@ from utils.parsers import (
 )
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
+MAX_INVENTORY_BULK_UPDATE_ROWS = 20000
 
 
 def _assert_model_enabled(model_name: str) -> None:
@@ -163,12 +164,20 @@ def update_inventory(data: List[Dict[str, Any]]):
     import pandas as pd
     try:
         if data:
+            if len(data) > MAX_INVENTORY_BULK_UPDATE_ROWS:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"单次最多允许更新 {MAX_INVENTORY_BULK_UPDATE_ROWS} 条库存记录，请分批提交",
+                )
             missing_sn = [idx for idx, item in enumerate(data) if not str(item.get("流水号", "")).strip()]
             if missing_sn:
                 raise HTTPException(status_code=422, detail=f"第 {missing_sn[:10]} 条记录缺少必填字段: 流水号")
-            for item in data:
-                if "机型" in item and str(item.get("机型", "")).strip():
-                    _assert_model_enabled(str(item.get("机型", "")))
+            candidate_models = [item.get("机型", "") for item in data if str(item.get("机型", "")).strip()]
+            invalid_models = find_disabled_models(candidate_models)
+            if invalid_models:
+                sample = ", ".join(invalid_models[:10])
+                suffix = "..." if len(invalid_models) > 10 else ""
+                raise HTTPException(status_code=422, detail=f"机型不在字典中或未启用: {sample}{suffix}")
         df = pd.DataFrame(data)
         unknown_cols = [c for c in df.columns if c not in INVENTORY_COLS]
         if unknown_cols:

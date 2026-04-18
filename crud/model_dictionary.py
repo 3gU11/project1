@@ -60,16 +60,28 @@ def get_enabled_model_names() -> list[str]:
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"读取机型字典失败: {e}") from e
 
-
 def is_model_enabled(model_name: object) -> bool:
     clean = _clean_name(model_name).replace("(加高)", "").strip()
     if not clean:
         return False
     try:
-        names = set(get_enabled_model_names())
-        return clean in names
+        return clean in set(get_enabled_model_names())
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"校验机型失败: {e}") from e
+
+
+def find_disabled_models(model_names: Iterable[object]) -> list[str]:
+    """批量校验机型，返回不在启用字典中的机型列表（去重后）。"""
+    enabled = set(get_enabled_model_names())
+    invalid: list[str] = []
+    seen = set()
+    for name in model_names or []:
+        clean = _clean_name(name).replace("(加高)", "").strip()
+        if not clean or clean in enabled or clean in seen:
+            continue
+        seen.add(clean)
+        invalid.append(clean)
+    return invalid
 
 
 def save_model_dictionary(rows: Iterable[dict]) -> int:
@@ -95,6 +107,9 @@ def save_model_dictionary(rows: Iterable[dict]) -> int:
                     "remark": remark,
                 }
             )
+
+        if not cleaned:
+            raise RuntimeError("至少保留 1 个机型")
 
         with get_engine().begin() as conn:
             ensure_model_dictionary_table()

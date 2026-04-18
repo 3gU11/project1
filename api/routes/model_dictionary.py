@@ -46,6 +46,8 @@ def save_dictionary_rows(
     try:
         count = save_model_dictionary(payload.rows)
         return {"message": f"机型字典已保存（{count} 条）", "count": count}
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存机型字典失败: {e}")
 
@@ -74,5 +76,7 @@ def delete_model_name(
         return {"message": "机型删除成功", "deleted": deleted}
     except HTTPException:
         raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"机型删除失败: {e}")
