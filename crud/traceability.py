@@ -3,10 +3,14 @@ from sqlalchemy import text
 from database import get_engine
 from utils.cache import fetch_data_with_cache
 
-def search_global_summary(keyword: str):
+def search_global_summary(keyword: str = ""):
     """
     Step 1: 广度筛选 - 返回追溯第一层级列表。
     """
+    keyword = str(keyword or "").strip()
+    if not keyword:
+        return pd.DataFrame()
+
     query = """
         SELECT
             fp.`机型` AS `机型`,
@@ -21,7 +25,8 @@ def search_global_summary(keyword: str):
         LEFT JOIN finished_goods_data fg
           ON fg.`占用订单号` = fp.`订单号`
          AND fg.`机型` = fp.`机型`
-        WHERE fp.`代理商` LIKE :kw
+        WHERE fp.`客户名` LIKE :kw
+           OR fp.`代理商` LIKE :kw
            OR fp.`合同号` LIKE :kw
            OR fp.`订单号` LIKE :kw
         GROUP BY

@@ -8,7 +8,7 @@ router = APIRouter(dependencies=[Depends(get_current_user_token)])
 def search_traceability(keyword: str = "", _ctx: dict = Depends(require_roles("Admin", "Boss"))):
     if not keyword:
         return {"data": []}
-    df = search_global_summary(keyword)
+    df = search_global_summary(keyword=keyword)
     return {"data": df.to_dict(orient="records")}
 
 @router.get("/{target_id}/status")

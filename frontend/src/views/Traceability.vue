@@ -12,7 +12,7 @@
         <el-col :span="16">
           <el-input
             v-model="searchKeyword"
-            placeholder="输入代理商、合同号或订单号进行模糊搜索，例如: 吴龙, HT-2026..."
+            placeholder="输入客户、代理商、合同号或订单号，例如: 山东省临朐县..., 吴龙, HT-2026..."
             clearable
             @keyup.enter="handleSearch"
           >
@@ -105,7 +105,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { apiGet } from '../utils/request'
+import { apiGet, getApiErrorMessage } from '../utils/request'
 import PageHeader from '../components/PageHeader.vue'
 
 const searchKeyword = ref('')
@@ -154,14 +154,18 @@ const onSummaryRowClick = (row: any) => {
 }
 
 const handleSearch = async () => {
-  if (!searchKeyword.value.trim()) return
+  const keyword = searchKeyword.value.trim()
+  if (!keyword) return
   loading.value = true
   hasSearched.value = true
   try {
-    const res = await apiGet(`/traceability/search?keyword=${encodeURIComponent(searchKeyword.value.trim())}`)
+    const params = new URLSearchParams()
+    params.set('keyword', keyword)
+    const res = await apiGet(`/traceability/search?${params.toString()}`)
     summaryList.value = res.data || []
-  } catch (e) {
+  } catch (e: any) {
     summaryList.value = []
+    ElMessage.error(getApiErrorMessage(e) || '追溯搜索失败')
   } finally {
     loading.value = false
   }

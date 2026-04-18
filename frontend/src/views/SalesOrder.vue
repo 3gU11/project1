@@ -89,7 +89,19 @@
 
     <template v-else-if="activeTab === 'import'">
       <h3 class="section-title">📥 导入已规划合同 (Import Planned Contracts)</h3>
-      <el-table :data="plannedContractRows" border stripe size="small" height="320">
+      <el-table
+        ref="plannedImportTableRef"
+        :data="plannedContractRows"
+        :row-key="getPlannedImportRowKey"
+        border
+        stripe
+        size="small"
+        height="320"
+        reserve-selection
+        @selection-change="onPlannedImportSelectionChange"
+        @row-click="onPlannedImportRowClick"
+      >
+        <el-table-column type="selection" width="48" />
         <el-table-column prop="合同号" label="合同号" width="140" />
         <el-table-column prop="客户名" label="客户名" min-width="240" />
         <el-table-column prop="机型" label="机型" width="140" />
@@ -97,18 +109,9 @@
         <el-table-column prop="要求交期" label="要求交期" width="120" />
         <el-table-column prop="备注" label="备注" min-width="120" />
       </el-table>
-      <div class="field-label" style="margin-top: 10px">选择要转换(合并)的合同 (支持多选)</div>
-      <el-select
-        v-model="selectedImportContractIds"
-        multiple
-        filterable
-        collapse-tags
-        collapse-tags-tooltip
-        placeholder="请选择合同号"
-        style="width: 100%"
-      >
-        <el-option v-for="id in plannedContractIds" :key="id" :label="id" :value="id" />
-      </el-select>
+      <div class="hint" style="margin-top: 8px">
+        已勾选 {{ selectedImportContractIds.length }} 个合同，可直接在表格中勾选要导入的合同
+      </div>
 
       <el-alert
         v-if="selectedImportContractIds.length > 0"
@@ -178,7 +181,7 @@
         </div>
       </template>
       <div v-else class="hint" style="margin-top: 8px">
-        请先选择要导入的合同号
+        请先在表格中勾选要导入的合同
       </div>
     </template>
 
@@ -311,8 +314,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { ElTable } from 'element-plus'
 import { apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -337,7 +341,9 @@ const managePage = ref(1)
 const managePageSize = ref(50)
 const selectedManageOrderId = ref('')
 const selectedImportContractIds = ref<string[]>([])
+const selectedPlannedImportRows = ref<RowData[]>([])
 const mergeRows = ref<Array<{ sourceContract: string; model: string; high: boolean; qty: number; rowNote: string }>>([])
+const plannedImportTableRef = ref<InstanceType<typeof ElTable> | null>(null)
 const mergeDraft = reactive({
   customer: '',
   agent: '',
@@ -451,14 +457,6 @@ const manageRowsPaged = computed(() => {
 })
 
 const plannedContractRows = computed(() => planRows.value.filter((r) => String(r['状态'] || '') === '已规划'))
-const plannedContractIds = computed(() => {
-  const set = new Set<string>()
-  for (const r of plannedContractRows.value) {
-    const id = String(r['合同号'] || '')
-    if (id) set.add(id)
-  }
-  return Array.from(set)
-})
 const selectedImportRows = computed(() => {
   return plannedContractRows.value.filter((r) => selectedImportContractIds.value.includes(String(r['合同号'] || '')))
 })
@@ -499,6 +497,34 @@ const fetchData = async () => {
 }
 const retryFetch = () => {
   void fetchData()
+}
+
+const getPlannedImportRowKey = (row: RowData) => {
+  return [
+    String(row['合同号'] || ''),
+    String(row['机型'] || ''),
+    String(row['要求交期'] || ''),
+    String(row['备注'] || ''),
+    String(row['排产数量'] || ''),
+  ].join('::')
+}
+
+const syncSelectedImportContractIds = (rows: RowData[]) => {
+  selectedPlannedImportRows.value = rows
+  const ids = new Set<string>()
+  for (const row of rows) {
+    const id = String(row['合同号'] || '').trim()
+    if (id) ids.add(id)
+  }
+  selectedImportContractIds.value = Array.from(ids)
+}
+
+const onPlannedImportSelectionChange = (rows: RowData[]) => {
+  syncSelectedImportContractIds(rows)
+}
+
+const onPlannedImportRowClick = (row: RowData) => {
+  plannedImportTableRef.value?.toggleRowSelection(row)
 }
 
 const createManualOrder = async () => {
@@ -597,7 +623,9 @@ const createOrderFromPlanned = async () => {
     }
     ElMessage.success('已转换为订单')
     selectedImportContractIds.value = []
+    selectedPlannedImportRows.value = []
     mergeRows.value = []
+    plannedImportTableRef.value?.clearSelection()
     await fetchData()
   }, { errorMessage: '转换失败' })
 }
@@ -639,6 +667,17 @@ watch(selectedImportContractIds, () => {
       rowNote: String(r['备注'] || ''),
     }
   })
+})
+
+watch(plannedContractRows, async () => {
+  await nextTick()
+  if (!plannedImportTableRef.value || selectedImportContractIds.value.length === 0) return
+  const selectedSet = new Set(selectedImportContractIds.value)
+  for (const row of plannedContractRows.value) {
+    const id = String(row['合同号'] || '').trim()
+    if (!id || !selectedSet.has(id)) continue
+    plannedImportTableRef.value.toggleRowSelection(row, true)
+  }
 })
 
 const openEdit = (row: RowData, syncSelection = true) => {
