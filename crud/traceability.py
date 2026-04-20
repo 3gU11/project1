@@ -21,12 +21,15 @@ def search_global_summary(keyword: str = ""):
                 fp.`客户名` AS `客户`,
                 fp.`代理商` AS `代理商`,
                 GROUP_CONCAT(DISTINCT fg.`状态` ORDER BY fg.`状态` SEPARATOR ' / ') AS `机台状态`,
-                MIN(fg.`预计入库时间`) AS `预计入库时间`,
+                fp.`要求交期` AS `要求交期`,
+                DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `发货时间`,
                 NULL AS `流水号`
             FROM factory_plan fp
             LEFT JOIN finished_goods_data fg
               ON fg.`占用订单号` = fp.`订单号`
              AND fg.`机型` = fp.`机型`
+            LEFT JOIN sales_orders so
+              ON fp.`订单号` = so.`订单号`
             WHERE fp.`客户名` LIKE :kw
                OR fp.`代理商` LIKE :kw
                OR fp.`合同号` LIKE :kw
@@ -37,7 +40,9 @@ def search_global_summary(keyword: str = ""):
                 fp.`合同号`,
                 fp.`订单号`,
                 fp.`客户名`,
-                fp.`代理商`
+                fp.`代理商`,
+                fp.`要求交期`,
+                so.`发货时间`
                 
             UNION ALL
             
@@ -49,7 +54,8 @@ def search_global_summary(keyword: str = ""):
                 COALESCE(fp.`客户名`, so.`客户名`) AS `客户`,
                 COALESCE(fp.`代理商`, so.`代理商`) AS `代理商`,
                 fg.`状态` AS `机台状态`,
-                fg.`预计入库时间` AS `预计入库时间`,
+                fp.`要求交期` AS `要求交期`,
+                DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `发货时间`,
                 fg.`流水号` AS `流水号`
             FROM finished_goods_data fg
             LEFT JOIN factory_plan fp

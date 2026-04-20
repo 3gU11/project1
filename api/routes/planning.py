@@ -571,11 +571,16 @@ def create_contracts_batch(
 
         df_plan = pd.concat([df_plan, pd.DataFrame(add_list)], ignore_index=True)
         save_factory_plan(df_plan)
+        
+        # 收集新录入的所有独立合同号
+        added_contract_ids = list(set([str(item["合同号"]) for item in add_list]))
+        contract_ids_str = "、".join(added_contract_ids)
+        
         append_audit_log(
             module="合同管理",
             action_type="批量录入",
             biz_type="合同",
-            content=f"批量录入合同 {len(add_list)} 条；跳过重复 {existed} 条",
+            content=f"批量录入合同 {len(add_list)} 条（合同号：{contract_ids_str}）；跳过重复 {existed} 条",
             user_id=current_user.get("username"),
             username=current_operator,
         )

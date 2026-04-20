@@ -38,7 +38,8 @@
           <el-table-column prop="机台状态" label="机台状态" min-width="180" />
           <el-table-column prop="客户" label="客户" min-width="220" />
           <el-table-column prop="代理商" label="代理商" width="120" />
-          <el-table-column prop="预计入库时间" label="预计入库时间" width="180" />
+          <el-table-column prop="要求交期" label="合同要求交期" width="140" />
+          <el-table-column prop="发货时间" label="订单发货时间" width="140" />
         </el-table>
         <div v-if="summaryList.length === 0 && !loading" class="text-gray-500 mt-2">未找到相关数据。</div>
       </div>
@@ -90,7 +91,7 @@
                   <el-card>
                     <h4>{{ log.action }}</h4>
                     <p>操作人: {{ log.operator || '系统' }}</p>
-                    <p>流水号: {{ log.流水号 || '-' }}</p>
+                    <p v-if="log.流水号">{{ isOrderAction(log.action, log.流水号) ? '单号' : '流水号' }}: {{ log.流水号 }}</p>
                     <p class="text-xs text-gray-400">日志 ID: {{ log.id || '-' }}</p>
                   </el-card>
                 </el-timeline-item>
@@ -145,6 +146,13 @@ const getTraceTarget = (row: any) => {
   const orderId = String(row?.订单号 || '').trim()
   if (orderId) return orderId
   return String(row?.合同号 || '').trim()
+}
+
+const isOrderAction = (actionName: string, sn: string) => {
+  const n = String(actionName || '')
+  const s = String(sn || '')
+  if (s.startsWith('SO-') || s.startsWith('HT')) return true
+  return n.includes('合同') || n.includes('订单') || n.includes('批量录入') || n === '新增' || n === '修改'
 }
 
 const onSummaryRowClick = (row: any) => {
