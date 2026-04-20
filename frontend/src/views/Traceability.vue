@@ -12,7 +12,7 @@
         <el-col :span="16">
           <el-input
             v-model="searchKeyword"
-            placeholder="输入客户、代理商、合同号或订单号，例如: 山东省临朐县..., 吴龙, HT-2026..."
+            placeholder="输入流水号、客户、代理商、合同号或订单号，例如: 95-04-222, 吴龙, HT-2026..."
             clearable
             @keyup.enter="handleSearch"
           >
@@ -34,6 +34,7 @@
         >
           <el-table-column prop="机型" label="机型" min-width="140" />
           <el-table-column prop="状态" label="状态" width="120" />
+          <el-table-column prop="流水号" label="流水号" min-width="140" />
           <el-table-column prop="机台状态" label="机台状态" min-width="180" />
           <el-table-column prop="客户" label="客户" min-width="220" />
           <el-table-column prop="代理商" label="代理商" width="120" />
@@ -47,8 +48,8 @@
       <template #header>
         <div class="card-header">
           <span>
-            2.合同号：<strong>{{ targetContractNo || '-' }}</strong>
-            <template v-if="targetOrderNo"> 订单号：<strong>{{ targetOrderNo }}</strong></template>
+            2. 追溯目标：<strong>{{ targetContractNo || '-' }}</strong>
+            <template v-if="targetOrderNo"> （关联单号：<strong>{{ targetOrderNo }}</strong>）</template>
           </span>
         </div>
       </template>
@@ -139,6 +140,8 @@ const groupedTimeline = computed(() => {
 })
 
 const getTraceTarget = (row: any) => {
+  const sn = String(row?.流水号 || '').trim()
+  if (sn) return sn
   const orderId = String(row?.订单号 || '').trim()
   if (orderId) return orderId
   return String(row?.合同号 || '').trim()
@@ -147,8 +150,15 @@ const getTraceTarget = (row: any) => {
 const onSummaryRowClick = (row: any) => {
   const target = getTraceTarget(row)
   if (!target) return
-  targetContractNo.value = String(row?.合同号 || '').trim()
-  targetOrderNo.value = String(row?.订单号 || '').trim()
+  
+  const sn = String(row?.流水号 || '').trim()
+  if (sn) {
+    targetContractNo.value = sn // 复用这块区域展示流水号
+    targetOrderNo.value = String(row?.订单号 || '').trim()
+  } else {
+    targetContractNo.value = String(row?.合同号 || '').trim()
+    targetOrderNo.value = String(row?.订单号 || '').trim()
+  }
   selectedModel.value = String(row?.机型 || '').trim()
   handleTrace(target, selectedModel.value)
 }

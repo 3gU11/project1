@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 import pandas as pd
 from sqlalchemy import text
 
+from crud.audit_logs import append_audit_log
 from crud.users import get_all_users, save_all_users, create_pending_user, user_exists
 from api.routes.auth import require_roles
 from database import get_engine
@@ -48,7 +49,7 @@ def list_users(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/")
-def replace_users(data: List[Dict[str, Any]], _ctx: dict = Depends(require_roles("Admin"))):
+def replace_users(data: List[Dict[str, Any]], request: Request, _ctx: dict = Depends(require_roles("Admin"))):
     """Replace all users."""
     import pandas as pd
     try:
@@ -56,6 +57,16 @@ def replace_users(data: List[Dict[str, Any]], _ctx: dict = Depends(require_roles
         success = save_all_users(df)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save users")
+            
+        operator = str(_ctx.get("name") or _ctx.get("username") or "system").strip()
+        append_audit_log(
+            user_id=_ctx.get("username"),
+            username=operator,
+            action_type="全量替换",
+            module="用户管理",
+            biz_type="用户",
+            content=f"全量替换所有用户数据，共 {len(df)} 条"
+        )
         return {"message": "Users updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -91,7 +102,7 @@ class UserPatchPayload(BaseModel):
     name: str | None = None
 
 @router.post("/register")
-def register_user(user: UserCreate):
+def register_user(user: UserCreate, request: Request):
     """Register a new pending user."""
     try:
         if user_exists(user.username):
@@ -103,6 +114,16 @@ def register_user(user: UserCreate):
             role=user.role,
             name=user.name
         )
+        
+        append_audit_log(
+            user_id=user.username,
+            username=user.name,
+            action_type="注册",
+            module="用户管理",
+            biz_type="用户",
+            content=f"新用户注册：{user.name} ({user.username})"
+        )
+        
         return {"message": "User registered successfully", "data": new_row}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -115,7 +136,7 @@ def register_user(user: UserCreate):
 
 
 @router.post("/audit")
-def audit_user(payload: UserAuditPayload, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
+def audit_user(payload: UserAuditPayload, request: Request, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
     try:
         df = get_all_users()
         if df.empty:
@@ -138,6 +159,15 @@ def audit_user(payload: UserAuditPayload, _ctx: dict = Depends(require_roles("Ad
             
         if not save_all_users(df):
             raise HTTPException(status_code=500, detail="保存失败")
+        operator = str(_ctx.get("name") or _ctx.get("username") or "system").strip()
+        append_audit_log(
+            module="用户管理",
+            action_type="审核" if payload.action == "approve" else "拒绝",
+            biz_type="用户",
+            content=f"{msg}：{payload.username}",
+            user_id=_ctx.get("username"),
+            username=operator,
+        )
         return {"message": msg}
     except HTTPException:
         raise
@@ -146,7 +176,7 @@ def audit_user(payload: UserAuditPayload, _ctx: dict = Depends(require_roles("Ad
 
 
 @router.patch("/{username}")
-def patch_user(username: str, payload: UserPatchPayload, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
+def patch_user(username: str, payload: UserPatchPayload, request: Request, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
     try:
         df = get_all_users()
         if df.empty:
@@ -166,6 +196,16 @@ def patch_user(username: str, payload: UserPatchPayload, _ctx: dict = Depends(re
             df.loc[mask, "name"] = v
         if not save_all_users(df):
             raise HTTPException(status_code=500, detail="保存失败")
+        operator = str(_ctx.get("name") or _ctx.get("username") or "system").strip()
+        changed_fields = [k for k, v in payload.model_dump().items() if v is not None]
+        append_audit_log(
+            module="用户管理",
+            action_type="修改",
+            biz_type="用户",
+            content=f"修改用户：{username}；字段：{', '.join(changed_fields) or '无'}",
+            user_id=_ctx.get("username"),
+            username=operator,
+        )
         return {"message": "更新成功"}
     except HTTPException:
         raise

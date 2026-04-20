@@ -89,6 +89,11 @@
 
     <template v-else-if="activeTab === 'import'">
       <h3 class="section-title">📥 导入已规划合同 (Import Planned Contracts)</h3>
+
+      <div style="max-width: 600px; margin-bottom: 12px;">
+        <el-input v-model="importSearch.keyword" placeholder="搜索合同号/客户名（模糊）" clearable />
+      </div>
+
       <el-table
         ref="plannedImportTableRef"
         :data="plannedContractRows"
@@ -362,6 +367,10 @@ const manualForm = reactive({
 })
 const manualRows = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([{ model: '', qty: 1, high: false, rowNote: '' }])
 
+const importSearch = reactive({
+  keyword: '',
+})
+
 const editingId = ref('')
 const editNeedPack = ref(false)
 const editSourceText = ref('')
@@ -456,7 +465,17 @@ const manageRowsPaged = computed(() => {
   return manageRowsFiltered.value.slice(start, end)
 })
 
-const plannedContractRows = computed(() => planRows.value.filter((r) => String(r['状态'] || '') === '已规划'))
+const plannedContractRows = computed(() => {
+  let list = planRows.value.filter((r) => String(r['状态'] || '') === '已规划')
+  const term = importSearch.keyword.trim().toLowerCase()
+  if (term) {
+    list = list.filter((r) => {
+      const hit = `${r['合同号'] || ''} ${r['客户名'] || ''}`.toLowerCase()
+      return hit.includes(term)
+    })
+  }
+  return list
+})
 const selectedImportRows = computed(() => {
   return plannedContractRows.value.filter((r) => selectedImportContractIds.value.includes(String(r['合同号'] || '')))
 })

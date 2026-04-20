@@ -144,17 +144,10 @@
           </div>
 
           <div class="confirm-row">
-            <el-date-picker
-              v-model="selectedInboundDate"
-              type="date"
-              placeholder="预计入库日期"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-            />
-            <el-button type="primary" :disabled="!canConfirmImport" :loading="confirmingImport" @click="confirmImport">
-              🚀 确认导入 (Confirm)
-            </el-button>
-          </div>
+              <el-button type="primary" :disabled="!canConfirmImport" :loading="confirmingImport" @click="confirmImport">
+                🚀 确认导入 (Confirm)
+              </el-button>
+            </div>
         </el-card>
 
         <el-card shadow="never" class="import-section">
@@ -175,7 +168,7 @@
               />
             </el-select>
             <el-input-number v-model="autoGen.qty" :min="1" />
-            <el-date-picker v-model="autoGen.expectedDate" type="date" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
+            <el-date-picker v-model="autoGen.expectedDate" type="date" placeholder="预计入库日期" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
           </div>
           <el-input
             v-model="autoGen.note"
@@ -250,7 +243,6 @@ const stagingSortAsc = ref(true)
 const stagingPageSize = ref(20)
 const stagingPageNo = ref(1)
 const stagingSelectedMap = ref<Record<string, boolean>>({})
-const selectedInboundDate = ref('')
 const autoGen = reactive({
   batch: '',
   model: '',
@@ -387,12 +379,7 @@ const stagingPagedRows = computed(() => {
 })
 
 const selectedStagingSerialNos = computed(() => {
-  const serialNos: string[] = []
-  for (const row of stagingRows.value) {
-    const sn = String(row['流水号'] || '').trim()
-    if (sn && stagingSelectedMap.value[sn]) serialNos.push(sn)
-  }
-  return serialNos
+  return Object.keys(stagingSelectedMap.value).filter((k) => stagingSelectedMap.value[k])
 })
 
 const selectedCountAll = computed(() => {
@@ -418,7 +405,7 @@ const selectAllTable = computed({
 })
 
 const canConfirmImport = computed(() => {
-  return selectedCountAll.value > 0 && !!selectedInboundDate.value
+  return selectedCountAll.value > 0
 })
 
 const saveCurrentPageEdits = async () => {
@@ -483,14 +470,9 @@ const confirmImport = async () => {
     ElMessage.warning('请先勾选至少 1 条数据')
     return
   }
-  if (!selectedInboundDate.value) {
-    ElMessage.warning('请选择预计入库日期')
-    return
-  }
   await submitWithLock(confirmingImport, async () => {
     const response = await apiPost<ImportConfirmResponse>('/inventory/import-staging/import-confirm', {
       selected_track_nos: selectedTrackNos,
-      expected_inbound_date: selectedInboundDate.value,
     })
     const successCount = Number(response.success_count || 0)
     const failedCount = Number(response.failed_count || 0)

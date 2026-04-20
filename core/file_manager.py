@@ -10,23 +10,29 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from config import BASE_DIR
+from crud.audit_logs import append_audit_log
 from database import get_engine
 
 
 def audit_log(action, details, user="System"):
-    ip = "Local"
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    new_row = {
-        "timestamp": timestamp,
-        "user": user,
-        "ip": ip,
-        "action": action,
-        "details": details,
+    action_text = str(action or "").strip()
+    mapping = {
+        "Upload Contract": ("合同管理", "上传附件", "合同附件"),
+        "Delete Contract File": ("合同管理", "删除附件", "合同附件"),
+        "System Cleanup": ("系统管理", "清理附件", "合同附件"),
+        "Upload Machine Archive": ("机台档案", "上传附件", "机台档案"),
+        "Delete Machine Archive": ("机台档案", "删除附件", "机台档案"),
+        "Batch Delete Machine Archive": ("机台档案", "批量删除附件", "机台档案"),
     }
-    try:
-        pd.DataFrame([new_row]).to_sql('audit_log', get_engine(), if_exists='append', index=False, method='multi')
-    except (OperationalError, Exception):
-        pass
+    module, action_type, biz_type = mapping.get(action_text, ("系统管理", action_text or "记录日志", ""))
+    append_audit_log(
+        module=module,
+        action_type=action_type,
+        biz_type=biz_type,
+        content=str(details or "").strip(),
+        user_id=user,
+        username=user,
+    )
 
 
 def save_contract_file(uploaded_file, customer_name, contract_id, uploader_name, convert_to_docx=True):

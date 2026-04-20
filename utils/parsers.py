@@ -177,7 +177,7 @@ def generate_auto_inbound(batch_input, model_input, qty_input, expected_inbound_
     
     for i in range(qty_input):
         current_seq = start_seq + i
-        new_sn = f"{target_prefix}{current_seq}"
+        new_sn = f"{target_prefix}{current_seq:02d}"
         new_records.append({
             "批次号": batch_input, "机型": model_input, "流水号": new_sn,
             "状态": "待入库", "预计入库时间": expected_inbound_text,
@@ -313,15 +313,18 @@ def diff_tracking_vs_inventory(tracking_df: "pd.DataFrame") -> "pd.DataFrame":
     new_df = new_df.reset_index(drop=True) 
     return new_df
 
-def build_import_payload(selected_df, selected_date):
+def build_import_payload(selected_df, fallback_date=None):
     if selected_df is None or selected_df.empty:
         return [], "请至少选择 1 条数据"
-    if selected_date is None:
-        return [], "请选择预计入库日期"
-    date_str = selected_date.strftime("%Y-%m-%d") if hasattr(selected_date, "strftime") else str(selected_date)
+    
     payload = []
-    for sn in selected_df["流水号"].astype(str).str.strip().tolist():
+    for _, row in selected_df.iterrows():
+        sn = str(row.get("流水号", "")).strip()
         if sn:
+            row_date = str(row.get("预计入库时间", "")).strip()
+            date_str = row_date if row_date and row_date not in ("nan", "None") else ""
+            if not date_str and fallback_date:
+                date_str = fallback_date.strftime("%Y-%m-%d") if hasattr(fallback_date, "strftime") else str(fallback_date)
             payload.append({"trackNo": sn, "expectInDate": date_str})
     if not payload:
         return [], "所选数据缺少有效流水号"

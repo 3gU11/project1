@@ -28,9 +28,13 @@ def get_schema_rollback_sql():
         "DROP INDEX idx_fp_contract_status_due ON factory_plan",
         "DROP INDEX idx_fp_due_date ON factory_plan",
         "DROP INDEX idx_log_time ON transaction_log",
+        "DROP INDEX idx_sys_operation_log_time ON sys_operation_log",
+        "DROP INDEX idx_sys_operation_log_user ON sys_operation_log",
+        "DROP INDEX idx_sys_operation_log_module ON sys_operation_log",
         "DROP INDEX idx_import_batch_model ON plan_import",
         "DROP INDEX idx_ship_month_time ON shipping_history",
         "DROP INDEX uq_contract_path ON contract_records",
+        "DROP TABLE IF EXISTS sys_operation_log",
         "DROP TABLE IF EXISTS roles",
     ]
 
@@ -149,6 +153,19 @@ def init_mysql_tables():
             `ip`        VARCHAR(100) DEFAULT '',
             `action`    VARCHAR(200) DEFAULT '',
             `details`   TEXT,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS sys_operation_log (
+            `id`           BIGINT NOT NULL AUTO_INCREMENT,
+            `user_id`      VARCHAR(100) DEFAULT '',
+            `username`     VARCHAR(100) DEFAULT '',
+            `operate_time` DATETIME NULL,
+            `module`       VARCHAR(100) DEFAULT '',
+            `action_type`  VARCHAR(100) DEFAULT '',
+            `biz_type`     VARCHAR(100) DEFAULT '',
+            `content`      TEXT,
             PRIMARY KEY (`id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
@@ -346,6 +363,7 @@ def init_mysql_tables():
             ("planning_records", "updated_at"),
             ("contract_records", "upload_time"),
             ("audit_log", "timestamp"),
+            ("sys_operation_log", "operate_time"),
             ("users", "register_time"),
             ("users", "audit_time"),
             ("shipping_history", "预计入库时间"),
@@ -399,6 +417,7 @@ def init_mysql_tables():
             "ALTER TABLE planning_records MODIFY COLUMN `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
             "ALTER TABLE contract_records MODIFY COLUMN `upload_time` DATETIME NULL",
             "ALTER TABLE audit_log MODIFY COLUMN `timestamp` DATETIME NULL",
+            "ALTER TABLE sys_operation_log MODIFY COLUMN `operate_time` DATETIME NULL",
             "ALTER TABLE users MODIFY COLUMN `register_time` DATETIME NULL",
             "ALTER TABLE users MODIFY COLUMN `audit_time` DATETIME NULL",
             "ALTER TABLE shipping_history MODIFY COLUMN `预计入库时间` DATETIME NULL",
@@ -527,6 +546,9 @@ def init_mysql_tables():
         _add_index_if_missing("factory_plan", "idx_fp_contract_status_due", "`合同号`, `状态`, `要求交期`")
         _add_index_if_missing("factory_plan", "idx_fp_due_date", "`要求交期`")
         _add_index_if_missing("transaction_log", "idx_log_time", "`时间`")
+        _add_index_if_missing("sys_operation_log", "idx_sys_operation_log_time", "`operate_time`")
+        _add_index_if_missing("sys_operation_log", "idx_sys_operation_log_user", "`user_id`, `operate_time`")
+        _add_index_if_missing("sys_operation_log", "idx_sys_operation_log_module", "`module`, `action_type`, `biz_type`")
         _add_index_if_missing("contract_records", "idx_contract_id", "`contract_id`")
         _add_index_if_missing("contract_records", "idx_contract_upload_time", "`upload_time`")
         _add_index_if_missing("plan_import", "idx_import_batch_model", "`批次号`, `机型`")

@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from database import get_engine
@@ -17,9 +18,29 @@ def append_log(action, sn_list, operator=None):
             print(f"append_log error: {e}")
 
 
-def get_transaction_logs(limit=500):
+def get_transaction_logs(page: int = 1, page_size: int = 50, days: int = 14):
     try:
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 200))
+        days = max(1, int(days))
+        offset = (page - 1) * page_size
+        cutoff = datetime.now() - timedelta(days=days)
         with get_engine().connect() as conn:
-            return pd.read_sql(f"SELECT 时间, 操作类型, 流水号, 操作员 FROM transaction_log ORDER BY 时间 DESC LIMIT {int(limit)}", conn)
+            total = conn.execute(
+                text("SELECT COUNT(*) FROM transaction_log WHERE 时间 >= :cutoff"),
+                {"cutoff": cutoff},
+            ).scalar() or 0
+            df = pd.read_sql(
+                text(
+                    "SELECT 时间, 操作类型, 流水号, 操作员 "
+                    "FROM transaction_log "
+                    "WHERE 时间 >= :cutoff "
+                    "ORDER BY 时间 DESC "
+                    "LIMIT :limit OFFSET :offset"
+                ),
+                conn,
+                params={"cutoff": cutoff, "limit": page_size, "offset": offset},
+            )
+            return df, int(total)
     except (OperationalError, Exception):
-        return pd.DataFrame(columns=["时间", "操作类型", "流水号", "操作员"])
+        return pd.DataFrame(columns=["时间", "操作类型", "流水号", "操作员"]), 0

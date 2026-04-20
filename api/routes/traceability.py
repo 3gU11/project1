@@ -11,12 +11,24 @@ def search_traceability(keyword: str = "", _ctx: dict = Depends(require_roles("A
     df = search_global_summary(keyword=keyword)
     return {"data": df.to_dict(orient="records")}
 
+import math
+
 @router.get("/{target_id}/status")
 def target_status(target_id: str, model: str = "", _ctx: dict = Depends(require_roles("Admin", "Boss"))):
     df = get_target_status_distribution(target_id, model=model)
-    return {"data": df.to_dict(orient="records")}
+    records = df.to_dict(orient="records")
+    for r in records:
+        for k, v in r.items():
+            if isinstance(v, float) and math.isnan(v):
+                r[k] = None
+    return {"data": records}
 
 @router.get("/{target_id}/timeline")
 def target_timeline(target_id: str, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
     df = get_target_timeline(target_id)
-    return {"data": df.to_dict(orient="records")}
+    records = df.to_dict(orient="records")
+    for r in records:
+        for k, v in r.items():
+            if isinstance(v, float) and math.isnan(v):
+                r[k] = None
+    return {"data": records}

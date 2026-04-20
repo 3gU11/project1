@@ -8,7 +8,7 @@ import os
 import uuid
 from datetime import datetime
 import pandas as pd
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import json
@@ -16,12 +16,13 @@ from sqlalchemy import text
 
 from config import BASE_DIR
 from core.file_manager import delete_contract_file, save_contract_file
+from crud.audit_logs import append_audit_log
 from crud.contracts import get_contract_files
 from crud.inventory import get_data
 from crud.model_dictionary import is_model_enabled
 from crud.planning import get_factory_plan, save_factory_plan
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
-from api.routes.auth import get_current_operator_name, get_current_user_token
+from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from utils.parsers import parse_alloc_dict
 from database import get_engine
 
@@ -254,7 +255,12 @@ def get_sales_orders(
 
 
 @router.post("/orders")
-def create_sales_order_api(payload: SalesOrderCreatePayload):
+def create_sales_order_api(
+    payload: SalesOrderCreatePayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
     try:
         _assert_models_in_dictionary(_extract_models_from_demand_text(str(payload.需求机型 or "")))
         df_orders = get_orders()
@@ -275,13 +281,31 @@ def create_sales_order_api(payload: SalesOrderCreatePayload):
         }
         df_orders = pd.concat([df_orders, pd.DataFrame([new_row])], ignore_index=True)
         save_orders(df_orders)
+        append_audit_log(
+            module="销售下单",
+            action_type="新增",
+            biz_type="订单",
+            content=(
+                f"创建订单：{order_id}；客户：{payload.客户名}；"
+                f"需求机型：{str(payload.需求机型 or '').strip() or '未填写'}；"
+                f"需求数量：{int(payload.需求数量)}"
+            ),
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": "订单创建成功", "order_id": order_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建订单失败: {e}")
 
 
 @router.put("/orders/{order_id}")
-def update_sales_order_api(order_id: str, payload: SalesOrderUpdatePayload):
+def update_sales_order_api(
+    order_id: str,
+    payload: SalesOrderUpdatePayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
     try:
         df_orders = get_orders()
         mask = df_orders["订单号"].astype(str) == str(order_id)
@@ -299,6 +323,15 @@ def update_sales_order_api(order_id: str, payload: SalesOrderUpdatePayload):
             else:
                 df_orders.loc[mask, key] = "" if value is None else str(value)
         save_orders(df_orders)
+        changed_fields = [k for k, v in updates.items() if v is not None]
+        append_audit_log(
+            module="销售下单",
+            action_type="修改",
+            biz_type="订单",
+            content=f"修改订单：{order_id}；更新字段：{', '.join(changed_fields) or '无'}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": "订单更新成功"}
     except HTTPException:
         raise
@@ -329,7 +362,9 @@ def get_order_allocations_api(order_id: str):
 def allocate_order_inventory_api(
     order_id: str,
     payload: OrderAllocatePayload,
+    request: Request,
     current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
 ):
     try:
         selected = [str(x).strip() for x in (payload.selected_serial_nos or []) if str(x).strip()]
@@ -344,6 +379,14 @@ def allocate_order_inventory_api(
         customer = str(first.get("客户名", "") or "")
         agent = str(first.get("代理商", "") or "")
         allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
+        append_audit_log(
+            module="订单配货",
+            action_type="配货",
+            biz_type="订单",
+            content=f"为订单 {order_id} 配货 {len(selected)} 台机台；流水号：{', '.join(selected[:10])}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": f"配货成功，已锁定 {len(selected)} 台机台"}
     except HTTPException:
         raise
@@ -355,7 +398,9 @@ def allocate_order_inventory_api(
 def release_order_inventory_api(
     order_id: str,
     payload: OrderReleasePayload,
+    request: Request,
     current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
 ):
     try:
         order_id = str(order_id).strip()
@@ -381,6 +426,14 @@ def release_order_inventory_api(
                 raise HTTPException(status_code=422, detail="所选机台不属于当前订单或已不可释放")
 
         revert_to_inbound(target_sns, reason=f"订单配货释放-{order_id}", operator=current_operator)
+        append_audit_log(
+            module="订单配货",
+            action_type="释放",
+            biz_type="订单",
+            content=f"释放订单 {order_id} 已配机台 {len(target_sns)} 台；流水号：{', '.join(target_sns[:10])}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": f"已释放 {len(target_sns)} 台机台", "released": len(target_sns)}
     except HTTPException:
         raise
@@ -389,7 +442,13 @@ def release_order_inventory_api(
 
 
 @router.post("/contract/{contract_id}/status")
-def update_contract_status(contract_id: str, payload: StatusPayload):
+def update_contract_status(
+    contract_id: str,
+    payload: StatusPayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
     try:
         new_status = str(payload.status or "").strip()
         if not new_status:
@@ -400,6 +459,14 @@ def update_contract_status(contract_id: str, payload: StatusPayload):
             raise HTTPException(status_code=404, detail="合同不存在")
         df_plan.loc[mask, "状态"] = new_status
         save_factory_plan(df_plan)
+        append_audit_log(
+            module="合同管理",
+            action_type="更新状态",
+            biz_type="合同",
+            content=f"合同 {contract_id} 状态更新为：{new_status}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": f"合同状态已更新为 {new_status}"}
     except HTTPException:
         raise
@@ -408,7 +475,13 @@ def update_contract_status(contract_id: str, payload: StatusPayload):
 
 
 @router.post("/contract/{contract_id}/link-order")
-def link_contract_to_order(contract_id: str, payload: LinkOrderPayload):
+def link_contract_to_order(
+    contract_id: str,
+    payload: LinkOrderPayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
     try:
         order_id = str(payload.order_id or "").strip()
         if not order_id:
@@ -433,6 +506,14 @@ def link_contract_to_order(contract_id: str, payload: LinkOrderPayload):
         df_plan.loc[mask, "状态"] = "已转订单"
         df_plan.loc[mask, "订单号"] = order_id
         save_factory_plan(df_plan)
+        append_audit_log(
+            module="合同管理",
+            action_type="关联订单",
+            biz_type="合同",
+            content=f"合同 {contract_id} 关联订单：{order_id}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
 
         return {"message": f"已成功将合同 {contract_id} 与订单 {order_id} 关联"}
     except HTTPException:
@@ -442,7 +523,12 @@ def link_contract_to_order(contract_id: str, payload: LinkOrderPayload):
 
 
 @router.post("/contracts/batch-create")
-def create_contracts_batch(payload: BatchContractCreatePayload):
+def create_contracts_batch(
+    payload: BatchContractCreatePayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
     try:
         rows = payload.rows or []
         if not rows:
@@ -485,6 +571,14 @@ def create_contracts_batch(payload: BatchContractCreatePayload):
 
         df_plan = pd.concat([df_plan, pd.DataFrame(add_list)], ignore_index=True)
         save_factory_plan(df_plan)
+        append_audit_log(
+            module="合同管理",
+            action_type="批量录入",
+            biz_type="合同",
+            content=f"批量录入合同 {len(add_list)} 条；跳过重复 {existed} 条",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {
             "message": f"批量录入完成，新增 {len(add_list)} 条，跳过重复 {existed} 条",
             "inserted": len(add_list),
@@ -497,7 +591,13 @@ def create_contracts_batch(payload: BatchContractCreatePayload):
 
 
 @router.put("/contract/{contract_id}")
-def edit_contract(contract_id: str, payload: ContractEditPayload):
+def edit_contract(
+    contract_id: str,
+    payload: ContractEditPayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
     try:
         if not payload.items:
             raise HTTPException(status_code=422, detail="至少保留一条机型明细")
@@ -540,6 +640,14 @@ def edit_contract(contract_id: str, payload: ContractEditPayload):
 
         df_plan = pd.concat([df_plan, pd.DataFrame(new_rows)], ignore_index=True)
         save_factory_plan(df_plan)
+        append_audit_log(
+            module="合同管理",
+            action_type="编辑",
+            biz_type="合同",
+            content=f"编辑合同：{contract_id}；机型明细 {len(new_rows)} 条",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": "合同修改已保存"}
     except HTTPException:
         raise
@@ -562,7 +670,8 @@ async def upload_contract_file_api(
     contract_id: str,
     file: UploadFile = File(...),
     customer_name: str = "",
-    uploader_name: str = "API",
+    uploader_name: str = "",
+    current_operator: str = Depends(get_current_operator_name),
 ):
     try:
         ok, msg = await asyncio.to_thread(
@@ -570,7 +679,7 @@ async def upload_contract_file_api(
             file,
             customer_name or str(contract_id),
             contract_id,
-            uploader_name or "API",
+            uploader_name or current_operator or "API",
             True,
         )
         if not ok:
@@ -583,10 +692,14 @@ async def upload_contract_file_api(
 
 
 @router.delete("/contract/{contract_id}/files/{file_name}")
-def delete_contract_file_api(contract_id: str, file_name: str):
+def delete_contract_file_api(
+    contract_id: str,
+    file_name: str,
+    current_operator: str = Depends(get_current_operator_name),
+):
     try:
         decoded_name = unquote(file_name)
-        ok, msg = delete_contract_file(contract_id, decoded_name, operator="API")
+        ok, msg = delete_contract_file(contract_id, decoded_name, operator=current_operator or "API")
         if not ok:
             raise HTTPException(status_code=422, detail=msg)
         return {"message": msg}
@@ -677,7 +790,13 @@ def preview_contract_file_api(contract_id: str, file_name: str):
 
 
 @router.post("/contract/{contract_id}/save-plan")
-def save_contract_plan(contract_id: str, payload: PlanSavePayload):
+def save_contract_plan(
+    contract_id: str,
+    payload: PlanSavePayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
     try:
         if not payload.rows:
             raise HTTPException(status_code=422, detail="缺少规划数据")
@@ -750,6 +869,14 @@ def save_contract_plan(contract_id: str, payload: PlanSavePayload):
                     orders_df.loc[hit, "指定批次/来源"] = [all_plans] * int(hit.sum())
                     save_orders(orders_df)
 
+        append_audit_log(
+            module="合同管理",
+            action_type="保存规划",
+            biz_type="合同",
+            content=f"保存合同 {contract_id} 的规划，共 {len(payload.rows)} 行",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": "规划保存成功"}
     except HTTPException:
         raise

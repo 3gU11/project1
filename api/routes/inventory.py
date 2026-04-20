@@ -7,13 +7,14 @@ import os
 import re
 import tempfile
 import aiofiles
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from config import MACHINE_ARCHIVE_ABS_DIR
 from core.file_manager import audit_log
+from crud.audit_logs import append_audit_log
 from crud.inventory import (
     INVENTORY_COLS,
     append_import_staging,
@@ -31,7 +32,7 @@ from crud.inventory import (
 from crud.logs import append_log
 from crud.model_dictionary import find_disabled_models, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound
-from api.routes.auth import get_current_operator_name, get_current_user_token
+from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from database import get_engine
 from utils.parsers import (
     build_import_payload,
@@ -74,7 +75,7 @@ class ImportStagingSavePayload(BaseModel):
 
 class ImportConfirmPayload(BaseModel):
     selected_track_nos: List[str] = Field(default_factory=list)
-    expected_inbound_date: str
+    expected_inbound_date: str = ""
 
 
 class ImportStagingDeletePayload(BaseModel):
@@ -156,7 +157,11 @@ def get_inventory(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/")
-def update_inventory(data: List[Dict[str, Any]]):
+def update_inventory(
+    data: List[Dict[str, Any]],
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     """
     Replace all inventory data with the provided list of dicts.
     Note: In actual production, you might want to use specific update/add endpoints instead of full replace.
@@ -183,6 +188,16 @@ def update_inventory(data: List[Dict[str, Any]]):
         if unknown_cols:
             raise HTTPException(status_code=422, detail=f"存在不支持字段: {unknown_cols}")
         save_data(df)
+        
+        append_audit_log(
+            user_id=current_user.get("username"),
+            username=current_user.get("name") or current_user.get("username") or "System",
+            action_type="全量更新",
+            module="库存查询",
+            biz_type="库存",
+            content=f"全量覆盖更新库存数据，更新记录数：{len(data)}"
+        )
+        
         return {"message": "Inventory updated successfully"}
     except HTTPException:
         raise
@@ -193,7 +208,12 @@ def update_inventory(data: List[Dict[str, Any]]):
 
 
 @router.put("/machine-edit/{serial_no}")
-def machine_inline_update(serial_no: str, payload: MachineInlineUpdatePayload):
+def machine_inline_update(
+    serial_no: str, 
+    payload: MachineInlineUpdatePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         sn = str(serial_no).strip()
         if not sn:
@@ -202,14 +222,30 @@ def machine_inline_update(serial_no: str, payload: MachineInlineUpdatePayload):
         mask = df["流水号"].astype(str).str.strip() == sn
         if not mask.any():
             raise HTTPException(status_code=404, detail="机台不存在")
+            
+        changes = []
         if payload.model is not None:
             model = str(payload.model).strip()
             _assert_model_enabled(model)
             df.loc[mask, "机型"] = model
+            changes.append(f"机型改为 {model}")
         if payload.note is not None:
             df.loc[mask, "机台备注/配置"] = str(payload.note).strip()
+            changes.append(f"备注改为 {payload.note}")
+            
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         save_data(df)
+        
+        if changes:
+            append_audit_log(
+                user_id=current_user.get("username"),
+                username=current_user.get("name") or current_user.get("username") or "System",
+                action_type="修改",
+                module="机台档案",
+                biz_type="机台",
+                content=f"修改机台 {sn}；变更内容：{', '.join(changes)}"
+            )
+            
         return {"message": "更新成功"}
     except HTTPException:
         raise
@@ -218,7 +254,11 @@ def machine_inline_update(serial_no: str, payload: MachineInlineUpdatePayload):
 
 
 @router.post("/machine-edit/batch-update")
-def machine_batch_update(payload: MachineBatchUpdatePayload):
+def machine_batch_update(
+    payload: MachineBatchUpdatePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not sns:
@@ -228,9 +268,11 @@ def machine_batch_update(payload: MachineBatchUpdatePayload):
         if not mask.any():
             raise HTTPException(status_code=404, detail="未找到对应机台")
 
+        changes = []
         if payload.model is not None and str(payload.model).strip():
             _assert_model_enabled(str(payload.model).strip())
             df.loc[mask, "机型"] = str(payload.model).strip()
+            changes.append(f"机型改为 {payload.model}")
 
         note_parts = []
         if payload.note and str(payload.note).strip():
@@ -240,9 +282,23 @@ def machine_batch_update(payload: MachineBatchUpdatePayload):
         if payload.back_cond:
             note_parts.append("后导电")
         if note_parts:
-            df.loc[mask, "机台备注/配置"] = "；".join(note_parts)
+            new_note = "；".join(note_parts)
+            df.loc[mask, "机台备注/配置"] = new_note
+            changes.append(f"备注改为 {new_note}")
+            
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         save_data(df)
+        
+        if changes:
+            append_audit_log(
+                user_id=current_user.get("username"),
+                username=current_user.get("name") or current_user.get("username") or "System",
+                action_type="批量修改",
+                module="机台档案",
+                biz_type="机台",
+                content=f"批量修改 {int(mask.sum())} 台机台；变更内容：{', '.join(changes)}"
+            )
+            
         return {"message": f"批量更新成功，共 {int(mask.sum())} 台"}
     except HTTPException:
         raise
@@ -259,27 +315,67 @@ def get_layout(layout_id: str):
 
 
 @router.post("/layout/save")
-def save_layout(payload: LayoutPayload):
+def save_layout(
+    payload: LayoutPayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
-        return save_warehouse_layout(payload.layout_id, payload.layout_json)
+        res = save_warehouse_layout(payload.layout_id, payload.layout_json)
+        append_audit_log(
+            user_id=current_user.get("username"),
+            username=current_user.get("name") or current_user.get("username") or "System",
+            action_type="修改",
+            module="库位大屏",
+            biz_type="库位大屏",
+            content=f"修改库位大屏配置 ({payload.layout_id})"
+        )
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/layout/reset")
-def reset_layout(payload: LayoutResetPayload):
+def reset_layout(
+    payload: LayoutResetPayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
-        return reset_warehouse_layout(payload.layout_id)
+        res = reset_warehouse_layout(payload.layout_id)
+        append_audit_log(
+            user_id=current_user.get("username"),
+            username=current_user.get("name") or current_user.get("username") or "System",
+            action_type="重置",
+            module="库位大屏",
+            biz_type="库位大屏",
+            content=f"重置库位大屏配置 ({payload.layout_id})"
+        )
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/inbound-to-slot")
-def inbound_machine_to_slot(payload: InboundSlotPayload):
+def inbound_machine_to_slot(
+    payload: InboundSlotPayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         result = inbound_to_slot(payload.serial_no, payload.slot_code, is_transfer=bool(payload.is_transfer))
         if not result.get("ok"):
             raise HTTPException(status_code=422, detail=result)
+        
+        action = "调拨机台" if payload.is_transfer else "机台入库"
+        append_audit_log(
+            user_id=current_user.get("username"),
+            username=current_user.get("name") or current_user.get("username") or "System",
+            action_type="调拨" if payload.is_transfer else "入库",
+            module="入库作业",
+            biz_type="机台",
+            content=f"{action} 1 台机台；流水号：{payload.serial_no}，目标库位：{payload.slot_code}"
+        )
         return result
     except HTTPException:
         raise
@@ -308,7 +404,11 @@ def get_import_staging_rows(
 
 
 @router.post("/import-staging/upload")
-async def upload_tracking_sheet(file: UploadFile = File(...)):
+async def upload_tracking_sheet(
+    file: UploadFile = File(...),
+    request: Request = None,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         if not file.filename:
             raise HTTPException(status_code=400, detail="请选择跟踪单文件")
@@ -350,6 +450,17 @@ async def upload_tracking_sheet(file: UploadFile = File(...)):
                 _assert_model_enabled(model)
 
         appended = await asyncio.to_thread(append_import_staging, diff_df)
+        
+        if request and current_user:
+            append_audit_log(
+                user_id=current_user.get("username"),
+                username=current_user.get("name") or current_user.get("username") or "System",
+                action_type="上传",
+                module="入库作业",
+                biz_type="待入库数据",
+                content=f"解析文件 {file.filename}，追加 {appended} 条待入库数据"
+            )
+            
         return {"message": f"解析成功！已追加 {appended} 条记录到待入库清单。", "appended": appended}
     except HTTPException:
         raise
@@ -364,7 +475,11 @@ async def upload_tracking_sheet(file: UploadFile = File(...)):
 
 
 @router.post("/import-staging/save")
-def save_import_staging_rows(payload: ImportStagingSavePayload):
+def save_import_staging_rows(
+    payload: ImportStagingSavePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     import pandas as pd
 
     try:
@@ -374,18 +489,42 @@ def save_import_staging_rows(payload: ImportStagingSavePayload):
                 if model.strip():
                     _assert_model_enabled(model)
         save_import_staging(df)
+        
+        append_audit_log(
+            user_id=current_user.get("username"),
+            username=current_user.get("name") or current_user.get("username") or "System",
+            action_type="保存",
+            module="入库作业",
+            biz_type="待入库数据",
+            content=f"保存待入库清单，共 {len(df)} 条记录"
+        )
+        
         return {"message": "待入库清单保存成功"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存失败: {e}")
 
 
 @router.post("/import-staging/delete")
-def delete_import_staging_rows(payload: ImportStagingDeletePayload):
+def delete_import_staging_rows(
+    payload: ImportStagingDeletePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         serial_nos = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not serial_nos:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 条数据")
         deleted = delete_import_staging_by_serials(serial_nos)
+        
+        append_audit_log(
+            user_id=current_user.get("username"),
+            username=current_user.get("name") or current_user.get("username") or "System",
+            action_type="删除",
+            module="入库作业",
+            biz_type="待入库数据",
+            content=f"删除 {deleted} 条待入库数据"
+        )
+        
         return {"message": f"已删除 {deleted} 条待入库数据", "deleted": deleted}
     except HTTPException:
         raise
@@ -394,14 +533,16 @@ def delete_import_staging_rows(payload: ImportStagingDeletePayload):
 
 
 @router.post("/import-staging/import-confirm")
-def import_confirm(payload: ImportConfirmPayload):
+def import_confirm(
+    payload: ImportConfirmPayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     import pandas as pd
 
     try:
         if not payload.selected_track_nos:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 条数据")
-        if not payload.expected_inbound_date:
-            raise HTTPException(status_code=422, detail="请选择预计入库日期")
 
         plan_df = get_import_staging().copy()
         if plan_df.empty:
@@ -417,10 +558,46 @@ def import_confirm(payload: ImportConfirmPayload):
             raise HTTPException(status_code=422, detail=err)
 
         result = execute_import_transaction_payload(payload_data, retry_times=1)
+
+        success_items = result.get("success", [])
+        success_count = len(success_items)
+        if success_count > 0:
+            selected_row_map = {}
+            for _, row in selected_rows.iterrows():
+                serial_no = str(row.get("流水号", "")).strip()
+                if serial_no:
+                    selected_row_map[serial_no] = row
+
+            for item in success_items:
+                serial_no = str(item.get("trackNo", "")).strip()
+                row = selected_row_map.get(serial_no)
+                model_name = str((row.get("机型", "") if row is not None else "") or "").strip()
+                batch_no = str((row.get("批次号", "") if row is not None else "") or "").strip()
+                expected_date = str((row.get("预计入库时间", "") if row is not None else "") or "").strip()
+                if not expected_date:
+                    expected_date = str(payload.expected_inbound_date or "").strip()
+
+                content_parts = [f"开始生产；流水号：{serial_no}"]
+                if model_name:
+                    content_parts.append(f"机型：{model_name}")
+                if batch_no:
+                    content_parts.append(f"批次号：{batch_no}")
+                if expected_date:
+                    content_parts.append(f"预计入库日期：{expected_date}")
+
+                append_audit_log(
+                    user_id=current_user.get("username"),
+                    username=current_user.get("name") or current_user.get("username") or "System",
+                    action_type="开始生产",
+                    module="入库作业",
+                    biz_type="待入库数据",
+                    content="；".join(content_parts),
+                )
+            
         return {
             "success": result.get("success", []),
             "failed": result.get("failed", []),
-            "success_count": len(result.get("success", [])),
+            "success_count": success_count,
             "failed_count": len(result.get("failed", [])),
         }
     except HTTPException:
@@ -430,7 +607,11 @@ def import_confirm(payload: ImportConfirmPayload):
 
 
 @router.post("/import-staging/auto-generate")
-def auto_generate_import_rows(payload: AutoGeneratePayload):
+def auto_generate_import_rows(
+    payload: AutoGeneratePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         _assert_model_enabled(payload.model)
         code, msg = generate_auto_inbound(
@@ -441,6 +622,14 @@ def auto_generate_import_rows(payload: AutoGeneratePayload):
             payload.machine_note,
         )
         if code == 1:
+            append_audit_log(
+                user_id=current_user.get("username"),
+                username=current_user.get("name") or current_user.get("username") or "System",
+                action_type="自动生成",
+                module="入库作业",
+                biz_type="待入库数据",
+                content=f"自动生成待入库数据 {payload.qty} 台；批次号：{payload.batch}，机型：{payload.model}"
+            )
             return {"message": msg}
         raise HTTPException(status_code=422, detail=msg)
     except HTTPException:
@@ -487,7 +676,9 @@ def get_shipping_pending():
 @router.post("/shipping/confirm")
 def confirm_shipping(
     payload: ShippingActionPayload,
+    request: Request,
     current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
 ):
     try:
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
@@ -505,6 +696,14 @@ def confirm_shipping(
         save_data(df)
         archive_shipped_data(df[df["流水号"].astype(str).isin(sns)])
         append_log("正式发货", sns, operator=current_operator)
+        append_audit_log(
+            module="发货复核",
+            action_type="确认发货",
+            biz_type="机台",
+            content=f"确认发货 {len(sns)} 台机台；流水号：{', '.join(sns[:10])}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": f"发货完成，共 {len(sns)} 台"}
     except HTTPException:
         raise
@@ -515,13 +714,23 @@ def confirm_shipping(
 @router.post("/shipping/revert")
 def revert_shipping(
     payload: ShippingActionPayload,
+    request: Request,
     current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
 ):
     try:
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not sns:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 台机台")
         revert_to_inbound(sns, reason="正式发货撤回", operator=current_operator)
+        append_audit_log(
+            module="发货复核",
+            action_type="撤回发货",
+            biz_type="机台",
+            content=f"撤回发货 {len(sns)} 台机台；流水号：{', '.join(sns[:10])}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
         return {"message": f"已撤回，共 {len(sns)} 台"}
     except HTTPException:
         raise
@@ -580,7 +789,13 @@ def machine_archive_files(serial_no: str):
 
 
 @router.post("/machine-archive/{serial_no}/upload")
-async def machine_archive_upload(serial_no: str, label: str = Form(""), files: List[UploadFile] = File(...)):
+async def machine_archive_upload(
+    serial_no: str, 
+    label: str = Form(""), 
+    files: List[UploadFile] = File(...),
+    request: Request = None,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         if not files:
             raise HTTPException(status_code=422, detail="请至少上传 1 个文件")
@@ -605,7 +820,17 @@ async def machine_archive_upload(serial_no: str, label: str = Form(""), files: L
             await up.close()
         if saved <= 0:
             raise HTTPException(status_code=422, detail="没有可保存的有效文件")
-        audit_log("Upload Machine Archive", f"{serial_no}: uploaded {saved} files")
+            
+        if request and current_user:
+            append_audit_log(
+                user_id=current_user.get("username"),
+                username=current_user.get("name") or current_user.get("username") or "System",
+                action_type="上传",
+                module="机台档案",
+                biz_type="附件",
+                content=f"上传机台档案 {saved} 个文件；流水号：{serial_no}"
+            )
+            
         return {"message": f"上传成功，共 {saved} 个文件"}
     except HTTPException:
         raise
@@ -644,7 +869,12 @@ def machine_archive_preview(serial_no: str, file_name: str):
 
 
 @router.delete("/machine-archive/{serial_no}/files/{file_name}")
-def machine_archive_delete(serial_no: str, file_name: str):
+def machine_archive_delete(
+    serial_no: str, 
+    file_name: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         sn_dir = _ensure_sn_dir(serial_no)
         safe_file = _safe_name(file_name)
@@ -652,7 +882,16 @@ def machine_archive_delete(serial_no: str, file_name: str):
         if not os.path.exists(abs_path) or not os.path.isfile(abs_path):
             raise HTTPException(status_code=404, detail="文件不存在")
         os.remove(abs_path)
-        audit_log("Delete Machine Archive", f"{serial_no}: deleted {safe_file}")
+        
+        append_audit_log(
+            user_id=current_user.get("username"),
+            username=current_user.get("name") or current_user.get("username") or "System",
+            action_type="删除",
+            module="机台档案",
+            biz_type="附件",
+            content=f"删除机台档案文件 {safe_file}；流水号：{serial_no}"
+        )
+        
         return {"message": "删除成功"}
     except HTTPException:
         raise
@@ -661,7 +900,12 @@ def machine_archive_delete(serial_no: str, file_name: str):
 
 
 @router.post("/machine-archive/{serial_no}/files/batch-delete")
-def machine_archive_batch_delete(serial_no: str, payload: ArchiveBatchDeletePayload):
+def machine_archive_batch_delete(
+    serial_no: str, 
+    payload: ArchiveBatchDeletePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user_context)
+):
     try:
         names = [_safe_name(x) for x in (payload.file_names or []) if _safe_name(x)]
         if not names:
@@ -676,7 +920,17 @@ def machine_archive_batch_delete(serial_no: str, payload: ArchiveBatchDeletePayl
                 continue
             os.remove(abs_path)
             deleted += 1
-        audit_log("Batch Delete Machine Archive", f"{serial_no}: deleted {deleted} files")
+            
+        if deleted > 0:
+            append_audit_log(
+                user_id=current_user.get("username"),
+                username=current_user.get("name") or current_user.get("username") or "System",
+                action_type="批量删除",
+                module="机台档案",
+                biz_type="附件",
+                content=f"批量删除机台档案 {deleted} 个文件；流水号：{serial_no}"
+            )
+            
         return {"message": f"批量删除完成，成功 {deleted}，不存在 {missing}", "deleted": deleted, "missing": missing}
     except HTTPException:
         raise

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from core.auth import verify_login
 from crud.users import get_user_for_login
+from crud.audit_logs import append_audit_log
 
 SECRET_KEY = "V7EX_SECRET_KEY_SUPER_SECURE"
 ALGORITHM = "HS256"
