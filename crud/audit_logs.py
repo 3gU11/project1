@@ -235,9 +235,9 @@ def get_operation_logs(
         where_sql = f" WHERE {' AND '.join(where_clauses)}"
         count_sql = text(f"SELECT COUNT(*) FROM sys_operation_log{where_sql}")
         sql = text(
-            "SELECT `operate_time`, `username`, `module`, `action_type`, `biz_type`, `content` "
+            "SELECT DATE_FORMAT(`operate_time`, '%Y-%m-%d') AS `operate_time`, `username`, `module`, `action_type`, `biz_type`, `content` "
             f"FROM sys_operation_log{where_sql} "
-            "ORDER BY `operate_time` DESC, `id` DESC "
+            "ORDER BY sys_operation_log.`operate_time` DESC, `id` DESC "
             "LIMIT :limit OFFSET :offset"
         )
         with get_engine().connect() as conn:

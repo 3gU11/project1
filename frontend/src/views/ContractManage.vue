@@ -97,7 +97,7 @@
     </div>
 
     <el-table
-      :data="displayRows"
+      :data="pagedRows"
       border
       stripe
       size="small"
@@ -105,15 +105,26 @@
       @current-change="onCurrentRowChange"
       highlight-current-row
     >
-      <el-table-column prop="合同号" label="合同号" width="120" />
+      <el-table-column prop="合同号" label="合同号" min-width="160" />
       <el-table-column prop="客户名" label="客户名" min-width="260" />
       <el-table-column prop="代理商" label="代理商" width="90" />
-      <el-table-column prop="机型" label="机型" width="90" />
+      <el-table-column prop="机型" label="机型" min-width="160" />
       <el-table-column prop="排产数量" label="排产数量" width="90" />
       <el-table-column prop="要求交期" label="要求交期" width="100" />
       <el-table-column prop="状态" label="状态" width="90" />
       <el-table-column prop="备注" label="备注" min-width="120" />
     </el-table>
+
+    <div v-if="displayRows.length > pageSize" class="table-pagination">
+      <el-pagination
+        background
+        layout="total, prev, pager, next"
+        :total="displayRows.length"
+        :page-size="pageSize"
+        :current-page="tablePage"
+        @current-change="onPageChange"
+      />
+    </div>
 
     <div class="ops-panel">
       <div class="ops-left">
@@ -144,7 +155,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiPost, getApiErrorMessage } from '../utils/request'
 import { useFormSubmit } from '../composables/useFormSubmit'
@@ -163,11 +174,16 @@ const executing = ref(false)
 const batchSaving = ref(false)
 const batchPanelOpen = ref(false)
 const allRows = ref<any[]>([])
+const urgentRows = ref<any[]>([])
+const recentRows = ref<any[]>([])
+const allRowsSorted = ref<any[]>([])
 const selectedContractId = ref('')
 const viewMode = ref<ViewMode>('urgent')
 const operationType = ref<OperationType>('ordered')
 const batchPickedFiles = ref<File[]>([])
 const linkOrderId = ref('')
+const tablePage = ref(1)
+const pageSize = 120
 const { submitWithLock } = useFormSubmit()
 const contractsStore = useContractsStore()
 const batchForm = ref({
@@ -218,21 +234,32 @@ const isWithinDays = (v: string, days: number) => {
   return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000
 }
 
+const sortContractRows = (rows: any[]) => {
+  return [...rows].sort((a: any, b: any) => String(a['合同号'] || '').localeCompare(String(b['合同号'] || '')))
+}
+
+const rebuildViewCaches = (rows: any[]) => {
+  const recent = rows.filter((r: any) => isWithinDays(String(r['要求交期'] || ''), 60))
+  urgentRows.value = sortContractRows(
+    recent.filter((r: any) => String(r['状态'] || '') === '未下单')
+  )
+  recentRows.value = sortContractRows(recent)
+  allRowsSorted.value = sortContractRows(rows)
+}
+
 const filteredRows = computed(() => {
-  if (viewMode.value === 'all') return allRows.value
-  if (viewMode.value === 'recent') {
-    return allRows.value.filter((r: any) => isWithinDays(String(r['要求交期'] || ''), 60))
-  }
-  return allRows.value.filter((r: any) => {
-    const status = String(r['状态'] || '')
-    const near = isWithinDays(String(r['要求交期'] || ''), 60)
-    return status === '未下单' && near
-  })
+  if (viewMode.value === 'all') return allRowsSorted.value
+  if (viewMode.value === 'recent') return recentRows.value
+  return urgentRows.value
 })
 
 const displayRows = computed(() => {
-  const rows = [...filteredRows.value]
-  return rows.sort((a: any, b: any) => String(a['合同号'] || '').localeCompare(String(b['合同号'] || '')))
+  return filteredRows.value
+})
+
+const pagedRows = computed(() => {
+  const start = (tablePage.value - 1) * pageSize
+  return displayRows.value.slice(start, start + pageSize)
 })
 
 const selectableContractIds = computed(() => {
@@ -243,6 +270,10 @@ const selectableContractIds = computed(() => {
   }
   return Array.from(set)
 })
+
+const onPageChange = (page: number) => {
+  tablePage.value = page
+}
 
 const statusByOperation: Record<OperationType, string> = {
   ordered: '已下单',
@@ -255,6 +286,7 @@ const fetchContracts = async () => {
   loading.value = true
   try {
     allRows.value = await contractsStore.fetchPlanningContracts()
+    rebuildViewCaches(allRows.value)
     if (!selectedContractId.value && selectableContractIds.value.length > 0) {
       selectedContractId.value = selectableContractIds.value[0]
     }
@@ -264,6 +296,10 @@ const fetchContracts = async () => {
     loading.value = false
   }
 }
+
+watch(viewMode, () => {
+  tablePage.value = 1
+})
 
 const onCurrentRowChange = (row: any) => {
   if (!row) return
@@ -456,9 +492,11 @@ onMounted(() => {
   border: none;
   background: transparent;
   color: var(--color-gray-500);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   cursor: pointer;
-  padding: 2px 0;
+  padding: 8px 4px;
+  min-height: 42px;
+  font-weight: 600;
 }
 .view-tab.active {
   color: #ef4444;
@@ -474,11 +512,17 @@ onMounted(() => {
   justify-content: space-between;
   gap: var(--space-3);
 }
+.table-pagination {
+  margin-top: var(--space-2);
+  display: flex;
+  justify-content: flex-end;
+}
 .ops-left {
   flex: 1;
 }
 .ops-left :deep(.el-select) {
-  width: 100%;
+  width: 520px;
+  max-width: 100%;
 }
 .ops-label {
   font-size: var(--font-size-sm);
@@ -490,6 +534,11 @@ onMounted(() => {
   align-items: center;
   gap: var(--space-3);
   white-space: nowrap;
+}
+.ops-right :deep(.el-radio-group) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
 }
 .tip {
   color: var(--color-gray-500);

@@ -39,7 +39,15 @@ def list_users(
             total_df = pd.read_sql(text(f"SELECT COUNT(*) AS total FROM users{where_sql}"), conn, params=params)
             total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
             df = pd.read_sql(
-                text(f"SELECT * FROM users{where_sql} ORDER BY register_time DESC LIMIT :limit OFFSET :skip"),
+                text(
+                    "SELECT username, password, role, name, status, "
+                    "DATE_FORMAT(register_time, '%Y-%m-%d') AS register_time, "
+                    "DATE_FORMAT(audit_time, '%Y-%m-%d') AS audit_time, "
+                    "auditor "
+                    f"FROM users{where_sql} "
+                    "ORDER BY users.register_time DESC "
+                    "LIMIT :limit OFFSET :skip"
+                ),
                 conn,
                 params=params,
             )

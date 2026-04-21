@@ -11,7 +11,7 @@
               collapse-tags
               collapse-tags-tooltip
               placeholder="Choose options"
-              style="width: 360px; margin-right: 10px"
+              style="width: 520px; max-width: 100%; margin-right: 10px"
             >
               <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
             </el-select>
@@ -116,7 +116,7 @@
           >
             <el-table-column type="index" label="#" width="60" />
             <el-table-column prop="批次号" label="批次号" width="120" />
-            <el-table-column prop="机型" label="机型" width="130" />
+            <el-table-column prop="机型" label="机型" min-width="160" />
             <el-table-column prop="流水号" label="流水号" width="150" />
             <el-table-column prop="状态" label="状态" width="100" />
             <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="180" show-overflow-tooltip />

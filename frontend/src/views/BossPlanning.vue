@@ -192,7 +192,6 @@
                       :min="0"
                       :max="item.maxSpot"
                       :disabled="item.spotLocked"
-                      controls-position="right"
                     />
                     <span class="plan-hint">现货可用 {{ item.spotAvailable }} 台</span>
                   </div>
@@ -209,7 +208,6 @@
                         :min="0"
                         :max="batch.max"
                         :disabled="batch.locked"
-                        controls-position="right"
                       />
                     </div>
                   </div>
@@ -321,7 +319,6 @@
                     :min="0"
                     :max="item.maxSpot"
                     :disabled="item.spotLocked"
-                    controls-position="right"
                   />
                   <span class="plan-hint">现货可用 {{ item.spotAvailable }} 台</span>
                 </div>
@@ -339,7 +336,6 @@
                         :min="0"
                         :max="batch.max"
                         :disabled="batch.locked"
-                        controls-position="right"
                       />
                     </div>
                   </template>

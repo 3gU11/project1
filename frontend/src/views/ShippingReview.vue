@@ -20,7 +20,7 @@
       <el-table-column prop="发货时间" label="发货时间" width="120" />
       <el-table-column prop="占用订单号" label="订单号" width="170" />
       <el-table-column prop="客户" label="客户" min-width="140" />
-      <el-table-column prop="机型" label="机型" width="140" />
+      <el-table-column prop="机型" label="机型" min-width="160" />
       <el-table-column prop="流水号" label="流水号" width="160" />
       <el-table-column prop="订单备注" label="订单备注" min-width="180" />
       <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="180" />

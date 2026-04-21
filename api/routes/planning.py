@@ -239,9 +239,14 @@ def get_sales_orders(
 
         count_sql = f"SELECT COUNT(*) AS total FROM sales_orders{where_sql}"
         data_sql = (
-            "SELECT * FROM sales_orders"
+            "SELECT `订单号`, `客户名`, `代理商`, `需求机型`, `需求数量`, "
+            "DATE_FORMAT(`下单时间`, '%Y-%m-%d') AS `下单时间`, "
+            "`备注`, `包装选项`, "
+            "DATE_FORMAT(`发货时间`, '%Y-%m-%d') AS `发货时间`, "
+            "`指定批次/来源`, `status`, `delete_reason` "
+            "FROM sales_orders"
             f"{where_sql} "
-            "ORDER BY `下单时间` DESC LIMIT :limit OFFSET :skip"
+            "ORDER BY sales_orders.`下单时间` DESC LIMIT :limit OFFSET :skip"
         )
         with get_engine().connect() as conn:
             total_df = pd.read_sql(text(count_sql), conn, params=params)

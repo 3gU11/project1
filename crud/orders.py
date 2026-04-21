@@ -66,7 +66,8 @@ def get_orders():
                     df[col] = ""
         df["需求数量"] = pd.to_numeric(df["需求数量"], errors="coerce").fillna(0).astype(int)
         for dt_col in ["下单时间", "发货时间"]:
-            df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce")
+            if dt_col in df.columns:
+                df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
         df["指定批次/来源"] = df["指定批次/来源"].apply(_normalize_source_json)
         fill_cols = [c for c in ORDER_COLS if c not in ["需求数量", "下单时间", "发货时间", "指定批次/来源"]]
         for col in fill_cols:

@@ -8,7 +8,7 @@
 
     <div class="query-row">
       <div class="field-label">🔍 搜索/选择流水号</div>
-      <el-select v-model="selectedSerial" filterable clearable placeholder="请选择流水号" style="width: 320px" @change="onSerialChange">
+      <el-select v-model="selectedSerial" filterable clearable placeholder="请选择流水号" style="width: 460px; max-width: 100%" @change="onSerialChange">
         <el-option v-for="sn in serials" :key="sn" :label="sn" :value="sn" />
       </el-select>
       <div v-if="selectedSerial" class="machine-meta">

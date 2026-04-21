@@ -27,8 +27,8 @@ const toSafeDate = (value: Date | number | string) => {
 
 export const formatTimeHMS = (value: Date | number | string = new Date()) => {
   const d = toSafeDate(value)
-  if (!d) return '--:--:--'
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+  if (!d) return 'Unknown'
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
 export const formatYearMonth = (value: Date | number | string, fallback = 'Unknown') => {

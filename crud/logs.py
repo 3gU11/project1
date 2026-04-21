@@ -32,10 +32,10 @@ def get_transaction_logs(page: int = 1, page_size: int = 50, days: int = 14):
             ).scalar() or 0
             df = pd.read_sql(
                 text(
-                    "SELECT 时间, 操作类型, 流水号, 操作员 "
+                    "SELECT DATE_FORMAT(时间, '%Y-%m-%d') AS 时间, 操作类型, 流水号, 操作员 "
                     "FROM transaction_log "
                     "WHERE 时间 >= :cutoff "
-                    "ORDER BY 时间 DESC "
+                    "ORDER BY transaction_log.时间 DESC "
                     "LIMIT :limit OFFSET :offset"
                 ),
                 conn,

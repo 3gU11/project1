@@ -75,7 +75,7 @@
             >
               <el-table-column type="selection" width="48" />
               <el-table-column prop="流水号" label="流水号" width="150" />
-              <el-table-column prop="机型" label="机型" width="140" />
+              <el-table-column prop="机型" label="机型" min-width="160" />
               <el-table-column prop="状态" label="状态" width="90" />
               <el-table-column prop="批次号" label="批次号" width="120" />
               <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="160" />
@@ -96,7 +96,7 @@
             >
               <el-table-column type="selection" width="48" />
               <el-table-column prop="流水号" label="流水号" width="150" />
-              <el-table-column prop="机型" label="机型" width="140" />
+              <el-table-column prop="机型" label="机型" min-width="160" />
               <el-table-column prop="状态" label="状态" width="90" />
               <el-table-column prop="批次号" label="批次号" width="120" />
               <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="160" />
@@ -432,11 +432,10 @@ onMounted(() => {
   border: 1px solid var(--color-gray-200);
   border-radius: var(--radius-lg);
   background: var(--panel-bg);
-  padding: 8px;
-  height: 56px;
+  padding: 10px 12px; /* 增加上下内边距 */
+  min-height: 64px; /* 从固定 height 56px 改为 min-height 64px，让它自适应内容 */
   text-align: left;
   cursor: pointer;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -447,7 +446,8 @@ onMounted(() => {
   background: #fee2e2;
 }
 .order-customer {
-  font-weight: 600;
+  font-size: var(--font-size-base); /* 放大客户名称字号 */
+  font-weight: 700; /* 加粗客户名称 */
   color: var(--color-gray-900);
   white-space: nowrap;
   overflow: hidden;
@@ -455,8 +455,8 @@ onMounted(() => {
 }
 .sub {
   margin-top: 4px;
-  color: var(--color-gray-500);
-  font-size: var(--font-size-sm);
+  color: var(--color-gray-600); /* 略微加深副标题颜色 */
+  font-size: var(--font-size-base); /* 放大单号和机型字号 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -465,12 +465,13 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 10px;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base); /* 放大配货面板摘要描述字号 */
 }
 .field-label {
   margin-bottom: 6px;
-  font-size: var(--font-size-sm);
-  color: var(--color-gray-700);
+  font-size: var(--font-size-base); /* 放大配货面板模块小标题字号 */
+  font-weight: 600;
+  color: var(--color-gray-800);
 }
 .ops {
   margin-top: var(--space-2);

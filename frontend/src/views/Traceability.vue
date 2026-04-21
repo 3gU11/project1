@@ -32,7 +32,7 @@
           max-height="300"
           @row-click="onSummaryRowClick"
         >
-          <el-table-column prop="机型" label="机型" min-width="140" />
+          <el-table-column prop="机型" label="机型" min-width="160" />
           <el-table-column prop="状态" label="状态" width="120" />
           <el-table-column prop="流水号" label="流水号" min-width="140" />
           <el-table-column prop="机台状态" label="机台状态" min-width="180" />

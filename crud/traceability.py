@@ -108,7 +108,7 @@ def get_target_timeline(target_id: str):
                 CAST(`操作类型` AS CHAR) AS action, 
                 CAST(`流水号` AS CHAR) AS `流水号`, 
                 CAST(`操作员` AS CHAR) AS operator, 
-                `时间` AS created_at
+                DATE_FORMAT(`时间`, '%Y-%m-%d') AS created_at
             FROM transaction_log
             WHERE `流水号` = :target_id
                OR `流水号` LIKE :kw
@@ -131,7 +131,7 @@ def get_target_timeline(target_id: str):
                 CAST(`action_type` AS CHAR) AS action, 
                 CAST(`serial_no` AS CHAR) AS `流水号`, 
                 CAST(`username` AS CHAR) AS operator, 
-                `operate_time` AS created_at
+                DATE_FORMAT(`operate_time`, '%Y-%m-%d') AS created_at
             FROM sys_operation_log
             WHERE `serial_no` = :target_id 
                OR `serial_no` LIKE :kw

@@ -55,6 +55,8 @@ def get_factory_plan():
                 df[col] = ""
         if "指定批次/来源" in df.columns:
             df["指定批次/来源"] = df["指定批次/来源"].apply(parse_alloc_dict)
+        if "要求交期" in df.columns:
+            df["要求交期"] = pd.to_datetime(df["要求交期"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
         fill_cols = [c for c in cols if c != "指定批次/来源"]
         for col in fill_cols:
             df[col] = df[col].fillna("")

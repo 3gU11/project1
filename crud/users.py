@@ -19,7 +19,13 @@ def init_users_csv():
 def get_all_users():
     try:
         with get_engine().connect() as conn:
-            df = pd.read_sql("SELECT username, password, role, name, status, register_time, audit_time, auditor FROM users", conn)
+            df = pd.read_sql(
+                "SELECT username, password, role, name, status, "
+                "DATE_FORMAT(register_time, '%Y-%m-%d') AS register_time, "
+                "DATE_FORMAT(audit_time, '%Y-%m-%d') AS audit_time, "
+                "auditor FROM users", 
+                conn
+            )
         if df.empty:
             return df
         # 读取时先做一次规范化去重，避免管理页重复显示

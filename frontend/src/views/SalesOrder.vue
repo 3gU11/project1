@@ -48,7 +48,11 @@
         </el-table-column>
         <el-table-column label="数量" width="180">
           <template #default="scope">
-            <el-input-number v-model="scope.row.qty" :min="1" controls-position="right" />
+            <el-input
+              :model-value="String(scope.row.qty ?? 1)"
+              @input="(val: string | number) => setQtyValue(scope.row, val)"
+              inputmode="numeric"
+            />
           </template>
         </el-table-column>
         <el-table-column label="加高?" width="120">
@@ -107,9 +111,9 @@
         @row-click="onPlannedImportRowClick"
       >
         <el-table-column type="selection" width="48" />
-        <el-table-column prop="合同号" label="合同号" width="140" />
+        <el-table-column prop="合同号" label="合同号" min-width="160" />
         <el-table-column prop="客户名" label="客户名" min-width="240" />
-        <el-table-column prop="机型" label="机型" width="140" />
+        <el-table-column prop="机型" label="机型" min-width="160" />
         <el-table-column prop="排产数量" label="排产数量" width="90" />
         <el-table-column prop="要求交期" label="要求交期" width="120" />
         <el-table-column prop="备注" label="备注" min-width="120" />
@@ -168,7 +172,11 @@
           </el-table-column>
           <el-table-column label="数量" width="100">
             <template #default="scope">
-              <el-input-number v-model="scope.row.qty" :min="1" controls-position="right" />
+              <el-input
+                :model-value="String(scope.row.qty ?? 1)"
+                @input="(val: string | number) => setQtyValue(scope.row, val)"
+                inputmode="numeric"
+              />
             </template>
           </el-table-column>
           <el-table-column label="备注" min-width="140">
@@ -225,7 +233,19 @@
         <el-table-column prop="订单号" label="订单号" width="170" />
         <el-table-column prop="客户名" label="客户名" min-width="160" />
         <el-table-column prop="代理商" label="代理商" width="90" />
-        <el-table-column prop="需求机型" label="需求机型" min-width="150" />
+        <el-table-column label="需求机型" min-width="200">
+          <template #default="scope">
+            <div class="model-token-list">
+              <span
+                v-for="(token, index) in splitDemandModelTokens(scope.row['需求机型'])"
+                :key="`${scope.row['订单号'] || 'order'}-${index}-${token}`"
+                class="model-token"
+              >
+                {{ token }}
+              </span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="需求数量" label="需求数量" width="90" />
         <el-table-column prop="发货时间" label="发货时间" width="120" />
         <el-table-column prop="备注" label="备注" min-width="170" />
@@ -281,7 +301,11 @@
           </el-table-column>
           <el-table-column label="数量" width="120">
             <template #default="scope">
-              <el-input-number v-model="scope.row.qty" :min="1" controls-position="right" />
+              <el-input
+                :model-value="String(scope.row.qty ?? 1)"
+                @input="(val: string | number) => setQtyValue(scope.row, val)"
+                inputmode="numeric"
+              />
             </template>
           </el-table-column>
           <el-table-column label="加高?" width="90">
@@ -413,6 +437,23 @@ const parseOrderDemandTotal = (order: RowData) => {
   return Number.isFinite(fallback) ? Math.max(0, fallback) : 0
 }
 
+const splitDemandModelTokens = (value: unknown) => {
+  return String(value || '')
+    .split(';')
+    .map((token) => token.trim())
+    .filter(Boolean)
+}
+
+const normalizeQtyValue = (value: unknown) => {
+  const digits = String(value ?? '').replace(/[^\d]/g, '')
+  const parsed = Number(digits || '1')
+  return parsed > 0 ? parsed : 1
+}
+
+const setQtyValue = (row: { qty: number }, value: unknown) => {
+  row.qty = normalizeQtyValue(value)
+}
+
 const shippedCountByOrder = computed(() => {
   const map = new Map<string, number>()
   for (const r of inventoryRows.value) {
@@ -503,7 +544,11 @@ const fetchData = async () => {
       apiGetAll<RowData>('/planning/'),
       apiGetAll<RowData>('/inventory/'),
     ])
-    rows.value = nextOrders
+    rows.value = nextOrders.map((row) => ({
+      ...row,
+      '下单时间': String(row['下单时间'] || '').slice(0, 10),
+      '发货时间': String(row['发货时间'] || '').slice(0, 10),
+    }))
     planRows.value = nextPlans
     inventoryRows.value = nextInventory
   } catch (err: any) {
@@ -878,9 +923,11 @@ watch([keyword, statusFilter, monthFilter], () => {
   border: none;
   background: transparent;
   color: var(--color-gray-500);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   cursor: pointer;
-  padding: 2px 0;
+  padding: 8px 4px;
+  min-height: 42px;
+  font-weight: 600;
 }
 .tab-btn.active {
   color: #ef4444;
@@ -925,6 +972,16 @@ watch([keyword, statusFilter, monthFilter], () => {
   margin: 6px 0;
   color: #94a3b8;
   font-size: var(--font-size-sm);
+}
+.model-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  line-height: 1.35;
+}
+.model-token {
+  display: inline-block;
+  white-space: nowrap; /* 每个机型片段完整显示后再换行 */
 }
 .merge-alert {
   margin-top: var(--space-2);

@@ -49,32 +49,45 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
 
 <style scoped>
 .home-page {
-  padding: var(--space-6) var(--space-4) var(--space-12);
+  padding: 4px 20px 12px;
   container-type: inline-size;
   container-name: home;
+  min-height: calc(100vh - 44px);
+  display: flex;
+  flex-direction: column;
 }
 .page-title {
   margin: 0;
-  font-size: clamp(var(--text-3xl), 5vw, var(--text-4xl));
+  font-size: clamp(26px, 3.6vw, 30px);
   font-weight: 800;
   color: var(--color-gray-900);
   line-height: var(--leading-tight);
 }
 .subtitle {
-  margin: var(--space-2) 0 var(--space-8);
+  margin: 4px 0 18px;
   color: var(--color-gray-500);
-  font-size: var(--text-sm);
+  font-size: 12px;
+}
+.section {
+  margin-bottom: 18px;
+}
+.section:last-of-type {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 .section-title {
-  margin: 0 0 var(--space-4);
-  font-size: clamp(var(--text-2xl), 4vw, var(--text-3xl));
+  margin: 0 0 10px;
+  font-size: 16px;
   color: var(--color-gray-900);
   font-weight: 700;
 }
 .top-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: calc(100% - 36px);
+  margin-left: 36px; /* 让主页按钮区整体稍微靠右 */
 }
 
 /* Base Button Styles based on 8pt system and ratios */
@@ -82,40 +95,49 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
   display: flex;
   align-items: center;
   justify-content: center;
+  text-align: center;
   border: none;
-  box-shadow: inset 0 0 0 1px var(--border-color-light);
+  box-shadow: inset 0 0 0 1.5px var(--border-color-light);
   border-radius: var(--radius-md);
   background: var(--panel-bg);
   color: var(--color-gray-700);
-  font-size: var(--text-base);
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  padding: var(--btn-padding-y) var(--btn-padding-x);
+  padding: 10px 16px;
   width: 100%;
 }
 
 .top-card {
-  height: var(--btn-height-primary);
+  min-height: 62px;
 }
 
 .divider {
-  margin: var(--space-8) 0;
+  margin: 14px 0 20px;
   border: none;
   border-top: 1px solid var(--border-color-light);
 }
 
 .module-columns {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--space-4);
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 28px 96px;
+  justify-content: space-between;
+  align-content: space-evenly;
+  flex: 1;
+  width: calc(100% - 52px);
+  margin-left: 52px; /* 模块区整体再向右一点 */
+  justify-items: center; /* 每列按钮居中，保证中间列中点更容易对齐 */
 }
 
 .module-btn {
-  height: var(--btn-height-secondary);
+  min-height: 66px;
   width: 100%;
-  padding: var(--space-2) var(--space-4);
+  max-width: 210px;
+  padding: 12px 14px;
   justify-content: center;
+  justify-self: center;
 }
 
 .btn-base:hover {
@@ -139,13 +161,26 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
 
 /* Responsive Overrides using Container Queries */
 @container home (max-width: 768px) {
+  .home-page {
+    min-height: auto;
+  }
   .module-columns {
-    grid-template-columns: repeat(2, 1fr); /* 2 columns on mobile for better touch areas */
-    gap: var(--space-3);
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+    gap: 12px;
+    align-content: start;
+    flex: none;
+    width: 100%;
+    margin-left: 0;
   }
   
   .top-cards {
     grid-template-columns: 1fr;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .module-btn {
+    max-width: none;
   }
 }
 

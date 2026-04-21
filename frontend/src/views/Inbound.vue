@@ -28,7 +28,7 @@
         >
           <el-table-column type="selection" width="48" />
           <el-table-column prop="批次号" label="批次号" width="120" />
-          <el-table-column prop="机型" label="机型" width="140" />
+          <el-table-column prop="机型" label="机型" min-width="160" />
           <el-table-column prop="流水号" label="流水号" width="170" />
           <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="200" show-overflow-tooltip />
         </el-table>
@@ -109,7 +109,7 @@
                 <el-input v-model="scope.row['批次号']" />
               </template>
             </el-table-column>
-            <el-table-column prop="机型" label="机型" width="130">
+            <el-table-column prop="机型" label="机型" min-width="160">
               <template #default="scope">
                 <el-select v-model="scope.row['机型']" filterable placeholder="请选择机型" style="width: 100%">
                   <el-option v-for="model in autoGenModelOptions" :key="model" :label="model" :value="model" />

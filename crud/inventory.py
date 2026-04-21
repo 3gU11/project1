@@ -68,6 +68,12 @@ def get_data():
                 df[col] = ""
         if '备注' in df.columns and '订单备注' not in df.columns:
             df.rename(columns={'备注': '订单备注'}, inplace=True)
+            
+        if "预计入库时间" in df.columns:
+            df["预计入库时间"] = pd.to_datetime(df["预计入库时间"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
+        if "更新时间" in df.columns:
+            df["更新时间"] = pd.to_datetime(df["更新时间"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
+            
         try:
             df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
         except Exception:

@@ -35,9 +35,9 @@
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column prop="register_time" label="注册时间" width="170" />
-          <el-table-column prop="audit_time" label="审核时间" width="170" />
-          <el-table-column prop="auditor" label="审核人" width="120" />
+          <el-table-column prop="register_time" label="注册时间" width="120" />
+          <el-table-column prop="audit_time" label="审核时间" width="120" />
+          <el-table-column prop="auditor" label="审核人" min-width="120" />
         </el-table>
       </el-tab-pane>
       <el-tab-pane :label="`待审核申请 (${pendingCount})`">
@@ -77,7 +77,12 @@ const activeCount = computed(() => users.value.filter((u) => String(u.status || 
 const loadUsers = async () => {
   loading.value = true
   try {
-    users.value = await apiGetAll<any>('/users/')
+    const rows = await apiGetAll<any>('/users/')
+    users.value = rows.map((row: any) => ({
+      ...row,
+      register_time: String(row?.register_time || '').slice(0, 10),
+      audit_time: String(row?.audit_time || '').slice(0, 10),
+    }))
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取用户失败')
   } finally {

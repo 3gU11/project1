@@ -152,13 +152,13 @@ watch(() => router.currentRoute.value.path, () => {
   position: relative;
 }
 .sidebar {
-  width: 220px;
+  width: 196px;
   background: var(--panel-bg);
   border-right: 1px solid #e5e7eb;
   color: var(--text-color);
   display: flex;
   flex-direction: column;
-  padding: 10px 8px;
+  padding: 12px 10px;
   gap: 12px;
   transition: width 0.2s ease, padding 0.2s ease;
 }
@@ -177,19 +177,19 @@ watch(() => router.currentRoute.value.path, () => {
   padding: 0;
 }
 .logo {
-  padding: 8px 6px;
-  font-size: 22px;
+  padding: 6px 4px;
+  font-size: 19px;
   font-weight: bold;
   color: #1f2937;
 }
 .menu-group {
   border-top: 1px solid #e5e7eb;
-  padding-top: 10px;
+  padding-top: 12px;
 }
 .group-title {
   color: #6b7280;
-  font-size: 12px;
-  margin-bottom: 8px;
+  font-size: 15px;
+  margin-bottom: 10px;
   font-weight: 700;
 }
 .menu-item {
@@ -198,19 +198,22 @@ watch(() => router.currentRoute.value.path, () => {
   border: 1px solid #d1fae5;
   background: #ecfdf5;
   color: #047857;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
 }
 .menu-btn {
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px solid #e5e7eb;
   background: #ffffff;
   border-radius: 8px;
   color: #374151;
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 600;
   margin-bottom: 8px;
   cursor: pointer;
 }
@@ -225,34 +228,34 @@ watch(() => router.currentRoute.value.path, () => {
 .user-info {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 8px;
+  padding: 10px 8px;
   background: #fff;
 }
 .user-info button {
   margin-top: 8px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 8px 12px;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   background: #fff;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 15px;
 }
 .user-name,
 .user-role {
   margin: 2px 0;
-  font-size: 12px;
+  font-size: 15px;
   color: #6b7280;
 }
 .main-content {
   flex-grow: 1;
-  padding: 18px 20px;
+  padding: 18px 22px;
   background-color: var(--panel-bg);
   overflow-y: auto;
   transition: padding 0.2s ease;
 }
 .main-content.expanded {
-  padding-left: 14px;
+  padding-left: 16px;
 }
 .mobile-menu-btn {
   position: fixed;
@@ -263,7 +266,7 @@ watch(() => router.currentRoute.value.path, () => {
   background: #fff;
   border-radius: 8px;
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
 }
 .mobile-mask {
@@ -289,10 +292,10 @@ watch(() => router.currentRoute.value.path, () => {
   }
   .main-content {
     width: 100%;
-    padding: 54px 10px 10px;
+    padding: 50px 8px 8px;
   }
   .main-content.expanded {
-    padding-left: 10px;
+    padding-left: 8px;
   }
 }
 </style>
