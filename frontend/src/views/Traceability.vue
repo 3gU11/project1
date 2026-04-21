@@ -89,7 +89,13 @@
                   <el-card>
                     <h4>{{ log.action }}</h4>
                     <p>操作人: {{ log.operator || '系统' }}</p>
+                    <p v-if="log.contract_no">合同号: <span class="font-bold">{{ log.contract_no }}</span></p>
+                    <p v-if="log.order_no">订单号: <span class="font-bold">{{ log.order_no }}</span></p>
                     <p v-if="log.流水号">{{ isOrderAction(log.action, log.流水号) ? '单号' : '流水号' }}: {{ log.流水号 }}</p>
+                    <div v-if="log.content" class="log-content-box">
+                      <span class="content-label">详情:</span>
+                      <div class="content-text">{{ log.content }}</div>
+                    </div>
                     <p class="text-xs text-gray-400">日志 ID: {{ log.id || '-' }}</p>
                   </el-card>
                 </el-timeline-item>
@@ -128,14 +134,23 @@ const groupedTimeline = computed(() => {
     const action = String(log?.action || '未知操作')
     const createdAt = String(log?.created_at || '')
     if (!groups.has(action)) {
-      groups.set(action, { action, count: 0, latestAt: createdAt, items: [] })
+      groups.set(action, { action, count: 0, latestAt: '', items: [] })
     }
     const group = groups.get(action)!
     group.items.push(log)
     group.count += 1
-    if (!group.latestAt) group.latestAt = createdAt
+    if (createdAt && (!group.latestAt || createdAt > group.latestAt)) {
+      group.latestAt = createdAt
+    }
   }
-  return Array.from(groups.values())
+  // Sort groups by latest timestamp ascending (earliest action group first)
+  const result = Array.from(groups.values())
+  result.sort((a, b) => (a.latestAt || '').localeCompare(b.latestAt || ''))
+  // Sort items within each group by created_at ascending
+  for (const g of result) {
+    g.items.sort((x: any, y: any) => String(x.created_at || '').localeCompare(String(y.created_at || '')))
+  }
+  return result
 })
 
 const getTraceTarget = (row: any) => {
@@ -312,5 +327,27 @@ const handleTrace = async (id: string, model = '') => {
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+.log-content-box {
+  margin-top: 8px;
+  margin-bottom: 8px;
+  background: var(--color-gray-50);
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+.content-label {
+  font-size: 12px;
+  color: var(--color-gray-500);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 4px;
+}
+.content-text {
+  font-size: 13px;
+  color: var(--color-gray-800);
+  white-space: pre-wrap;
+  line-height: 1.5;
+  word-break: break-all;
 }
 </style>

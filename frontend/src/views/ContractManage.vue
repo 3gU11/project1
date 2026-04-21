@@ -10,8 +10,10 @@
       </button>
     </div>
 
-    <div v-if="batchPanelOpen" class="batch-panel">
-      <div class="batch-grid">
+    <div class="batch-slide" :class="{ open: batchPanelOpen }">
+      <div class="batch-slide-inner">
+        <div class="batch-panel">
+          <div class="batch-grid">
         <div>
           <div class="ops-label">系统自动生成合同号</div>
           <div class="auto-id">{{ batchForm.contractId }}</div>
@@ -45,8 +47,8 @@
 
       <el-divider />
       <div class="tip">请在下方清单中添加设备机型。支持同一机型添加多条记录（例如：标准版与加高版分开录入）。</div>
-      <el-table :data="batchItems" border stripe size="small">
-        <el-table-column label="#" width="46">
+      <el-table :data="batchItems" border stripe class="form-table">
+        <el-table-column label="#" width="60">
           <template #default="scope">{{ scope.$index + 1 }}</template>
         </el-table-column>
         <el-table-column label="机型">
@@ -56,9 +58,9 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="数量" width="120">
+        <el-table-column label="数量" width="100">
           <template #default="scope">
-            <el-input-number v-model="scope.row.qty" :min="1" controls-position="right" />
+            <el-input-number v-model="scope.row.qty" :min="1" :controls="false" placeholder="数量" style="width: 100%" />
           </template>
         </el-table-column>
         <el-table-column label="加高?" width="90">
@@ -81,6 +83,8 @@
 
       <div class="batch-save">
         <el-button type="danger" :loading="batchSaving" @click="submitBatchContracts">💾 保存所有合同条目</el-button>
+      </div>
+        </div>
       </div>
     </div>
 
@@ -457,8 +461,23 @@ onMounted(() => {
   cursor: pointer;
   padding: var(--space-2) 0;
 }
+.batch-slide {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.batch-slide.open {
+  grid-template-rows: 1fr;
+}
+.batch-slide-inner {
+  overflow: hidden;
+  padding-top: 0;
+  transition: padding-top 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.batch-slide.open .batch-slide-inner {
+  padding-top: var(--space-2);
+}
 .batch-panel {
-  margin-top: var(--space-2);
   border: 1px solid var(--color-gray-200);
   border-radius: var(--radius-lg);
   padding: var(--space-2);
@@ -558,5 +577,11 @@ onMounted(() => {
 .link-order-panel .ops-label {
   margin-bottom: 0;
   white-space: nowrap;
+}
+.form-table :deep(.el-table__cell) {
+  padding: 10px 8px !important;
+}
+.form-table :deep(.cell) {
+  padding: 0 4px !important;
 }
 </style>

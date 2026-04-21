@@ -20,7 +20,7 @@
     <section class="section">
       <div class="module-columns">
         <button v-if="can('/inbound')" class="btn-base module-btn" @click="go('/inbound')">
-          <span class="icon">📦</span> 成品入库
+          <span class="icon">⬇️</span> 成品入库
         </button>
         <button v-if="can('/shipping-review')" class="btn-base module-btn" @click="go('/shipping-review')">
           <span class="icon">🚚</span> 发货复核
@@ -35,7 +35,7 @@
           <span class="icon">🔍</span> 库存查询
         </button>
         <button v-if="can('/order-allocation')" class="btn-base module-btn" @click="go('/order-allocation')">
-          <span class="icon">📦</span> 订单配货
+          <span class="icon">📋</span> 订单配货
         </button>
         <button v-if="can('/machine-edit')" class="btn-base module-btn" @click="go('/machine-edit')">
           <span class="icon">🛠️</span> 机台编辑
