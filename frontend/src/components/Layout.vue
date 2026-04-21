@@ -148,7 +148,8 @@ watch(() => router.currentRoute.value.path, () => {
 <style scoped>
 .layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   position: relative;
 }
 .sidebar {
@@ -161,6 +162,18 @@ watch(() => router.currentRoute.value.path, () => {
   padding: 12px 10px;
   gap: 12px;
   transition: width 0.2s ease, padding 0.2s ease;
+  overflow-y: auto;
+}
+/* 美化左侧滚动条 */
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+.sidebar:hover::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
 }
 .sidebar.collapsed {
   width: 28px;

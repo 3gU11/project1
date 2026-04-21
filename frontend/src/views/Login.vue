@@ -4,7 +4,7 @@
       <h2 class="title">🔐 V7ex 成品管理系统</h2>
       
       <el-tabs v-model="activeTab" class="login-tabs">
-        <el-tab-pane label="🔑 登录" name="login">
+        <el-tab-pane label="登录系统" name="login">
           <el-form :model="loginForm" :rules="loginRules" ref="loginFormRef" label-position="top">
             <el-form-item label="账号" prop="username">
               <el-input v-model="loginForm.username" placeholder="请输入账号" :prefix-icon="User"></el-input>
@@ -21,7 +21,7 @@
           </el-form>
         </el-tab-pane>
         
-        <el-tab-pane label="📝 注册新账号" name="register">
+        <el-tab-pane label="注册申请" name="register">
           <el-form :model="registerForm" :rules="registerRules" ref="registerFormRef" label-position="top">
             <el-form-item label="设置账号 (用户名)" prop="username">
               <el-input v-model="registerForm.username" placeholder="登录用的唯一ID"></el-input>
@@ -170,24 +170,29 @@ const handleRegister = async (formEl: FormInstance | undefined) => {
   justify-content: center;
   align-items: center;
   height: 100vh;
-  background-color: #f0f2f5;
-  background-image: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  background-color: #fbfbfd;
+  background-image: radial-gradient(circle at 10% 20%, rgba(10, 115, 251, 0.05) 0%, rgba(255,255,255,0) 90%), radial-gradient(circle at 90% 80%, rgba(220,230,240,0.3) 0%, rgba(255,255,255,0) 80%);
 }
 
 .login-card {
-  background: white;
-  padding: 40px;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 32px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.02);
   width: 100%;
-  max-width: 450px;
+  max-width: 420px;
 }
 
 .title {
   text-align: center;
-  margin-bottom: 24px;
-  color: #303133;
-  font-weight: 600;
+  margin-bottom: 28px;
+  color: #1d1d1f;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: -0.02em;
 }
 
 .login-tabs {
@@ -200,8 +205,10 @@ const handleRegister = async (formEl: FormInstance | undefined) => {
 
 .submit-btn {
   width: 100%;
-  margin-top: 10px;
-  padding: 12px 0;
+  margin-top: 8px;
+  padding: 10px 0;
   font-size: 16px;
+  border-radius: 8px;
+  height: 42px;
 }
 </style>

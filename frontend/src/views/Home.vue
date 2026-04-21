@@ -6,8 +6,12 @@
     <section class="section">
       <h2 class="section-title">👑 管理与统筹</h2>
       <div class="top-cards">
-        <button v-if="can('/planning')" class="btn-base top-card" @click="go('/planning')">👑 生产统筹</button>
-        <button v-if="can('/contracts')" class="btn-base top-card" @click="go('/contracts')">📊 合同管理</button>
+        <button v-if="can('/planning')" class="btn-base top-card" @click="go('/planning')">
+          <span class="icon">👑</span> 生产统筹
+        </button>
+        <button v-if="can('/contracts')" class="btn-base top-card" @click="go('/contracts')">
+          <span class="icon">📊</span> 合同管理
+        </button>
       </div>
     </section>
 
@@ -15,14 +19,30 @@
 
     <section class="section">
       <div class="module-columns">
-        <button v-if="can('/inbound')" class="btn-base module-btn" @click="go('/inbound')">📦 成品入库</button>
-        <button v-if="can('/shipping-review')" class="btn-base module-btn" @click="go('/shipping-review')">🚚 发货复核</button>
-        <button v-if="can('/machine-archive')" class="btn-base module-btn" @click="go('/machine-archive')">📂 机台档案</button>
-        <button v-if="can('/sales-orders')" class="btn-base module-btn" @click="go('/sales-orders')">📌 销售下单</button>
-        <button v-if="can('/inventory')" class="btn-base module-btn" @click="go('/inventory')">🔍 库存查询</button>
-        <button v-if="can('/order-allocation')" class="btn-base module-btn" @click="go('/order-allocation')">📦 订单配货</button>
-        <button v-if="can('/machine-edit')" class="btn-base module-btn" @click="go('/machine-edit')">🛠️ 机台编辑</button>
-        <button v-if="can('/warehouse-dashboard')" class="btn-base module-btn" @click="go('/warehouse-dashboard')">🖥️ 库位大屏</button>
+        <button v-if="can('/inbound')" class="btn-base module-btn" @click="go('/inbound')">
+          <span class="icon">📦</span> 成品入库
+        </button>
+        <button v-if="can('/shipping-review')" class="btn-base module-btn" @click="go('/shipping-review')">
+          <span class="icon">🚚</span> 发货复核
+        </button>
+        <button v-if="can('/machine-archive')" class="btn-base module-btn" @click="go('/machine-archive')">
+          <span class="icon">📂</span> 机台档案
+        </button>
+        <button v-if="can('/sales-orders')" class="btn-base module-btn" @click="go('/sales-orders')">
+          <span class="icon">📝</span> 销售下单
+        </button>
+        <button v-if="can('/inventory')" class="btn-base module-btn" @click="go('/inventory')">
+          <span class="icon">🔍</span> 库存查询
+        </button>
+        <button v-if="can('/order-allocation')" class="btn-base module-btn" @click="go('/order-allocation')">
+          <span class="icon">📦</span> 订单配货
+        </button>
+        <button v-if="can('/machine-edit')" class="btn-base module-btn" @click="go('/machine-edit')">
+          <span class="icon">🛠️</span> 机台编辑
+        </button>
+        <button v-if="can('/warehouse-dashboard')" class="btn-base module-btn" @click="go('/warehouse-dashboard')">
+          <span class="icon">🖥️</span> 库位大屏
+        </button>
       </div>
     </section>
   </div>
@@ -49,7 +69,9 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
 
 <style scoped>
 .home-page {
-  padding: 4px 20px 12px;
+  padding: 32px 40px;
+  max-width: 1400px;
+  margin: 0 auto;
   container-type: inline-size;
   container-name: home;
   min-height: calc(100vh - 44px);
@@ -58,10 +80,10 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
 }
 .page-title {
   margin: 0;
-  font-size: clamp(26px, 3.6vw, 30px);
-  font-weight: 800;
+  font-size: max(24px, 3.2vw);
+  font-weight: 700;
   color: var(--color-gray-900);
-  line-height: var(--leading-tight);
+  letter-spacing: -0.01em;
 }
 .subtitle {
   margin: 4px 0 18px;
@@ -85,73 +107,83 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
 .top-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  width: calc(100% - 36px);
-  margin-left: 36px; /* 让主页按钮区整体稍微靠右 */
+  gap: 24px;
+  width: 100%;
+}
+
+.icon {
+  margin-right: 0;
+  margin-bottom: 12px;
+  font-size: 36px;
+  opacity: 0.9;
+  display: block;
+  transition: transform 0.3s ease;
 }
 
 /* Base Button Styles based on 8pt system and ratios */
 .btn-base {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
-  border: none;
-  box-shadow: inset 0 0 0 1.5px var(--border-color-light);
-  border-radius: var(--radius-md);
-  background: var(--panel-bg);
-  color: var(--color-gray-700);
-  font-size: 15px;
-  font-weight: 700;
+  border: 1px solid rgba(0,0,0,0.04);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.03);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--color-gray-800);
+  font-size: 16px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  padding: 10px 16px;
+  transition: all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+  padding: 24px;
   width: 100%;
 }
 
 .top-card {
-  min-height: 62px;
+  min-height: 140px;
+  font-size: 18px;
+}
+.top-card .icon {
+  font-size: 42px;
+  margin-bottom: 16px;
 }
 
 .divider {
-  margin: 14px 0 20px;
+  margin: 32px 0;
   border: none;
-  border-top: 1px solid var(--border-color-light);
+  border-top: 1px solid rgba(0,0,0,0.06);
 }
 
 .module-columns {
   display: grid;
-  grid-template-columns: repeat(3, minmax(160px, 1fr));
-  gap: 28px 96px;
-  justify-content: space-between;
-  align-content: space-evenly;
-  flex: 1;
-  width: calc(100% - 52px);
-  margin-left: 52px; /* 模块区整体再向右一点 */
-  justify-items: center; /* 每列按钮居中，保证中间列中点更容易对齐 */
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+  width: 100%;
 }
 
 .module-btn {
-  min-height: 66px;
+  min-height: 120px;
   width: 100%;
-  max-width: 210px;
-  padding: 12px 14px;
-  justify-content: center;
-  justify-self: center;
+  padding: 16px;
 }
 
 .btn-base:hover {
-  box-shadow: 
-    inset 0 0 0 1.5px var(--color-primary-100),
-    var(--shadow-md);
-  color: var(--color-primary-600);
-  transform: scale(var(--button-hover-scale));
-  z-index: 1;
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+  border-color: rgba(0,0,0,0.08);
+  background: rgba(255, 255, 255, 1);
+}
+
+.btn-base:hover .icon {
+  transform: scale(1.1);
 }
 
 .btn-base:active {
-  transform: scale(1);
-  box-shadow: inset 0 0 0 1px var(--color-primary-500);
+  transform: scale(0.97);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 
 .btn-base:focus-visible {
@@ -163,10 +195,11 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
 @container home (max-width: 768px) {
   .home-page {
     min-height: auto;
+    padding: 16px;
   }
   .module-columns {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
-    gap: 12px;
+    gap: 16px;
     align-content: start;
     flex: none;
     width: 100%;
@@ -177,6 +210,7 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.role)
     grid-template-columns: 1fr;
     width: 100%;
     margin-left: 0;
+    gap: 16px;
   }
 
   .module-btn {

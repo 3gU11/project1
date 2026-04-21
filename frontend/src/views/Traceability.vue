@@ -1,35 +1,33 @@
 <template>
   <div class="traceability-page">
-    <PageHeader title="🔍 汇总与追溯" :small="true" />
-    
-    <el-card class="mb-4">
-      <template #header>
-        <div class="card-header">
-          <span>1. 全局搜索</span>
-        </div>
-      </template>
-      <el-row :gutter="20">
-        <el-col :span="16">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="输入流水号、客户、代理商、合同号或订单号，例如: 95-04-222, 吴龙, HT-2026..."
-            clearable
-            @keyup.enter="handleSearch"
-          >
-            <template #append>
-              <el-button @click="handleSearch">搜索</el-button>
-            </template>
-          </el-input>
-        </el-col>
-      </el-row>
-      
-      <div v-if="hasSearched" class="mt-4">
+    <div class="search-hero">
+      <div class="hero-header">
+        <h1 class="hero-title">🔍 汇总与追溯</h1>
+        <p class="hero-subtitle">全局搜索流水号、客户、代理商、合同号或订单号进行全链路深度追溯</p>
+      </div>
+
+      <div class="search-box-wrapper">
+        <el-input
+          v-model="searchKeyword"
+          placeholder="例如: 95-04-222, 吴龙, HT-2026..."
+          class="hero-search-input"
+          clearable
+          @keyup.enter="handleSearch"
+        >
+          <template #append>
+            <el-button type="primary" @click="handleSearch">搜 索</el-button>
+          </template>
+        </el-input>
+      </div>
+
+      <div v-if="hasSearched" class="search-result-area">
         <el-table
           :data="summaryList"
           v-loading="loading"
           border
           stripe
-          max-height="300"
+          class="elegant-table"
+          max-height="400"
           @row-click="onSummaryRowClick"
         >
           <el-table-column prop="机型" label="机型" min-width="160" />
@@ -43,7 +41,7 @@
         </el-table>
         <div v-if="summaryList.length === 0 && !loading" class="text-gray-500 mt-2">未找到相关数据。</div>
       </div>
-    </el-card>
+    </div>
 
     <el-card v-if="targetId">
       <template #header>
@@ -255,5 +253,64 @@ const handleTrace = async (id: string, model = '') => {
 .group-meta {
   font-size: var(--font-size-sm);
   color: var(--color-gray-500);
+}
+.search-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px 40px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(250, 251, 253, 0.6) 100%);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.03);
+  border: 1px solid rgba(0,0,0,0.04);
+  margin-bottom: 24px;
+}
+.hero-title {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--color-gray-900);
+}
+.hero-subtitle {
+  margin: 12px 0 32px;
+  font-size: 16px;
+  color: var(--color-gray-500);
+}
+.search-box-wrapper {
+  width: 100%;
+  max-width: 680px;
+}
+.hero-search-input :deep(.el-input__wrapper) {
+  min-height: 56px !important;
+  border-radius: 28px 0 0 28px !important;
+  font-size: 16px !important;
+  box-shadow: inset 0 0 0 1.5px var(--border-color-strong) !important;
+  padding: 0 24px !important;
+  transition: all 0.3s ease;
+}
+.hero-search-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: inset 0 0 0 2px var(--color-primary-500) !important;
+}
+.hero-search-input :deep(.el-input-group__append) {
+  border-radius: 0 28px 28px 0 !important;
+  background-color: var(--color-primary-500);
+  color: white;
+  border: none;
+  box-shadow: none !important;
+  padding: 0 32px;
+  font-weight: 700;
+  font-size: 16px;
+  min-width: 100px;
+}
+.search-result-area {
+  margin-top: 32px;
+  width: 100%;
+}
+.elegant-table {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
 }
 </style>

@@ -102,7 +102,7 @@
               <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="160" />
             </el-table>
             <div class="ops">
-              <el-button :loading="saving" @click="releaseSelected">确认撤回</el-button>
+              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
             </div>
           </template>
         </el-card>

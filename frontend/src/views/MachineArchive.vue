@@ -1,19 +1,20 @@
 <template>
   <div class="archive-page">
-    <div class="head-row">
-      <h1 class="title">📁 机台档案</h1>
-    </div>
+    <div class="search-hero">
+      <div class="hero-header">
+        <h1 class="hero-title">📁 机台档案</h1>
+        <p class="hero-subtitle">管理每台机器的电子档案（照片/文档），快速搜索流水号获取资料</p>
+      </div>
 
-    <el-alert :closable="false" type="info" title="💡 管理每台机器的电子档案（照片/文档），文件存储在物理文件夹中。" />
+      <div class="search-box-wrapper">
+        <el-select v-model="selectedSerial" filterable clearable placeholder="🔍 输入或搜索机器流水号..." class="hero-search-select" @change="onSerialChange">
+          <el-option v-for="sn in serials" :key="sn" :label="sn" :value="sn" />
+        </el-select>
+      </div>
 
-    <div class="query-row">
-      <div class="field-label">🔍 搜索/选择流水号</div>
-      <el-select v-model="selectedSerial" filterable clearable placeholder="请选择流水号" style="width: 460px; max-width: 100%" @change="onSerialChange">
-        <el-option v-for="sn in serials" :key="sn" :label="sn" :value="sn" />
-      </el-select>
-      <div v-if="selectedSerial" class="machine-meta">
+      <div v-if="selectedSerial" class="machine-focus-card">
         <div class="sn-title">{{ selectedSerial }}</div>
-        <div class="sn-sub">机型: {{ selectedMachine?.model || '-' }} | 状态: {{ selectedMachine?.status || '-' }}</div>
+        <div class="sn-sub">机型: <span class="highlight">{{ selectedMachine?.model || '-' }}</span> | 状态: <span class="highlight">{{ selectedMachine?.status || '-' }}</span></div>
       </div>
     </div>
 
@@ -349,44 +350,71 @@ onBeforeUnmount(() => {
 .archive-page {
   padding-right: 6px;
 }
-.head-row {
+.search-hero {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(250, 251, 253, 0.6) 100%);
+  border-radius: 20px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.03);
+  border: 1px solid rgba(0,0,0,0.04);
+  margin-bottom: 24px;
 }
-.back-btn {
-  padding: 4px 12px;
-}
-.title {
+.hero-title {
   margin: 0;
-  font-size: 42px;
+  font-size: 36px;
   font-weight: 800;
-  color: var(--color-gray-800);
+  color: var(--color-gray-900);
 }
-.query-row {
-  margin-top: var(--space-2);
+.hero-subtitle {
+  margin: 12px 0 32px;
+  font-size: 16px;
+  color: var(--color-gray-500);
 }
-.field-label {
-  color: var(--color-gray-700);
-  font-size: var(--font-size-sm);
-  margin-bottom: 4px;
+.search-box-wrapper {
+  width: 100%;
+  max-width: 580px;
 }
-.machine-meta {
-  margin-left: 20px;
+.hero-search-select {
+  width: 100%;
+}
+.hero-search-select :deep(.el-input__wrapper) {
+  min-height: 56px !important;
+  border-radius: 28px !important;
+  font-size: 16px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06) !important;
+  padding: 0 24px !important;
+  transition: all 0.3s ease;
+}
+.hero-search-select :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 3px rgba(10, 115, 251, 0.2), 0 4px 16px rgba(0,0,0,0.08) !important;
+}
+
+.machine-focus-card {
+  margin-top: 32px;
+  padding: 20px 40px;
+  background: var(--color-primary-50);
+  border: 1px solid var(--color-primary-100);
+  border-radius: 16px;
   display: inline-block;
-  vertical-align: top;
 }
 .sn-title {
   font-size: 32px;
-  font-weight: 700;
-  color: var(--color-gray-900);
+  font-weight: 800;
+  color: var(--color-primary-700);
   line-height: 1.1;
+  margin-bottom: 8px;
 }
 .sn-sub {
-  margin-top: 4px;
-  font-size: var(--font-size-sm);
-  color: #94a3b8;
+  font-size: 15px;
+  color: var(--color-gray-700);
+}
+.sn-sub .highlight {
+  font-weight: 600;
+  color: var(--color-gray-900);
 }
 .empty-bar {
   border: 1px solid var(--color-primary-100);
