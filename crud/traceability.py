@@ -23,7 +23,7 @@ def search_global_summary(keyword: str = ""):
                 GROUP_CONCAT(DISTINCT fg.`状态` ORDER BY fg.`状态` SEPARATOR ' / ') AS `机台状态`,
                 fp.`要求交期` AS `要求交期`,
                 DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `发货时间`,
-                NULL AS `流水号`
+                GROUP_CONCAT(DISTINCT CAST(fg.`流水号` AS CHAR) ORDER BY fg.`流水号` SEPARATOR ', ') AS `流水号`
             FROM factory_plan fp
             LEFT JOIN finished_goods_data fg
               ON fg.`占用订单号` = fp.`订单号`
@@ -56,7 +56,7 @@ def search_global_summary(keyword: str = ""):
                 fg.`状态` AS `机台状态`,
                 fp.`要求交期` AS `要求交期`,
                 DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `发货时间`,
-                fg.`流水号` AS `流水号`
+                CAST(fg.`流水号` AS CHAR) AS `流水号`
             FROM finished_goods_data fg
             LEFT JOIN factory_plan fp
               ON fg.`占用订单号` = fp.`订单号`

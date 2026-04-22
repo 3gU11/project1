@@ -23,6 +23,7 @@
       <div v-if="hasSearched" class="search-result-area">
         <el-table
           :data="summaryList"
+          :key="lastSearchWasSerial ? 'serial-view' : 'summary-view'"
           v-loading="loading"
           border
           stripe
@@ -32,12 +33,53 @@
         >
           <el-table-column prop="机型" label="机型" min-width="160" />
           <el-table-column prop="状态" label="状态" width="120" />
-          <el-table-column prop="流水号" label="流水号" min-width="140" />
-          <el-table-column prop="机台状态" label="机台状态" min-width="180" />
-          <el-table-column prop="客户" label="客户" min-width="220" />
+          <el-table-column label="流水号" min-width="160" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.流水号">{{ row.流水号 }}</span>
+              <span v-else class="text-gray-400">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="机台状态" label="机台状态" width="120" />
+          <el-table-column prop="客户" label="客户" min-width="180" />
           <el-table-column prop="代理商" label="代理商" width="120" />
           <el-table-column prop="要求交期" label="合同要求交期" width="140" />
-          <el-table-column prop="发货时间" label="订单发货时间" width="140" />
+          <el-table-column prop="发货时间" label="订单发货时间" width="120" />
+          <el-table-column v-if="!lastSearchWasSerial" label="合同附件" width="110" align="center">
+            <template #default="{ row }">
+              <el-popover
+                v-if="row.合同号"
+                :visible="visiblePopover === row.合同号"
+                placement="bottom"
+                :width="220"
+                trigger="contextmenu"
+              >
+                <template #reference>
+                  <el-button
+                    type="primary"
+                    link
+                    :icon="Download"
+                    @click.stop="handleSmartDownload(row.合同号)"
+                    :loading="filesLoadingMap[row.合同号]"
+                  >
+                    下载
+                  </el-button>
+                </template>
+                <div v-click-outside="() => visiblePopover = ''" class="popover-file-list">
+                  <div class="popover-tip">请选择要下载的文件：</div>
+                  <div
+                    v-for="file in filesMap[row.合同号]"
+                    :key="file.file_name"
+                    class="file-item"
+                    @click="handleFileItemClick(row.合同号, file.file_name)"
+                  >
+                    <el-icon><Document /></el-icon>
+                    <span class="file-name">{{ file.file_name }}</span>
+                  </div>
+                </div>
+              </el-popover>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
         </el-table>
         <div v-if="summaryList.length === 0 && !loading" class="text-gray-500 mt-2">未找到相关数据。</div>
       </div>
@@ -110,14 +152,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { apiGet, getApiErrorMessage } from '../utils/request'
+import { computed, ref, reactive } from 'vue'
+import { ElMessage, ClickOutside as vClickOutside } from 'element-plus'
+import { Download, Document } from '@element-plus/icons-vue'
+import { apiGet, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
 import PageHeader from '../components/PageHeader.vue'
 
 const searchKeyword = ref('')
 const hasSearched = ref(false)
 const loading = ref(false)
 const summaryList = ref<any[]>([])
+const lastSearchWasSerial = ref(false)
 
 const targetId = ref('')
 const targetContractNo = ref('')
@@ -127,6 +172,61 @@ const detailLoading = ref(false)
 const statusList = ref<any[]>([])
 const timelineList = ref<any[]>([])
 const expandedGroups = ref<string[]>([])
+
+// 附件下载相关
+const filesMap = reactive<Record<string, any[]>>({})
+const filesLoadingMap = reactive<Record<string, boolean>>({})
+const visiblePopover = ref('')
+
+const handleSmartDownload = async (contractId: string) => {
+  if (filesMap[contractId]) {
+    processDownload(contractId)
+    return
+  }
+  
+  filesLoadingMap[contractId] = true
+  try {
+    const res = await apiGet(`/planning/contract/${encodeURIComponent(contractId)}/files`)
+    const files = res.data || []
+    filesMap[contractId] = files
+    processDownload(contractId)
+  } catch (e) {
+    ElMessage.error('获取附件失败')
+  } finally {
+    filesLoadingMap[contractId] = false
+  }
+}
+
+const processDownload = (contractId: string) => {
+  const files = filesMap[contractId] || []
+  if (files.length === 0) {
+    ElMessage.warning('该合同暂无附件')
+    return
+  }
+  if (files.length === 1) {
+    doDownload(contractId, files[0].file_name)
+  } else {
+    // 多个文件，打开气泡选择
+    visiblePopover.value = contractId
+  }
+}
+
+const handleFileItemClick = (contractId: string, fileName: string) => {
+  visiblePopover.value = ''
+  doDownload(contractId, fileName)
+}
+
+const doDownload = async (contractId: string, fileName: string) => {
+  try {
+    await apiDownloadBlob(
+      `/planning/contract/${encodeURIComponent(contractId)}/files/${encodeURIComponent(fileName)}/download`,
+      fileName
+    )
+    ElMessage.success(`${fileName} 下载完成`)
+  } catch (e) {
+    ElMessage.error(getApiErrorMessage(e) || '文件下载失败，请稍后重试')
+  }
+}
 
 const groupedTimeline = computed(() => {
   const groups = new Map<string, { action: string; count: number; latestAt: string; items: any[] }>()
@@ -192,6 +292,9 @@ const handleSearch = async () => {
   try {
     const params = new URLSearchParams()
     params.set('keyword', keyword)
+    // 提前识别搜索类型，防止渲染刷新过慢
+    lastSearchWasSerial.value = /^\d/.test(keyword)
+
     const res = await apiGet(`/traceability/search?${params.toString()}`)
     summaryList.value = res.data || []
   } catch (e: any) {
@@ -349,5 +452,39 @@ const handleTrace = async (id: string, model = '') => {
   white-space: pre-wrap;
   line-height: 1.5;
   word-break: break-all;
+}
+
+.popover-file-list {
+  min-height: 40px;
+}
+.popover-tip {
+  font-size: 12px;
+  color: var(--color-gray-500);
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--border-color-light);
+  margin-bottom: 4px;
+}
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.file-item:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+}
+.file-name {
+  font-size: 13px;
+  word-break: break-all;
+}
+.no-files {
+  padding: 12px;
+  text-align: center;
+  color: var(--color-gray-400);
+  font-size: 13px;
 }
 </style>

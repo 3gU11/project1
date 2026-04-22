@@ -34,7 +34,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/logs', name: 'Logs', label: '📜 交易日志', title: '交易日志', roles: ['Admin', 'Boss', 'Prod', 'Sales'], component: () => import('../views/LogViewer.vue') },
   { path: '/inventory', name: 'Inventory', label: '🔎 库存查询', title: '库存查询', roles: ['Admin', 'Boss', 'Sales', 'Prod'], component: () => import('../views/InventoryQuery.vue') },
   { path: '/inbound', name: 'Inbound', label: '⬇️ 成品入库', title: '成品入库', roles: ['Admin', 'Boss', 'Prod', 'Inbound'], component: () => import('../views/Inbound.vue') },
-  { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', roles: ['Admin', 'Boss'], isManagement: true, component: () => import('../views/Traceability.vue') },
+  { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', roles: ['Admin', 'Boss', 'Sales'], isManagement: true, component: () => import('../views/Traceability.vue') },
 ]
 
 export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({

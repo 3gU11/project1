@@ -155,13 +155,60 @@
       <el-input v-model="linkOrderId" placeholder="例如: SO-2026..." style="width: 300px" />
     </div>
 
+    <!-- 合同附件面板 -->
+    <div v-if="selectedContractId" class="attachment-panel">
+      <div class="attachment-header">
+        <span class="attachment-title">📎 合同附件 — {{ selectedContractId }}</span>
+        <el-button link type="primary" :loading="attachmentLoading" @click="fetchAttachments(selectedContractId)">
+          🔄 刷新
+        </el-button>
+      </div>
+
+      <div v-if="attachmentLoading" class="attachment-loading">
+        <el-icon class="is-loading"><Loading /></el-icon> 加载中...
+      </div>
+
+      <div v-else-if="attachmentFiles.length === 0" class="attachment-empty">
+        该合同暂无附件
+      </div>
+
+      <div v-else class="attachment-list">
+        <div v-for="file in attachmentFiles" :key="file.file_name" class="attachment-item">
+          <div class="attachment-info">
+            <el-icon><Document /></el-icon>
+            <span class="attachment-name">{{ file.file_name }}</span>
+            <span class="attachment-meta">{{ file.uploader }} · {{ file.upload_time }}</span>
+          </div>
+          <div class="attachment-actions">
+            <el-button type="primary" link :loading="downloadingFile === file.file_name" @click="downloadAttachment(selectedContractId, file.file_name)">
+              下载
+            </el-button>
+            <el-button type="danger" link @click="deleteAttachment(selectedContractId, file.file_name)">
+              删除
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="attachment-upload-row">
+        <el-upload
+          :auto-upload="false"
+          :show-file-list="false"
+          :on-change="onExistingContractFileChange"
+        >
+          <el-button size="small">➕ 追加附件</el-button>
+        </el-upload>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { apiPost, getApiErrorMessage } from '../utils/request'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Loading, Document } from '@element-plus/icons-vue'
+import { apiGet, apiPost, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
@@ -413,6 +460,86 @@ const submitBatchContracts = async () => {
 const batchFormDraft = useRefFormDraft('contracts:batch-form', batchForm)
 const batchItemsDraft = useRefFormDraft('contracts:batch-items', batchItems)
 
+// === 合同附件管理 ===
+const attachmentFiles = ref<any[]>([])
+const attachmentLoading = ref(false)
+const downloadingFile = ref('')
+
+const fetchAttachments = async (contractId: string) => {
+  if (!contractId) return
+  attachmentLoading.value = true
+  try {
+    const res = await apiGet(`/planning/contract/${encodeURIComponent(contractId)}/files`)
+    attachmentFiles.value = res.data || []
+  } catch (e) {
+    attachmentFiles.value = []
+    ElMessage.error('获取附件列表失败')
+  } finally {
+    attachmentLoading.value = false
+  }
+}
+
+const downloadAttachment = async (contractId: string, fileName: string) => {
+  downloadingFile.value = fileName
+  try {
+    await apiDownloadBlob(
+      `/planning/contract/${encodeURIComponent(contractId)}/files/${encodeURIComponent(fileName)}/download`,
+      fileName
+    )
+    ElMessage.success(`${fileName} 下载完成`)
+  } catch (e) {
+    ElMessage.error(getApiErrorMessage(e) || '文件下载失败')
+  } finally {
+    downloadingFile.value = ''
+  }
+}
+
+const deleteAttachment = async (contractId: string, fileName: string) => {
+  try {
+    await ElMessageBox.confirm(`确认删除文件「${fileName}」？此操作不可恢复。`, '删除附件', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await apiDelete(`/planning/contract/${encodeURIComponent(contractId)}/files/${encodeURIComponent(fileName)}`)
+    ElMessage.success('附件已删除')
+    await fetchAttachments(contractId)
+  } catch (e) {
+    ElMessage.error(getApiErrorMessage(e) || '删除附件失败')
+  }
+}
+
+const onExistingContractFileChange = async (uploadFile: any) => {
+  const raw = uploadFile.raw as File | undefined
+  if (!raw || !selectedContractId.value) return
+  const fd = new FormData()
+  fd.append('file', raw)
+  try {
+    await apiPost(
+      `/planning/contract/${encodeURIComponent(selectedContractId.value)}/files`,
+      fd,
+      { params: { customer_name: '', uploader_name: 'Web' }, headers: { 'Content-Type': 'multipart/form-data' } }
+    )
+    ElMessage.success('附件上传成功')
+    await fetchAttachments(selectedContractId.value)
+  } catch (e) {
+    ElMessage.error(getApiErrorMessage(e) || '上传附件失败')
+  }
+}
+
+// 选择合同号时自动加载附件列表
+watch(selectedContractId, (newId) => {
+  if (newId) {
+    fetchAttachments(newId)
+  } else {
+    attachmentFiles.value = []
+  }
+})
+
 onMounted(() => {
   resetBatchForm()
   fetchContracts()
@@ -583,5 +710,82 @@ onMounted(() => {
 }
 .form-table :deep(.cell) {
   padding: 0 4px !important;
+}
+
+/* 合同附件面板 */
+.attachment-panel {
+  margin-top: var(--space-2);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  background: var(--color-gray-50);
+}
+.attachment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.attachment-title {
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  color: var(--color-gray-800);
+}
+.attachment-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) 0;
+}
+.attachment-empty {
+  color: var(--color-gray-400);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) 0;
+}
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  transition: box-shadow 0.2s;
+}
+.attachment-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.attachment-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.attachment-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-gray-800);
+  word-break: break-all;
+}
+.attachment-meta {
+  font-size: 12px;
+  color: var(--color-gray-400);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.attachment-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.attachment-upload-row {
+  margin-top: var(--space-2);
 }
 </style>

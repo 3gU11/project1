@@ -22,7 +22,7 @@
         <van-uploader
           v-model="fileList"
           multiple
-          :max-count="9"
+          :max-count="100"
           :after-read="afterRead"
           @click-preview="handlePreview"
           @delete="onDelete"
@@ -113,6 +113,51 @@ const machineInfo = ref({
 })
 
 const fileList = ref<UploaderFileListItem[]>([])
+
+/** 图片压缩逻辑 */
+const compressImage = (file: File, maxWidth = 1280): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onload = (e) => {
+      const img = new Image()
+      img.src = e.target?.result as string
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let width = img.width
+        let height = img.height
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width)
+            width = maxWidth
+          }
+        } else {
+          if (height > maxWidth) {
+            width = Math.round((width * maxWidth) / height)
+            height = maxWidth
+          }
+        }
+
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx?.drawImage(img, 0, 0, width, height)
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('Canvas 转 Blob 失败'))
+          },
+          'image/jpeg',
+          0.85
+        )
+      }
+      img.onerror = () => reject(new Error('图片加载失败'))
+    }
+    reader.onerror = () => reject(new Error('文件读取失败'))
+  })
+}
 const previewImageUrls = computed(() => fileList.value.map((item) => String(item.url || '')).filter(Boolean))
 
 const revokeObjectUrls = () => {
@@ -124,21 +169,35 @@ const revokeObjectUrls = () => {
   })
 }
 
-const getArchiveImageObjectUrl = async (fileName: string) => {
+const getArchiveImageObjectUrl = async (fileName: string, type: 'thumbnail' | 'preview' = 'thumbnail') => {
+  if (!fileName) return ''
   try {
+    // 针对大文件请求增加超时宽限，并确保路径拼写严谨
     const response = await request.get(
-      `/inventory/machine-archive/${encodeURIComponent(serialNo.value)}/files/${encodeURIComponent(fileName)}/preview`,
-      { responseType: 'blob' }
+      `/inventory/machine-archive/${serialNo.value}/files/${fileName}/${type}`,
+      { 
+        responseType: 'blob',
+        timeout: 60000 // 高清图加载给予 60s 宽限
+      }
     )
     const blob = response instanceof Blob ? response : new Blob([response as any])
+    if (blob.size < 100) {
+      throw new Error('返回数据异常')
+    }
     return URL.createObjectURL(blob)
-  } catch {
-    const response = await request.get(
-      `/inventory/machine-archive/${encodeURIComponent(serialNo.value)}/files/${encodeURIComponent(fileName)}/download`,
-      { responseType: 'blob' }
-    )
-    const blob = response instanceof Blob ? response : new Blob([response as any])
-    return URL.createObjectURL(blob)
+  } catch (error: any) {
+    console.error(`Fetch ${type} failed for ${fileName}:`, error)
+    try {
+      // 兜底逻辑：如果高清预览失败，尝试获取下载流
+      const response = await request.get(
+        `/inventory/machine-archive/${serialNo.value}/files/${fileName}/download`,
+        { responseType: 'blob' }
+      )
+      const blob = response instanceof Blob ? response : new Blob([response as any])
+      return URL.createObjectURL(blob)
+    } catch (e2) {
+      return '' // 完全失败则返回空，界面会保持缩略图
+    }
   }
 }
 
@@ -178,7 +237,8 @@ const loadFiles = async () => {
         imageFiles.map(async (file: any) => {
           const fileName = String(file.file_name || '')
           return {
-            url: await getArchiveImageObjectUrl(fileName),
+            url: await getArchiveImageObjectUrl(fileName, 'thumbnail'),
+            fullUrl: '', // 懒加载原图
             file_name: file.file_name,
             isImage: true,
             deletable: true,
@@ -197,12 +257,13 @@ const loadFiles = async () => {
 }
 
 const handlePreview = (payload: { file: UploaderFileListItem }) => {
-  const currentUrl = String(payload.file?.url || '')
-  const startPosition = previewImageUrls.value.findIndex((url) => url === currentUrl)
+  const images = fileList.value.map((item) => item.url || '').filter(Boolean)
+  const index = fileList.value.findIndex((i: any) => i.file_name === (payload.file as any).file_name)
+  
   showImagePreview({
-    images: previewImageUrls.value,
-    startPosition: startPosition >= 0 ? startPosition : 0,
-    closeable: true,
+    images,
+    startPosition: index >= 0 ? index : 0,
+    closeable: true
   })
 }
 
@@ -210,39 +271,38 @@ const afterRead = async (items: UploaderFileListItem | UploaderFileListItem[]) =
   const uploadItems = Array.isArray(items) ? items : [items]
   
   for (const item of uploadItems) {
-    if (!item.file && !item.content) continue
+    if (!item.file) continue
     
     item.status = 'uploading'
-    item.message = '上传中...'
+    item.message = '准备中...'
 
     try {
-      const beforeFiles = await inventoryApi.getMachineArchive(serialNo.value)
-      const beforeCount = Array.isArray(beforeFiles?.data) ? beforeFiles.data.length : 0
+      // 1. 获取原图和文件名 (不压缩)
+      const rawFile = item.file as File
+      const fileName = getUploadFileName(rawFile)
 
+      item.message = '上传原图...'
       const formData = new FormData()
-      const payload = normalizeUploadPayload(item)
-      formData.append('files', payload.file, payload.fileName)
-      // Pass empty label or specific one since we removed labeling requirement
+      formData.append('files', rawFile, fileName)
       formData.append('label', '档案图片')
 
+      // 2. 发起上传请求
       const uploadRes = await inventoryApi.uploadMachineArchive(serialNo.value, formData) as any
-      if (!uploadRes?.message || !String(uploadRes.message).includes('上传成功')) {
-        throw new Error('服务端未返回有效的上传成功结果')
+      if (!uploadRes?.saved_names?.[0]) {
+        throw new Error('上传失败或未返回文件名')
       }
 
-      const latestFiles = await loadFiles()
-      const afterCount = Array.isArray(latestFiles) ? latestFiles.length : 0
-      if (afterCount <= beforeCount) {
-        throw new Error('上传响应成功，但未在档案列表中发现新文件')
-      }
+      // 3. 结果同步：显示缩略图，但后端存的是原图
+      const savedName = uploadRes.saved_names[0]
+      item.file_name = savedName
+      item.url = await getArchiveImageObjectUrl(savedName, 'thumbnail')
+      item.fullUrl = '' // 点击查看时再加载原图
 
       item.status = 'done'
       item.message = ''
-      showSuccessToast('上传成功')
     } catch (error: any) {
       item.status = 'failed'
-      item.message = '上传失败'
-      await loadFiles()
+      item.message = '失败'
       showFailToast(error.message || '上传失败')
     }
   }

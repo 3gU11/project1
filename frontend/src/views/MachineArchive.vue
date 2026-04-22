@@ -46,6 +46,8 @@
             :initial-index="idx"
             fit="cover"
             preview-teleported
+            @switch="upgradeToFullImage"
+            @click="upgradeToFullImage(idx)"
           />
           <div class="gallery-name" :title="file.file_name">{{ file.file_name }}</div>
           <div class="gallery-meta">
@@ -132,12 +134,12 @@ const activePanels = ref<string[]>([])
 const serials = ref<string[]>([])
 const selectedSerial = ref('')
 const files = ref<any[]>([])
-const renderedImages = ref<Array<{ file_name: string; size: number; update_time: string; objectUrl: string }>>([])
+const renderedImages = ref<Array<{ file_name: string; size: number; update_time: string; objectUrl: string; fullUrl: string }>>([])
 const selectedImageNames = ref<string[]>([])
 const inventoryMap = ref<Record<string, { model: string; status: string }>>({})
 const selectedMachine = computed(() => inventoryMap.value[selectedSerial.value] || null)
 const imageFiles = computed(() => files.value.filter((f) => Boolean(f.is_image)))
-const previewImageUrls = computed(() => renderedImages.value.map((item) => item.objectUrl))
+const previewImageUrls = computed(() => renderedImages.value.map((item) => item.fullUrl || item.objectUrl))
 const allImagesSelected = computed(() => renderedImages.value.length > 0 && renderedImages.value.every((item) => selectedImageNames.value.includes(item.file_name)))
 const isImageIndeterminate = computed(() => {
   if (renderedImages.value.length === 0) return false
@@ -151,28 +153,44 @@ const formatSize = (size: number) => {
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 const revokeRenderedImages = () => {
-  renderedImages.value.forEach((item) => {
+  renderedImages.value.forEach((item: any) => {
     if (item.objectUrl) URL.revokeObjectURL(item.objectUrl)
+    if (item.fullUrl) URL.revokeObjectURL(item.fullUrl)
   })
   renderedImages.value = []
   selectedImageNames.value = []
 }
 const loadRenderedImages = async () => {
   revokeRenderedImages()
-  const next: Array<{ file_name: string; size: number; update_time: string; objectUrl: string }> = []
-  for (const file of imageFiles.value) {
+  // 并发加载缩略图以提升效率
+  const promises = imageFiles.value.map(async (file) => {
     try {
-      next.push({
+      const thumbUrl = await getMachineArchivePreviewObjectUrl(selectedSerial.value, String(file.file_name || ''), 'thumbnail')
+      return {
         file_name: String(file.file_name || ''),
         size: Number(file.size || 0),
         update_time: String(file.update_time || ''),
-        objectUrl: await getMachineArchivePreviewObjectUrl(selectedSerial.value, String(file.file_name || '')),
-      })
+        objectUrl: thumbUrl,
+        fullUrl: '' // 初始为空，按需加载
+      }
     } catch {
-      // Skip broken image entries so the page can still render remaining images.
+      return null
     }
+  })
+  const results = await Promise.all(promises)
+  renderedImages.value = results.filter((i): i is any => i !== null)
+}
+
+const upgradeToFullImage = async (idx: number) => {
+  const item = renderedImages.value[idx] as any
+  if (!item || item.fullUrl) return
+  
+  try {
+    const fullUrl = await getMachineArchivePreviewObjectUrl(selectedSerial.value, item.file_name, 'preview')
+    item.fullUrl = fullUrl
+  } catch (e) {
+    console.error('加载原图失败', e)
   }
-  renderedImages.value = next
 }
 
 const partInput = reactive({

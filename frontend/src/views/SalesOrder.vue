@@ -266,8 +266,34 @@
 
       <template v-if="editingId">
         <el-divider />
-        <h4 class="merge-title">🖊 编辑订单：{{ editingId }} | {{ editForm.客户名 }}</h4>
-        <el-row :gutter="10">
+        
+        <template v-if="isEditingDeletedOrder">
+          <h4 class="merge-title">🔒 已删除订单操作：{{ editingId }}</h4>
+          <div class="delete-box">
+            <div class="field-label" style="color: var(--color-gray-600); margin-bottom: 16px;">
+              该订单已被标记删除。您可以选择将其还原到正常列表中，或者永久从系统数据库中清除。
+            </div>
+            <div class="delete-actions">
+              <el-button type="success" :loading="saving" @click="restoreOrder">🔄 还原订单</el-button>
+              <el-button type="danger" plain :loading="saving" @click="hardDeleteOrder">🗑️ 彻底删除</el-button>
+            </div>
+          </div>
+        </template>
+
+        <template v-else-if="isEditingCompletedOrder">
+          <h4 class="merge-title">🗑️ 删除订单操作 (选中 1 个)</h4>
+          <div class="delete-box">
+            <div class="field-label">请输入删除原因 (必填):</div>
+            <el-input v-model="deleteReason" placeholder="例如：客户取消、重复下单等" />
+            <div class="delete-actions">
+              <el-button type="warning" plain :loading="saving" @click="deleteOrder">⚠️ 确认删除</el-button>
+            </div>
+          </div>
+        </template>
+
+        <template v-else>
+          <h4 class="merge-title">🖊 编辑订单：{{ editingId }} | {{ editForm.客户名 }}</h4>
+          <el-row :gutter="10">
           <el-col :span="12">
             <div class="field-label">客户名</div>
             <el-input v-model="editForm.客户名" />
@@ -329,14 +355,15 @@
         <div class="field-label" style="margin-top: 8px">指定批次/来源</div>
         <el-input v-model="editSourceText" />
 
-        <el-divider />
-        <div class="field-label">删除原因 (若仅标记删除建议填写)</div>
-        <el-input v-model="deleteReason" placeholder="例如：客户取消、重复下单等" />
+          <el-divider />
+          <div class="field-label">删除原因 (若仅标记删除建议填写)</div>
+          <el-input v-model="deleteReason" placeholder="例如：客户取消、重复下单等" />
 
-        <div class="edit-actions">
-          <el-button type="danger" :loading="saving" @click="saveEdit">💾 保存修改</el-button>
-          <el-button :loading="saving" @click="deleteOrder">🗑 删除订单</el-button>
-        </div>
+          <div class="edit-actions">
+            <el-button type="danger" :loading="saving" @click="saveEdit">💾 保存修改</el-button>
+            <el-button :loading="saving" @click="deleteOrder">🗑 删除订单</el-button>
+          </div>
+        </template>
       </template>
     </template>
   </div>
@@ -346,7 +373,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
-import { apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
+import { apiDelete, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
@@ -477,14 +504,26 @@ const completedOrderIdSet = computed(() => {
   return set
 })
 
+const isEditingCompletedOrder = computed(() => {
+  if (!editingId.value) return false
+  return editForm.status === 'done' || completedOrderIdSet.value.has(editingId.value)
+})
+
+const isEditingDeletedOrder = computed(() => {
+  if (!editingId.value) return false
+  return editForm.status === 'deleted'
+})
+
 const manageRowsFiltered = computed(() => {
   const term = keyword.value.trim().toLowerCase()
   return rows.value
     .filter((r) => {
       const oid = String(r['订单号'] || '')
       const status = String(r.status || 'active')
-      const completed = completedOrderIdSet.value.has(oid)
       if (statusFilter.value === 'deleted') return status === 'deleted'
+      if (status === 'deleted') return false
+
+      const completed = completedOrderIdSet.value.has(oid)
       if (statusFilter.value === 'done') return status === 'done' || completed
       // active
       if (!['active', 'ready', 'packed', 'done'].includes(status)) return false
@@ -883,8 +922,48 @@ const deleteOrder = async () => {
       备注: deletedNote,
     })
     ElMessage.success('订单已标记删除')
+    clearEditPanel()
     await fetchData()
   }, { errorMessage: '删除失败' })
+}
+
+const restoreOrder = async () => {
+  if (!editingId.value) return
+  await submitWithLock(saving, async () => {
+    await apiPut(`/planning/orders/${encodeURIComponent(editingId.value)}`, {
+      status: 'active',
+    })
+    ElMessage.success('订单已还原')
+    clearEditPanel()
+    await fetchData()
+  }, { errorMessage: '还原失败' })
+}
+
+const hardDeleteOrder = async () => {
+  if (!editingId.value) return
+  const ok = await confirm('⚠️ 确定要从数据库中彻底删除这条订单吗？该操作不可撤销且会清除所有订单记录。', '危险操作')
+  if (!ok) return
+
+  await submitWithLock(saving, async () => {
+    await apiDelete(`/planning/orders/${encodeURIComponent(editingId.value)}`)
+    ElMessage.success('订单已从数据库永久清除')
+    clearEditPanel()
+    await fetchData()
+  }, { errorMessage: '彻底删除失败' })
+}
+
+/** 辅助确认弹窗 */
+const confirm = (msg: string, title = '提示'): Promise<boolean> => {
+  return new Promise((resolve) => {
+    // 这里简单封装一个 Element Plus 的确认框
+    import('element-plus').then(({ ElMessageBox }) => {
+      ElMessageBox.confirm(msg, title, {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }).then(() => resolve(true)).catch(() => resolve(false))
+    })
+  })
 }
 
 onMounted(() => {
@@ -1001,5 +1080,23 @@ watch([keyword, statusFilter, monthFilter], () => {
   margin-top: var(--space-2);
   display: flex;
   justify-content: flex-end;
+}
+.delete-box {
+  background-color: var(--color-gray-50);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-top: 16px;
+}
+.delete-box .field-label {
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.delete-box .el-input {
+  margin-bottom: 16px;
+}
+.delete-actions {
+  display: flex;
+  gap: 12px;
 }
 </style>

@@ -344,6 +344,37 @@ def update_sales_order_api(
         raise HTTPException(status_code=500, detail=f"更新订单失败: {e}")
 
 
+@router.delete("/orders/{order_id}")
+def hard_delete_sales_order_api(
+    order_id: str,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
+    try:
+        from crud.orders import get_orders, save_orders
+        df_orders = get_orders()
+        mask = df_orders["订单号"].astype(str) == str(order_id)
+        if not mask.any():
+            raise HTTPException(status_code=404, detail="订单不存在")
+        
+        df_orders = df_orders[~mask].copy()
+        save_orders(df_orders)
+        
+        append_audit_log(
+            module="销售下单",
+            action_type="彻底删除",
+            biz_type="订单",
+            content=f"彻底删除订单：{order_id}",
+            user_id=current_user.get("username"),
+            username=current_operator,
+        )
+        return {"message": "订单已永久删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"彻底删除订单失败: {e}")
+
+
 @router.get("/orders/{order_id}/allocations")
 def get_order_allocations_api(order_id: str):
     try:

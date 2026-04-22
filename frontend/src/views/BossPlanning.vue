@@ -368,7 +368,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { apiDelete, apiGet, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
+import { apiDelete, apiGet, apiPost, apiPut, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import EditModePanel from '../components/EditModePanel.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
@@ -1267,10 +1267,17 @@ const deleteFile = async (fileName: string) => {
   }
 }
 
-const downloadFile = (fileName: string) => {
+const downloadFile = async (fileName: string) => {
   if (!selectedId.value) return
-  const url = `/api/v1/planning/contract/${encodeURIComponent(selectedId.value)}/files/${encodeURIComponent(fileName)}/download`
-  window.open(url, '_blank')
+  try {
+    await apiDownloadBlob(
+      `/planning/contract/${encodeURIComponent(selectedId.value)}/files/${encodeURIComponent(fileName)}/download`,
+      fileName
+    )
+    ElMessage.success(`${fileName} 下载完成`)
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '文件下载失败')
+  }
 }
 
 const previewFile = async (fileName: string) => {

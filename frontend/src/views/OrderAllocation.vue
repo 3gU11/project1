@@ -23,8 +23,13 @@
                   :class="{ active: selectedOrderId === String(o['订单号'] || '') }"
                   @click="selectOrder(o)"
                 >
-                  <div class="order-customer">{{ o['客户名'] }}</div>
-                  <div class="sub">{{ o['订单号'] }} | {{ o['需求机型'] }}</div>
+                  <div class="order-item-head">
+                    <div class="order-customer" :title="o['客户名']">{{ o['客户名'] }}</div>
+                    <el-tag :type="getComputedOrderState(o).type" size="small" class="status-tag">
+                      {{ getComputedOrderState(o).text }}
+                    </el-tag>
+                  </div>
+                  <div class="sub" :title="`${o['订单号']} | ${o['需求机型']}`">{{ o['订单号'] }} | {{ o['需求机型'] }}</div>
                 </button>
               </template>
             </VirtualScrollList>
@@ -404,6 +409,32 @@ const releaseSelected = async () => {
   }
 }
 
+const allocatedByOrderId = computed(() => {
+  const map = new Map<string, number>()
+  for (const row of inventoryRows.value) {
+    const orderId = String(row['占用订单号'] || '').trim()
+    if (!orderId) continue
+    map.set(orderId, (map.get(orderId) || 0) + 1)
+  }
+  return map
+})
+
+const getComputedOrderState = (o: Row) => {
+  const s = String(o.status || 'active')
+  if (s === 'packed') return { text: '已打包', type: 'primary' }
+  if (s === 'shipped') return { text: '已出库', type: 'info' }
+  if (s === 'canceled') return { text: '已取消', type: 'danger' }
+
+  const orderId = String(o['订单号'] || '')
+  const need = parseOrderDemandTotal(o)
+  const allocated = allocatedByOrderId.value.get(orderId) || 0
+
+  if (s === 'ready' || (need > 0 && allocated >= need)) {
+    return { text: '已满足', type: 'success' }
+  }
+  return { text: '待配齐', type: 'warning' }
+}
+
 onMounted(() => {
   loadData()
 })
@@ -445,13 +476,25 @@ onMounted(() => {
   border-color: #ef4444;
   background: #fee2e2;
 }
+.order-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  width: 100%;
+  gap: 8px;
+}
 .order-customer {
+  flex: 1;
   font-size: var(--font-size-base); /* 放大客户名称字号 */
   font-weight: 700; /* 加粗客户名称 */
   color: var(--color-gray-900);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
+}
+.status-tag {
+  flex-shrink: 0;
 }
 .sub {
   margin-top: 4px;
@@ -460,6 +503,8 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: left;
+  width: 100%;
 }
 .summary {
   display: grid;

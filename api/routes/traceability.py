@@ -5,7 +5,7 @@ from crud.traceability import search_global_summary, get_target_status_distribut
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
 
 @router.get("/search")
-def search_traceability(keyword: str = "", _ctx: dict = Depends(require_roles("Admin", "Boss"))):
+def search_traceability(keyword: str = "", _ctx: dict = Depends(require_roles("Admin", "Boss", "Sales"))):
     if not keyword:
         return {"data": []}
     df = search_global_summary(keyword=keyword)
@@ -14,7 +14,7 @@ def search_traceability(keyword: str = "", _ctx: dict = Depends(require_roles("A
 import math
 
 @router.get("/{target_id}/status")
-def target_status(target_id: str, model: str = "", _ctx: dict = Depends(require_roles("Admin", "Boss"))):
+def target_status(target_id: str, model: str = "", _ctx: dict = Depends(require_roles("Admin", "Boss", "Sales"))):
     df = get_target_status_distribution(target_id, model=model)
     records = df.to_dict(orient="records")
     for r in records:
@@ -24,7 +24,7 @@ def target_status(target_id: str, model: str = "", _ctx: dict = Depends(require_
     return {"data": records}
 
 @router.get("/{target_id}/timeline")
-def target_timeline(target_id: str, _ctx: dict = Depends(require_roles("Admin", "Boss"))):
+def target_timeline(target_id: str, _ctx: dict = Depends(require_roles("Admin", "Boss", "Sales"))):
     df = get_target_timeline(target_id)
     records = df.to_dict(orient="records")
     for r in records:

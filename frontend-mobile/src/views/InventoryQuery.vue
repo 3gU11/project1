@@ -2,8 +2,21 @@
   <div class="page">
     <van-nav-bar :title="pageTitle" fixed placeholder />
 
-    <div class="card">
+    <div class="card search-card">
       <van-search v-model="keyword" placeholder="搜索批次号/流水号/机型/库位" @search="load" />
+      
+      <!-- 库管角色：增加快捷过滤器 -->
+      <div v-if="isProd" class="filter-bar">
+        <van-button
+          :type="onlyShippingReview ? 'primary' : 'default'"
+          size="small"
+          round
+          plain
+          @click="onlyShippingReview = !onlyShippingReview"
+        >
+          🚢 待发货复核
+        </van-button>
+      </div>
     </div>
 
     <div class="card">
@@ -12,24 +25,30 @@
 
     <div class="card">
       <!-- 库管角色：直接点击编辑 -->
-      <van-list v-if="isProd" :loading="inventoryStore.loading" finished finished-text="没有更多了">
+      <van-list
+        v-if="isProd"
+        v-model:loading="loadingMore"
+        :finished="finished"
+        finished-text="没有更多了"
+        @load="onLoad"
+      >
         <van-cell
-          v-for="item in visibleList"
+          v-for="item in displayedItems"
           :key="item.id"
           is-link
           @click="goToEdit(item.serialNo)"
+          class="compact-cell"
         >
           <template #title>
-            <div class="primary-row">
-              <span class="machine-model">{{ item.model || '-' }}</span>
-            </div>
-            <div class="important-row">
-              <span>批次号：{{ item.batchNo || '-' }}</span>
-              <span>流水号：{{ item.serialNo || '-' }}</span>
-            </div>
-            <div class="secondary-row">
-              <span>库位：{{ item.slotCode || '-' }}</span>
-              <span>状态：{{ item.status || '-' }}</span>
+            <div class="list-item-content">
+              <div class="row-main">
+                <span class="machine-model">{{ item.model || '-' }}</span>
+                <span class="status-tag">{{ item.status || '-' }}</span>
+              </div>
+              <div class="row-sub">
+                <span>{{ item.batchNo }} | {{ item.serialNo }}</span>
+                <span class="slot-text">库位: {{ item.slotCode || '-' }}</span>
+              </div>
             </div>
           </template>
         </van-cell>
@@ -38,24 +57,29 @@
       <!-- 入库员角色：勾选入库 -->
       <div v-else>
         <van-checkbox-group v-model="selectedSerialNos" ref="checkboxGroup">
-          <van-list :loading="inventoryStore.loading" finished finished-text="没有更多了">
+          <van-list
+            v-model:loading="loadingMore"
+            :finished="finished"
+            finished-text="没有更多了"
+            @load="onLoad"
+          >
             <van-cell
-              v-for="item in visibleList"
+              v-for="item in displayedItems"
               :key="item.id"
               clickable
               @click="toggleSelection(item.serialNo)"
+              class="compact-cell"
             >
               <template #title>
-                <div class="primary-row">
-                  <span class="machine-model">{{ item.model || '-' }}</span>
-                </div>
-                <div class="important-row">
-                  <span>批次号：{{ item.batchNo || '-' }}</span>
-                  <span>流水号：{{ item.serialNo || '-' }}</span>
-                </div>
-                <div class="secondary-row">
-                  <span>库位：{{ item.slotCode || '-' }}</span>
-                  <span>状态：{{ item.status || '-' }}</span>
+                <div class="list-item-content">
+                  <div class="row-main">
+                    <span class="machine-model">{{ item.model || '-' }}</span>
+                    <span class="status-tag">{{ item.status || '-' }}</span>
+                  </div>
+                  <div class="row-sub">
+                    <span>{{ item.batchNo }} | {{ item.serialNo }}</span>
+                    <span class="slot-text">库位: {{ item.slotCode || '-' }}</span>
+                  </div>
                 </div>
               </template>
               <template #right-icon>
@@ -77,22 +101,37 @@
     <van-popup v-model:show="showInboundPopup" position="bottom" round style="height: 70%;">
       <div class="popup-content">
         <h3 class="popup-title">选择入库库位</h3>
+
+        <div class="popup-actions-top">
+          <van-button block round @click="showInboundPopup = false">取消</van-button>
+          <van-button 
+            block 
+            round 
+            type="primary" 
+            :loading="submitting" 
+            :disabled="!selectedSlotCode && !slotKeyword.trim()"
+            @click="confirmInbound(selectedSlotCode || slotKeyword)" 
+            style="margin-left: 16px;"
+          >
+            确认入库 {{ selectedSlotCode ? `至 ${selectedSlotCode}` : (slotKeyword.trim() ? `至 ${slotKeyword.trim()}` : '') }}
+          </van-button>
+        </div>
         
         <van-field
           v-model="slotKeyword"
           label="库位号"
           placeholder="请输入或扫描库位号"
+          clearable
         />
 
         <div class="slot-list">
-          <div class="slot-title">输入库位后，仅显示匹配结果，点击卡片直接入库：</div>
+          <div class="slot-title">请选择下方目标库位：</div>
           <van-grid v-if="filteredSlots.length" :column-num="3" gutter="8" clickable>
             <van-grid-item
               v-for="slot in filteredSlots"
               :key="slot.code"
-              :text="slot.code"
               :class="{ 'active-slot': selectedSlotCode === slot.code }"
-              @click="selectSlotAndInbound(slot.code)"
+              @click="selectedSlotCode = slot.code"
             >
               <template #text>
                 <div class="slot-item-text" :class="{ 'active-text': selectedSlotCode === slot.code }">
@@ -103,13 +142,6 @@
             </van-grid-item>
           </van-grid>
           <van-empty v-else description="没有匹配的库位" />
-        </div>
-
-        <div class="popup-actions">
-          <van-button block round @click="showInboundPopup = false">取消</van-button>
-          <van-button block round type="primary" :loading="submitting" @click="confirmInbound()" style="margin-left: 16px;">
-            确认入库
-          </van-button>
         </div>
       </div>
     </van-popup>
@@ -134,15 +166,23 @@ const showInboundPopup = ref(false)
 const slotKeyword = ref('')
 const selectedSlotCode = ref('')
 const submitting = ref(false)
+const onlyShippingReview = computed({
+  get: () => inventoryStore.onlyShippingReview,
+  set: (v) => { inventoryStore.onlyShippingReview = v }
+})
 
 const isProd = computed(() => userStore.userInfo?.role === 'Prod')
 const pageTitle = computed(() => isProd.value ? '查询管理' : '机台入库')
 const countTitle = computed(() => (isProd.value ? '现有数量' : '待入库数量'))
 const visibleList = computed(() => {
+  let list = inventoryStore.list
   if (isProd.value) {
-    return inventoryStore.list
+    if (onlyShippingReview.value) {
+      list = list.filter((item) => item.status.includes('待发货'))
+    }
+    return list
   }
-  return inventoryStore.list.filter((item) => item.status.includes('待入库'))
+  return list.filter((item) => item.status.includes('待入库'))
 })
 const countValue = computed(() => {
   if (isProd.value) {
@@ -164,7 +204,47 @@ const load = async () => {
   if (!isProd.value) {
     await inventoryStore.loadSlots()
   }
+  resetProgressiveList()
 }
+
+/** 渐进式渲染逻辑 (解决低性能手机卡顿) */
+const displayedItems = ref<any[]>([])
+const loadingMore = ref(false)
+const finished = ref(false)
+const currentPage = ref(0)
+const PAGE_SIZE = 20
+
+const resetProgressiveList = () => {
+  displayedItems.value = []
+  currentPage.value = 0
+  finished.value = false
+  onLoad()
+}
+
+const onLoad = () => {
+  // 小延迟模拟平滑加载并避免 UI 阻塞
+  setTimeout(() => {
+    const start = currentPage.value * PAGE_SIZE
+    const end = start + PAGE_SIZE
+    const nextBatch = visibleList.value.slice(start, end)
+    
+    if (nextBatch.length > 0) {
+      displayedItems.value.push(...nextBatch)
+      currentPage.value++
+    }
+    
+    loadingMore.value = false
+    if (displayedItems.value.length >= visibleList.value.length) {
+      finished.value = true
+    }
+  }, 50)
+}
+
+// 监听搜索词或过滤器变化，重置列表
+import { watch } from 'vue'
+watch([keyword, onlyShippingReview], () => {
+  resetProgressiveList()
+})
 
 const goToEdit = (serialNo: string) => {
   if (!serialNo) return
@@ -181,9 +261,9 @@ const toggleSelection = (serialNo: string) => {
 }
 
 const confirmInbound = async (slotCode?: string) => {
-  const finalSlotCode = (slotCode ?? slotKeyword.value).trim()
+  const finalSlotCode = (slotCode || selectedSlotCode.value || slotKeyword.value).trim()
   if (!finalSlotCode) {
-    showToast('请输入库位号')
+    showToast('请通过搜索或点击下方卡片选择库位')
     return
   }
   
@@ -228,29 +308,48 @@ onMounted(load)
   margin-bottom: 12px;
   background: #fff;
 }
-.primary-row {
+.search-card {
+  padding-bottom: 8px;
+}
+.filter-bar {
+  padding: 0 16px 8px;
+  display: flex;
+  gap: 8px;
+}
+.compact-cell {
+  padding: 10px 16px;
+}
+.list-item-content {
+  display: flex;
+  flex-direction: column;
+}
+.row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.machine-model {
   font-size: 15px;
   font-weight: 600;
   color: var(--van-text-color);
 }
-.machine-model {
-  display: inline-block;
-  margin-bottom: 4px;
-}
-.important-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: var(--van-text-color);
-}
-.secondary-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 4px;
+.status-tag {
   font-size: 12px;
-  color: var(--van-text-color-2);
+  background: var(--van-primary-color-light, #eef5fe);
+  color: var(--van-primary-color);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.row-sub {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #666;
+}
+.slot-text {
+  color: var(--van-primary-color);
+  font-weight: 500;
 }
 .action-bar {
   position: fixed;
@@ -277,9 +376,11 @@ onMounted(load)
   text-align: center;
   font-size: 16px;
 }
-.popup-actions {
+.popup-actions-top {
   display: flex;
-  margin-top: 24px;
+  margin-bottom: 20px;
+  background: #fff;
+  z-index: 10;
 }
 .slot-list {
   margin-top: 16px;

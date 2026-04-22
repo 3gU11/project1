@@ -13,6 +13,7 @@ export const useInventoryStore = defineStore('inventory', {
     },
     slots: [] as MobileSlot[],
     loading: false,
+    onlyShippingReview: false,
   }),
   actions: {
     async loadInventory(keyword = '') {

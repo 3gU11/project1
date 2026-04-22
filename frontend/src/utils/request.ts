@@ -101,4 +101,22 @@ export const apiDelete = async <T = any>(url: string, config?: ApiConfig): Promi
 }
 export const unwrap = <T = any>(response: AxiosResponse<T>): T => response.data
 
+/**
+ * 下载文件（blob 模式），复用 axios 拦截器自动携带 token。
+ * @param url   相对路径，例如 /planning/contract/.../download
+ * @param fileName  浏览器保存时使用的文件名
+ */
+export const apiDownloadBlob = async (url: string, fileName: string): Promise<void> => {
+  const response = await request.get(url, { responseType: 'blob', timeout: 120000 })
+  const blob = new Blob([response.data])
+  const blobUrl = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.setAttribute('download', fileName)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(blobUrl)
+}
+
 export default request

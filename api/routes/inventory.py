@@ -7,8 +7,9 @@ import os
 import re
 import tempfile
 import aiofiles
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Request, Response
 from fastapi.responses import FileResponse
+from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -800,7 +801,7 @@ async def machine_archive_upload(
         if not files:
             raise HTTPException(status_code=422, detail="请至少上传 1 个文件")
         sn_dir = _ensure_sn_dir(serial_no)
-        saved = 0
+        saved_names = []
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_label = _safe_name(label) or "档案"
         for idx, up in enumerate(files, start=1):
@@ -816,8 +817,10 @@ async def machine_archive_upload(
                     if not chunk:
                         break
                     await f.write(chunk)
-            saved += 1
+            saved_names.append(final_name)
             await up.close()
+
+        saved = len(saved_names)
         if saved <= 0:
             raise HTTPException(status_code=422, detail="没有可保存的有效文件")
             
@@ -831,7 +834,7 @@ async def machine_archive_upload(
                 content=f"上传机台档案 {saved} 个文件；流水号：{serial_no}"
             )
             
-        return {"message": f"上传成功，共 {saved} 个文件"}
+        return {"message": f"上传成功，共 {saved} 个文件", "saved_names": saved_names}
     except HTTPException:
         raise
     except Exception as e:
@@ -853,6 +856,40 @@ def machine_archive_download(serial_no: str, file_name: str):
         raise HTTPException(status_code=500, detail=f"下载失败: {e}")
 
 
+@router.get("/machine-archive/{serial_no}/files/{file_name}/thumbnail")
+def machine_archive_thumbnail(serial_no: str, file_name: str):
+    try:
+        sn_dir = _ensure_sn_dir(serial_no)
+        safe_file = _safe_name(file_name)
+        abs_path = os.path.join(sn_dir, safe_file)
+        if not os.path.exists(abs_path) or not os.path.isfile(abs_path):
+            raise HTTPException(status_code=404, detail="文件不存在")
+
+        ext = os.path.splitext(safe_file)[1].lower()
+        if ext not in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"]:
+             return FileResponse(path=abs_path, filename=safe_file)
+
+        # 动态通过 Pillow 生成缩略图
+        with Image.open(abs_path) as img:
+            # 如果原图已经很小，直接返回
+            if img.width <= 400 and img.height <= 400:
+                return FileResponse(path=abs_path, filename=safe_file)
+            
+            # 等比例缩小
+            img.thumbnail((400, 400))
+            
+            buf = BytesIO()
+            # 统一转为 JPEG 以压缩体积，如果是透明 PNG 可以考虑保留格式，这里为性能统一用 JPEG
+            save_format = "JPEG" if ext != ".png" else "PNG"
+            img.save(buf, format=save_format, quality=80)
+            return Response(content=buf.getvalue(), media_type=f"image/{save_format.lower()}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取缩略图失败: {e}")
+
+
 @router.get("/machine-archive/{serial_no}/files/{file_name}/preview")
 def machine_archive_preview(serial_no: str, file_name: str):
     try:
@@ -861,7 +898,16 @@ def machine_archive_preview(serial_no: str, file_name: str):
         abs_path = os.path.join(sn_dir, safe_file)
         if not os.path.exists(abs_path) or not os.path.isfile(abs_path):
             raise HTTPException(status_code=404, detail="文件不存在")
-        return FileResponse(path=abs_path)
+        
+        ext = os.path.splitext(safe_file)[1].lower()
+        mime_types = {
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png", ".webp": "image/webp",
+            ".gif": "image/gif", ".bmp": "image/bmp"
+        }
+        media_type = mime_types.get(ext, "image/jpeg")
+        
+        return FileResponse(path=abs_path, media_type=media_type)
     except HTTPException:
         raise
     except Exception as e:
