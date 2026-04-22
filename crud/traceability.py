@@ -11,67 +11,6 @@ def search_global_summary(keyword: str = ""):
     if not keyword:
         return pd.DataFrame()
 
-    query = """
-        SELECT * FROM (
-            SELECT
-                fp.`机型` AS `机型`,
-                fp.`状态` AS `状态`,
-                fp.`合同号` AS `合同号`,
-                fp.`订单号` AS `订单号`,
-                fp.`客户名` AS `客户`,
-                fp.`代理商` AS `代理商`,
-                GROUP_CONCAT(DISTINCT fg.`状态` ORDER BY fg.`状态` SEPARATOR ' / ') AS `机台状态`,
-                fp.`要求交期` AS `要求交期`,
-                DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `发货时间`,
-                GROUP_CONCAT(DISTINCT CAST(fg.`流水号` AS CHAR) ORDER BY fg.`流水号` SEPARATOR ', ') AS `流水号`
-            FROM factory_plan fp
-            LEFT JOIN finished_goods_data fg
-              ON fg.`占用订单号` = fp.`订单号`
-             AND fg.`机型` = fp.`机型`
-            LEFT JOIN sales_orders so
-              ON fp.`订单号` = so.`订单号`
-            WHERE fp.`客户名` LIKE :kw
-               OR fp.`代理商` LIKE :kw
-               OR fp.`合同号` LIKE :kw
-               OR fp.`订单号` LIKE :kw
-            GROUP BY
-                fp.`机型`,
-                fp.`状态`,
-                fp.`合同号`,
-                fp.`订单号`,
-                fp.`客户名`,
-                fp.`代理商`,
-                fp.`要求交期`,
-                so.`发货时间`
-                
-            UNION ALL
-            
-            SELECT 
-                fg.`机型` AS `机型`,
-                '单台追溯' AS `状态`,
-                fp.`合同号` AS `合同号`,
-                fg.`占用订单号` AS `订单号`,
-                COALESCE(fp.`客户名`, so.`客户名`) AS `客户`,
-                COALESCE(fp.`代理商`, so.`代理商`) AS `代理商`,
-                fg.`状态` AS `机台状态`,
-                fp.`要求交期` AS `要求交期`,
-                DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `发货时间`,
-                CAST(fg.`流水号` AS CHAR) AS `流水号`
-            FROM finished_goods_data fg
-            LEFT JOIN factory_plan fp
-              ON fg.`占用订单号` = fp.`订单号`
-             AND fg.`机型` = fp.`机型`
-            LEFT JOIN sales_orders so
-              ON fg.`占用订单号` = so.`订单号`
-            WHERE fg.`流水号` LIKE :kw
-        ) AS combined
-        ORDER BY `合同号` DESC, `订单号` DESC, `机型` ASC
-    """
-    df = fetch_data_with_cache(query, params={"kw": f"%{keyword}%"}, ttl=30)
-    return df
-
-def get_target_status_distribution(target_id: str, model: str = ""):
-    """
     Step 2.1: 获取精确 ID 的实时状态切片。
     """
     query = """
