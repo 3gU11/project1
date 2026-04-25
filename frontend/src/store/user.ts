@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useCacheStore } from './cache'
 import { normalizeRole } from '../utils/roles'
 
-type UserInfo = { username: string; role: string; name: string }
+type UserInfo = { username: string; role: string; name: string; permissions: string[] }
 const STORAGE_KEY = 'v7ex_auth'
 
 export const useUserStore = defineStore('user', () => {
@@ -19,7 +19,7 @@ export const useUserStore = defineStore('user', () => {
     try {
       const parsed = JSON.parse(raw)
       token.value = parsed.token || ''
-      userInfo.value = parsed.userInfo || null
+      userInfo.value = parsed.userInfo ? { ...parsed.userInfo, permissions: Array.isArray(parsed.userInfo.permissions) ? parsed.userInfo.permissions : [] } : null
       rememberMe.value = !!parsed.rememberMe
     } catch {
       // ignore broken storage payload
@@ -45,7 +45,7 @@ export const useUserStore = defineStore('user', () => {
   function login(userData: UserInfo, jwtToken: string, remember = true) {
     const cacheStore = useCacheStore()
     cacheStore.clear()
-    userInfo.value = userData
+    userInfo.value = { ...userData, permissions: Array.isArray(userData.permissions) ? userData.permissions : [] }
     token.value = jwtToken
     rememberMe.value = remember
     saveToStorage()
@@ -67,6 +67,11 @@ export const useUserStore = defineStore('user', () => {
     return roles.map((r) => normalizeRole(r)).includes(role)
   }
 
+  function hasPermission(permission?: string) {
+    if (!permission) return true
+    return (userInfo.value?.permissions || []).map((p) => String(p).trim()).includes(permission)
+  }
+
   loadFromStorage()
 
   return {
@@ -77,5 +82,6 @@ export const useUserStore = defineStore('user', () => {
     login,
     logout,
     hasRole,
+    hasPermission,
   }
 })

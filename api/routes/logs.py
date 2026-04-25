@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from crud.audit_logs import get_operation_logs
 from crud.logs import get_transaction_logs
-from api.routes.auth import get_current_user_token, require_roles
+from api.routes.auth import get_current_user_token, require_permissions
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
 
@@ -20,7 +20,7 @@ def list_transaction_logs(page: int = 1, page_size: int = 50, days: int = 14):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/audit", dependencies=[Depends(require_roles("Admin", "Boss"))])
+@router.get("/audit", dependencies=[Depends(require_permissions("LOG_VIEW"))])
 def list_audit_logs(
     page: int = 1,
     page_size: int = 50,

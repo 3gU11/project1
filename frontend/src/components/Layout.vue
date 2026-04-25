@@ -59,7 +59,7 @@ let warmupHandle: number | null = null
 
 const visibleMenus = computed(() => {
   const onHome = router.currentRoute.value.path === '/'
-  return getAccessibleMenus(userStore.userInfo?.role).filter((m) => {
+  return getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
     if (onHome) {
       // 在首页时，侧边栏仅保留这 4 个菜单
       const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary']

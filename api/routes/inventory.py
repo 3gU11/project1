@@ -858,6 +858,10 @@ def machine_archive_download(serial_no: str, file_name: str):
 
 @router.get("/machine-archive/{serial_no}/files/{file_name}/thumbnail")
 def machine_archive_thumbnail(serial_no: str, file_name: str):
+    """
+    获取机台档案缩略图（带磁盘缓存优化）
+    缓存路径: machine_archives/{serial_no}/.thumbs/{file_name}.thumb.jpg
+    """
     try:
         sn_dir = _ensure_sn_dir(serial_no)
         safe_file = _safe_name(file_name)
@@ -867,26 +871,47 @@ def machine_archive_thumbnail(serial_no: str, file_name: str):
 
         ext = os.path.splitext(safe_file)[1].lower()
         if ext not in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"]:
-             return FileResponse(path=abs_path, filename=safe_file)
+            return FileResponse(path=abs_path, filename=safe_file)
 
-        # 动态通过 Pillow 生成缩略图
+        # 缩略图缓存目录
+        thumb_dir = os.path.join(sn_dir, ".thumbs")
+        thumb_filename = f"{safe_file}.thumb.jpg"
+        thumb_path = os.path.join(thumb_dir, thumb_filename)
+
+        # 检查缓存：缓存存在且比原图新则直接返回
+        if os.path.exists(thumb_path):
+            try:
+                orig_mtime = os.path.getmtime(abs_path)
+                thumb_mtime = os.path.getmtime(thumb_path)
+                if thumb_mtime >= orig_mtime:
+                    logger.debug(f"Returning cached thumbnail: {thumb_path}")
+                    return FileResponse(path=thumb_path, media_type="image/jpeg")
+            except Exception:
+                # 缓存检查失败，继续生成新缩略图
+                pass
+
+        # 动态生成缩略图
         with Image.open(abs_path) as img:
-            # 如果原图已经很小，直接返回
+            # 如果原图已经很小，直接返回原图（不缓存）
             if img.width <= 400 and img.height <= 400:
                 return FileResponse(path=abs_path, filename=safe_file)
-            
+
             # 等比例缩小
             img.thumbnail((400, 400))
-            
-            buf = BytesIO()
-            # 统一转为 JPEG 以压缩体积，如果是透明 PNG 可以考虑保留格式，这里为性能统一用 JPEG
-            save_format = "JPEG" if ext != ".png" else "PNG"
-            img.save(buf, format=save_format, quality=80)
-            return Response(content=buf.getvalue(), media_type=f"image/{save_format.lower()}")
-            
+
+            # 确保缓存目录存在
+            os.makedirs(thumb_dir, exist_ok=True)
+
+            # 保存到缓存（统一转为 JPEG 压缩体积）
+            img.convert('RGB').save(thumb_path, format="JPEG", quality=80)
+
+            # 返回缓存文件
+            return FileResponse(path=thumb_path, media_type="image/jpeg")
+
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Failed to generate thumbnail for {serial_no}/{file_name}")
         raise HTTPException(status_code=500, detail=f"获取缩略图失败: {e}")
 
 

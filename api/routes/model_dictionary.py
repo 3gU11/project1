@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from api.routes.auth import get_current_user_token, require_roles
+from api.routes.auth import get_current_user_token, require_permissions
 from crud.audit_logs import append_audit_log
 from crud.model_dictionary import (
     delete_model_dictionary_item,
@@ -43,7 +43,7 @@ def get_dictionary_rows():
 def save_dictionary_rows(
     payload: ModelDictionarySavePayload,
     request: Request,
-    _ctx: dict = Depends(require_roles("Admin", "Boss")),
+    _ctx: dict = Depends(require_permissions("MODEL_DICTIONARY")),
 ):
     try:
         count = save_model_dictionary(payload.rows)
@@ -67,7 +67,7 @@ def save_dictionary_rows(
 def replace_model_name(
     payload: ModelDictionaryReplacePayload,
     request: Request,
-    _ctx: dict = Depends(require_roles("Admin", "Boss")),
+    _ctx: dict = Depends(require_permissions("MODEL_DICTIONARY")),
 ):
     try:
         result = replace_model_name_globally(payload.old_name, payload.new_name)
@@ -89,7 +89,7 @@ def replace_model_name(
 def delete_model_name(
     payload: ModelDictionaryDeletePayload,
     request: Request,
-    _ctx: dict = Depends(require_roles("Admin", "Boss")),
+    _ctx: dict = Depends(require_permissions("MODEL_DICTIONARY")),
 ):
     try:
         deleted = delete_model_dictionary_item(payload.model_name, payload.id)

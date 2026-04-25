@@ -56,7 +56,13 @@ def fetch_data_with_cache(query: str, params: dict = None, ttl: int = 30) -> pd.
 
     try:
         with get_engine().connect() as conn:
-            df = pd.read_sql(text(query), conn, params=params)
+            result = conn.execute(text(query), params)
+            df = pd.DataFrame(result.mappings().all())
+        if df.empty:
+            # 确保即使没有数据也返回正确的列结构（如果可能），
+            # 或者至少返回一个带列名但没行的 DF。
+            # 这里简单返回空 DF。
+            return pd.DataFrame()
     except Exception as e:
         logging.error(f"SQL fetch error: {e}")
         return pd.DataFrame()

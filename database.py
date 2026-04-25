@@ -51,7 +51,13 @@ def get_engine():
         url,
         pool_pre_ping=True,
         pool_recycle=3600,
-        connect_args={"auth_plugin_map": {"caching_sha2_password": "mysql_native_password", "sha256_password": "mysql_native_password"}},
+        connect_args={
+            "auth_plugin_map": {
+                "caching_sha2_password": "mysql_native_password",
+                "sha256_password": "mysql_native_password"
+            },
+            "init_command": "SET NAMES utf8mb4 COLLATE utf8mb4_general_ci"
+        },
     )
 
 
@@ -599,16 +605,183 @@ def init_mysql_tables():
                         text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:r, :f)"),
                         {"r": role_id, "f": func_code},
                     )
-        for role_id, func_codes in DEFAULT_ROLE_PERMISSIONS.items():
-            for func_code in func_codes:
-                conn.execute(
-                    text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:r, :f)"),
-                    {"r": role_id, "f": func_code},
-                )
-        sales_perms = DEFAULT_ROLE_PERMISSIONS.get("Sales", [])
-        conn.execute(text("DELETE FROM role_permissions WHERE role_id='Sales'"))
-        for func_code in sales_perms:
-            conn.execute(
-                text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:r, :f)"),
-                {"r": "Sales", "f": func_code},
-            )
+
+
+# Schema 版本控制常量
+CURRENT_SCHEMA_VERSION = 1
+
+
+def _ensure_schema_version_table(conn):
+    """确保 schema_version 表存在"""
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INT PRIMARY KEY,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            description VARCHAR(255)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """))
+
+
+def _get_current_schema_version(conn):
+    """获取当前 schema 版本"""
+    try:
+        result = conn.execute(text("SELECT MAX(version) FROM schema_version"))
+        version = result.scalar()
+        return version if version is not None else 0
+    except Exception:
+        return 0
+
+
+def _record_schema_version(conn, version, description=""):
+    """记录 schema 版本"""
+    conn.execute(
+        text("INSERT INTO schema_version (version, description) VALUES (:v, :d) ON DUPLICATE KEY UPDATE applied_at=CURRENT_TIMESTAMP"),
+        {"v": version, "d": description}
+    )
+
+
+def init_mysql_tables_v2():
+    """
+    优化版数据库初始化：使用 Schema 版本控制，避免每次启动全量迁移
+    大幅提升启动速度，特别是数据量大时
+    """
+    engine = get_engine()
+
+    with engine.begin() as conn:
+        # 1. 确保基础表和版本表存在（这部分每次都执行，确保表结构存在）
+        _ensure_schema_version_table(conn)
+
+        # 获取当前版本
+        current_version = _get_current_schema_version(conn)
+
+        # 如果已经是最新版本，跳过大部分初始化
+        if current_version >= CURRENT_SCHEMA_VERSION:
+            # 只执行必要的轻量级检查（如默认用户）
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for uid, info in DEFAULT_USERS.items():
+                conn.execute(text(
+                    "INSERT IGNORE INTO users "
+                    "(username, password, role, name, status, register_time, audit_time, auditor) "
+                    "VALUES (:u, :p, :r, :n, 'active', :t, :t, 'System')"
+                ), {"u": uid, "p": info["password"], "r": info["role"], "n": info["name"], "t": current_time})
+            return {"initialized": False, "version": current_version, "message": "Schema already up to date"}
+
+        # 2. 版本 0 -> 1：创建所有基础表（首次启动或旧版本升级）
+        if current_version < 1:
+            # 执行建表 DDL（简化版，只创建核心表，其他表按需创建）
+            ddl_statements = [
+                """
+                CREATE TABLE IF NOT EXISTS finished_goods_data (
+                    `流水号`        VARCHAR(100) NOT NULL,
+                    `批次号`        VARCHAR(100) DEFAULT '',
+                    `机型`          VARCHAR(100) DEFAULT '',
+                    `状态`          VARCHAR(50)  DEFAULT '',
+                    `预计入库时间`  DATETIME NULL,
+                    `更新时间`      TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    `占用订单号`    VARCHAR(100) NULL,
+                    `客户`          VARCHAR(200) DEFAULT '',
+                    `代理商`        VARCHAR(200) DEFAULT '',
+                    `订单备注`      TEXT,
+                    `机台备注/配置` TEXT,
+                    `Location_Code` VARCHAR(100) DEFAULT '',
+                    PRIMARY KEY (`流水号`),
+                    INDEX `idx_fg_order` (`占用订单号`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS sales_orders (
+                    `订单号`        VARCHAR(100) NOT NULL,
+                    `客户名`        VARCHAR(200) DEFAULT '',
+                    `代理商`        VARCHAR(200) DEFAULT '',
+                    `需求机型`      TEXT,
+                    `需求数量`      INT DEFAULT 0,
+                    `下单时间`      DATETIME NULL,
+                    `备注`          TEXT,
+                    `包装选项`      VARCHAR(100) DEFAULT '',
+                    `发货时间`      DATETIME NULL,
+                    `指定批次/来源` JSON NULL,
+                    `status`        VARCHAR(50)  DEFAULT 'active',
+                    `delete_reason` TEXT,
+                    PRIMARY KEY (`订单号`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS factory_plan (
+                    `id`            INT NOT NULL AUTO_INCREMENT,
+                    `合同号`        VARCHAR(100) DEFAULT '',
+                    `机型`          VARCHAR(100) DEFAULT '',
+                    `排产数量`      VARCHAR(20)  DEFAULT '',
+                    `要求交期`      VARCHAR(50)  DEFAULT '',
+                    `状态`          VARCHAR(50)  DEFAULT '',
+                    `备注`          TEXT,
+                    `客户名`        VARCHAR(200) DEFAULT '',
+                    `代理商`        VARCHAR(200) DEFAULT '',
+                    `指定批次/来源` JSON NULL,
+                    `订单号`        VARCHAR(100) NULL,
+                    PRIMARY KEY (`id`),
+                    INDEX `idx_fp_order` (`订单号`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    `username`      VARCHAR(100) NOT NULL,
+                    `password`      VARCHAR(200) DEFAULT '',
+                    `role`          VARCHAR(50)  DEFAULT '',
+                    `name`          VARCHAR(100) DEFAULT '',
+                    `status`        VARCHAR(50)  DEFAULT 'pending',
+                    `register_time` DATETIME NULL,
+                    `audit_time`    DATETIME NULL,
+                    `auditor`       VARCHAR(100) DEFAULT '',
+                    PRIMARY KEY (`username`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS role_permissions (
+                    `id`        INT NOT NULL AUTO_INCREMENT,
+                    `role_id`   VARCHAR(50)  DEFAULT '',
+                    `func_code` VARCHAR(100) DEFAULT '',
+                    PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+            ]
+
+            for ddl in ddl_statements:
+                try:
+                    conn.execute(text(ddl))
+                except Exception as e:
+                    # 表已存在时忽略错误
+                    pass
+
+            # 插入默认用户
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for uid, info in DEFAULT_USERS.items():
+                conn.execute(text(
+                    "INSERT IGNORE INTO users "
+                    "(username, password, role, name, status, register_time, audit_time, auditor) "
+                    "VALUES (:u, :p, :r, :n, 'active', :t, :t, 'System')"
+                ), {"u": uid, "p": info["password"], "r": info["role"], "n": info["name"], "t": current_time})
+
+            # 插入默认权限
+            result = conn.execute(text("SELECT COUNT(*) FROM role_permissions"))
+            if result.fetchone()[0] == 0:
+                for role_id, func_codes in DEFAULT_ROLE_PERMISSIONS.items():
+                    for func_code in func_codes:
+                        conn.execute(
+                            text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:r, :f)"),
+                            {"r": role_id, "f": func_code},
+                        )
+
+            # 记录版本
+            _record_schema_version(conn, 1, "Initial schema creation")
+
+        # 未来版本升级可以在这里添加
+        # if current_version < 2:
+        #     ... 执行 v2 升级 ...
+        #     _record_schema_version(conn, 2, "Add new features")
+
+        return {
+            "initialized": True,
+            "from_version": current_version,
+            "to_version": CURRENT_SCHEMA_VERSION,
+            "message": f"Schema upgraded from {current_version} to {CURRENT_SCHEMA_VERSION}"
+        }

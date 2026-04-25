@@ -11,6 +11,24 @@ MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "030705")
 MYSQL_DB = os.environ.get("MYSQL_DB", "rjfinshed")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "888")
 
+# Performance Optimization Feature Flags
+# 使用 TTL 缓存替代 lru_cache(maxsize=1)
+USE_TTL_CACHE = os.environ.get("USE_TTL_CACHE", "false").lower() in ("true", "1", "yes")
+TTL_CACHE_SECONDS = int(os.environ.get("TTL_CACHE_SECONDS", "30"))
+
+# 使用 SQL COUNT 替代全表扫描（inbound_to_slot 优化）
+USE_INBOUND_SQL_OPTIMIZED = os.environ.get("USE_INBOUND_SQL_OPTIMIZED", "false").lower() in ("true", "1", "yes")
+
+# 缩略图磁盘缓存
+THUMBNAIL_CACHE_ENABLED = os.environ.get("THUMBNAIL_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+THUMBNAIL_CACHE_MAX_AGE_DAYS = int(os.environ.get("THUMBNAIL_CACHE_MAX_AGE_DAYS", "7"))
+
+# Schema 版本控制（启动优化）
+USE_SCHEMA_VERSIONING = os.environ.get("USE_SCHEMA_VERSIONING", "false").lower() in ("true", "1", "yes")
+
+# UPSERT 优化（save_data）
+USE_UPSERT_OPTIMIZED = os.environ.get("USE_UPSERT_OPTIMIZED", "false").lower() in ("true", "1", "yes")
+
 # Paths
 ARCHIVE_DIR = "shipping_history"
 CONTRACT_DIR = "data/contracts"
@@ -63,10 +81,11 @@ DEFAULT_USERS = {
 }
 
 DEFAULT_ROLE_PERMISSIONS = {
-    "Boss": ["PLANNING", "CONTRACT", "QUERY", "ARCHIVE", "WAREHOUSE_MAP", "TRACEABILITY"],
-    "Sales": ["PLANNING", "CONTRACT", "SALES_CREATE", "SALES_ALLOC", "INBOUND", "QUERY", "WAREHOUSE_MAP"],
-    "Prod": ["INBOUND", "SHIP_CONFIRM", "QUERY", "MACHINE_EDIT", "MACHINE_EDIT_MODEL", "ARCHIVE", "WAREHOUSE_MAP"],
-    "Inbound": ["INBOUND", "WAREHOUSE_MAP"],
+    "Admin": ["PLANNING", "CONTRACT", "MODEL_DICTIONARY", "USER_MANAGE", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY"],
+    "Boss": ["PLANNING", "CONTRACT", "MODEL_DICTIONARY", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY"],
+    "Sales": ["PLANNING", "CONTRACT", "SALES_CREATE", "SALES_ALLOC", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "TRACEABILITY"],
+    "Prod": ["SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND"],
+    "Inbound": ["WAREHOUSE_MAP", "INBOUND"],
 }
 
 PRESET_RATIOS = {

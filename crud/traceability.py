@@ -11,6 +11,69 @@ def search_global_summary(keyword: str = ""):
     if not keyword:
         return pd.DataFrame()
 
+    query = """
+        SELECT * FROM (
+            SELECT
+                fp.`机型` AS `机型`,
+                fp.`状态` AS `状态`,
+                fp.`合同号` AS `合同号`,
+                fp.`订单号` AS `订单号`,
+                fp.`客户名` AS `客户`,
+                fp.`代理商` AS `代理商`,
+                GROUP_CONCAT(DISTINCT fg.`状态` ORDER BY fg.`状态` SEPARATOR ' / ') COLLATE utf8mb4_general_ci AS `机台状态`,
+                fp.`要求交期` AS `要求交期`,
+                LEFT(CAST(so.`发货时间` AS CHAR), 10) COLLATE utf8mb4_general_ci AS `发货时间`,
+                GROUP_CONCAT(DISTINCT CAST(fg.`流水号` AS CHAR) ORDER BY fg.`流水号` SEPARATOR ', ') COLLATE utf8mb4_general_ci AS `流水号`
+            FROM factory_plan fp
+            LEFT JOIN finished_goods_data fg
+              ON fg.`占用订单号` = fp.`订单号`
+             AND fg.`机型` = fp.`机型`
+            LEFT JOIN sales_orders so
+              ON fp.`订单号` = so.`订单号`
+            WHERE fp.`客户名` LIKE :kw1
+               OR fp.`代理商` LIKE :kw2
+               OR fp.`合同号` LIKE :kw3
+               OR fp.`订单号` LIKE :kw4
+            GROUP BY
+                fp.`机型`,
+                fp.`状态`,
+                fp.`合同号`,
+                fp.`订单号`,
+                fp.`客户名`,
+                fp.`代理商`,
+                fp.`要求交期`,
+                so.`发货时间`
+                
+            UNION ALL
+            
+            SELECT 
+                fg.`机型` AS `机型`,
+                '单台追溯' COLLATE utf8mb4_general_ci AS `状态`,
+                fp.`合同号` AS `合同号`,
+                fg.`占用订单号` AS `订单号`,
+                COALESCE(fp.`客户名`, so.`客户名`) COLLATE utf8mb4_general_ci AS `客户`,
+                COALESCE(fp.`代理商`, so.`代理商`) COLLATE utf8mb4_general_ci AS `代理商`,
+                fg.`状态` AS `机台状态`,
+                fp.`要求交期` AS `要求交期`,
+                LEFT(CAST(so.`发货时间` AS CHAR), 10) COLLATE utf8mb4_general_ci AS `发货时间`,
+                fg.`流水号` AS `流水号`
+            FROM finished_goods_data fg
+            LEFT JOIN factory_plan fp
+              ON fg.`占用订单号` = fp.`订单号`
+             AND fg.`机型` = fp.`机型`
+            LEFT JOIN sales_orders so
+              ON fg.`占用订单号` = so.`订单号`
+            WHERE fg.`流水号` LIKE :kw5
+        ) AS combined
+        ORDER BY `合同号` DESC, `订单号` DESC, `机型` ASC
+    """
+    pattern = f"%{keyword}%"
+    params = {f"kw{i}": pattern for i in range(1, 6)}
+    df = fetch_data_with_cache(query, params=params, ttl=30)
+    return df
+
+def get_target_status_distribution(target_id: str, model: str = ""):
+    """
     Step 2.1: 获取精确 ID 的实时状态切片。
     """
     query = """
@@ -47,7 +110,7 @@ def get_target_timeline(target_id: str):
                 CAST(`操作类型` AS CHAR) AS action, 
                 CAST(`流水号` AS CHAR) AS `流水号`, 
                 CAST(`操作员` AS CHAR) AS operator, 
-                DATE_FORMAT(`时间`, '%Y-%m-%d %H:%i:%s') AS created_at,
+                CAST(`时间` AS CHAR) COLLATE utf8mb4_general_ci AS created_at,
                 NULL AS contract_no,
                 NULL AS order_no,
                 NULL AS content
@@ -71,12 +134,12 @@ def get_target_timeline(target_id: str):
             SELECT 
                 `id`, 
                 CAST(`action_type` AS CHAR) AS action, 
-                CAST(`serial_no` AS CHAR) AS `流水号`, 
-                CAST(`username` AS CHAR) AS operator, 
-                DATE_FORMAT(`operate_time`, '%Y-%m-%d %H:%i:%s') AS created_at,
-                CAST(`contract_no` AS CHAR) AS contract_no,
-                CAST(`order_no` AS CHAR) AS order_no,
-                CAST(`content` AS CHAR) AS content
+                CAST(`serial_no` AS CHAR) COLLATE utf8mb4_general_ci AS `流水号`, 
+                CAST(`username` AS CHAR) COLLATE utf8mb4_general_ci AS operator, 
+                CAST(`operate_time` AS CHAR) COLLATE utf8mb4_general_ci AS created_at,
+                CAST(`contract_no` AS CHAR) COLLATE utf8mb4_general_ci AS contract_no,
+                CAST(`order_no` AS CHAR) COLLATE utf8mb4_general_ci AS order_no,
+                CAST(`content` AS CHAR) COLLATE utf8mb4_general_ci AS content
             FROM sys_operation_log
             WHERE `serial_no` = :target_id 
                OR `serial_no` LIKE :kw

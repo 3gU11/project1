@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles
 
 app = FastAPI(
     title="V7ex API",
@@ -25,6 +25,7 @@ app.include_router(planning.router, prefix="/api/v1/planning", tags=["Planning"]
 app.include_router(logs.router, prefix="/api/v1/logs", tags=["Logs"])
 app.include_router(traceability.router, prefix="/api/v1/traceability", tags=["Traceability"])
 app.include_router(model_dictionary.router, prefix="/api/v1/model-dictionary", tags=["ModelDictionary"])
+app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles"])
 
 @app.get("/health")
 def health_check():

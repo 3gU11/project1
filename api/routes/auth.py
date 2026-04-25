@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from core.auth import verify_login
 from crud.users import get_user_for_login
+from crud.roles import get_role_permissions
 from crud.audit_logs import append_audit_log
 
 SECRET_KEY = "V7EX_SECRET_KEY_SUPER_SECURE"
@@ -24,6 +25,7 @@ class UserResponse(BaseModel):
     username: str
     role: str
     name: str
+    permissions: list[str] = []
 
 def create_access_token(subject: Union[str, Any], expires_delta: timedelta = None, extra: dict | None = None) -> str:
     if expires_delta:
@@ -74,6 +76,22 @@ def require_roles(*allowed_roles: str):
     return _guard
 
 
+def require_permissions(*required_permissions: str):
+    normalized_required = {str(p).strip() for p in required_permissions if str(p).strip()}
+
+    def _guard(user_ctx: dict = Depends(get_current_user_context)) -> dict:
+        if not normalized_required:
+            return user_ctx
+        role = str(user_ctx.get("role") or "").strip()
+        permissions = set(get_role_permissions(role))
+        if not normalized_required.issubset(permissions):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有操作权限")
+        user_ctx["permissions"] = sorted(permissions)
+        return user_ctx
+
+    return _guard
+
+
 def get_current_operator_name(token: str = Depends(oauth2_scheme)) -> str:
     try:
         user_ctx = get_current_user_context(token)
@@ -102,6 +120,7 @@ def login_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=400, detail=msg)
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    permissions = get_role_permissions(str(user_row.get("role", "")))
     access_token = create_access_token(
         subject=user_row["username"],
         expires_delta=access_token_expires,
@@ -114,6 +133,7 @@ def login_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
         "user": {
             "username": user_row["username"],
             "role": user_row["role"],
-            "name": user_row["name"]
+            "name": user_row["name"],
+            "permissions": permissions,
         }
     }

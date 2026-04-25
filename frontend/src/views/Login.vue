@@ -34,11 +34,12 @@
             </el-form-item>
             <el-form-item label="申请角色" prop="role">
               <el-select v-model="registerForm.role" placeholder="请选择申请角色" class="full-width">
-                <el-option label="Boss (老板/管理)" value="Boss"></el-option>
-                <el-option label="Admin (管理员)" value="Admin"></el-option>
-                <el-option label="Sales (销售员)" value="Sales"></el-option>
-                <el-option label="Prod (生产/仓管)" value="Prod"></el-option>
-                <el-option label="Inbound (入库员)" value="Inbound"></el-option>
+                <el-option
+                  v-for="role in roles"
+                  :key="role.role_id"
+                  :label="`${role.role_name || role.role_id} (${role.role_id})`"
+                  :value="role.role_id"
+                />
               </el-select>
             </el-form-item>
             <el-form-item>
@@ -52,21 +53,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../store/user'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
-import { apiPost } from '../utils/request'
+import { apiGet, apiPost } from '../utils/request'
 import { useReactiveFormDraft } from '../composables/useFormDraft'
 import { requiredRule, requiredSelectRule } from '../utils/formRules'
 
 type LoginResponse = {
   access_token: string
   token_type?: string
-  user: { username: string; role: string; name: string }
+  user: { username: string; role: string; name: string; permissions: string[] }
 }
+
+type RoleOption = { role_id: string; role_name: string }
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -75,6 +78,7 @@ const activeTab = ref('login')
 const loading = ref(false)
 const registerLoading = ref(false)
 const rememberMe = ref(true)
+const roles = ref<RoleOption[]>([])
 
 const loginFormRef = ref<FormInstance>()
 const loginForm = reactive({
@@ -108,6 +112,15 @@ const loginDraft = useReactiveFormDraft('login:form', loginForm, {
 const registerDraft = useReactiveFormDraft('login:register', registerForm, {
   omitKeys: ['password'],
 })
+
+const loadRoles = async () => {
+  try {
+    const res = await apiGet<{ data: RoleOption[] }>('/roles/')
+    roles.value = res.data || []
+  } catch {
+    roles.value = []
+  }
+}
 
 const handleLogin = async (formEl: FormInstance | undefined) => {
   if (!formEl) return
@@ -162,6 +175,9 @@ const handleRegister = async (formEl: FormInstance | undefined) => {
     }
   })
 }
+onMounted(() => {
+  loadRoles()
+})
 </script>
 
 <style scoped>

@@ -11,6 +11,7 @@ from crud.inventory import get_data, save_data
 from crud.logs import append_log
 from database import get_engine
 from utils.cache import fetch_data_with_cache
+from utils.local_cache import ttl_cache
 from utils.parsers import parse_plan_map
 
 
@@ -80,8 +81,44 @@ def get_orders():
         return pd.DataFrame(columns=ORDER_COLS)
 
 
+@ttl_cache(ttl_seconds=30)
+def get_orders_v2():
+    """
+    优化版：使用 TTL 缓存替代 lru_cache(maxsize=1)
+    缓存 30 秒后自动过期，避免脏数据
+    """
+    try:
+        with get_engine().connect() as conn:
+            df = pd.read_sql("SELECT * FROM sales_orders", conn)
+        if df.empty:
+            return pd.DataFrame(columns=ORDER_COLS)
+        for col in ORDER_COLS:
+            if col not in df.columns:
+                if col == "需求数量":
+                    df[col] = 0
+                elif col == "指定批次/来源":
+                    df[col] = {}
+                else:
+                    df[col] = ""
+        df["需求数量"] = pd.to_numeric(df["需求数量"], errors="coerce").fillna(0).astype(int)
+        for dt_col in ["下单时间", "发货时间"]:
+            if dt_col in df.columns:
+                df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
+        df["指定批次/来源"] = df["指定批次/来源"].apply(_normalize_source_json)
+        fill_cols = [c for c in ORDER_COLS if c not in ["需求数量", "下单时间", "发货时间", "指定批次/来源"]]
+        for col in fill_cols:
+            df[col] = df[col].fillna("")
+        mask = (df['status'] == "") | (df['status'].isna())
+        if mask.any():
+            df.loc[mask, 'status'] = "active"
+        return df
+    except (OperationalError, Exception):
+        return pd.DataFrame(columns=ORDER_COLS)
+
+
 def save_orders(df):
     get_orders.cache_clear()
+    get_orders_v2.cache_clear()  # 同时清除 v2 版本缓存
     try:
         df = df.copy()
         for col in ORDER_COLS:
@@ -111,6 +148,7 @@ def save_orders(df):
 
 def create_sales_order(customer, agent, model_data, note, pack_option="", delivery_time="", source_batch=""):
     get_orders.cache_clear()
+    get_orders_v2.cache_clear()  # 同时清除 v2 版本缓存
     odf = get_orders()
     order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
     final_model_str = ""
