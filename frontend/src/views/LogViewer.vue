@@ -88,7 +88,7 @@ type ListResponse<T = any> = { data: T[]; total: number; page: number; page_size
 const LOG_DAYS = 14
 
 const userStore = useUserStore()
-const canViewAudit = ref(userStore.userInfo?.role === 'Admin' || userStore.userInfo?.role === 'Boss')
+const canViewAudit = ref(userStore.hasPermission('LOG_VIEW'))
 
 const loading = ref(false)
 const activeTab = ref<'transaction' | 'audit'>(canViewAudit.value ? 'audit' : 'transaction')

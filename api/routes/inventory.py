@@ -656,12 +656,56 @@ def get_shipping_pending():
         if not orders_df.empty:
             odf = orders_df.copy()
             odf["订单号"] = odf["订单号"].astype(str).str.strip()
-            note_map = odf.set_index("订单号")["备注"].to_dict()
+            order_note_map = odf.set_index("订单号")["备注"].to_dict()
             date_map = odf.set_index("订单号")["发货时间"].to_dict()
             if "订单备注" not in pending.columns:
                 pending["订单备注"] = ""
-            mapped_notes = pending["占用订单号"].map(note_map)
-            pending["订单备注"] = mapped_notes.fillna(pending["订单备注"])
+
+            def _clean_shipping_note(value):
+                if value is None:
+                    return ""
+                text = str(value).strip()
+                if not text:
+                    return ""
+                lowered = text.lower()
+                if lowered in {"none", "nan", "null"}:
+                    return ""
+                if text == "合同导入" or text.startswith("合同导入:") or text.startswith("合同导入："):
+                    return ""
+                if text.endswith(":None") or text.endswith("：None"):
+                    return ""
+                text = re.sub(r'^合同\S+自动生成[；;]?\s*', '', text)
+                if not text:
+                    return ""
+                return text
+
+            from crud.planning import get_factory_plan_v2
+            plan_df = get_factory_plan_v2()
+            if not plan_df.empty:
+                plan_df["订单号"] = plan_df["订单号"].astype(str).str.strip()
+                model_note_map = {}
+                for _, row in plan_df.iterrows():
+                    order_no = str(row.get("订单号", "")).strip()
+                    model = str(row.get("机型", "")).strip()
+                    note = _clean_shipping_note(row.get("备注", ""))
+                    if order_no and model and note:
+                        model_note_map.setdefault(order_no, {})[model] = note
+
+            def _resolve_note(row):
+                order_no = str(row.get("占用订单号", "")).strip()
+                model = str(row.get("机型", "")).strip()
+                existing = str(row.get("订单备注", "")).strip()
+                if existing and existing.lower() not in {"none", "nan", "null"}:
+                    return _clean_shipping_note(existing)
+                plan_note = model_note_map.get(order_no, {}).get(model, "")
+                if plan_note:
+                    return plan_note
+                order_note = _clean_shipping_note(order_note_map.get(order_no, ""))
+                if order_note:
+                    return order_note
+                return ""
+
+            pending["订单备注"] = pending.apply(_resolve_note, axis=1)
             raw_dates = pending["占用订单号"].map(date_map)
             pending["发货时间"] = pd.to_datetime(raw_dates, errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
         else:

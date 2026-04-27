@@ -788,13 +788,21 @@ watch(isFullscreen, (v) => {
   padding: 0;
   width: 100vw;
   height: 100vh;
-  overflow: auto;
+  overflow: hidden;
   background: radial-gradient(circle at 20% 20%, #0b1a2f, #020617 55%, #00040f);
 }
 .fullscreen-mode .board-body {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
   padding: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.fullscreen-mode .board-body::-webkit-scrollbar {
+  display: none;
 }
 
 .label { font-size: var(--font-size-sm); color: var(--color-gray-500); margin-bottom: 4px; }

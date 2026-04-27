@@ -50,6 +50,7 @@
               <div>客户：{{ selectedOrder?.['客户名'] || '-' }}</div>
               <div>需求总量：{{ totalDemandQty }}</div>
               <div>已配货：{{ allocations.length }}</div>
+              <div class="summary-note">备注：{{ selectedOrder?.['备注'] || '-' }}</div>
             </div>
 
             <el-divider />
@@ -127,6 +128,7 @@ import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type ListResponse<T = any> = { data: T[] }
 type ReleaseResponse = { message?: string; released?: number }
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 type Row = Record<string, any>
 
@@ -419,7 +421,7 @@ const allocatedByOrderId = computed(() => {
   return map
 })
 
-const getComputedOrderState = (o: Row) => {
+const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
   const s = String(o.status || 'active')
   if (s === 'packed') return { text: '已打包', type: 'primary' }
   if (s === 'shipped') return { text: '已出库', type: 'info' }
@@ -511,6 +513,13 @@ onMounted(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 10px;
   font-size: var(--font-size-base); /* 放大配货面板摘要描述字号 */
+}
+.summary-note {
+  grid-column: 1 / -1;
+  min-height: 22px;
+  color: var(--color-gray-700);
+  white-space: normal;
+  word-break: break-word;
 }
 .field-label {
   margin-bottom: 6px;

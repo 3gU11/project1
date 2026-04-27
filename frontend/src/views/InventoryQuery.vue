@@ -5,13 +5,18 @@
         <div class="card-header">
           <span class="title">📊 实时库存比例分布</span>
           <div class="actions">
+            <el-select v-model="statusFilter" style="width: 140px; margin-right: 10px">
+              <el-option label="全部" value="" />
+              <el-option label="库存中" value="库存中" />
+              <el-option label="待入库" value="待入库" />
+            </el-select>
             <el-select
               v-model="selectedModels"
               multiple
               collapse-tags
               collapse-tags-tooltip
               placeholder="Choose options"
-              style="width: 520px; max-width: 100%; margin-right: 10px"
+              style="width: 400px; max-width: 100%; margin-right: 10px"
             >
               <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
             </el-select>
@@ -86,12 +91,46 @@
           <div v-else class="chart-empty">暂无机型分布数据</div>
         </el-col>
         <el-col :span="9">
-          <el-table :data="modelSummary" border stripe size="small" class="model-summary-table" height="620">
+          <el-table
+            v-if="selectedModels.length === 0"
+            :data="modelSummary"
+            border
+            stripe
+            size="small"
+            class="model-summary-table"
+            height="620"
+          >
             <el-table-column prop="机型" label="机型" />
             <el-table-column prop="库存中" label="库存中" width="100" />
             <el-table-column prop="待入库" label="待入库" width="100" />
             <el-table-column prop="全部" label="全部" width="100" />
           </el-table>
+          <div v-else class="model-detail-virtual-table">
+            <div class="model-detail-header">
+              <div>#</div>
+              <div>批次号</div>
+              <div>机型</div>
+              <div>流水号</div>
+              <div>状态</div>
+            </div>
+            <VirtualScrollList
+              :items="filteredForStats"
+              :height="580"
+              :item-height="40"
+              item-key="流水号"
+              :overscan="12"
+            >
+              <template #default="{ item, index }">
+                <div class="model-detail-row" :class="{ stripe: index % 2 === 1 }">
+                  <div>{{ index + 1 }}</div>
+                  <div :title="item['批次号']">{{ item['批次号'] || '-' }}</div>
+                  <div :title="item['机型']">{{ item['机型'] || '-' }}</div>
+                  <div :title="item['流水号']">{{ item['流水号'] || '-' }}</div>
+                  <div :title="item['状态']">{{ item['状态'] || '-' }}</div>
+                </div>
+              </template>
+            </VirtualScrollList>
+          </div>
         </el-col>
       </el-row>
 
@@ -143,6 +182,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { useInventoryStore } from '../store/inventory'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
 import { compareModels, getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
+import VirtualScrollList from '../components/VirtualScrollList.vue'
 
 const loading = ref(false)
 const inventoryList = ref<any[]>([])
@@ -182,11 +222,16 @@ const modelOptions = computed(() => {
 const indexedRows = computed(() => buildInventoryIndex(inventoryList.value))
 
 const filteredForStats = computed(() => {
-  return filterInventoryRows(indexedRows.value, {
+  const rows = filterInventoryRows(indexedRows.value, {
     selectedModels: selectedModels.value,
     statusFilter: statusFilter.value,
     searchQuery: searchQuery.value,
     highOnly: highOnly.value,
+  })
+  return rows.sort((a, b) => {
+    const snA = String(a['流水号'] || '').toLowerCase()
+    const snB = String(b['流水号'] || '').toLowerCase()
+    return snA.localeCompare(snB)
   })
 })
 
@@ -559,6 +604,53 @@ onActivated(() => {
 }
 .model-summary-table {
   max-width: 520px;
+}
+.model-detail-virtual-table {
+  width: 100%;
+  height: 620px;
+  border: 1px solid var(--border-color-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--panel-bg);
+}
+.model-detail-header,
+.model-detail-row {
+  display: grid;
+  grid-template-columns: 52px 110px minmax(150px, 1fr) 140px 95px;
+  align-items: center;
+}
+.model-detail-header {
+  height: 40px;
+  background: var(--color-gray-50);
+  border-bottom: 1px solid var(--border-color-light);
+  color: var(--color-gray-800);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.model-detail-row {
+  height: 40px;
+  border-bottom: 1px solid var(--border-color-light);
+  color: var(--color-gray-700);
+  font-size: var(--font-size-sm);
+}
+.model-detail-row.stripe {
+  background: var(--color-gray-50);
+}
+.model-detail-header > div,
+.model-detail-row > div {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid var(--border-color-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-detail-header > div:last-child,
+.model-detail-row > div:last-child {
+  border-right: none;
 }
 .pagination-container {
   margin-top: 6px;

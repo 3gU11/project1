@@ -12,6 +12,12 @@
             clearable
             style="max-width: 420px"
           />
+          <el-select v-model="pendingSortCol" style="width: 140px">
+            <el-option label="批次号" value="批次号" />
+            <el-option label="流水号" value="流水号" />
+            <el-option label="机型" value="机型" />
+          </el-select>
+          <el-checkbox v-model="pendingSortAsc">升序</el-checkbox>
           <el-button size="small" @click="fetchInventory">刷新数据</el-button>
         </div>
 
@@ -197,7 +203,7 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { ElMessage } from 'element-plus'
 import { useFormSubmit } from '../composables/useFormSubmit'
-import { compareModels, getModelOrderList, sortRowsByModel } from '../utils/modelOrder'
+import { compareModels, getModelOrderList } from '../utils/modelOrder'
 import {
   buildSlotStats,
   defaultSlots,
@@ -219,6 +225,8 @@ const slots = ref<WarehouseSlot[]>([])
 const pendingTableRef = ref()
 const pendingKeywordRaw = ref('')
 const pendingKeyword = ref('')
+const pendingSortCol = ref('批次号')
+const pendingSortAsc = ref(true)
 const slotKeyword = ref('')
 let pendingKeywordTimer: any = null
 
@@ -274,7 +282,15 @@ const pendingRows = computed(() => {
       String(item['机型'] || '').toLowerCase().includes(kw)
     )
   }
-  return sortRowsByModel(rows, (item) => String(item['机型'] || ''))
+  rows.sort((a, b) => {
+    const av = String(a[pendingSortCol.value] || '')
+    const bv = String(b[pendingSortCol.value] || '')
+    if (pendingSortCol.value === '机型') {
+      return pendingSortAsc.value ? compareModels(av, bv) : compareModels(bv, av)
+    }
+    return pendingSortAsc.value ? av.localeCompare(bv) : bv.localeCompare(av)
+  })
+  return rows
 })
 
 const slotStats = computed(() => {

@@ -299,6 +299,8 @@ def create_sales_order_api(
             username=current_operator,
         )
         return {"message": "订单创建成功", "order_id": order_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建订单失败: {e}")
 

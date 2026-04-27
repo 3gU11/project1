@@ -273,6 +273,12 @@ def init_mysql_tables():
                 "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND CONSTRAINT_NAME=:c"
             ), {"db": MYSQL_DB, "t": table_name, "c": constraint_name}).scalar() > 0
 
+        def _column_exists(table_name, column_name):
+            return conn.execute(text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND COLUMN_NAME=:c"
+            ), {"db": MYSQL_DB, "t": table_name, "c": column_name}).scalar() > 0
+
         def _add_index_if_missing(table_name, index_name, columns_sql, unique=False):
             if not _index_exists(table_name, index_name):
                 index_type = "UNIQUE INDEX" if unique else "INDEX"
@@ -347,6 +353,22 @@ def init_mysql_tables():
 
         for ddl in ddl_statements:
             conn.execute(text(ddl))
+
+        try:
+            if not _column_exists("sales_orders", "包装选项"):
+                conn.execute(text(
+                    "ALTER TABLE sales_orders "
+                    "ADD COLUMN `包装选项` VARCHAR(100) "
+                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT '' AFTER `备注`"
+                ))
+            else:
+                conn.execute(text(
+                    "ALTER TABLE sales_orders "
+                    "MODIFY COLUMN `包装选项` VARCHAR(100) "
+                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT ''"
+                ))
+        except Exception:
+            pass
 
         conn.execute(text("UPDATE finished_goods_data SET `占用订单号`=NULL WHERE `占用订单号`=''"))
         conn.execute(text("UPDATE factory_plan SET `订单号`=NULL WHERE `订单号`=''"))

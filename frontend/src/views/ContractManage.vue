@@ -88,18 +88,6 @@
       </div>
     </div>
 
-    <div class="view-tabs">
-      <button type="button" class="view-tab" :class="{ active: viewMode === 'urgent' }" @click="viewMode = 'urgent'">
-        🔥 紧急处理 [2月内]
-      </button>
-      <button type="button" class="view-tab" :class="{ active: viewMode === 'recent' }" @click="viewMode = 'recent'">
-        📘 近期规划 [2月内]
-      </button>
-      <button type="button" class="view-tab" :class="{ active: viewMode === 'all' }" @click="viewMode = 'all'">
-        📋 全景视图
-      </button>
-    </div>
-
     <el-table
       :data="pagedRows"
       border
@@ -133,9 +121,19 @@
     <div class="ops-panel">
       <div class="ops-left">
         <div class="ops-label">选择合同号进行操作</div>
-        <el-select v-model="selectedContractId" filterable placeholder="请选择合同号">
-          <el-option v-for="id in selectableContractIds" :key="id" :label="id" :value="id" />
-        </el-select>
+        <el-input
+          v-model="selectedContractId"
+          clearable
+          placeholder="手动输入合同号，可按合同号/客户名/代理商筛选上方列表"
+          @input="filterContracts"
+          @clear="clearContractFilter"
+        />
+        <div v-if="contractSearchKeyword" class="ops-hint">
+          当前筛选 {{ displayRows.length }} 条
+        </div>
+        <div v-else class="ops-hint">
+          点击上方表格行可自动填入合同号
+        </div>
       </div>
 
       <div class="ops-right">
@@ -216,7 +214,6 @@ import { hasText, isPositiveInteger } from '../utils/formRules'
 import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
 
-type ViewMode = 'urgent' | 'recent' | 'all'
 type OperationType = 'ordered' | 'cancelled' | 'done' | 'linked'
 type MessageResponse = { message?: string }
 
@@ -225,11 +222,9 @@ const executing = ref(false)
 const batchSaving = ref(false)
 const batchPanelOpen = ref(false)
 const allRows = ref<any[]>([])
-const urgentRows = ref<any[]>([])
-const recentRows = ref<any[]>([])
 const allRowsSorted = ref<any[]>([])
 const selectedContractId = ref('')
-const viewMode = ref<ViewMode>('urgent')
+const contractSearchKeyword = ref('')
 const operationType = ref<OperationType>('ordered')
 const batchPickedFiles = ref<File[]>([])
 const linkOrderId = ref('')
@@ -271,37 +266,25 @@ const resetBatchForm = () => {
   batchPickedFiles.value = []
 }
 
-const parseDate = (v: string) => {
-  const d = new Date(v)
-  if (Number.isNaN(d.getTime())) return null
-  return d
-}
-
-const isWithinDays = (v: string, days: number) => {
-  const d = parseDate(v)
-  if (!d) return false
-  const now = new Date()
-  const diff = d.getTime() - now.getTime()
-  return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000
-}
-
 const sortContractRows = (rows: any[]) => {
   return [...rows].sort((a: any, b: any) => String(a['合同号'] || '').localeCompare(String(b['合同号'] || '')))
 }
 
 const rebuildViewCaches = (rows: any[]) => {
-  const recent = rows.filter((r: any) => isWithinDays(String(r['要求交期'] || ''), 60))
-  urgentRows.value = sortContractRows(
-    recent.filter((r: any) => String(r['状态'] || '') === '未下单')
-  )
-  recentRows.value = sortContractRows(recent)
   allRowsSorted.value = sortContractRows(rows)
 }
 
 const filteredRows = computed(() => {
-  if (viewMode.value === 'all') return allRowsSorted.value
-  if (viewMode.value === 'recent') return recentRows.value
-  return urgentRows.value
+  const keyword = contractSearchKeyword.value.trim().toLowerCase()
+  if (!keyword) return allRowsSorted.value
+  return allRowsSorted.value.filter((row: any) => {
+    const haystack = [
+      row['合同号'],
+      row['客户名'],
+      row['代理商'],
+    ].map((v) => String(v || '').toLowerCase())
+    return haystack.some((text) => text.includes(keyword))
+  })
 })
 
 const displayRows = computed(() => {
@@ -321,6 +304,16 @@ const selectableContractIds = computed(() => {
   }
   return Array.from(set)
 })
+
+const filterContracts = (value: string | number) => {
+  contractSearchKeyword.value = String(value || '')
+  tablePage.value = 1
+}
+
+const clearContractFilter = () => {
+  contractSearchKeyword.value = ''
+  tablePage.value = 1
+}
 
 const onPageChange = (page: number) => {
   tablePage.value = page
@@ -347,10 +340,6 @@ const fetchContracts = async () => {
     loading.value = false
   }
 }
-
-watch(viewMode, () => {
-  tablePage.value = 1
-})
 
 const onCurrentRowChange = (row: any) => {
   if (!row) return
@@ -629,25 +618,6 @@ onMounted(() => {
 .batch-save {
   margin-top: var(--space-2);
 }
-.view-tabs {
-  margin-top: var(--space-2);
-  display: flex;
-  gap: var(--space-3);
-}
-.view-tab {
-  border: none;
-  background: transparent;
-  color: var(--color-gray-500);
-  font-size: var(--font-size-base);
-  cursor: pointer;
-  padding: 8px 4px;
-  min-height: 42px;
-  font-weight: 600;
-}
-.view-tab.active {
-  color: #ef4444;
-  font-weight: 700;
-}
 :deep(.el-table) {
   margin-top: var(--space-2);
 }
@@ -666,9 +636,14 @@ onMounted(() => {
 .ops-left {
   flex: 1;
 }
-.ops-left :deep(.el-select) {
+.ops-left :deep(.el-input) {
   width: 520px;
   max-width: 100%;
+}
+.ops-hint {
+  margin-top: 4px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
 }
 .ops-label {
   font-size: var(--font-size-sm);

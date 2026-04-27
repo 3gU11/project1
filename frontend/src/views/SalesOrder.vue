@@ -469,6 +469,12 @@ const splitDemandModelTokens = (value: unknown) => {
     .split(';')
     .map((token) => token.trim())
     .filter(Boolean)
+    .map((token) => {
+      const matched = token.match(/^(.*?)(?:\s*[x×:：]\s*)(\d+)$/i)
+      if (!matched) return token
+      const model = matched[1].trim()
+      return model || token
+    })
 }
 
 const normalizeQtyValue = (value: unknown) => {
@@ -813,8 +819,8 @@ const openEdit = (row: RowData, syncSelection = true) => {
     .map((x: string) => x.trim())
     .filter(Boolean)
   for (const token of rawModels) {
-    const m = token.match(/^(.*)x(\d+)$/)
-    const modelRaw = m ? m[1] : token
+    const m = token.match(/^(.*?)(?:\s*[x×:：]\s*)(\d+)$/i)
+    const modelRaw = m ? m[1].trim() : token
     const qty = m ? Number(m[2]) : 1
     const high = modelRaw.includes('(加高)')
     parsedRows.push({

@@ -146,6 +146,20 @@ def save_orders(df):
         raise RuntimeError(f"订单保存失败: {e}") from e
 
 
+def _normalize_order_note(value) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    text = str(value).strip()
+    if text.lower() in {"none", "nan", "null"}:
+        return ""
+    return text
+
+
 def create_sales_order(customer, agent, model_data, note, pack_option="", delivery_time="", source_batch=""):
     get_orders.cache_clear()
     get_orders_v2.cache_clear()  # 同时清除 v2 版本缓存
@@ -180,13 +194,33 @@ def create_sales_order(customer, agent, model_data, note, pack_option="", delive
     return order_id
 
 
+def _build_model_note_map(order_id):
+    """根据订单号从 factory_plan 构建机型→备注的映射"""
+    from crud.planning import get_factory_plan_v2
+    plan_df = get_factory_plan_v2()
+    if plan_df.empty:
+        return {}
+    matched = plan_df[plan_df['订单号'].astype(str).str.strip() == str(order_id).strip()]
+    if matched.empty:
+        return {}
+    note_map = {}
+    for _, row in matched.iterrows():
+        model = str(row.get('机型', '')).strip()
+        note = _normalize_order_note(row.get('备注', ''))
+        if model and note:
+            note_map[model] = note
+    return note_map
+
+
 def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     df = get_data()
     orders = get_orders()
     order_note = ""
     target_order = orders[orders['订单号'] == order_id]
     if not target_order.empty:
-        order_note = str(target_order.iloc[0]['备注'])
+        order_note = _normalize_order_note(target_order.iloc[0]['备注'])
+
+    model_note_map = _build_model_note_map(order_id)
 
     current_status_df = df[df['流水号'].isin(selected_sns)]
     pending_inbound_sns = current_status_df[current_status_df['状态'] == '待入库']['流水号'].tolist()
@@ -198,7 +232,15 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     df.loc[mask, '占用订单号'] = order_id
     df.loc[mask, '客户'] = customer
     df.loc[mask, '代理商'] = agent
-    df.loc[mask, '订单备注'] = order_note
+    if model_note_map:
+        for sn in selected_sns:
+            row_mask = df['流水号'] == sn
+            if not row_mask.any():
+                continue
+            model = str(df.loc[row_mask, '机型'].iloc[0]).strip()
+            df.loc[row_mask, '订单备注'] = model_note_map.get(model, order_note)
+    else:
+        df.loc[mask, '订单备注'] = order_note
     df.loc[mask, '更新时间'] = datetime.now()
 
     save_data(df)

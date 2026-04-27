@@ -5,25 +5,37 @@
       <el-button type="primary" :loading="loading" @click="loadPending">刷新数据</el-button>
     </div>
 
-    <el-alert :closable="false" type="info" :title="`待发货总数：${pendingRows.length}`" />
+    <div class="filter-card">
+      <el-input v-model="filters.serialNo" clearable placeholder="按流水号模糊搜索" class="filter-item" />
+      <el-input v-model="filters.orderNo" clearable placeholder="按订单号模糊搜索" class="filter-item" />
+      <el-input v-model="filters.customer" clearable placeholder="按客户模糊搜索" class="filter-item" />
+      <el-button @click="resetFilters">重置查询</el-button>
+    </div>
+
+    <el-alert
+      :closable="false"
+      type="info"
+      :title="`待发货总数：${pendingRows.length}，当前显示：${displayRows.length}`"
+    />
 
     <el-table
-      :data="pendingRows"
+      :data="displayRows"
       border
       stripe
       size="small"
       height="560"
       style="margin-top: 10px"
       @selection-change="onSelectionChange"
+      @sort-change="onSortChange"
     >
       <el-table-column type="selection" width="48" />
-      <el-table-column prop="发货时间" label="发货时间" width="120" />
-      <el-table-column prop="占用订单号" label="订单号" width="170" />
-      <el-table-column prop="客户" label="客户" min-width="140" />
-      <el-table-column prop="机型" label="机型" min-width="160" />
-      <el-table-column prop="流水号" label="流水号" width="160" />
-      <el-table-column prop="订单备注" label="订单备注" min-width="180" />
-      <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="180" />
+      <el-table-column prop="发货时间" label="发货时间" width="120" sortable="custom" />
+      <el-table-column prop="占用订单号" label="订单号" width="170" sortable="custom" />
+      <el-table-column prop="客户" label="客户" min-width="140" sortable="custom" />
+      <el-table-column prop="机型" label="机型" min-width="160" sortable="custom" />
+      <el-table-column prop="流水号" label="流水号" width="160" sortable="custom" />
+      <el-table-column prop="订单备注" label="订单备注" min-width="180" sortable="custom" />
+      <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="180" sortable="custom" />
     </el-table>
 
     <div class="ops">
@@ -74,8 +86,9 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { TableColumnCtx } from 'element-plus'
 import { getMachineArchivePreviewObjectUrl } from '../utils/machineArchivePreview'
 import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
 
@@ -84,6 +97,13 @@ type ListResponse<T = any> = { data: T[] }
 type MessageResponse = { message?: string }
 type ArchiveFile = { file_name: string; is_image?: boolean; size?: number; update_time?: string }
 type PreviewPhoto = { file_name: string; objectUrl: string; size: number; update_time: string }
+type SortOrder = 'ascending' | 'descending' | null
+
+type SortState = {
+  prop: string
+  order: SortOrder
+}
+
 const loading = ref(false)
 const saving = ref(false)
 const pendingRows = ref<Row[]>([])
@@ -91,6 +111,70 @@ const selectedSerials = ref<string[]>([])
 const selectedRows = ref<Row[]>([])
 const previewPhotosMap = ref<Record<string, PreviewPhoto[]>>({})
 const showAllPhotosMap = ref<Record<string, boolean>>({})
+const filters = ref({
+  serialNo: '',
+  orderNo: '',
+  customer: '',
+})
+const sortState = ref<SortState>({
+  prop: '发货时间',
+  order: 'descending',
+})
+
+const normalizeText = (value: unknown) => String(value ?? '').trim().toLowerCase()
+
+const includesKeyword = (value: unknown, keyword: string) => {
+  if (!keyword) return true
+  return normalizeText(value).includes(normalizeText(keyword))
+}
+
+const compareValue = (left: unknown, right: unknown) => {
+  const leftText = String(left ?? '').trim()
+  const rightText = String(right ?? '').trim()
+
+  const leftDate = Date.parse(leftText)
+  const rightDate = Date.parse(rightText)
+  if (!Number.isNaN(leftDate) && !Number.isNaN(rightDate)) {
+    return leftDate - rightDate
+  }
+
+  return leftText.localeCompare(rightText, 'zh-CN', { numeric: true, sensitivity: 'base' })
+}
+
+const displayRows = computed(() => {
+  const filtered = pendingRows.value.filter((row) => {
+    return (
+      includesKeyword(row['流水号'], filters.value.serialNo)
+      && includesKeyword(row['占用订单号'], filters.value.orderNo)
+      && includesKeyword(row['客户'], filters.value.customer)
+    )
+  })
+
+  const { prop, order } = sortState.value
+  if (!prop || !order) {
+    return filtered
+  }
+
+  return [...filtered].sort((a, b) => {
+    const compared = compareValue(a[prop], b[prop])
+    return order === 'ascending' ? compared : -compared
+  })
+})
+
+const resetFilters = () => {
+  filters.value = {
+    serialNo: '',
+    orderNo: '',
+    customer: '',
+  }
+}
+
+const onSortChange = ({ prop, order }: { column: TableColumnCtx<Row>, prop: string, order: string | null }) => {
+  sortState.value = {
+    prop: prop || '',
+    order: order === 'ascending' || order === 'descending' ? order : null,
+  }
+}
 
 const revokePreviewUrls = (serialNo?: string) => {
   const targets = serialNo ? { [serialNo]: previewPhotosMap.value[serialNo] || [] } : previewPhotosMap.value
@@ -249,6 +333,15 @@ onBeforeUnmount(() => {
   font-weight: 800;
   color: var(--color-gray-800);
 }
+.filter-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: center;
+}
+.filter-item {
+  width: 100%;
+}
 .ops {
   margin-top: var(--space-2);
   display: flex;
@@ -289,5 +382,17 @@ onBeforeUnmount(() => {
 .empty-tip {
   color: var(--color-gray-500);
   font-size: var(--font-size-sm);
+}
+
+@media (max-width: 1200px) {
+  .filter-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .filter-card {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

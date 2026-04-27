@@ -1,5 +1,9 @@
-from fastapi import FastAPI
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles
 
 app = FastAPI(
@@ -7,6 +11,10 @@ app = FastAPI(
     description="FastAPI layer for the Finished Goods Management System",
     version="1.0.0"
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+FRONTEND_INDEX_FILE = FRONTEND_DIST_DIR / "index.html"
 
 # Configure CORS
 app.add_middleware(
@@ -30,3 +38,23 @@ app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles"])
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+if (FRONTEND_DIST_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="frontend-assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_frontend(full_path: str):
+    if not FRONTEND_INDEX_FILE.exists():
+        raise HTTPException(status_code=404, detail="Frontend build not found")
+
+    clean_path = str(full_path or "").strip("/")
+    if clean_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    candidate = FRONTEND_DIST_DIR / clean_path if clean_path else FRONTEND_INDEX_FILE
+    if clean_path and candidate.is_file():
+        return FileResponse(candidate)
+
+    return FileResponse(FRONTEND_INDEX_FILE)

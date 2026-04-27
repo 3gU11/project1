@@ -226,6 +226,15 @@
               <div class="ops-row">
                 <el-button type="primary" :loading="savingPlan" @click="savePlanning">💾 保存规划 (Save Plan)</el-button>
                 <el-button
+                  v-if="isPlanningContract"
+                  type="danger"
+                  plain
+                  :loading="saving"
+                  @click="rejectContract"
+                >
+                  取消合同
+                </el-button>
+                <el-button
                   v-if="canShowDirectAllocation"
                   type="success"
                   :loading="directAllocating"
@@ -759,6 +768,7 @@ const showPlanningPanel = computed(() => {
 })
 const isContractSelected = computed(() => selectedType.value === 'contract')
 const isPendingContract = computed(() => activeTab.value === 'pending' && selectedType.value === 'contract')
+const isPlanningContract = computed(() => activeTab.value === 'planning' && selectedType.value === 'contract')
 const showContractPreviewPanel = computed(() => isContractSelected.value)
 const showInitialSkeleton = computed(
   () => showSkeletonDelayed.value && loading.value && !loadError.value && !hasRenderableData.value,

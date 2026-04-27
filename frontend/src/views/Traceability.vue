@@ -156,7 +156,6 @@ import { computed, ref, reactive } from 'vue'
 import { ElMessage, ClickOutside as vClickOutside } from 'element-plus'
 import { Download, Document } from '@element-plus/icons-vue'
 import { apiGet, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
-import PageHeader from '../components/PageHeader.vue'
 
 const searchKeyword = ref('')
 const hasSearched = ref(false)
