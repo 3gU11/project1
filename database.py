@@ -33,7 +33,10 @@ def get_schema_rollback_sql():
         "DROP INDEX idx_sys_operation_log_module ON sys_operation_log",
         "DROP INDEX idx_import_batch_model ON plan_import",
         "DROP INDEX idx_ship_month_time ON shipping_history",
+        "DROP INDEX idx_rush_order_queue_status ON rush_order_queue",
+        "DROP INDEX idx_rush_order_queue_contract ON rush_order_queue",
         "DROP INDEX uq_contract_path ON contract_records",
+        "DROP TABLE IF EXISTS rush_order_queue",
         "DROP TABLE IF EXISTS sys_operation_log",
         "DROP TABLE IF EXISTS roles",
     ]
@@ -76,9 +79,9 @@ def init_mysql_tables():
             `占用订单号`    VARCHAR(100) NULL,
             `客户`          VARCHAR(200) DEFAULT '',
             `代理商`        VARCHAR(200) DEFAULT '',
-            `订单备注`      TEXT,
-            `机台备注/配置` TEXT,
+            `合同备注`      TEXT,
             `Location_Code` VARCHAR(100) DEFAULT '',
+            `合同号`        VARCHAR(100) DEFAULT '',
             PRIMARY KEY (`流水号`),
             INDEX `idx_fg_order` (`占用订单号`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -222,8 +225,8 @@ def init_mysql_tables():
             `占用订单号`    VARCHAR(100) DEFAULT '',
             `客户`          VARCHAR(200) DEFAULT '',
             `代理商`        VARCHAR(200) DEFAULT '',
-            `订单备注`      TEXT,
-            `机台备注/配置` TEXT,
+            `合同备注`      TEXT,
+            `合同号`        VARCHAR(100) DEFAULT '',
             `archive_month` VARCHAR(20)  DEFAULT '',
             PRIMARY KEY (`id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -235,7 +238,10 @@ def init_mysql_tables():
             `机型`          VARCHAR(100) DEFAULT '',
             `状态`          VARCHAR(50)  DEFAULT '待入库',
             `预计入库时间`  DATETIME NULL,
-            `机台备注/配置` TEXT,
+            `客户`          VARCHAR(200) DEFAULT '',
+            `代理商`        VARCHAR(200) DEFAULT '',
+            `合同备注`      TEXT,
+            `合同号`        VARCHAR(100) DEFAULT '',
             PRIMARY KEY (`流水号`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
@@ -251,12 +257,32 @@ def init_mysql_tables():
         CREATE TABLE IF NOT EXISTS model_dictionary (
             `id`         INT NOT NULL AUTO_INCREMENT,
             `model_name` VARCHAR(100) NOT NULL,
+            `model_family` VARCHAR(32) NULL,
             `sort_order` INT NOT NULL DEFAULT 0,
             `enabled`    TINYINT(1) NOT NULL DEFAULT 1,
             `remark`     VARCHAR(255) DEFAULT '',
             `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             UNIQUE KEY `uq_model_dictionary_name` (`model_name`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS rush_order_queue (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `contract_no` VARCHAR(100) NOT NULL,
+            `customer` VARCHAR(200) DEFAULT '',
+            `dealer_name` VARCHAR(200) DEFAULT '',
+            `model_type` VARCHAR(100) NOT NULL,
+            `due_date` DATE NULL,
+            `source` VARCHAR(50) NOT NULL DEFAULT 'contract',
+            `status` VARCHAR(30) NOT NULL DEFAULT 'pending',
+            `created_by` VARCHAR(100) DEFAULT '',
+            `updated_by` VARCHAR(100) DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            INDEX `idx_rush_order_queue_status` (`status`, `created_at`),
+            INDEX `idx_rush_order_queue_contract` (`contract_no`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
     ]
@@ -353,6 +379,12 @@ def init_mysql_tables():
 
         for ddl in ddl_statements:
             conn.execute(text(ddl))
+
+        if not _column_exists("model_dictionary", "model_family"):
+            conn.execute(text(
+                "ALTER TABLE model_dictionary "
+                "ADD COLUMN `model_family` VARCHAR(32) NULL AFTER `model_name`"
+            ))
 
         try:
             if not _column_exists("sales_orders", "包装选项"):
@@ -457,6 +489,49 @@ def init_mysql_tables():
                 conn.execute(text(sql))
             except Exception:
                 pass
+
+        # plan_import: add 客户/代理商/合同备注, drop 机台备注/配置
+        for col_name, col_def in [
+            ("客户", "VARCHAR(200) DEFAULT '' AFTER `预计入库时间`"),
+            ("代理商", "VARCHAR(200) DEFAULT '' AFTER `客户`"),
+            ("合同备注", "TEXT AFTER `代理商`"),
+            ("合同号", "VARCHAR(100) DEFAULT '' AFTER `合同备注`"),
+        ]:
+            if not _column_exists("plan_import", col_name):
+                try:
+                    conn.execute(text(f"ALTER TABLE plan_import ADD COLUMN `{col_name}` {col_def}"))
+                except Exception:
+                    pass
+        if _column_exists("plan_import", "机台备注/配置"):
+            try:
+                conn.execute(text("ALTER TABLE plan_import DROP COLUMN `机台备注/配置`"))
+            except Exception:
+                pass
+
+        for table_name, after_col in [
+            ("finished_goods_data", "代理商"),
+            ("shipping_history", "代理商"),
+        ]:
+            if not _column_exists(table_name, "合同备注"):
+                try:
+                    conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `合同备注` TEXT AFTER `{after_col}`"))
+                except Exception:
+                    pass
+            for legacy_col in ["订单备注", "机台备注/配置"]:
+                if _column_exists(table_name, legacy_col):
+                    try:
+                        conn.execute(text(f"""
+                            UPDATE `{table_name}`
+                            SET `合同备注` = `{legacy_col}`
+                            WHERE COALESCE(TRIM(`合同备注`), '') = ''
+                              AND COALESCE(TRIM(`{legacy_col}`), '') <> ''
+                        """))
+                    except Exception:
+                        pass
+                    try:
+                        conn.execute(text(f"ALTER TABLE `{table_name}` DROP COLUMN `{legacy_col}`"))
+                    except Exception:
+                        pass
 
         try:
             fk_fg = conn.execute(text(
@@ -610,6 +685,10 @@ def init_mysql_tables():
         result = conn.execute(text("SHOW COLUMNS FROM finished_goods_data LIKE 'Location_Code'"))
         if result.fetchone() is None:
             conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `Location_Code` VARCHAR(100) DEFAULT ''"))
+        if not _column_exists("finished_goods_data", "合同号"):
+            conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `合同号` VARCHAR(100) DEFAULT '' AFTER `Location_Code`"))
+        if not _column_exists("shipping_history", "合同号"):
+            conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT '' AFTER `合同备注`"))
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for uid, info in DEFAULT_USERS.items():
@@ -630,7 +709,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 5
 
 
 def _ensure_schema_version_table(conn):
@@ -703,9 +782,9 @@ def init_mysql_tables_v2():
                     `占用订单号`    VARCHAR(100) NULL,
                     `客户`          VARCHAR(200) DEFAULT '',
                     `代理商`        VARCHAR(200) DEFAULT '',
-                    `订单备注`      TEXT,
-                    `机台备注/配置` TEXT,
+                    `合同备注`      TEXT,
                     `Location_Code` VARCHAR(100) DEFAULT '',
+                    `合同号`        VARCHAR(100) DEFAULT '',
                     PRIMARY KEY (`流水号`),
                     INDEX `idx_fg_order` (`占用订单号`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -745,6 +824,20 @@ def init_mysql_tables_v2():
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """,
                 """
+                CREATE TABLE IF NOT EXISTS plan_import (
+                    `流水号`        VARCHAR(100) NOT NULL,
+                    `批次号`        VARCHAR(100) DEFAULT '',
+                    `机型`          VARCHAR(100) DEFAULT '',
+                    `状态`          VARCHAR(50)  DEFAULT '待入库',
+                    `预计入库时间`  DATETIME NULL,
+                    `客户`          VARCHAR(200) DEFAULT '',
+                    `代理商`        VARCHAR(200) DEFAULT '',
+                    `合同备注`      TEXT,
+                    `合同号`        VARCHAR(100) DEFAULT '',
+                    PRIMARY KEY (`流水号`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS users (
                     `username`      VARCHAR(100) NOT NULL,
                     `password`      VARCHAR(200) DEFAULT '',
@@ -763,6 +856,25 @@ def init_mysql_tables_v2():
                     `role_id`   VARCHAR(50)  DEFAULT '',
                     `func_code` VARCHAR(100) DEFAULT '',
                     PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS rush_order_queue (
+                    `id` BIGINT NOT NULL AUTO_INCREMENT,
+                    `contract_no` VARCHAR(100) NOT NULL,
+                    `customer` VARCHAR(200) DEFAULT '',
+                    `dealer_name` VARCHAR(200) DEFAULT '',
+                    `model_type` VARCHAR(100) NOT NULL,
+                    `due_date` DATE NULL,
+                    `source` VARCHAR(50) NOT NULL DEFAULT 'contract',
+                    `status` VARCHAR(30) NOT NULL DEFAULT 'pending',
+                    `created_by` VARCHAR(100) DEFAULT '',
+                    `updated_by` VARCHAR(100) DEFAULT '',
+                    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    INDEX `idx_rush_order_queue_status` (`status`, `created_at`),
+                    INDEX `idx_rush_order_queue_contract` (`contract_no`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """,
             ]
@@ -796,10 +908,171 @@ def init_mysql_tables_v2():
             # 记录版本
             _record_schema_version(conn, 1, "Initial schema creation")
 
-        # 未来版本升级可以在这里添加
-        # if current_version < 2:
-        #     ... 执行 v2 升级 ...
-        #     _record_schema_version(conn, 2, "Add new features")
+        # 版本 1 → 2：plan_import 列结构调整（客户/代理商/合同备注 替代 机台备注/配置）
+        if current_version < 2:
+            def _column_exists_v2(t, c):
+                raw = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND COLUMN_NAME=:c"
+                ), {"db": MYSQL_DB, "t": t, "c": c}).scalar()
+                try:
+                    return int(raw or 0) > 0
+                except Exception:
+                    return False
+
+            for col_name, col_def in [
+                ("客户", "VARCHAR(200) DEFAULT '' AFTER `预计入库时间`"),
+                ("代理商", "VARCHAR(200) DEFAULT '' AFTER `客户`"),
+                ("合同备注", "TEXT AFTER `代理商`"),
+                ("合同号", "VARCHAR(100) DEFAULT '' AFTER `合同备注`"),
+            ]:
+                if not _column_exists_v2("plan_import", col_name):
+                    try:
+                        conn.execute(text(f"ALTER TABLE plan_import ADD COLUMN `{col_name}` {col_def}"))
+                    except Exception:
+                        pass
+            if _column_exists_v2("plan_import", "机台备注/配置"):
+                try:
+                    conn.execute(text("ALTER TABLE plan_import DROP COLUMN `机台备注/配置`"))
+                except Exception:
+                    pass
+            _record_schema_version(conn, 2, "plan_import: replace 机台备注/配置 with 客户, 代理商, 合同备注")
+
+        # 版本 2 → 3：补齐合同号在 plan_import / finished_goods_data / shipping_history 的追溯链路
+        if current_version < 3:
+            def _column_exists_v3(t, c):
+                raw = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND COLUMN_NAME=:c"
+                ), {"db": MYSQL_DB, "t": t, "c": c}).scalar()
+                try:
+                    return int(raw or 0) > 0
+                except Exception:
+                    return False
+
+            for table_name, after_col in [
+                ("plan_import", "合同备注"),
+                ("finished_goods_data", "Location_Code"),
+                ("shipping_history", "合同备注"),
+            ]:
+                if not _column_exists_v3(table_name, "合同号"):
+                    try:
+                        conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `合同号` VARCHAR(100) DEFAULT '' AFTER `{after_col}`"))
+                    except Exception:
+                        pass
+            _record_schema_version(conn, 3, "add contract_no traceability columns")
+
+        # 版本 3 → 4：合同录入急单持久队列
+        if current_version < 4:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS rush_order_queue (
+                    `id` BIGINT NOT NULL AUTO_INCREMENT,
+                    `contract_no` VARCHAR(100) NOT NULL,
+                    `customer` VARCHAR(200) DEFAULT '',
+                    `dealer_name` VARCHAR(200) DEFAULT '',
+                    `model_type` VARCHAR(100) NOT NULL,
+                    `due_date` DATE NULL,
+                    `source` VARCHAR(50) NOT NULL DEFAULT 'contract',
+                    `status` VARCHAR(30) NOT NULL DEFAULT 'pending',
+                    `created_by` VARCHAR(100) DEFAULT '',
+                    `updated_by` VARCHAR(100) DEFAULT '',
+                    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    INDEX `idx_rush_order_queue_status` (`status`, `created_at`),
+                    INDEX `idx_rush_order_queue_contract` (`contract_no`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            _record_schema_version(conn, 4, "add persistent rush order queue")
+
+        # 版本 4 → 5：统一机台/订单备注为合同备注，并删除库存旧备注字段
+        if current_version < 5:
+            def _column_exists_v5(t, c):
+                raw = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND COLUMN_NAME=:c"
+                ), {"db": MYSQL_DB, "t": t, "c": c}).scalar()
+                try:
+                    return int(raw or 0) > 0
+                except Exception:
+                    return False
+
+            for table_name, after_col in [
+                ("finished_goods_data", "代理商"),
+                ("shipping_history", "代理商"),
+            ]:
+                if not _column_exists_v5(table_name, "合同备注"):
+                    try:
+                        conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `合同备注` TEXT AFTER `{after_col}`"))
+                    except Exception:
+                        pass
+
+            if _column_exists_v5("finished_goods_data", "合同备注"):
+                try:
+                    conn.execute(text("""
+                        UPDATE finished_goods_data fg
+                        LEFT JOIN factory_plan fp
+                          ON fg.`合同号` = fp.`合同号` AND fg.`机型` = fp.`机型`
+                        SET fg.`合同备注` = fp.`备注`
+                        WHERE COALESCE(TRIM(fg.`合同备注`), '') = ''
+                          AND COALESCE(TRIM(fp.`备注`), '') <> ''
+                    """))
+                except Exception:
+                    pass
+                try:
+                    conn.execute(text("""
+                        UPDATE finished_goods_data fg
+                        LEFT JOIN plan_import pi ON fg.`流水号` = pi.`流水号`
+                        SET fg.`合同备注` = pi.`合同备注`
+                        WHERE COALESCE(TRIM(fg.`合同备注`), '') = ''
+                          AND COALESCE(TRIM(pi.`合同备注`), '') <> ''
+                    """))
+                except Exception:
+                    pass
+                for legacy_col in ["订单备注", "机台备注/配置"]:
+                    if _column_exists_v5("finished_goods_data", legacy_col):
+                        try:
+                            conn.execute(text(f"""
+                                UPDATE finished_goods_data
+                                SET `合同备注` = `{legacy_col}`
+                                WHERE COALESCE(TRIM(`合同备注`), '') = ''
+                                  AND COALESCE(TRIM(`{legacy_col}`), '') <> ''
+                            """))
+                        except Exception:
+                            pass
+
+            if _column_exists_v5("shipping_history", "合同备注"):
+                try:
+                    conn.execute(text("""
+                        UPDATE shipping_history sh
+                        LEFT JOIN factory_plan fp
+                          ON sh.`合同号` = fp.`合同号` AND sh.`机型` = fp.`机型`
+                        SET sh.`合同备注` = fp.`备注`
+                        WHERE COALESCE(TRIM(sh.`合同备注`), '') = ''
+                          AND COALESCE(TRIM(fp.`备注`), '') <> ''
+                    """))
+                except Exception:
+                    pass
+                for legacy_col in ["订单备注", "机台备注/配置"]:
+                    if _column_exists_v5("shipping_history", legacy_col):
+                        try:
+                            conn.execute(text(f"""
+                                UPDATE shipping_history
+                                SET `合同备注` = `{legacy_col}`
+                                WHERE COALESCE(TRIM(`合同备注`), '') = ''
+                                  AND COALESCE(TRIM(`{legacy_col}`), '') <> ''
+                            """))
+                        except Exception:
+                            pass
+
+            for table_name in ["finished_goods_data", "shipping_history"]:
+                for legacy_col in ["订单备注", "机台备注/配置"]:
+                    if _column_exists_v5(table_name, legacy_col):
+                        try:
+                            conn.execute(text(f"ALTER TABLE `{table_name}` DROP COLUMN `{legacy_col}`"))
+                        except Exception:
+                            pass
+            _record_schema_version(conn, 5, "unify machine/order notes into contract remarks")
 
         return {
             "initialized": True,

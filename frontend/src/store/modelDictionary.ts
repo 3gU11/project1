@@ -6,6 +6,7 @@ import { setModelOrderList } from '../utils/modelOrder'
 export interface ModelDictionaryRow {
   id?: number
   model_name: string
+  model_family?: string
   sort_order: number
   enabled: boolean
   remark: string
@@ -17,6 +18,7 @@ const normalizeRows = (rows: any[]): ModelDictionaryRow[] => {
   return (rows || []).map((r: any, idx: number) => ({
     id: Number.isFinite(Number(r?.id)) ? Number(r.id) : undefined,
     model_name: String(r?.model_name || '').trim(),
+    model_family: String(r?.model_family || '').trim(),
     sort_order: idx,
     enabled: Boolean(r?.enabled ?? true),
     remark: String(r?.remark || ''),
@@ -51,6 +53,7 @@ export const useModelDictionaryStore = defineStore('modelDictionary', () => {
     const payload = (nextRows || []).map((r, idx) => ({
       id: Number.isFinite(Number(r.id)) ? Number(r.id) : undefined,
       model_name: String(r.model_name || '').trim(),
+      model_family: String(r.model_family || '').trim(),
       sort_order: idx,
       enabled: Boolean(r.enabled),
       remark: String(r.remark || ''),

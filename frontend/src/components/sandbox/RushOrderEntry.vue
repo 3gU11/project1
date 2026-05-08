@@ -1,0 +1,176 @@
+<template>
+  <div class="rush-entry">
+    <div class="rush-header">
+      <h3>急单队列</h3>
+      <el-button size="small" link type="primary" :loading="rushStore.loadingRushOrders" @click="loadRushOrders">
+        刷新
+      </el-button>
+    </div>
+
+    <div v-if="rushStore.rushOrders.length > 0">
+      <div class="rush-count">
+        待处理急单 ({{ rushStore.rushOrders.length }})
+      </div>
+      <VueDraggable
+        v-model="rushStore.rushOrders"
+        :group="{ name: 'rush-orders', pull: 'clone', put: false, revertClone: true }"
+        item-key="id"
+        :sort="false"
+        draggable=".rush-card"
+        :clone="cloneRushOrder"
+      >
+        <div v-for="element in rushStore.rushOrders" :key="element.id" class="rush-card" :data-rush-id="element.id">
+          <div class="rush-card-main">
+            <strong>{{ element.contract_no }}</strong>
+            <span :style="{ color: modelColors[element.model_type] || '#333' }">{{ element.model_type }}</span>
+            <span>{{ element.customer || '-' }}</span>
+          </div>
+          <div class="rush-card-meta">
+            {{ element.dealer_name || '-' }} · {{ element.due_date || '-' }}
+          </div>
+          <div class="rush-card-actions">
+            <el-button size="small" type="primary" link @click="autoInsert(element)">自动插入</el-button>
+            <el-button size="small" type="danger" link @click="deleteRushOrder(element)">删除</el-button>
+          </div>
+        </div>
+      </VueDraggable>
+    </div>
+
+    <div v-else class="rush-empty">
+      合同管理标记急单后自动出现在这里
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { onMounted } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
+import { ElMessage } from 'element-plus'
+import { useRushStore } from '../../stores/useSandboxRushStore'
+import { MODEL_COLORS } from '../../utils/sandboxModelType'
+import * as sandboxApi from '../../services/sandboxApi'
+import { getApiErrorMessage } from '../../utils/request'
+
+const rushStore = useRushStore()
+const emit = defineEmits<{
+  (e: 'auto-inserted'): void
+}>()
+const modelColors = MODEL_COLORS
+
+async function loadRushOrders() {
+  try {
+    await rushStore.fetchRushOrders()
+  } catch (e: any) {
+    ElMessage.warning(`加载急单队列失败: ${getApiErrorMessage(e) || e.message}`)
+  }
+}
+
+async function autoInsert(order: any) {
+  const rushModel = String(order?.model_type || '').trim()
+  if (!rushModel) {
+    ElMessage.warning('急单机型为空，无法自动插入')
+    return
+  }
+  try {
+    const res = await sandboxApi.getBatches({ status: 'In_Production,Confirmed', limit: 2000 }) as any
+    const batches = Array.isArray(res)
+      ? res
+      : (res?.batches || res?.data || [])
+    const hasExactModelSlot = (batches || []).some((b: any) =>
+      ['In_Production', 'Confirmed'].includes(String(b?.status || '')) &&
+      (b?.units || []).some((u: any) =>
+        String(u?.model_type || '').trim() === rushModel && !Boolean(u?.is_locked)
+      )
+    )
+    if (!hasExactModelSlot) {
+      ElMessage.warning(`自动插入失败：当前生产链无可用机型位（${rushModel}）`)
+      return
+    }
+  } catch {
+    // 预检失败时继续走后端，让后端给出最终业务校验结果。
+  }
+
+  try {
+    await rushStore.executeRushAutoInsert(order)
+    await rushStore.markRushOrderStatus(order.id, 'inserted')
+    emit('auto-inserted')
+    ElMessage.success('急单已自动插入')
+  } catch (e: any) {
+    const detail = getApiErrorMessage(e)
+    if (detail) {
+      ElMessage.error(`自动插入失败: ${detail}`)
+    }
+  }
+}
+
+async function deleteRushOrder(order: any) {
+  try {
+    await rushStore.markRushOrderStatus(order.id, 'deleted')
+    ElMessage.success('急单卡已删除')
+  } catch (e: any) {
+    ElMessage.error(getApiErrorMessage(e) || '删除急单卡失败')
+  }
+}
+
+function cloneRushOrder(order: any) {
+  return { ...order, __drag_type: 'rush-order' }
+}
+
+onMounted(loadRushOrders)
+</script>
+
+<style scoped>
+.rush-entry {
+  padding: 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fff;
+}
+.rush-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.rush-header h3 {
+  font-size: 14px;
+  margin: 0;
+}
+.rush-count {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 6px;
+}
+.rush-card {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-left: 3px solid #f56c6c;
+  border-radius: 6px;
+  background: #fff7f7;
+  cursor: grab;
+}
+.rush-card-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+.rush-card-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #999;
+}
+.rush-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.rush-empty {
+  color: #bbb;
+  text-align: center;
+  padding: 24px 8px;
+  font-size: 13px;
+}
+</style>

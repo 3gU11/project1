@@ -216,3 +216,40 @@ MIT License
 ---
 
 **V7ex** - 让库存管理更简单 🚀
+
+## Boss Plan (FastAPI + Go)
+
+- Default backend path is `Frontend -> FastAPI (/api/v1/sandbox) -> Go (/api/*)`.
+- `run_fullstack.bat` now builds Go first, then starts Go/FastAPI/frontend, and waits for Go health (`/api/health`) before continuing.
+- Key available sandbox APIs:
+  - `POST /api/v1/sandbox/units/repair-family-mismatches`
+  - `POST /api/v1/sandbox/forecast/recompute`
+  - `GET /api/v1/sandbox/model-types`
+  - `GET /api/v1/sandbox/forecast/achievement`
+- Permission model:
+  - Read APIs require `SANDBOX_VIEW`
+  - Write APIs require `SANDBOX_EDIT`
+  - `Admin`/`Boss` remain compatible through role permissions.
+- Mobile note: `frontend-mobile` remains lightweight warehouse-facing; Boss Plan sandbox is not included by default.
+
+## Launcher EXE
+
+- One-click startup now uses `launcher.exe` (built from `tools/launcher/main.go`).
+- You can still run `run_fullstack.bat`; it bootstraps and executes `launcher.exe`.
+
+Examples:
+
+```bat
+launcher.exe
+launcher.exe --dry-run
+launcher.exe --no-mobile
+launcher.exe --ports go=3001,api=8000,web=3000,mobile=5174
+launcher.exe --python "C:\Users\zc123\python-sdk\python3.13.2\python.exe"
+```
+
+Exit codes:
+- `0` success
+- `1` precheck failed
+- `2` go build failed
+- `3` go health check failed
+- `4` process start failed

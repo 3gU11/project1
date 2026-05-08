@@ -17,7 +17,7 @@ export const buildInventoryIndex = (rows: any[]): IndexedInventoryRow[] => {
   return rows.map((row) => {
     const model = String(row['机型'] || '')
     const status = String(row['状态'] || '')
-    const highHint = `${model}|${String(row['机台备注/配置'] || '')}|${String(row['订单备注'] || '')}`
+    const highHint = `${model}|${String(row['合同备注'] || '')}`
     const searchText = `${String(row['流水号'] || '')}|${model}|${String(row['批次号'] || '')}|${String(row['客户'] || '')}`.toLowerCase()
     return { row, searchText, model, status, highHint }
   })

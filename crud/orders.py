@@ -214,12 +214,6 @@ def _build_model_note_map(order_id):
 
 def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     df = get_data()
-    orders = get_orders()
-    order_note = ""
-    target_order = orders[orders['订单号'] == order_id]
-    if not target_order.empty:
-        order_note = _normalize_order_note(target_order.iloc[0]['备注'])
-
     model_note_map = _build_model_note_map(order_id)
 
     current_status_df = df[df['流水号'].isin(selected_sns)]
@@ -238,9 +232,9 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
             if not row_mask.any():
                 continue
             model = str(df.loc[row_mask, '机型'].iloc[0]).strip()
-            df.loc[row_mask, '订单备注'] = model_note_map.get(model, order_note)
-    else:
-        df.loc[mask, '订单备注'] = order_note
+            note = model_note_map.get(model, "")
+            if note:
+                df.loc[row_mask, '合同备注'] = note
     df.loc[mask, '更新时间'] = datetime.now()
 
     save_data(df)
@@ -250,11 +244,17 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
 def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
     df = get_data()
     mask = df['流水号'].isin(selected_sns)
-    df.loc[mask, '状态'] = '待入库'
+    def _restore_status(row):
+        slot = str(row.get("Location_Code", "") or "").strip()
+        if slot:
+            return f"库存中（{slot}）"
+        return "待入库"
+
+    if mask.any():
+        df.loc[mask, '状态'] = df.loc[mask].apply(_restore_status, axis=1)
     df.loc[mask, '占用订单号'] = ""
     df.loc[mask, '客户'] = ""
     df.loc[mask, '代理商'] = ""
-    df.loc[mask, '订单备注'] = ""
     df.loc[mask, '更新时间'] = datetime.now()
     save_data(df)
     append_log(f"{reason}-退回待入库", selected_sns, operator=operator)

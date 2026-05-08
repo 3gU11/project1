@@ -13,8 +13,8 @@ from utils.local_cache import ttl_cache
 
 
 logger = logging.getLogger(__name__)
-INVENTORY_COLS = ["批次号", "机型", "流水号", "状态", "预计入库时间", "更新时间", "占用订单号", "客户", "代理商", "订单备注", "机台备注/配置", "Location_Code"]
-IMPORT_COLS = ["流水号", "批次号", "机型", "状态", "预计入库时间", "机台备注/配置"]
+INVENTORY_COLS = ["批次号", "机型", "流水号", "状态", "预计入库时间", "更新时间", "占用订单号", "客户", "代理商", "合同备注", "Location_Code", "合同号"]
+IMPORT_COLS = ["流水号", "批次号", "机型", "状态", "预计入库时间", "客户", "代理商", "合同备注", "合同号"]
 WAREHOUSE_MAX_CAPACITY = 5
 
 
@@ -42,6 +42,40 @@ def _ensure_plan_import_status_column(conn):
     return True
 
 
+def _ensure_plan_import_trace_columns(conn):
+    added = False
+    for col_name, col_def in [
+        ("客户", "VARCHAR(200) DEFAULT ''"),
+        ("代理商", "VARCHAR(200) DEFAULT ''"),
+        ("合同备注", "TEXT"),
+        ("合同号", "VARCHAR(100) DEFAULT ''"),
+    ]:
+        if _has_column(conn, "plan_import", col_name):
+            continue
+        try:
+            conn.execute(text(f"ALTER TABLE plan_import ADD COLUMN `{col_name}` {col_def}"))
+        except Exception:
+            conn.execute(text(f"ALTER TABLE plan_import ADD COLUMN `{col_name}` TEXT"))
+        added = True
+    return added
+
+
+def _normalize_contract_note_columns(df):
+    normalized = df.copy()
+    if "合同备注" not in normalized.columns:
+        normalized["合同备注"] = ""
+    for legacy_col in ["备注", "订单备注", "机台备注/配置"]:
+        if legacy_col in normalized.columns:
+            missing = normalized["合同备注"].fillna("").astype(str).str.strip() == ""
+            normalized.loc[missing, "合同备注"] = normalized.loc[missing, legacy_col].fillna("").astype(str)
+    return normalized
+
+
+def _ensure_finished_goods_contract_note_column(conn):
+    if not _has_column(conn, "finished_goods_data", "合同备注"):
+        conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
+
+
 def _normalize_import_df(df):
     normalized = df.copy()
     for col in IMPORT_COLS:
@@ -63,12 +97,10 @@ def get_data():
             df = pd.read_sql("SELECT * FROM finished_goods_data", conn)
         if df.empty:
             return pd.DataFrame(columns=INVENTORY_COLS)
-        df = df.fillna("")
+        df = _normalize_contract_note_columns(df.fillna(""))
         for col in INVENTORY_COLS:
             if col not in df.columns:
                 df[col] = ""
-        if '备注' in df.columns and '订单备注' not in df.columns:
-            df.rename(columns={'备注': '订单备注'}, inplace=True)
             
         if "预计入库时间" in df.columns:
             df["预计入库时间"] = pd.to_datetime(df["预计入库时间"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
@@ -95,12 +127,10 @@ def get_data_v2():
             df = pd.read_sql("SELECT * FROM finished_goods_data", conn)
         if df.empty:
             return pd.DataFrame(columns=INVENTORY_COLS)
-        df = df.fillna("")
+        df = _normalize_contract_note_columns(df.fillna(""))
         for col in INVENTORY_COLS:
             if col not in df.columns:
                 df[col] = ""
-        if '备注' in df.columns and '订单备注' not in df.columns:
-            df.rename(columns={'备注': '订单备注'}, inplace=True)
 
         if "预计入库时间" in df.columns:
             df["预计入库时间"] = pd.to_datetime(df["预计入库时间"], errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
@@ -132,9 +162,12 @@ def save_data(df):
         for col in fill_cols:
             df[col] = df[col].fillna("")
         with get_engine().begin() as conn:
+            _ensure_finished_goods_contract_note_column(conn)
             result = conn.execute(text("SHOW COLUMNS FROM finished_goods_data LIKE 'Location_Code'"))
             if result.fetchone() is None:
                 conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `Location_Code` VARCHAR(100) DEFAULT ''"))
+            if not _has_column(conn, "finished_goods_data", "合同号"):
+                conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
             conn.execute(text("DELETE FROM finished_goods_data"))
             if not df.empty:
                 df[INVENTORY_COLS].to_sql('finished_goods_data', conn, if_exists='append', index=False, method='multi', chunksize=500)
@@ -166,10 +199,13 @@ def save_data_v2(df):
             df[col] = df[col].fillna("")
 
         with get_engine().begin() as conn:
+            _ensure_finished_goods_contract_note_column(conn)
             # 确保 Location_Code 列存在
             result = conn.execute(text("SHOW COLUMNS FROM finished_goods_data LIKE 'Location_Code'"))
             if result.fetchone() is None:
                 conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `Location_Code` VARCHAR(100) DEFAULT ''"))
+            if not _has_column(conn, "finished_goods_data", "合同号"):
+                conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
 
             if df.empty:
                 return {"inserted": 0, "updated": 0}
@@ -179,10 +215,10 @@ def save_data_v2(df):
             upsert_sql = text("""
                 INSERT INTO finished_goods_data (
                     `流水号`, `批次号`, `机型`, `状态`, `预计入库时间`, `更新时间`,
-                    `占用订单号`, `客户`, `代理商`, `订单备注`, `机台备注/配置`, `Location_Code`
+                    `占用订单号`, `客户`, `代理商`, `合同备注`, `Location_Code`, `合同号`
                 ) VALUES (
                     :流水号, :批次号, :机型, :状态, :预计入库时间, :更新时间,
-                    :占用订单号, :客户, :代理商, :订单备注, :机台备注/配置, :Location_Code
+                    :占用订单号, :客户, :代理商, :合同备注, :Location_Code, :合同号
                 ) ON DUPLICATE KEY UPDATE
                     `批次号` = VALUES(`批次号`),
                     `机型` = VALUES(`机型`),
@@ -192,9 +228,9 @@ def save_data_v2(df):
                     `占用订单号` = VALUES(`占用订单号`),
                     `客户` = VALUES(`客户`),
                     `代理商` = VALUES(`代理商`),
-                    `订单备注` = VALUES(`订单备注`),
-                    `机台备注/配置` = VALUES(`机台备注/配置`),
-                    `Location_Code` = VALUES(`Location_Code`)
+                    `合同备注` = VALUES(`合同备注`),
+                    `Location_Code` = VALUES(`Location_Code`),
+                    `合同号` = VALUES(`合同号`)
             """)
 
             # 分批处理，避免单条 SQL 过长
@@ -232,7 +268,13 @@ def archive_shipped_data(df_shipped):
         for dt_col in ["预计入库时间", "更新时间"]:
             if dt_col in df_shipped.columns:
                 df_shipped[dt_col] = pd.to_datetime(df_shipped[dt_col], errors="coerce")
-        df_shipped.fillna("").to_sql('shipping_history', get_engine(), if_exists='append', index=False, method='multi', chunksize=500)
+        engine = get_engine()
+        with engine.begin() as conn:
+            if not _has_column(conn, "shipping_history", "合同备注"):
+                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
+            if not _has_column(conn, "shipping_history", "合同号"):
+                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
+        df_shipped.fillna("").to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
     except (OperationalError, Exception) as e:
         print(f"archive_shipped_data error: {e}")
 
@@ -241,6 +283,7 @@ def get_import_staging():
     try:
         with get_engine().begin() as conn:
             _ensure_plan_import_status_column(conn)
+            _ensure_plan_import_trace_columns(conn)
             df = pd.read_sql("SELECT * FROM plan_import", conn)
         df = df.fillna("")
         if "预计入库时间" in df.columns:
@@ -256,6 +299,7 @@ def save_import_staging(df):
         df = _normalize_import_df(df)
         with get_engine().begin() as conn:
             _ensure_plan_import_status_column(conn)
+            _ensure_plan_import_trace_columns(conn)
             conn.execute(text("DELETE FROM plan_import"))
             if not df.empty:
                 df.to_sql('plan_import', conn, if_exists='append', index=False, method='multi')
@@ -273,6 +317,7 @@ def append_import_staging(df):
         df = df.drop_duplicates(subset=["流水号"], keep="last")
         with get_engine().begin() as conn:
             _ensure_plan_import_status_column(conn)
+            _ensure_plan_import_trace_columns(conn)
             existing_df = pd.read_sql("SELECT 流水号 FROM plan_import", conn)
             existing_sns = set(existing_df["流水号"].astype(str).str.strip().tolist()) if not existing_df.empty else set()
             df_to_append = df[~df["流水号"].isin(existing_sns)].copy()
@@ -296,6 +341,7 @@ def append_import_staging_transactional(df):
         conn = get_engine().connect()
         trans = conn.begin()
         _ensure_plan_import_status_column(conn)
+        _ensure_plan_import_trace_columns(conn)
         existing_df = pd.read_sql("SELECT 流水号 FROM plan_import", conn)
         existing_sns = set(existing_df["流水号"].astype(str).str.strip().tolist()) if not existing_df.empty else set()
         df_to_append = normalized_df[~normalized_df["流水号"].isin(existing_sns)].copy()
@@ -363,16 +409,40 @@ def clear_import_staging():
 def delete_import_staging_by_serials(serial_nos):
     cleaned = [str(sn).strip() for sn in (serial_nos or []) if str(sn).strip()]
     if not cleaned:
-        return 0
+        return {"deleted": 0, "orphaned_batch_codes": []}
     try:
         with get_engine().begin() as conn:
             placeholders = ", ".join([f":sn{i}" for i in range(len(cleaned))])
             params = {f"sn{i}": sn for i, sn in enumerate(cleaned)}
+
+            # Collect affected batch_codes before deletion
+            affected_rows = conn.execute(
+                text(f"SELECT DISTINCT `批次号` FROM plan_import WHERE `流水号` IN ({placeholders})"),
+                params,
+            ).fetchall()
+            affected_codes = [
+                str(r[0]).strip() for r in affected_rows
+                if r[0] and str(r[0]).strip()
+            ]
+
+            # Delete the records
             result = conn.execute(
                 text(f"DELETE FROM plan_import WHERE `流水号` IN ({placeholders})"),
                 params,
             )
-            return int(result.rowcount or 0)
+            deleted = int(result.rowcount or 0)
+
+            # Check which batch_codes no longer have any records
+            orphaned = []
+            for bc in affected_codes:
+                remaining = conn.execute(
+                    text("SELECT COUNT(*) FROM plan_import WHERE `批次号` = :bc"),
+                    {"bc": bc},
+                ).scalar()
+                if not remaining:
+                    orphaned.append(bc)
+
+            return {"deleted": deleted, "orphaned_batch_codes": orphaned}
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"删除待入库数据失败: {e}") from e
 

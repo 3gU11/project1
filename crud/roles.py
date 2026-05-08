@@ -38,7 +38,6 @@ def ensure_role_tables() -> None:
                 pass
 
 PERMISSION_CATALOG = [
-    {"code": "PLANNING", "label": "生产统筹/订单规划", "group": "管理与统筹"},
     {"code": "CONTRACT", "label": "合同管理", "group": "管理与统筹"},
     {"code": "MODEL_DICTIONARY", "label": "机型字典", "group": "系统管理"},
     {"code": "USER_MANAGE", "label": "用户管理", "group": "系统管理"},
@@ -52,6 +51,8 @@ PERMISSION_CATALOG = [
     {"code": "QUERY", "label": "库存查询", "group": "查询"},
     {"code": "INBOUND", "label": "成品入库", "group": "生产/仓储"},
     {"code": "TRACEABILITY", "label": "汇总与追溯", "group": "查询"},
+    {"code": "SANDBOX_VIEW", "label": "预测沙盘(查看)", "group": "管理与统筹"},
+    {"code": "SANDBOX_EDIT", "label": "预测沙盘(编辑)", "group": "管理与统筹"},
 ]
 
 PERMISSION_CODES = {item["code"] for item in PERMISSION_CATALOG}
@@ -73,6 +74,7 @@ def seed_roles_and_permissions_if_empty() -> None:
     ensure_role_tables()
     engine = get_engine()
     with engine.begin() as conn:
+        conn.execute(text("DELETE FROM role_permissions WHERE func_code='PLANNING'"))
         for role_id, func_codes in DEFAULT_ROLE_PERMISSIONS.items():
             rid = normalize_role_id(role_id)
             if not rid:
@@ -81,17 +83,14 @@ def seed_roles_and_permissions_if_empty() -> None:
                 text("INSERT IGNORE INTO roles (role_id, role_name) VALUES (:rid, :rname)"),
                 {"rid": rid, "rname": rid},
             )
-            existing = conn.execute(
-                text("SELECT COUNT(*) FROM role_permissions WHERE role_id=:rid"),
-                {"rid": rid},
-            ).scalar() or 0
-            if existing == 0:
-                for func_code in func_codes:
-                    if func_code in PERMISSION_CODES:
-                        conn.execute(
-                            text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:rid, :func)"),
-                            {"rid": rid, "func": func_code},
-                        )
+            # Backfill missing default permissions for existing roles as well.
+            # This keeps old databases compatible when new permissions are introduced.
+            for func_code in func_codes:
+                if func_code in PERMISSION_CODES:
+                    conn.execute(
+                        text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:rid, :func)"),
+                        {"rid": rid, "func": func_code},
+                    )
 
 
 def list_roles() -> list[dict]:
@@ -202,7 +201,25 @@ def get_role_permissions(role_id: str) -> list[str]:
             text("SELECT func_code FROM role_permissions WHERE role_id=:rid ORDER BY func_code"),
             {"rid": rid},
         ).fetchall()
-    return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+        # Compatibility: tolerate case/space mismatch in historical role values.
+        if not rows:
+            rows = conn.execute(
+                text(
+                    "SELECT func_code FROM role_permissions "
+                    "WHERE UPPER(TRIM(role_id)) = UPPER(:rid) "
+                    "ORDER BY func_code"
+                ),
+                {"rid": rid},
+            ).fetchall()
+    perms = [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+    if perms:
+        return perms
+
+    # Final fallback: role defaults from config (for partially migrated databases).
+    for key, defaults in DEFAULT_ROLE_PERMISSIONS.items():
+        if normalize_role_id(key).lower() == rid.lower():
+            return [p for p in defaults if p in PERMISSION_CODES]
+    return []
 
 
 def set_role_permissions(role_id: str, permissions: Iterable[str]) -> list[str]:

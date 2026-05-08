@@ -1,16 +1,30 @@
 from pathlib import Path
+import logging
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="V7ex API",
     description="FastAPI layer for the Finished Goods Management System",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    from database import init_mysql_tables_v2
+    try:
+        result = init_mysql_tables_v2()
+        if result.get("initialized"):
+            logger.info("DB migration: %s", result.get("message", ""))
+    except Exception as e:
+        logger.warning("DB migration skipped: %s", e)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -34,6 +48,10 @@ app.include_router(logs.router, prefix="/api/v1/logs", tags=["Logs"])
 app.include_router(traceability.router, prefix="/api/v1/traceability", tags=["Traceability"])
 app.include_router(model_dictionary.router, prefix="/api/v1/model-dictionary", tags=["ModelDictionary"])
 app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles"])
+app.include_router(sandbox.router, prefix="/api/v1/sandbox", tags=["Sandbox"])
+
+# Register sandbox WS directly on app (bypasses router-level HTTP dependencies)
+app.websocket("/api/v1/sandbox/ws")(sandbox.proxy_ws)
 
 @app.get("/health")
 def health_check():

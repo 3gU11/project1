@@ -36,7 +36,9 @@
           <el-table-column prop="批次号" label="批次号" width="120" />
           <el-table-column prop="机型" label="机型" min-width="160" />
           <el-table-column prop="流水号" label="流水号" width="170" />
-          <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="客户" label="客户" min-width="120" />
+          <el-table-column prop="代理商" label="代理商" min-width="120" />
+          <el-table-column prop="合同备注" label="合同备注" min-width="200" show-overflow-tooltip />
         </el-table>
         <div class="selection-hint">已选择入库设备：{{ selectedPendingRows.length }} 台</div>
 
@@ -64,15 +66,7 @@
       </el-tab-pane>
       <el-tab-pane label="📋 批量导入跟踪单" name="import">
         <el-card shadow="never" class="import-section">
-          <template #header>📤 上传跟踪单据</template>
-          <input ref="trackingFileRef" type="file" accept=".xls,.xlsx" />
-          <el-button style="margin-left: 10px" type="primary" :loading="uploading" @click="uploadTracking">
-            🔍 解析并追加到待入库清单
-          </el-button>
-        </el-card>
-
-        <el-card shadow="never" class="import-section">
-          <template #header>📝 待入库数据审核 (DB Staging)</template>
+          <template #header>📝 待入库数据审核</template>
           <div class="filters">
             <el-input v-model="stagingFilterKeyword" placeholder="筛选关键字" clearable style="width: 220px" />
             <el-select v-model="stagingSortCol" style="width: 160px">
@@ -132,9 +126,19 @@
                 <el-input v-model="scope.row['预计入库时间']" />
               </template>
             </el-table-column>
-            <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="180">
+            <el-table-column prop="客户" label="客户" min-width="120">
               <template #default="scope">
-                <el-input v-model="scope.row['机台备注/配置']" />
+                <el-input v-model="scope.row['客户']" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="代理商" label="代理商" min-width="120">
+              <template #default="scope">
+                <el-input v-model="scope.row['代理商']" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="合同备注" label="合同备注" min-width="180">
+              <template #default="scope">
+                <el-input v-model="scope.row['合同备注']" />
               </template>
             </el-table-column>
           </el-table>
@@ -149,46 +153,6 @@
             />
           </div>
 
-          <div class="confirm-row">
-              <el-button type="primary" :disabled="!canConfirmImport" :loading="confirmingImport" @click="confirmImport">
-                🚀 确认导入 (Confirm)
-              </el-button>
-            </div>
-        </el-card>
-
-        <el-card shadow="never" class="import-section">
-          <template #header>⚡ 辅助功能：自动生成流水号 (Auto Generate)</template>
-          <div class="auto-grid">
-            <el-input v-model="autoGen.batch" placeholder="批次号" />
-            <el-select
-              v-model="autoGen.model"
-              filterable
-              clearable
-              placeholder="请选择机型"
-            >
-              <el-option
-                v-for="model in autoGenModelOptions"
-                :key="model"
-                :label="model"
-                :value="model"
-              />
-            </el-select>
-            <el-input-number v-model="autoGen.qty" :min="1" />
-            <el-date-picker v-model="autoGen.expectedDate" type="date" placeholder="预计入库日期" format="YYYY-MM-DD" value-format="YYYY-MM-DD" />
-          </div>
-          <el-input
-            v-model="autoGen.note"
-            type="textarea"
-            :rows="2"
-            placeholder="机台备注/配置"
-            style="margin-top: 8px"
-          />
-          <div class="auto-actions">
-            <el-checkbox v-model="autoGen.confirmed">我确认上述信息无误</el-checkbox>
-            <el-button type="primary" :disabled="!autoGen.confirmed" :loading="autoGenerating" @click="submitAutoGenerate">
-              ✅ 生成并保存到 PLAN_IMPORT
-            </el-button>
-          </div>
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -199,10 +163,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { ElMessage } from 'element-plus'
-import { useFormSubmit } from '../composables/useFormSubmit'
 import { compareModels, getModelOrderList } from '../utils/modelOrder'
 import {
   buildSlotStats,
@@ -213,7 +176,6 @@ import {
 } from './inboundLayout'
 type LayoutResponse = { layout_json?: { slots?: WarehouseSlot[] } }
 type MessageResponse = { message?: string }
-type ImportConfirmResponse = { success_count?: number; failed_count?: number }
 type InboundSlotResponse = { ok?: boolean }
 
 const layoutId = 'default'
@@ -238,11 +200,6 @@ const onPendingKeywordInput = (val: string) => {
 }
 const selectedPendingRows = ref<any[]>([])
 const selectedPendingSerialNos = ref<string[]>([])
-const trackingFileRef = ref<HTMLInputElement | null>(null)
-const uploading = ref(false)
-const confirmingImport = ref(false)
-const autoGenerating = ref(false)
-const { submitWithLock } = useFormSubmit()
 
 const stagingRows = ref<any[]>([])
 const stagingFilterKeyword = ref('')
@@ -251,14 +208,6 @@ const stagingSortAsc = ref(true)
 const stagingPageSize = ref(20)
 const stagingPageNo = ref(1)
 const stagingSelectedMap = ref<Record<string, boolean>>({})
-const autoGen = reactive({
-  batch: '',
-  model: '',
-  qty: 1,
-  expectedDate: '',
-  note: '',
-  confirmed: false,
-})
 
 const autoGenModelOptions = computed(() => {
   return getModelOrderList()
@@ -331,7 +280,9 @@ const fetchImportStaging = async () => {
       机型: String(r['机型'] || '').trim(),
       状态: String(r['状态'] || '待入库').trim() || '待入库',
       预计入库时间: String(r['预计入库时间'] || '').slice(0, 10),
-      '机台备注/配置': String(r['机台备注/配置'] || ''),
+      客户: String(r['客户'] || ''),
+      代理商: String(r['代理商'] || ''),
+      合同备注: String(r['合同备注'] || ''),
     }))
     stagingRows.value = nextRows
     const validSerials = new Set(nextRows.map((r: any) => String(r['流水号'] || '').trim()).filter((sn: string) => !!sn))
@@ -420,10 +371,6 @@ const selectAllTable = computed({
   },
 })
 
-const canConfirmImport = computed(() => {
-  return selectedCountAll.value > 0
-})
-
 const saveCurrentPageEdits = async () => {
   const allRows = stagingRows.value.map((r) => ({ ...r }))
   if (allRows.some((r) => !String(r['流水号'] || '').trim())) {
@@ -458,76 +405,6 @@ const deleteSelectedStagingRows = async () => {
   } catch (err: any) {
     error.value = getApiErrorMessage(err) || `删除失败: ${err.message || err}`
   }
-}
-
-const uploadTracking = async () => {
-  const file = trackingFileRef.value?.files?.[0]
-  if (!file) {
-    ElMessage.warning('请选择跟踪单文件')
-    return
-  }
-  await submitWithLock(uploading, async () => {
-    const fd = new FormData()
-    fd.append('file', file)
-    const response = await apiPost<MessageResponse>('/inventory/import-staging/upload', fd)
-    ElMessage.success(response.message || '解析成功')
-    await fetchImportStaging()
-  }, {
-    errorMessage: '上传解析失败',
-    onError: (err) => {
-      error.value = getApiErrorMessage(err) || `上传解析失败: ${err?.message || err}`
-    },
-  })
-}
-
-const confirmImport = async () => {
-  const selectedTrackNos = [...selectedStagingSerialNos.value]
-  if (selectedTrackNos.length === 0) {
-    ElMessage.warning('请先勾选至少 1 条数据')
-    return
-  }
-  await submitWithLock(confirmingImport, async () => {
-    const response = await apiPost<ImportConfirmResponse>('/inventory/import-staging/import-confirm', {
-      selected_track_nos: selectedTrackNos,
-    })
-    const successCount = Number(response.success_count || 0)
-    const failedCount = Number(response.failed_count || 0)
-    if (failedCount > 0) {
-      ElMessage.warning(`成功 ${successCount} 条，失败 ${failedCount} 条`)
-    } else {
-      ElMessage.success(`成功导入 ${successCount} 条`)
-    }
-    await Promise.all([fetchInventory(), fetchImportStaging()])
-  }, {
-    errorMessage: '导入失败',
-    onError: (err) => {
-      error.value = getApiErrorMessage(err) || `导入失败: ${err?.message || err}`
-    },
-  })
-}
-
-const submitAutoGenerate = async () => {
-  if (!autoGen.batch || !autoGen.model || !autoGen.expectedDate) {
-    ElMessage.warning('请填写完整的批次号、机型和预计入库日期')
-    return
-  }
-  await submitWithLock(autoGenerating, async () => {
-    const response = await apiPost<MessageResponse>('/inventory/import-staging/auto-generate', {
-      batch: autoGen.batch,
-      model: autoGen.model,
-      qty: autoGen.qty,
-      expected_inbound_date: autoGen.expectedDate,
-      machine_note: autoGen.note,
-    })
-    ElMessage.success(response.message || '生成成功')
-    autoGen.confirmed = false
-    await fetchImportStaging()
-  }, {
-    errorMessage: '自动生成失败',
-    onError: (err) => {
-      error.value = getApiErrorMessage(err) || `自动生成失败: ${err?.message || err}`
-    },
-  })
 }
 
 const onPendingSelectionChange = (rows: any[]) => {

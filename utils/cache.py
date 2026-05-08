@@ -12,16 +12,20 @@ from sqlalchemy import text
 
 from database import get_engine
 
-try:
-    import redis
-    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, socket_timeout=1)
-    redis_client.ping()
-    REDIS_AVAILABLE = True
-except Exception as e:
-    logging.warning(f"Redis not available, falling back to local cache: {e}")
-    REDIS_AVAILABLE = False
+USE_REDIS_CACHE = os.getenv("USE_REDIS_CACHE", "false").lower() in ("true", "1", "yes")
+REDIS_AVAILABLE = False
+redis_client = None
+
+if USE_REDIS_CACHE:
+    try:
+        import redis
+        REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+        REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+        redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, socket_timeout=1)
+        redis_client.ping()
+        REDIS_AVAILABLE = True
+    except Exception as e:
+        logging.warning(f"Redis not available, falling back to local cache: {e}")
 
 
 _LOCAL_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}

@@ -26,7 +26,10 @@ def search_global_summary(keyword: str = ""):
                 GROUP_CONCAT(DISTINCT CAST(fg.`流水号` AS CHAR) ORDER BY fg.`流水号` SEPARATOR ', ') COLLATE utf8mb4_general_ci AS `流水号`
             FROM factory_plan fp
             LEFT JOIN finished_goods_data fg
-              ON fg.`占用订单号` = fp.`订单号`
+              ON (
+                   fg.`合同号` = fp.`合同号`
+                   OR (fg.`占用订单号` = fp.`订单号` AND COALESCE(TRIM(fp.`订单号`), '') <> '')
+                 )
              AND fg.`机型` = fp.`机型`
             LEFT JOIN sales_orders so
               ON fp.`订单号` = so.`订单号`
@@ -59,7 +62,10 @@ def search_global_summary(keyword: str = ""):
                 fg.`流水号` AS `流水号`
             FROM finished_goods_data fg
             LEFT JOIN factory_plan fp
-              ON fg.`占用订单号` = fp.`订单号`
+              ON (
+                   fg.`合同号` = fp.`合同号`
+                   OR (fg.`占用订单号` = fp.`订单号` AND COALESCE(TRIM(fp.`订单号`), '') <> '')
+                 )
              AND fg.`机型` = fp.`机型`
             LEFT JOIN sales_orders so
               ON fg.`占用订单号` = so.`订单号`
@@ -88,7 +94,8 @@ def get_target_status_distribution(target_id: str, model: str = ""):
                 WHERE `合同号` = :target_id
                   AND COALESCE(TRIM(`订单号`), '') <> ''
            )
-           OR `订单备注` LIKE :kw
+           OR `合同号` = :target_id
+           OR `合同备注` LIKE :kw
         )
     """
     params = {"target_id": target_id, "kw": f"%{target_id}%"}
@@ -126,7 +133,8 @@ def get_target_timeline(target_id: str):
                         WHERE `合同号` = :target_id
                           AND COALESCE(TRIM(`订单号`), '') <> ''
                    )
-                   OR `订单备注` LIKE :kw
+                   OR `合同号` = :target_id
+                   OR `合同备注` LIKE :kw
                )
                
             UNION ALL

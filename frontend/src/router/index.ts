@@ -20,7 +20,6 @@ type AppRouteDef = {
 }
 
 const appRouteDefs: AppRouteDef[] = [
-  { path: '/planning', name: 'Planning', label: '👑 生产统筹/订单规划', title: '生产统筹', permission: 'PLANNING', isManagement: true, component: () => import('../views/BossPlanning.vue') },
   { path: '/contracts', name: 'Contracts', label: '📊 合同管理', title: '合同管理', permission: 'CONTRACT', isManagement: true, component: () => import('../views/ContractManage.vue') },
   { path: '/model-dictionary', name: 'ModelDictionary', label: '📚 机型字典', title: '机型字典', permission: 'MODEL_DICTIONARY', isManagement: true, component: () => import('../views/ModelDictionary.vue') },
   { path: '/users', name: 'Users', label: '👤 用户管理', title: '用户管理', permission: 'USER_MANAGE', isManagement: true, component: () => import('../views/UserManagement.vue') },
@@ -34,6 +33,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/inventory', name: 'Inventory', label: '🔎 库存查询', title: '库存查询', permission: 'QUERY', component: () => import('../views/InventoryQuery.vue') },
   { path: '/inbound', name: 'Inbound', label: '⬇️ 成品入库', title: '成品入库', permission: 'INBOUND', component: () => import('../views/Inbound.vue') },
   { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', permission: 'TRACEABILITY', isManagement: true, component: () => import('../views/Traceability.vue') },
+  { path: '/sandbox', name: 'BossPlan', label: '👑 老板计划', title: '老板计划', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/BossPlan.vue') },
 ]
 
 export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({

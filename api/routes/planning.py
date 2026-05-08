@@ -144,6 +144,7 @@ class SalesOrderCreatePayload(BaseModel):
     备注: str = ""
     包装选项: str = ""
     发货时间: str = ""
+    contract_ids: List[str] = Field(default_factory=list)
 
 
 class SalesOrderUpdatePayload(BaseModel):
@@ -178,10 +179,243 @@ class BatchContractRowPayload(BaseModel):
 
 class BatchContractCreatePayload(BaseModel):
     rows: List[BatchContractRowPayload]
+    is_rush: bool = False
 
 
 class LinkOrderPayload(BaseModel):
     order_id: str
+
+
+def _insert_production_queue(rows: list[dict[str, Any]]) -> int:
+    """新合同录入后同步写入 production_queue，走排产队列调度。"""
+    if not rows:
+        return 0
+    insert_values: list[dict[str, Any]] = []
+    for row in rows:
+        qty = int(row.get("排产数量") or 0)
+        if qty <= 0:
+            continue
+        insert_values.append({
+            "model_type": str(row.get("机型") or "").strip(),
+            "contract_no": str(row.get("合同号") or "").strip(),
+            "customer": str(row.get("客户名") or "").strip(),
+            "dealer": str(row.get("代理商") or "").strip(),
+            "due_date": str(row.get("要求交期") or "").strip(),
+            "quantity_remaining": qty,
+        })
+    if not insert_values:
+        return 0
+    with get_engine().begin() as conn:
+        for v in insert_values:
+            result = conn.execute(
+                text(
+                    "UPDATE production_queue SET quantity_remaining = quantity_remaining + :qty "
+                    "WHERE contract_no = :cid AND model_type = :model AND status = 'Waiting'"
+                ),
+                {"qty": v["quantity_remaining"], "cid": v["contract_no"], "model": v["model_type"]},
+            )
+            if result.rowcount == 0:
+                conn.execute(
+                    text(
+                        "INSERT INTO production_queue (model_type, contract_no, customer, dealer, due_date, quantity_remaining, status) "
+                        "VALUES (:model_type, :contract_no, :customer, :dealer, :due_date, :quantity_remaining, 'Waiting')"
+                    ),
+                    v,
+                )
+    return len(insert_values)
+
+
+def _insert_rush_order_queue(rows: list[dict[str, Any]], created_by: str = "") -> int:
+    if not rows:
+        return 0
+    insert_rows: list[dict[str, Any]] = []
+    for row in rows:
+        qty = int(row.get("qty") or 0)
+        if qty <= 0:
+            continue
+        contract_no = str(row.get("contract_no") or "").strip()
+        model_type = str(row.get("model_type") or "").strip()
+        if not contract_no or not model_type:
+            continue
+        due_date = str(row.get("due_date") or "").strip() or None
+        for _ in range(qty):
+            insert_rows.append({
+                "contract_no": contract_no,
+                "customer": str(row.get("customer") or "").strip(),
+                "dealer_name": str(row.get("dealer_name") or "").strip(),
+                "model_type": model_type,
+                "due_date": due_date,
+                "source": "contract",
+                "status": "pending",
+                "created_by": str(created_by or "").strip(),
+                "updated_by": str(created_by or "").strip(),
+            })
+    if not insert_rows:
+        return 0
+    with get_engine().begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO rush_order_queue
+                    (contract_no, customer, dealer_name, model_type, due_date, source, status, created_by, updated_by)
+                VALUES
+                    (:contract_no, :customer, :dealer_name, :model_type, :due_date, :source, :status, :created_by, :updated_by)
+            """),
+            insert_rows,
+        )
+    return len(insert_rows)
+
+
+def _clean_contract_ids(values: List[str] | None) -> list[str]:
+    result: list[str] = []
+    seen = set()
+    for item in values or []:
+        cid = str(item or "").strip()
+        if cid and cid not in seen:
+            seen.add(cid)
+            result.append(cid)
+    return result
+
+
+def _user_id_from_context(current_user) -> str:
+    return current_user.get("username") if isinstance(current_user, dict) else ""
+
+
+def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str = "已下单") -> int:
+    if not contract_ids:
+        return 0
+    df_plan = get_factory_plan()
+    if df_plan.empty:
+        raise HTTPException(status_code=422, detail="未找到可绑定的合同")
+    mask = df_plan["合同号"].astype(str).isin(contract_ids)
+    if not mask.any():
+        raise HTTPException(status_code=422, detail="未找到可绑定的合同")
+    existing = df_plan.loc[mask, "订单号"].fillna("").astype(str).str.strip()
+    conflict = existing[(existing != "") & (existing != str(order_id))]
+    if not conflict.empty:
+        raise HTTPException(status_code=422, detail="所选合同中存在已绑定其他订单的记录")
+    df_plan.loc[mask, "订单号"] = str(order_id)
+    if status:
+        df_plan.loc[mask, "状态"] = status
+    save_factory_plan(df_plan)
+    return int(mask.sum())
+
+
+def _validate_contracts_available(contract_ids: list[str], order_id: str) -> None:
+    if not contract_ids:
+        return
+    df_plan = get_factory_plan()
+    if df_plan.empty:
+        raise HTTPException(status_code=422, detail="未找到可绑定的合同")
+    mask = df_plan["合同号"].astype(str).isin(contract_ids)
+    if not mask.any():
+        raise HTTPException(status_code=422, detail="未找到可绑定的合同")
+    existing = df_plan.loc[mask, "订单号"].fillna("").astype(str).str.strip()
+    conflict = existing[(existing != "") & (existing != str(order_id))]
+    if not conflict.empty:
+        raise HTTPException(status_code=422, detail="所选合同中存在已绑定其他订单的记录")
+
+
+def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
+    order_id = str(order_id).strip()
+    plan_df = get_factory_plan()
+    contract_rows = plan_df[plan_df["订单号"].astype(str).str.strip() == order_id].copy() if not plan_df.empty else pd.DataFrame()
+    contract_ids = sorted({
+        str(x).strip()
+        for x in contract_rows.get("合同号", pd.Series(dtype=str)).tolist()
+        if str(x).strip()
+    })
+
+    inv_df = get_data()
+    if inv_df.empty:
+        inv_df = pd.DataFrame(columns=["流水号", "合同号", "占用订单号", "状态", "机型"])
+    for col in ["流水号", "合同号", "占用订单号", "状态", "机型", "批次号", "客户", "代理商", "合同备注"]:
+        if col not in inv_df.columns:
+            inv_df[col] = ""
+
+    linked_rows = pd.DataFrame(columns=inv_df.columns)
+    if contract_ids:
+        linked_rows = inv_df[inv_df["合同号"].astype(str).str.strip().isin(contract_ids)].copy()
+
+    # 补充：按订单所需机型，额外拉取库存中尚未被任何订单占用的空闲机台。
+    # 不限于合同号匹配，没有合同号的空闲机台也可以被配货。
+    needed_models: set[str] = set()
+    if not contract_rows.empty:
+        needed_models = {
+            str(x).strip()
+            for x in contract_rows.get("机型", pd.Series(dtype=str)).tolist()
+            if str(x).strip()
+        }
+    else:
+        # 兜底：factory_plan 中查不到关联合同时，从 sales_orders 的需求文本提取机型
+        orders_df = get_orders()
+        order_match = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
+        if not order_match.empty:
+            demand_text = str(order_match.iloc[0].get("需求机型", "") or "")
+            needed_models = {m for m in _extract_models_from_demand_text(demand_text) if m}
+    if needed_models:
+        model_rows = inv_df[
+            inv_df["机型"].astype(str).str.strip().isin(needed_models)
+            & (inv_df["占用订单号"].astype(str).str.strip() == "")
+            & (inv_df["状态"].astype(str).str.strip() != "已出库")
+        ].copy()
+        linked_rows = pd.concat([linked_rows, model_rows], ignore_index=True).drop_duplicates(subset=["流水号"], keep="first")
+
+    occupied_rows = inv_df[inv_df["占用订单号"].astype(str).str.strip() == order_id].copy()
+    rows = pd.concat([linked_rows, occupied_rows], ignore_index=True).drop_duplicates(subset=["流水号"], keep="first")
+
+    expected_counts: dict[tuple[str, str], int] = {}
+    expected_notes: dict[tuple[str, str], str] = {}
+    if not contract_rows.empty:
+        for _, row in contract_rows.iterrows():
+            cid = str(row.get("合同号", "") or "").strip()
+            model = str(row.get("机型", "") or "").strip()
+            if not cid or not model:
+                continue
+            try:
+                qty = int(float(row.get("排产数量", 0) or 0))
+            except Exception:
+                qty = 0
+            expected_counts[(cid, model)] = expected_counts.get((cid, model), 0) + max(0, qty)
+            note = str(row.get("备注", "") or "").strip()
+            if note:
+                expected_notes[(cid, model)] = note
+    else:
+        # 兜底：factory_plan 没有关联合同时，从 sales_orders 取需求数量
+        orders_df = get_orders()
+        order_match = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
+        if not order_match.empty:
+            demand_text = str(order_match.iloc[0].get("需求机型", "") or "")
+            total_qty = int(order_match.iloc[0].get("需求数量", 0) or 0)
+            models = _extract_models_from_demand_text(demand_text)
+            qty_per_model = max(1, total_qty // len(models)) if models else 0
+            for model in models:
+                expected_counts[(order_id, model)] = qty_per_model
+
+    placeholders = []
+    for (cid, model), qty in expected_counts.items():
+        matched = rows[
+            (rows["合同号"].astype(str).str.strip() == cid)
+            & (rows["机型"].astype(str).str.strip() == model)
+        ]
+        for i in range(max(0, qty - len(matched))):
+            placeholders.append({
+                "流水号": "",
+                "批次号": "",
+                "机型": model,
+                "状态": "未入库",
+                "预计入库时间": "",
+                "更新时间": "",
+                "占用订单号": "",
+                "客户": "",
+                "代理商": "",
+                "合同备注": expected_notes.get((cid, model), ""),
+                "Location_Code": "",
+                "合同号": cid,
+                "_placeholder": f"{cid}-{model}-{i + 1}",
+            })
+    if placeholders:
+        rows = pd.concat([rows, pd.DataFrame(placeholders)], ignore_index=True)
+    return rows
 
 @router.get("/")
 def get_planning_data(
@@ -270,6 +504,8 @@ def create_sales_order_api(
         _assert_models_in_dictionary(_extract_models_from_demand_text(str(payload.需求机型 or "")))
         df_orders = get_orders()
         order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
+        contract_ids = _clean_contract_ids(payload.contract_ids)
+        _validate_contracts_available(contract_ids, order_id)
         new_row = {
             "订单号": order_id,
             "客户名": str(payload.客户名 or ""),
@@ -286,6 +522,7 @@ def create_sales_order_api(
         }
         df_orders = pd.concat([df_orders, pd.DataFrame([new_row])], ignore_index=True)
         save_orders(df_orders)
+        linked_count = _link_contracts_to_order(contract_ids, order_id) if contract_ids else 0
         append_audit_log(
             module="销售下单",
             action_type="新增",
@@ -294,11 +531,12 @@ def create_sales_order_api(
                 f"创建订单：{order_id}；客户：{payload.客户名}；"
                 f"需求机型：{str(payload.需求机型 or '').strip() or '未填写'}；"
                 f"需求数量：{int(payload.需求数量)}"
+                + (f"；绑定合同：{', '.join(contract_ids)}" if contract_ids else "")
             ),
             user_id=current_user.get("username"),
             username=current_operator,
         )
-        return {"message": "订单创建成功", "order_id": order_id}
+        return {"message": "订单创建成功", "order_id": order_id, "linked_contract_count": linked_count}
     except HTTPException:
         raise
     except Exception as e:
@@ -383,11 +621,7 @@ def get_order_allocations_api(order_id: str):
         order_id = str(order_id).strip()
         if not order_id:
             raise HTTPException(status_code=422, detail="订单号不能为空")
-        inv_df = get_data()
-        rows = inv_df[
-            (inv_df["占用订单号"].astype(str) == order_id)
-            & (inv_df["状态"].astype(str) != "已出库")
-        ].copy()
+        rows = _get_order_contract_machine_rows(order_id)
         rows = rows.where(rows.notnull(), None)
         return {"data": rows.to_dict(orient="records")}
     except HTTPException:
@@ -400,7 +634,7 @@ def get_order_allocations_api(order_id: str):
 def allocate_order_inventory_api(
     order_id: str,
     payload: OrderAllocatePayload,
-    request: Request,
+    request: Request = None,
     current_operator: str = Depends(get_current_operator_name),
     current_user: dict = Depends(get_current_user_context),
 ):
@@ -416,13 +650,27 @@ def allocate_order_inventory_api(
         first = hit.iloc[0]
         customer = str(first.get("客户名", "") or "")
         agent = str(first.get("代理商", "") or "")
+        candidate_rows = _get_order_contract_machine_rows(str(order_id))
+        valid_sns = set(
+            candidate_rows[
+                (candidate_rows["流水号"].astype(str).str.strip() != "")
+                & (candidate_rows["状态"].astype(str).str.strip() != "已出库")
+                & (
+                    (candidate_rows["占用订单号"].astype(str).str.strip() == "")
+                    | (candidate_rows["占用订单号"].astype(str).str.strip() == str(order_id))
+                )
+            ]["流水号"].astype(str).str.strip().tolist()
+        )
+        invalid = [sn for sn in selected if sn not in valid_sns]
+        if invalid:
+            raise HTTPException(status_code=422, detail=f"所选机台不属于该订单绑定合同，或已不可配货: {', '.join(invalid[:10])}")
         allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
         append_audit_log(
             module="订单配货",
             action_type="配货",
             biz_type="订单",
             content=f"为订单 {order_id} 配货 {len(selected)} 台机台；流水号：{', '.join(selected[:10])}",
-            user_id=current_user.get("username"),
+            user_id=_user_id_from_context(current_user),
             username=current_operator,
         )
         return {"message": f"配货成功，已锁定 {len(selected)} 台机台"}
@@ -436,7 +684,7 @@ def allocate_order_inventory_api(
 def release_order_inventory_api(
     order_id: str,
     payload: OrderReleasePayload,
-    request: Request,
+    request: Request = None,
     current_operator: str = Depends(get_current_operator_name),
     current_user: dict = Depends(get_current_user_context),
 ):
@@ -469,7 +717,7 @@ def release_order_inventory_api(
             action_type="释放",
             biz_type="订单",
             content=f"释放订单 {order_id} 已配机台 {len(target_sns)} 台；流水号：{', '.join(target_sns[:10])}",
-            user_id=current_user.get("username"),
+            user_id=_user_id_from_context(current_user),
             username=current_operator,
         )
         return {"message": f"已释放 {len(target_sns)} 台机台", "released": len(target_sns)}
@@ -491,12 +739,15 @@ def update_contract_status(
         new_status = str(payload.status or "").strip()
         if not new_status:
             raise HTTPException(status_code=422, detail="status 不能为空")
-        df_plan = get_factory_plan()
-        mask = df_plan["合同号"].astype(str) == str(contract_id)
-        if not mask.any():
-            raise HTTPException(status_code=404, detail="合同不存在")
-        df_plan.loc[mask, "状态"] = new_status
-        save_factory_plan(df_plan)
+        with get_engine().begin() as conn:
+            result = conn.execute(
+                text("UPDATE factory_plan SET `状态` = :status WHERE `合同号` = :cid"),
+                {"status": new_status, "cid": str(contract_id)},
+            )
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="合同不存在")
+        get_factory_plan.cache_clear()
+        get_factory_plan_v2.cache_clear()
         append_audit_log(
             module="合同管理",
             action_type="更新状态",
@@ -576,6 +827,7 @@ def create_contracts_batch(
         df_plan = get_factory_plan()
         now_status = "未下单"
         add_list: List[Dict[str, Any]] = []
+        rush_source_rows: List[Dict[str, Any]] = []
         existed = 0
         for item in rows:
             cid = str(item.合同号 or "").strip()
@@ -603,12 +855,30 @@ def create_contracts_batch(
                     "订单号": "",
                 }
             )
+            rush_source_rows.append(
+                {
+                    "contract_no": cid,
+                    "customer": customer,
+                    "dealer_name": str(item.代理商 or "").strip(),
+                    "model_type": model,
+                    "due_date": due,
+                    "qty": qty,
+                }
+            )
 
         if not add_list:
             raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
 
         df_plan = pd.concat([df_plan, pd.DataFrame(add_list)], ignore_index=True)
         save_factory_plan(df_plan)
+
+        # 新合同同步写入 production_queue，优先走排产队列
+        _insert_production_queue(add_list)
+
+        rush_created = _insert_rush_order_queue(
+            rush_source_rows if payload.is_rush else [],
+            created_by=current_user.get("username") or current_operator,
+        )
         
         # 收集新录入的所有独立合同号
         added_contract_ids = list(set([str(item["合同号"]) for item in add_list]))
@@ -626,6 +896,7 @@ def create_contracts_batch(
             "message": f"批量录入完成，新增 {len(add_list)} 条，跳过重复 {existed} 条",
             "inserted": len(add_list),
             "skipped": existed,
+            "rush_created": rush_created,
         }
     except HTTPException:
         raise

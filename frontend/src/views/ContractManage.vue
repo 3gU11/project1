@@ -2,7 +2,7 @@
   <div class="contract-page">
     <PageHeader title="🏢 销售合同管理" />
 
-    <div class="notice">💡 提示：录入的新合同在审批通过后，将自动流转至生产统筹与下单环节。</div>
+    <div class="notice">💡 提示：录入的新合同在审批通过后，将自动流转至老板计划/沙盘与下单环节。</div>
 
     <div class="new-row">
       <button type="button" class="new-row-toggle" @click="batchPanelOpen = !batchPanelOpen">
@@ -30,6 +30,14 @@
         <div>
           <div class="ops-label">代理商名称</div>
           <el-input v-model="batchForm.agent" />
+        </div>
+        <div>
+          <div class="ops-label">急单</div>
+          <el-switch
+            v-model="batchForm.isRush"
+            active-text="是"
+            inactive-text="否"
+          />
         </div>
       </div>
 
@@ -215,7 +223,7 @@ import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
 
 type OperationType = 'ordered' | 'cancelled' | 'done' | 'linked'
-type MessageResponse = { message?: string }
+type MessageResponse = { message?: string; rush_created?: number }
 
 const loading = ref(false)
 const executing = ref(false)
@@ -238,6 +246,7 @@ const batchForm = ref({
   customer: '',
   agent: '',
   contractNote: '',
+  isRush: false,
 })
 const batchItems = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([
   { model: '', qty: 1, high: false, rowNote: '' },
@@ -261,6 +270,7 @@ const resetBatchForm = () => {
     customer: '',
     agent: '',
     contractNote: '',
+    isRush: false,
   }
   batchItems.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
   batchPickedFiles.value = []
@@ -420,12 +430,15 @@ const submitBatchContracts = async () => {
       合同号: cid,
       客户名: customer,
       代理商: batchForm.value.agent.trim(),
-      机型: `${r.model.trim()}${r.high ? '(加高)' : ''}`,
+      机型: r.model.trim(),
       排产数量: Number(r.qty),
       要求交期: deadline,
-      备注: [batchForm.value.contractNote.trim(), r.rowNote.trim()].filter(Boolean).join(' | '),
+      备注: [batchForm.value.contractNote.trim(), r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' | '),
     }))
-    const res = await apiPost<MessageResponse>('/planning/contracts/batch-create', { rows: payloadRows })
+    const res = await apiPost<MessageResponse>('/planning/contracts/batch-create', {
+      rows: payloadRows,
+      is_rush: Boolean(batchForm.value.isRush),
+    })
 
     if (batchPickedFiles.value.length > 0) {
       for (const f of batchPickedFiles.value) {
@@ -437,7 +450,8 @@ const submitBatchContracts = async () => {
         })
       }
     }
-    ElMessage.success(res.message || '批量录入成功')
+    const rushText = Number(res.rush_created || 0) > 0 ? `，已生成 ${res.rush_created} 张急单卡` : ''
+    ElMessage.success(`${res.message || '批量录入成功'}${rushText}`)
     batchPanelOpen.value = false
     resetBatchForm()
     batchFormDraft.clearDraft()

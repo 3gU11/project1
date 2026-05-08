@@ -34,8 +34,7 @@
       <el-table-column prop="客户" label="客户" min-width="140" sortable="custom" />
       <el-table-column prop="机型" label="机型" min-width="160" sortable="custom" />
       <el-table-column prop="流水号" label="流水号" width="160" sortable="custom" />
-      <el-table-column prop="订单备注" label="订单备注" min-width="180" sortable="custom" />
-      <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="180" sortable="custom" />
+      <el-table-column prop="合同备注" label="合同备注" min-width="220" sortable="custom" />
     </el-table>
 
     <div class="ops">

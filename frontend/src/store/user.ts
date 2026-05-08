@@ -6,6 +6,17 @@ import { normalizeRole } from '../utils/roles'
 type UserInfo = { username: string; role: string; name: string; permissions: string[] }
 const STORAGE_KEY = 'v7ex_auth'
 
+function normalizePermissions(role: string, permissions: string[] | undefined): string[] {
+  const set = new Set((permissions || []).map((p) => String(p || '').trim()).filter(Boolean))
+  set.delete('PLANNING')
+  const roleNorm = normalizeRole(role || '')
+  // Fallback for historical role-permission data: Admin/Boss should always see sandbox.
+  if (roleNorm === 'admin' || roleNorm === 'boss') {
+    set.add('SANDBOX_VIEW')
+  }
+  return [...set]
+}
+
 export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserInfo | null>(null)
   const token = ref<string>('')
@@ -19,7 +30,15 @@ export const useUserStore = defineStore('user', () => {
     try {
       const parsed = JSON.parse(raw)
       token.value = parsed.token || ''
-      userInfo.value = parsed.userInfo ? { ...parsed.userInfo, permissions: Array.isArray(parsed.userInfo.permissions) ? parsed.userInfo.permissions : [] } : null
+      userInfo.value = parsed.userInfo
+        ? {
+            ...parsed.userInfo,
+            permissions: normalizePermissions(
+              parsed.userInfo.role,
+              Array.isArray(parsed.userInfo.permissions) ? parsed.userInfo.permissions : []
+            )
+          }
+        : null
       rememberMe.value = !!parsed.rememberMe
     } catch {
       // ignore broken storage payload
@@ -45,7 +64,13 @@ export const useUserStore = defineStore('user', () => {
   function login(userData: UserInfo, jwtToken: string, remember = true) {
     const cacheStore = useCacheStore()
     cacheStore.clear()
-    userInfo.value = { ...userData, permissions: Array.isArray(userData.permissions) ? userData.permissions : [] }
+    userInfo.value = {
+      ...userData,
+      permissions: normalizePermissions(
+        userData.role,
+        Array.isArray(userData.permissions) ? userData.permissions : []
+      )
+    }
     token.value = jwtToken
     rememberMe.value = remember
     saveToStorage()

@@ -158,7 +158,7 @@
             <el-table-column prop="机型" label="机型" min-width="160" />
             <el-table-column prop="流水号" label="流水号" width="150" />
             <el-table-column prop="状态" label="状态" width="100" />
-            <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="合同备注" label="合同备注" min-width="180" show-overflow-tooltip />
           </el-table>
           <div class="pagination-container">
             <el-pagination
@@ -181,7 +181,8 @@ import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useInventoryStore } from '../store/inventory'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
-import { compareModels, getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
+import { getModelOrderList } from '../utils/modelOrder'
+import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount } from '../utils/inventoryStats'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 
 const loading = ref(false)
@@ -249,26 +250,15 @@ const inStockCount = computed(() => filteredForStats.value.filter((r) => String(
 const pendingCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '') === '待入库').length)
 
 const modelSummarySource = computed(() => {
-  const map = new Map<string, { 机型: string; 库存中: number; 待入库: number; 全部: number }>()
-  for (const row of filteredForStats.value) {
-    const model = String(row['机型'] || '未知')
-    if (!isModelInDictionary(model)) continue
-    if (!map.has(model)) map.set(model, { 机型: model, 库存中: 0, 待入库: 0, 全部: 0 })
-    const hit = map.get(model)!
-    const s = String(row['状态'] || '')
-    if (s.startsWith('库存中')) hit.库存中 += 1
-    if (s === '待入库') hit.待入库 += 1
-    hit.全部 += 1
-  }
-  return Array.from(map.values())
+  return buildModelInventorySummary(filteredForStats.value)
 })
 
 const modelSummary = computed(() => {
-  return [...modelSummarySource.value].sort((a, b) => compareModels(a.机型, b.机型))
+  return sortModelInventorySummary(modelSummarySource.value)
 })
 
 const modelSummaryByCount = computed(() => {
-  return [...modelSummarySource.value].sort((a, b) => (b.全部 - a.全部) || compareModels(a.机型, b.机型))
+  return sortModelInventorySummaryByCount(modelSummarySource.value)
 })
 
 const ratioBoard = computed(() => {

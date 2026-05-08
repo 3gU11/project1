@@ -1,0 +1,188 @@
+Starting server on :3001
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /ws                       --> smart-scheduling/server/internal/router.Setup.func1 (4 handlers)
+[GIN-debug] GET    /api/health               --> smart-scheduling/server/internal/router.Setup.func2 (4 handlers)
+[GIN-debug] POST   /api/auth/login           --> smart-scheduling/server/internal/handler.(*AuthHandler).Login-fm (4 handlers)
+[GIN-debug] GET    /api/auth/me              --> smart-scheduling/server/internal/handler.(*AuthHandler).Me-fm (5 handlers)
+[GIN-debug] GET    /api/model-types          --> smart-scheduling/server/internal/handler.(*MetaHandler).ModelTypes-fm (5 handlers)
+[GIN-debug] GET    /api/batches              --> smart-scheduling/server/internal/handler.(*BatchHandler).List-fm (5 handlers)
+[GIN-debug] GET    /api/batches/:id          --> smart-scheduling/server/internal/handler.(*BatchHandler).GetByID-fm (5 handlers)
+[GIN-debug] GET    /api/batches/:id/units    --> smart-scheduling/server/internal/handler.(*BatchHandler).GetBatchUnits-fm (5 handlers)
+[GIN-debug] POST   /api/batches/:id/confirm  --> smart-scheduling/server/internal/handler.(*BatchHandler).Confirm-fm (5 handlers)
+[GIN-debug] POST   /api/batches/batch-confirm --> smart-scheduling/server/internal/handler.(*BatchHandler).BatchConfirm-fm (5 handlers)
+[GIN-debug] POST   /api/batches/generate-next --> smart-scheduling/server/internal/handler.(*ForecastHandler).GenerateNext-fm (5 handlers)
+[GIN-debug] POST   /api/batches/:id/insert-empty-slot --> smart-scheduling/server/internal/handler.(*BatchHandler).InsertEmptySlot-fm (5 handlers)
+[GIN-debug] GET    /api/production-queue     --> smart-scheduling/server/internal/handler.(*BatchHandler).List-fm (5 handlers)
+[GIN-debug] GET    /api/units/empty-containers --> smart-scheduling/server/internal/handler.(*UnitHandler).EmptyContainers-fm (5 handlers)
+[GIN-debug] GET    /api/units/:id            --> smart-scheduling/server/internal/handler.(*UnitHandler).GetByID-fm (5 handlers)
+[GIN-debug] PATCH  /api/units/:id            --> smart-scheduling/server/internal/handler.(*UnitHandler).Update-fm (5 handlers)
+[GIN-debug] PATCH  /api/units/:id/unlock     --> smart-scheduling/server/internal/handler.(*UnitHandler).Unlock-fm (5 handlers)
+[GIN-debug] POST   /api/units/:id/move-batch --> smart-scheduling/server/internal/handler.(*UnitHandler).MoveBatch-fm (5 handlers)
+[GIN-debug] POST   /api/units/:id/reorder-slot --> smart-scheduling/server/internal/handler.(*UnitHandler).ReorderSlot-fm (5 handlers)
+[GIN-debug] POST   /api/units/swap-content   --> smart-scheduling/server/internal/handler.(*UnitHandler).SwapContent-fm (5 handlers)
+[GIN-debug] POST   /api/units/rush-insert    --> smart-scheduling/server/internal/handler.(*UnitHandler).RushInsert-fm (5 handlers)
+[GIN-debug] POST   /api/units/:id/mark-spot  --> smart-scheduling/server/internal/handler.(*UnitHandler).MarkSpot-fm (5 handlers)
+[GIN-debug] POST   /api/forecast/recompute   --> smart-scheduling/server/internal/handler.(*ForecastHandler).Recompute-fm (5 handlers)
+[GIN-debug] GET    /api/forecast/achievement --> smart-scheduling/server/internal/handler.(*ForecastHandler).Achievement-fm (5 handlers)
+[GIN-debug] GET    /api/capacity-ratio       --> smart-scheduling/server/internal/handler.(*CapacityHandler).Get-fm (5 handlers)
+[GIN-debug] PATCH  /api/capacity-ratio       --> smart-scheduling/server/internal/handler.(*CapacityHandler).Update-fm (5 handlers)
+[GIN-debug] GET    /api/production-lines     --> smart-scheduling/server/internal/handler.(*LineHandler).List-fm (5 handlers)
+[GIN-debug] POST   /api/production-lines/:id/assign --> smart-scheduling/server/internal/handler.(*LineHandler).Assign-fm (5 handlers)
+[GIN-debug] POST   /api/production-lines/:id/manual-complete --> smart-scheduling/server/internal/handler.(*LineHandler).ManualComplete-fm (5 handlers)
+[GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
+Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.
+[GIN-debug] Listening and serving HTTP on :3001
+[GIN] 2026/05/03 - 18:05:09 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
+[GIN] 2026/05/03 - 18:05:10 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/05/03 - 18:05:18 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
+[GIN] 2026/05/03 - 18:09:29 | 200 |      9.4917ms |       127.0.0.1 | PATCH    "/api/units/BATCH-202604-AUTO-003-20272509-S11/unlock"
+[GIN] 2026/05/03 - 18:09:29 | 200 |       2.502ms |       127.0.0.1 | GET      "/api/production-lines"
+
+2026/05/03 18:09:38 [31;1mD:/Program_2/Program_1/server/internal/service/rush_svc.go:241 [35;1mError 1146 (42S02): Table 'rjfinshed.operation_log' doesn't exist
+[0m[33m[0.510ms] [34;1m[rows:0][0m INSERT INTO `operation_log` (`actor`,`action`,`target_type`,`target_id`,`detail`,`created_at`) VALUES ('admin','rush_insert_auto','unit','BATCH-202604-AUTO-003-20272509-S10',CAST('{"family":"AUTO","mode":"auto","rush_contract":"444444"}' AS JSON),'2026-05-03 18:09:38.025')
+[GIN] 2026/05/03 - 18:09:38 | 200 |     19.9422ms |       127.0.0.1 | POST     "/api/units/rush-insert"
+[GIN] 2026/05/03 - 18:09:38 | 200 |      2.1302ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:09:38 | 200 |      8.6122ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:10:05 | 200 |      8.7195ms |       127.0.0.1 | PATCH    "/api/units/BATCH-202604-AUTO-003-20272509-S10/unlock"
+[GIN] 2026/05/03 - 18:10:05 | 200 |      3.2679ms |       127.0.0.1 | GET      "/api/production-lines"
+
+2026/05/03 18:11:33 [31;1mD:/Program_2/Program_1/server/internal/service/rush_svc.go:241 [35;1mError 1146 (42S02): Table 'rjfinshed.operation_log' doesn't exist
+[0m[33m[0.603ms] [34;1m[rows:0][0m INSERT INTO `operation_log` (`actor`,`action`,`target_type`,`target_id`,`detail`,`created_at`) VALUES ('admin','rush_insert_auto','unit','BATCH-202604-AUTO-003-20272509-S01',CAST('{"family":"AUTO","mode":"auto","rush_contract":"55555"}' AS JSON),'2026-05-03 18:11:33.633')
+[GIN] 2026/05/03 - 18:11:33 | 200 |     27.1202ms |       127.0.0.1 | POST     "/api/units/rush-insert"
+[GIN] 2026/05/03 - 18:11:33 | 200 |      1.6421ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:11:33 | 200 |      7.5369ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:11:56 | 200 |     16.2956ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:11:56 | 200 |     26.4644ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:11:56 | 200 |      7.7228ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:11:56 | 200 |       502.2µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:11:56 | 200 |      2.0221ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 18:12:03 | 200 |       2.082ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:12:03 | 200 |      3.6903ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:12:03 | 200 |      2.1086ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:12:03 | 200 |      7.3284ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:12:05 | 200 |      8.0731ms |       127.0.0.1 | PATCH    "/api/units/BATCH-202604-AUTO-003-20272509-S01/unlock"
+[GIN] 2026/05/03 - 18:12:05 | 200 |      2.6476ms |       127.0.0.1 | GET      "/api/production-lines"
+
+2026/05/03 18:13:57 [31;1mD:/Program_2/Program_1/server/internal/service/rush_svc.go:241 [35;1mError 1146 (42S02): Table 'rjfinshed.operation_log' doesn't exist
+[0m[33m[0.559ms] [34;1m[rows:0][0m INSERT INTO `operation_log` (`actor`,`action`,`target_type`,`target_id`,`detail`,`created_at`) VALUES ('admin','rush_insert_auto','unit','BATCH-202604-AUTO-003-20272509-S01',CAST('{"family":"AUTO","mode":"auto","rush_contract":"66666"}' AS JSON),'2026-05-03 18:13:57.275')
+[GIN] 2026/05/03 - 18:13:57 | 200 |     31.7426ms |       127.0.0.1 | POST     "/api/units/rush-insert"
+[GIN] 2026/05/03 - 18:13:57 | 200 |      1.6177ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:13:57 | 200 |      6.7273ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:14:05 | 200 |      1.8385ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:14:05 | 200 |      1.5949ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:14:05 | 200 |       8.257ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:14:05 | 200 |       558.6µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:14:05 | 200 |      1.5069ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 18:14:40 | 200 |      2.3378ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:14:40 | 200 |      1.5355ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:14:40 | 200 |      7.0471ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:14:40 | 200 |       9.134ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:14:45 | 200 |      9.0129ms |       127.0.0.1 | PATCH    "/api/units/BATCH-202604-AUTO-003-20272509-S01/unlock"
+[GIN] 2026/05/03 - 18:14:45 | 200 |      1.8237ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:15:10 | 200 |      9.0231ms |       127.0.0.1 | POST     "/api/units/BATCH-202604-AUTO-003-20272509-S12/mark-spot"
+[GIN] 2026/05/03 - 18:15:10 | 200 |      2.0042ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:15:19 | 200 |      2.0534ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:15:19 | 200 |      7.6535ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:15:19 | 200 |      1.5948ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:15:19 | 200 |      1.0115ms |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:15:19 | 200 |      1.5061ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 18:15:24 | 200 |      2.3206ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:15:24 | 200 |      8.6393ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:15:24 | 200 |      1.1815ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:15:24 | 200 |       9.153ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:15:27 | 200 |      1.5612ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:15:27 | 200 |      1.5449ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:15:27 | 200 |      7.8656ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:15:28 | 200 |      2.4805ms |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:15:28 | 200 |      2.5031ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 18:15:42 | 200 |      8.7469ms |       127.0.0.1 | PATCH    "/api/units/BATCH-202605-AUTO-006-09109314-S10"
+[GIN] 2026/05/03 - 18:15:42 | 200 |      6.1355ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:15:46 | 200 |      8.2375ms |       127.0.0.1 | PATCH    "/api/units/BATCH-202605-AUTO-006-09109314-S10/unlock"
+[GIN] 2026/05/03 - 18:15:46 | 200 |      5.8937ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:16:12 | 200 |      2.0852ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:16:12 | 200 |      2.0852ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:16:12 | 200 |      1.0374ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:16:12 | 200 |      9.3492ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:16:13 | 200 |      1.7031ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:16:13 | 200 |      6.8941ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:16:13 | 200 |       1.096ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:16:13 | 200 |       531.5µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:16:13 | 200 |      2.4644ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 18:33:57 | 200 |      2.6826ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:33:57 | 200 |      9.4475ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:33:57 | 200 |     10.2354ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:33:57 | 200 |      2.3863ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:52:36 | 200 |       1.754ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:52:36 | 200 |      8.3082ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:36 | 200 |      1.5444ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:52:36 | 200 |       503.3µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:52:36 | 200 |      1.9415ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 18:52:50 | 200 |     50.3826ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S01/move-batch"
+[GIN] 2026/05/03 - 18:52:50 | 200 |      5.9209ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:51 | 200 |     27.1144ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S01/move-batch"
+[GIN] 2026/05/03 - 18:52:51 | 200 |      5.6541ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:52 | 200 |     27.1495ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S02/move-batch"
+[GIN] 2026/05/03 - 18:52:52 | 200 |      7.5296ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:52 | 200 |     27.4324ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S03/move-batch"
+[GIN] 2026/05/03 - 18:52:52 | 200 |      6.4418ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:53 | 200 |     24.8774ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S04/move-batch"
+[GIN] 2026/05/03 - 18:52:53 | 200 |      6.7598ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:53 | 200 |     24.5487ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S05/move-batch"
+[GIN] 2026/05/03 - 18:52:53 | 200 |       6.348ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:53 | 200 |     24.5649ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S06/move-batch"
+[GIN] 2026/05/03 - 18:52:53 | 200 |      6.0033ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:54 | 200 |     26.3061ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S07/move-batch"
+[GIN] 2026/05/03 - 18:52:54 | 200 |      5.5799ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:54 | 200 |     28.9002ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S08/move-batch"
+[GIN] 2026/05/03 - 18:52:54 | 200 |      6.5318ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:55 | 200 |     27.7472ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S09/move-batch"
+[GIN] 2026/05/03 - 18:52:55 | 200 |      5.9677ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:55 | 200 |     24.1058ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S10/move-batch"
+[GIN] 2026/05/03 - 18:52:55 | 200 |      5.5845ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:52:56 | 200 |     44.2649ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S11/move-batch"
+[GIN] 2026/05/03 - 18:52:56 | 200 |      7.1977ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:02 | 200 |    118.1432ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S11/move-batch"
+[GIN] 2026/05/03 - 18:53:02 | 200 |      7.9798ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:10 | 200 |     93.3374ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S12/move-batch"
+[GIN] 2026/05/03 - 18:53:10 | 200 |      5.8929ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:11 | 200 |    103.5134ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S13/move-batch"
+[GIN] 2026/05/03 - 18:53:11 | 200 |      7.0756ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:13 | 200 |    132.3673ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S14/move-batch"
+[GIN] 2026/05/03 - 18:53:13 | 200 |      7.1419ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:14 | 200 |     96.0008ms |       127.0.0.1 | POST     "/api/units/BATCH-202605-AUTO-003-09103063-S15/move-batch"
+[GIN] 2026/05/03 - 18:53:14 | 200 |      6.4157ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:21 | 200 |    179.6639ms |       127.0.0.1 | POST     "/api/forecast/recompute"
+[GIN] 2026/05/03 - 18:53:21 | 200 |      6.7442ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:21 | 200 |        6.57ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:53:28 | 200 |      1.7738ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:53:28 | 200 |      3.3523ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:53:28 | 200 |      1.5429ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:53:28 | 200 |      6.9787ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:59:52 | 200 |       2.146ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:59:52 | 200 |     13.0169ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:59:52 | 200 |      2.2809ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:59:52 | 200 |       501.9µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:59:52 | 200 |      2.0932ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 18:59:53 | 200 |      2.2846ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:59:53 | 200 |     13.8095ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:59:53 | 200 |     15.3999ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 18:59:53 | 200 |      2.6408ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:59:58 | 200 |      3.0711ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:59:58 | 200 |      8.8799ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 18:59:58 | 200 |      1.0668ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 18:59:58 | 200 |       998.7µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 18:59:58 | 200 |      1.7573ms |       127.0.0.1 | GET      "/api/forecast/achievement"
+[GIN] 2026/05/03 - 19:00:01 | 200 |      1.1537ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 19:00:01 | 200 |      6.3063ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 19:00:01 | 200 |      1.0254ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 19:00:01 | 200 |      6.7109ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/03 - 19:00:13 | 200 |      1.5586ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 19:00:13 | 200 |      1.0567ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/03 - 19:00:13 | 200 |      8.3557ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/03 - 19:00:13 | 200 |       501.9µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/05/03 - 19:00:13 | 200 |      2.1077ms |       127.0.0.1 | GET      "/api/forecast/achievement"

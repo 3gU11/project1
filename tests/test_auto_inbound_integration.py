@@ -2,7 +2,6 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 
 from crud import inventory as inventory_crud
-from utils import parsers
 
 
 def _build_engine_with_plan_import(include_status):
@@ -12,13 +11,13 @@ def _build_engine_with_plan_import(include_status):
             conn.execute(text(
                 "CREATE TABLE plan_import ("
                 "流水号 TEXT PRIMARY KEY, 批次号 TEXT, 机型 TEXT, 状态 TEXT NOT NULL DEFAULT '待入库', "
-                "预计入库时间 TEXT, `机台备注/配置` TEXT)"
+                "预计入库时间 TEXT, `客户` TEXT, `代理商` TEXT, `合同备注` TEXT, `合同号` TEXT)"
             ))
         else:
             conn.execute(text(
                 "CREATE TABLE plan_import ("
                 "流水号 TEXT PRIMARY KEY, 批次号 TEXT, 机型 TEXT, "
-                "预计入库时间 TEXT, `机台备注/配置` TEXT)"
+                "预计入库时间 TEXT, `客户` TEXT, `代理商` TEXT, `合同备注` TEXT, `合同号` TEXT)"
             ))
     return engine
 
@@ -57,15 +56,3 @@ def test_append_import_staging_transaction_rollback(monkeypatch):
     finally:
         monkeypatch.setattr(pd.DataFrame, "to_sql", origin_to_sql)
 
-
-def test_generate_auto_inbound_returns_readable_error_code(monkeypatch):
-    monkeypatch.setattr(parsers, "get_data", lambda: pd.DataFrame(columns=["流水号"]))
-    monkeypatch.setattr(parsers, "get_import_staging", lambda: pd.DataFrame(columns=["流水号"]))
-    monkeypatch.setattr(
-        parsers,
-        "append_import_staging_transactional",
-        lambda df: {"ok": False, "error_code": "E_IMPORT_TXN_ROLLBACK", "message": "mock failure"},
-    )
-    code, msg = parsers.generate_auto_inbound("202603", "M3", 2, "2026-03-21", "")
-    assert code == -2
-    assert "E_IMPORT_TXN_ROLLBACK" in msg

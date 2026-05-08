@@ -11,6 +11,10 @@ MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "030705")
 MYSQL_DB = os.environ.get("MYSQL_DB", "rjfinshed")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "888")
 
+# Go Sandbox Service Configuration
+GO_SANDBOX_URL = os.environ.get("GO_SANDBOX_URL", "http://127.0.0.1:3001")
+GO_INTERNAL_TOKEN = os.environ.get("GO_INTERNAL_TOKEN", "")
+
 # Performance Optimization Feature Flags
 # 使用 TTL 缓存替代 lru_cache(maxsize=1)
 USE_TTL_CACHE = os.environ.get("USE_TTL_CACHE", "false").lower() in ("true", "1", "yes")
@@ -81,9 +85,9 @@ DEFAULT_USERS = {
 }
 
 DEFAULT_ROLE_PERMISSIONS = {
-    "Admin": ["PLANNING", "CONTRACT", "MODEL_DICTIONARY", "USER_MANAGE", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY"],
-    "Boss": ["PLANNING", "CONTRACT", "MODEL_DICTIONARY", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY"],
-    "Sales": ["PLANNING", "CONTRACT", "SALES_CREATE", "SALES_ALLOC", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "TRACEABILITY"],
+    "Admin": ["CONTRACT", "MODEL_DICTIONARY", "USER_MANAGE", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY", "SANDBOX_VIEW", "SANDBOX_EDIT"],
+    "Boss": ["CONTRACT", "MODEL_DICTIONARY", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY", "SANDBOX_VIEW", "SANDBOX_EDIT"],
+    "Sales": ["CONTRACT", "SALES_CREATE", "SALES_ALLOC", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "TRACEABILITY"],
     "Prod": ["SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND"],
     "Inbound": ["WAREHOUSE_MAP", "INBOUND"],
 }
@@ -110,7 +114,6 @@ CUSTOM_MODEL_ORDER = [
 ]
 
 FUNC_MAP = {
-    "PLANNING": {"label": "👑 生产统筹", "page": "boss_planning", "class": "boss-btn"},
     "CONTRACT": {"label": "🏭 合同管理", "page": "production", "class": "production-btn"},
     "QUERY": {"label": "🔍 库存查询", "page": "query", "class": "query-btn"},
     "ARCHIVE": {"label": "📂 机台档案", "page": "machine_archive", "class": "machine-edit-btn"},
@@ -120,6 +123,7 @@ FUNC_MAP = {
     "SHIP_CONFIRM": {"label": "🚛 发货复核", "page": "ship_confirm", "class": "ship-btn"},
     "MACHINE_EDIT": {"label": "🛠️ 机台编辑", "page": "machine_edit", "class": "machine-edit-btn"},
     "WAREHOUSE_MAP": {"label": "🗺️ 库位大屏", "page": "warehouse_dashboard", "class": "inbound-btn"},
+    "SANDBOX_VIEW": {"label": "👑 老板计划", "page": "sandbox", "class": "boss-btn"},
 }
 
 GLOBAL_CSS = """

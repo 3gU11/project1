@@ -61,8 +61,8 @@ const visibleMenus = computed(() => {
   const onHome = router.currentRoute.value.path === '/'
   return getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
     if (onHome) {
-      // 在首页时，侧边栏仅保留这 4 个菜单
-      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary']
+      // 在首页时，侧边栏仅保留高频入口
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/sandbox']
       return allowedInHome.includes(m.path)
     }
     return true
@@ -87,8 +87,8 @@ const warmupByRole = () => {
   const role = normalizeRole(userStore.userInfo?.role || '')
   const common = ['/inventory', '/warehouse-dashboard']
   const byRole: Record<string, string[]> = {
-    Admin: ['/users', '/logs', '/planning', '/contracts', '/model-dictionary'],
-    Boss: ['/planning', '/contracts', '/sales-orders', '/order-allocation', '/model-dictionary'],
+    Admin: ['/users', '/logs', '/sandbox', '/contracts', '/model-dictionary'],
+    Boss: ['/sandbox', '/contracts', '/sales-orders', '/order-allocation', '/model-dictionary'],
     Sales: ['/sales-orders', '/order-allocation', '/contracts'],
     Prod: ['/inbound', '/machine-archive', '/machine-edit', '/shipping-review'],
     Inbound: ['/inbound', '/warehouse-dashboard', '/inventory'],
@@ -153,7 +153,9 @@ watch(() => router.currentRoute.value.path, () => {
   position: relative;
 }
 .sidebar {
-  width: 196px;
+  width: 220px;
+  min-width: 220px;
+  flex: 0 0 220px;
   background: var(--panel-bg);
   border-right: 1px solid #e5e7eb;
   color: var(--text-color);
@@ -176,8 +178,16 @@ watch(() => router.currentRoute.value.path, () => {
   background: #cbd5e1;
 }
 .sidebar.collapsed {
-  width: 28px;
-  padding: 10px 2px;
+  width: 48px;
+  min-width: 48px;
+  flex-basis: 48px;
+  padding: 10px 6px;
+  overflow: hidden;
+}
+.sidebar.collapsed .logo,
+.sidebar.collapsed .menu-group,
+.sidebar.collapsed .user-info {
+  display: none;
 }
 .collapse-tip {
   width: 100%;
@@ -187,7 +197,12 @@ watch(() => router.currentRoute.value.path, () => {
   border: none;
   background: transparent;
   cursor: pointer;
-  padding: 0;
+  padding: 4px 0;
+  min-height: 32px;
+  border-radius: 8px;
+}
+.collapse-tip:hover {
+  background: #f3f4f6;
 }
 .logo {
   padding: 6px 4px;

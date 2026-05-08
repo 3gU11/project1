@@ -1,14 +1,9 @@
-import os
 import json
-import subprocess
-import tempfile
 from datetime import datetime
 
 import pandas as pd
-from config import MACHINE_ARCHIVE_ABS_DIR, OPENPYXL_AVAILABLE, openpyxl
 from crud.inventory import (
     append_import_staging,
-    append_import_staging_transactional,
     get_data,
     get_import_staging,
     save_data,
@@ -137,199 +132,6 @@ def process_paste_data(raw_text):
         return 1, f"已解析并添加 {len(new_records)} 条数据到计划表"
     except Exception as e: return -1, f"解析错误: {str(e)}"
 
-def generate_auto_inbound(batch_input, model_input, qty_input, expected_inbound_date, machine_note=""):
-    if qty_input <= 0: return -1, "数量必须大于0"
-    if not batch_input or not model_input: return -1, "批次号和机型不能为空"
-    
-    if len(machine_note) > 500: return -1, "机台备注/配置内容过长（最大500字符）"
-    machine_note = machine_note.replace("<script>", "").replace("</script>", "")
-
-    month_part = ""
-    if "-" in batch_input: month_part = batch_input.split("-")[0]
-    else: month_part = batch_input 
-    
-    target_prefix = f"96-{month_part}-"
-    existing_sns = set()
-    db_df = get_data()
-    if not db_df.empty: existing_sns.update(db_df['流水号'].dropna().tolist())
-    
-    # Check staging as well
-    staging_df = get_import_staging()
-    if '流水号' in staging_df.columns:
-        existing_sns.update(staging_df['流水号'].dropna().tolist())
-
-    max_seq = 0
-    for sn in existing_sns:
-        sn = str(sn).strip()
-        if sn.startswith(target_prefix):
-            try:
-                suffix = sn.replace(target_prefix, "")
-                seq = int(suffix)
-                if seq > max_seq: max_seq = seq
-            except: continue
-    
-    new_records = []
-    start_seq = max_seq + 1
-    if hasattr(expected_inbound_date, "strftime"):
-        expected_inbound_text = expected_inbound_date.strftime("%Y-%m-%d")
-    else:
-        expected_inbound_text = str(expected_inbound_date) if expected_inbound_date else ""
-    
-    for i in range(qty_input):
-        current_seq = start_seq + i
-        new_sn = f"{target_prefix}{current_seq:02d}"
-        new_records.append({
-            "批次号": batch_input, "机型": model_input, "流水号": new_sn,
-            "状态": "待入库", "预计入库时间": expected_inbound_text,
-            "机台备注/配置": machine_note
-        })
-        
-        # --- Auto Create Archive Folder ---
-        sn_folder = os.path.join(MACHINE_ARCHIVE_ABS_DIR, new_sn)
-        if not os.path.exists(sn_folder):
-            try: os.makedirs(sn_folder, exist_ok=True)
-            except: pass
-        
-    if new_records:
-        df_new = pd.DataFrame(new_records)
-        result = append_import_staging_transactional(df_new)
-        if not result.get("ok"):
-            return -2, f"{result.get('error_code', 'E_IMPORT_TXN_ROLLBACK')}: {result.get('message', '写入失败')}"
-        return 1, f"已生成 {result.get('inserted', qty_input)} 条数据 ({new_records[0]['流水号']} ~ {new_records[-1]['流水号']})"
-    else: return 0, "生成失败"
-
-def parse_tracking_xls(uploaded_file) -> tuple[int, str, "pd.DataFrame"]: 
-    """ 
-    解析瑞钧跟踪单 .xls / .xlsx 文件。 
-    返回 (code, message, df) 
-      code=1  成功 
-      code=-1 失败，df 为空 
-
-    提取列： 
-      col0 生产批次（前向填充） 
-      col1 机型 
-      col2 生产编号（流水号） 
-      col3 发货日期 → 写入「机台备注/配置」 
-    """ 
-    if not OPENPYXL_AVAILABLE:
-        return -1, "服务器未安装 openpyxl，无法解析 Excel 文件。", pd.DataFrame()
-
-    suffix = os.path.splitext(uploaded_file.name)[-1].lower() 
-    raw_bytes = uploaded_file.read() 
-
-    # ── 统一转为 xlsx ────────────────────────────────────────────────────── 
-    if suffix == ".xlsx": 
-        tmp_xlsx = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) 
-        tmp_xlsx.write(raw_bytes); tmp_xlsx.flush(); tmp_xlsx.close() 
-        xlsx_path = tmp_xlsx.name 
-    elif suffix == ".xls": 
-        tmp_xls = tempfile.NamedTemporaryFile(suffix=".xls", delete=False) 
-        tmp_xls.write(raw_bytes); tmp_xls.flush(); tmp_xls.close() 
-        out_dir = tempfile.mkdtemp() 
-        try: 
-            # Check for LibreOffice (soffice) or libreoffice
-            result = subprocess.run( 
-                ["libreoffice", "--headless", "--convert-to", "xlsx", 
-                 tmp_xls.name, "--outdir", out_dir], 
-                capture_output=True, timeout=30 
-            ) 
-            if result.returncode != 0: 
-                return -1, f"LibreOffice 转换失败: {result.stderr.decode()}", pd.DataFrame() 
-        except FileNotFoundError: 
-            return -1, "服务器未安装 LibreOffice，无法转换 .xls 文件。\n请将跟踪单另存为 .xlsx 后重新上传。", pd.DataFrame() 
-        finally: 
-            try: os.unlink(tmp_xls.name)
-            except: pass
-        converted = [f for f in os.listdir(out_dir) if f.endswith(".xlsx")] 
-        if not converted: 
-            return -1, "转换后未找到 xlsx 文件", pd.DataFrame() 
-        xlsx_path = os.path.join(out_dir, converted[0]) 
-    else: 
-        return -1, f"不支持的文件格式: {suffix}，请上传 .xls 或 .xlsx", pd.DataFrame() 
-
-    # ── 解析 xlsx ───────────────────────────────────────────────────────── 
-    try: 
-        wb = openpyxl.load_workbook(xlsx_path, data_only=True, read_only=True) 
-        ws = wb.active 
-        rows = [] 
-        current_batch = "" 
-        for r_idx, row in enumerate(ws.iter_rows(values_only=True)): 
-            if r_idx == 0:          # 跳过表头行 
-                continue 
-            batch_val = row[0] if len(row) > 0 else None 
-            model_val = row[1] if len(row) > 1 else None 
-            sn_val    = row[2] if len(row) > 2 else None 
-            note_val  = row[3] if len(row) > 3 else None   # 发货日期 
-
-            if batch_val: 
-                current_batch = str(batch_val).strip() 
-
-            if not model_val or not sn_val: 
-                continue 
-
-            model = str(model_val).strip() 
-            sn    = str(sn_val).strip() 
-            note  = str(note_val).strip() if note_val else "" 
-
-            if not sn or sn in ("nan", "None"): 
-                continue 
-
-            rows.append({ 
-                "批次号":     current_batch, 
-                "机型":       model, 
-                "流水号":     sn, 
-                "机台备注/配置": note, 
-            }) 
-        wb.close() 
-    except Exception as e: 
-        return -1, f"解析文件时出错: {e}", pd.DataFrame() 
-    finally: 
-        try: os.unlink(xlsx_path) 
-        except: pass 
-
-    if not rows: 
-        return -1, "解析后无有效数据，请检查文件格式", pd.DataFrame() 
-
-    df = pd.DataFrame(rows) 
-    return 1, f"解析成功，共 {len(df)} 条记录", df 
-
-def diff_tracking_vs_inventory(tracking_df: "pd.DataFrame") -> "pd.DataFrame": 
-    """ 
-    比对跟踪单与成品库，返回流水号不在库中的新条目。 
-    新条目默认状态 = '待入库'，预计入库时间为空。 
-    """ 
-    db_df = get_data()
-    staging_df = get_import_staging()
-    existing_sns = set(db_df["流水号"].astype(str).str.strip().tolist()) if not db_df.empty else set()
-    if not staging_df.empty and "流水号" in staging_df.columns:
-        existing_sns.update(staging_df["流水号"].astype(str).str.strip().tolist())
-
-    mask = ~tracking_df["流水号"].astype(str).str.strip().isin(existing_sns) 
-    new_df = tracking_df[mask].copy() 
-    new_df["状态"] = "待入库" 
-    new_df["预计入库时间"] = "" 
-    # 将「型号」列名对齐为系统内字段「机型」 
-    new_df = new_df.rename(columns={"型号": "机型"}) 
-    new_df = new_df.reset_index(drop=True) 
-    return new_df
-
-def build_import_payload(selected_df, fallback_date=None):
-    if selected_df is None or selected_df.empty:
-        return [], "请至少选择 1 条数据"
-    
-    payload = []
-    for _, row in selected_df.iterrows():
-        sn = str(row.get("流水号", "")).strip()
-        if sn:
-            row_date = str(row.get("预计入库时间", "")).strip()
-            date_str = row_date if row_date and row_date not in ("nan", "None") else ""
-            if not date_str and fallback_date:
-                date_str = fallback_date.strftime("%Y-%m-%d") if hasattr(fallback_date, "strftime") else str(fallback_date)
-            payload.append({"trackNo": sn, "expectInDate": date_str})
-    if not payload:
-        return [], "所选数据缺少有效流水号"
-    return payload, ""
-
 def execute_import_transaction_payload(payload, retry_times=1):
     result = {"success": [], "failed": []}
     if not payload:
@@ -374,11 +176,12 @@ def execute_import_transaction_payload(payload, retry_times=1):
             "预计入库时间": expect_date,
             "更新时间": current_time,
             "占用订单号": "",
-            "客户": "",
-            "代理商": "",
+            "客户": row.get("客户", ""),
+            "代理商": row.get("代理商", ""),
             "订单备注": "",
-            "机台备注/配置": row.get("机台备注/配置", ""),
+            "机台备注/配置": row.get("合同备注", ""),
             "Location_Code": "",
+            "合同号": row.get("合同号", ""),
         })
         add_track_nos.append(track_no)
 

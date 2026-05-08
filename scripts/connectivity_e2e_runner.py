@@ -101,11 +101,6 @@ class ConnectivityRunner:
     def run(self) -> int:
         self._step_unauth_guard()
         self._step_login_admin()
-        self._step_auto_generate_invalid_qty()
-        self._step_auto_generate_one()
-        self._step_pick_serial()
-        self._step_import_confirm_empty()
-        self._step_import_confirm()
         self._step_verify_pending()
         self._step_inbound_to_slot()
         self._step_verify_in_stock()
@@ -172,68 +167,6 @@ class ConnectivityRunner:
         )
         if status == 200 and body.get("access_token"):
             self.client.set_token(body["access_token"])
-
-    def _step_auto_generate_invalid_qty(self):
-        self._run_step(
-            "auto_generate_invalid_qty",
-            "POST",
-            "/api/v1/inventory/import-staging/auto-generate",
-            "422",
-            lambda s, b: s == 422,
-            payload={"batch": self.batch, "model": self.model, "qty": 0, "expected_inbound_date": self.expected_date, "machine_note": ""},
-        )
-
-    def _step_auto_generate_one(self):
-        self._run_step(
-            "auto_generate_one",
-            "POST",
-            "/api/v1/inventory/import-staging/auto-generate",
-            "200",
-            lambda s, b: s == 200,
-            payload={
-                "batch": self.batch,
-                "model": self.model,
-                "qty": 1,
-                "expected_inbound_date": self.expected_date,
-                "machine_note": f"E2E-{self.run_id}",
-            },
-        )
-
-    def _step_pick_serial(self):
-        status, body = self._run_step(
-            "import_staging_list",
-            "GET",
-            "/api/v1/inventory/import-staging",
-            "200+find_serial",
-            lambda s, b: s == 200 and isinstance(b.get("data", []), list),
-        )
-        if status != 200:
-            return
-        rows = body.get("data", [])
-        for r in reversed(rows):
-            if str(r.get("批次号", "")).strip() == self.batch:
-                self.serial_no = str(r.get("流水号", "")).strip()
-                break
-
-    def _step_import_confirm_empty(self):
-        self._run_step(
-            "import_confirm_empty",
-            "POST",
-            "/api/v1/inventory/import-staging/import-confirm",
-            "422",
-            lambda s, b: s == 422,
-            payload={"selected_track_nos": [], "expected_inbound_date": self.expected_date},
-        )
-
-    def _step_import_confirm(self):
-        self._run_step(
-            "import_confirm_valid",
-            "POST",
-            "/api/v1/inventory/import-staging/import-confirm",
-            "200+success_count>=1",
-            lambda s, b: s == 200 and int(b.get("success_count", 0)) >= 1,
-            payload={"selected_track_nos": [self.serial_no] if self.serial_no else [], "expected_inbound_date": self.expected_date},
-        )
 
     def _step_verify_pending(self):
         self._run_step(
@@ -446,8 +379,6 @@ class ConnectivityRunner:
     def _write_report(self) -> int:
         blockers = {
             "login_admin",
-            "auto_generate_one",
-            "import_confirm_valid",
             "inbound_to_slot",
             "create_order",
             "allocate_valid",

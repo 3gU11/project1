@@ -47,6 +47,18 @@
           <el-input v-model="scope.row.model_name" placeholder="例如 FR-400G" />
         </template>
       </el-table-column>
+      <el-table-column label="大类" width="150">
+        <template #default="scope">
+          <el-select v-model="scope.row.model_family" clearable placeholder="选择类别">
+            <el-option label="大机AUTO" value="大机AUTO" />
+            <el-option label="小机AUTO" value="小机AUTO" />
+            <el-option label="大机XS" value="大机XS" />
+            <el-option label="小机XS" value="小机XS" />
+            <el-option label="小机G" value="小机G" />
+            <el-option label="特殊" value="特殊" />
+          </el-select>
+        </template>
+      </el-table-column>
       <el-table-column label="启用" width="90" align="center">
         <template #default="scope">
           <el-switch v-model="scope.row.enabled" />
@@ -80,6 +92,7 @@ const localRows = ref<ModelDictionaryRow[]>([])
 const baselineRows = ref<ModelDictionaryRow[]>([])
 const draggingKey = ref('')
 const dragOverKey = ref('')
+const allowedFamilies = new Set(['大机AUTO', '小机AUTO', '大机XS', '小机XS', '小机G', '特殊'])
 
 const createTempId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -103,6 +116,7 @@ const normalizeForCompare = (rows: ModelDictionaryRow[]) => {
   return (rows || []).map((row, idx) => ({
     id: Number.isFinite(Number(row.id)) ? Number(row.id) : null,
     model_name: String(row.model_name || '').trim(),
+    model_family: String(row.model_family || '').trim(),
     sort_order: idx,
     enabled: Boolean(row.enabled),
     remark: String(row.remark || '').trim(),
@@ -135,6 +149,7 @@ const load = async () => {
 const addRow = () => {
   localRows.value.push({
     model_name: '',
+    model_family: '',
     sort_order: localRows.value.length,
     enabled: true,
     remark: '',
@@ -204,6 +219,15 @@ const save = async () => {
   if (new Set(names).size !== names.length) {
     ElMessage.warning('机型名称不能重复')
     return
+  }
+  for (const row of localRows.value) {
+    let family = String(row.model_family || '').trim()
+    if (family === '小机/XS') family = '小机XS'
+    if (family && !allowedFamilies.has(family)) {
+      ElMessage.warning(`机型 ${row.model_name} 的类别不合法`)
+      return
+    }
+    row.model_family = family
   }
   saving.value = true
   try {

@@ -12,6 +12,8 @@ const request = axios.create({
 
 let authRedirecting = false
 export const getApiErrorMessage = (error: any) => {
+  const backendError = error?.response?.data?.error
+  if (typeof backendError === 'string' && backendError.trim()) return backendError
   const detail = error?.response?.data?.detail
   if (typeof detail === 'string' && detail.trim()) return detail
   if (Array.isArray(detail) && detail.length > 0) return String(detail[0]?.msg || '请求参数错误')

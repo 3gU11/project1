@@ -69,6 +69,16 @@ def test_allocate_order_inventory_marks_machine_as_pending_shipping(monkeypatch)
             }
         ),
     )
+    monkeypatch.setattr(
+        planning_route,
+        "_get_order_contract_machine_rows",
+        lambda order_id: pd.DataFrame(
+            [
+                {"流水号": "SN001", "状态": "库存中（A01）", "占用订单号": "", "合同号": "HT001"},
+                {"流水号": "SN002", "状态": "待入库", "占用订单号": "", "合同号": "HT001"},
+            ]
+        ),
+    )
 
     result = allocate_order_inventory_api(
         "SO-001",

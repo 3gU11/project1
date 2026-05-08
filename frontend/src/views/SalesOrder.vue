@@ -726,10 +726,8 @@ const createOrderFromPlanned = async () => {
       发货时间: mergeDraft.deliveryDate,
       备注: mergedNote || `合同导入: ${selectedImportContractIds.value.join(',')}`,
       包装选项: mergeDraft.needPack ? '需要包装' : '',
+      contract_ids: selectedImportContractIds.value,
     })
-    for (const id of selectedImportContractIds.value) {
-      await apiPost(`/planning/contract/${encodeURIComponent(id)}/status`, { status: '已下单' })
-    }
     ElMessage.success('已转换为订单')
     selectedImportContractIds.value = []
     selectedPlannedImportRows.value = []

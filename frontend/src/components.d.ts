@@ -11,6 +11,8 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BatchCard: typeof import('./components/sandbox/BatchCard.vue')['default']
+    CapacityRatioEditor: typeof import('./components/sandbox/CapacityRatioEditor.vue')['default']
     EditModePanel: typeof import('./components/EditModePanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']
@@ -34,11 +36,11 @@ declare module 'vue' {
     ElOption: typeof import('element-plus/es')['ElOption']
     ElPagination: typeof import('element-plus/es')['ElPagination']
     ElPopover: typeof import('element-plus/es')['ElPopover']
-    ElProgress: typeof import('element-plus/es')['ElProgress']
     ElRadio: typeof import('element-plus/es')['ElRadio']
     ElRadioButton: typeof import('element-plus/es')['ElRadioButton']
     ElRadioGroup: typeof import('element-plus/es')['ElRadioGroup']
     ElRow: typeof import('element-plus/es')['ElRow']
+    ElSegmented: typeof import('element-plus/es')['ElSegmented']
     ElSelect: typeof import('element-plus/es')['ElSelect']
     ElStatistic: typeof import('element-plus/es')['ElStatistic']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
@@ -50,11 +52,14 @@ declare module 'vue' {
     ElTimeline: typeof import('element-plus/es')['ElTimeline']
     ElTimelineItem: typeof import('element-plus/es')['ElTimelineItem']
     ElUpload: typeof import('element-plus/es')['ElUpload']
+    EmptyContainerPicker: typeof import('./components/sandbox/EmptyContainerPicker.vue')['default']
     Layout: typeof import('./components/Layout.vue')['default']
     PageHeader: typeof import('./components/PageHeader.vue')['default']
     PageSkeleton: typeof import('./components/PageSkeleton.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    RushOrderEntry: typeof import('./components/sandbox/RushOrderEntry.vue')['default']
+    UnitCard: typeof import('./components/sandbox/UnitCard.vue')['default']
     VirtualScrollList: typeof import('./components/VirtualScrollList.vue')['default']
   }
   export interface GlobalDirectives {

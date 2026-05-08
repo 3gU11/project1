@@ -49,7 +49,7 @@
               <div>订单号：{{ selectedOrderId }}</div>
               <div>客户：{{ selectedOrder?.['客户名'] || '-' }}</div>
               <div>需求总量：{{ totalDemandQty }}</div>
-              <div>已配货：{{ allocations.length }}</div>
+              <div>应配机台：{{ allocations.length }}</div>
               <div class="summary-note">备注：{{ selectedOrder?.['备注'] || '-' }}</div>
             </div>
 
@@ -58,8 +58,8 @@
             <el-table :data="demandRows" border stripe size="small">
               <el-table-column prop="model" label="机型" min-width="180" />
               <el-table-column prop="need" label="需求" width="90" />
-              <el-table-column prop="allocated" label="已配" width="90" />
-              <el-table-column prop="pending" label="待配" width="90" />
+              <el-table-column prop="allocated" label="已确认" width="90" />
+              <el-table-column prop="pending" label="待确认" width="90" />
               <el-table-column label="状态" width="120">
                 <template #default="scope">
                   <el-tag :type="scope.row.pending <= 0 ? 'success' : 'warning'">
@@ -70,7 +70,7 @@
             </el-table>
 
             <el-divider />
-            <div class="field-label">候选库存（可分配）</div>
+            <div class="field-label">应配机台清单（按合同自动带出）</div>
             <el-table
               :data="candidateRows"
               border
@@ -80,20 +80,21 @@
               @selection-change="onCandidateSelectionChange"
             >
               <el-table-column type="selection" width="48" />
+              <el-table-column prop="合同号" label="合同号" width="140" />
               <el-table-column prop="流水号" label="流水号" width="150" />
               <el-table-column prop="机型" label="机型" min-width="160" />
-              <el-table-column prop="状态" label="状态" width="90" />
+              <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
-              <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="160" />
+              <el-table-column prop="合同备注" label="合同备注" min-width="160" />
             </el-table>
             <div class="ops">
-              <el-button type="primary" :loading="saving" @click="allocateSelected">确认分配</el-button>
+              <el-button type="primary" :loading="saving" @click="allocateSelected">复核确认配货</el-button>
             </div>
 
             <el-divider />
             <div class="field-label">配货撤回</div>
             <el-table
-              :data="allocations"
+              :data="confirmedRows"
               border
               stripe
               size="small"
@@ -101,11 +102,12 @@
               @selection-change="onAllocatedSelectionChange"
             >
               <el-table-column type="selection" width="48" />
+              <el-table-column prop="合同号" label="合同号" width="140" />
               <el-table-column prop="流水号" label="流水号" width="150" />
               <el-table-column prop="机型" label="机型" min-width="160" />
               <el-table-column prop="状态" label="状态" width="90" />
               <el-table-column prop="批次号" label="批次号" width="120" />
-              <el-table-column prop="机台备注/配置" label="机台备注/配置" min-width="160" />
+              <el-table-column prop="合同备注" label="合同备注" min-width="160" />
             </el-table>
             <div class="ops">
               <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
@@ -218,14 +220,13 @@ const totalDemandQty = computed(() => {
   return total
 })
 
-const requiredModels = computed(() => {
-  if (!selectedOrder.value) return [] as string[]
-  return Array.from(demandMap.value.keys())
-})
-
 const allocationModelCountMap = computed(() => {
   const map = new Map<string, number>()
   for (const r of allocations.value) {
+    const status = String(r['状态'] || '').trim()
+    const occupied = String(r['占用订单号'] || '').trim()
+    if (status === '未入库') continue
+    if (occupied !== selectedOrderId.value && status !== '待发货') continue
     const model = normalizeModelName(r['机型'])
     if (!model) continue
     map.set(model, (map.get(model) || 0) + 1)
@@ -249,15 +250,23 @@ const demandRows = computed(() => {
 
 const candidateRows = computed(() => {
   if (!selectedOrderId.value) return []
-  const modelSet = new Set(requiredModels.value)
-  return sortRowsByModel(inventoryRows.value.filter((r) => {
+  return sortRowsByModel(allocations.value.filter((r) => {
+    const serialNo = String(r['流水号'] || '').trim()
     const status = String(r['状态'] || '')
     const occupied = String(r['占用订单号'] || '')
-    const model = normalizeModelName(r['机型'])
-    if (!status.startsWith('库存中') && status !== '待入库') return false
+    if (!serialNo) return false
+    if (status === '未入库' || status === '已出库') return false
     if (occupied) return false
-    if (modelSet.size === 0) return true
-    return modelSet.has(model)
+    return true
+  }), (r) => String(r['机型'] || ''))
+})
+
+const confirmedRows = computed(() => {
+  return sortRowsByModel(allocations.value.filter((r) => {
+    const serialNo = String(r['流水号'] || '').trim()
+    const occupied = String(r['占用订单号'] || '').trim()
+    const status = String(r['状态'] || '').trim()
+    return serialNo && occupied === selectedOrderId.value && status !== '已出库'
   }), (r) => String(r['机型'] || ''))
 })
 
@@ -375,11 +384,11 @@ const allocateSelected = async () => {
     await apiPost(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`, {
       selected_serial_nos: selectedCandidateSerials.value,
     })
-    ElMessage.success('配货成功')
+    ElMessage.success('配货复核已确认')
     selectedCandidateSerials.value = []
     await loadData(true)
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '配货失败')
+    ElMessage.error(getApiErrorMessage(err) || '配货复核失败')
   } finally {
     saving.value = false
   }

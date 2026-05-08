@@ -6,8 +6,8 @@
     <section class="section">
       <h2 class="section-title">👑 管理与统筹</h2>
       <div class="top-cards">
-        <button v-if="can('/planning')" class="btn-base top-card" @click="go('/planning')">
-          <span class="icon">👑</span> 生产统筹
+        <button v-if="can('/sandbox')" class="btn-base top-card boss-plan-card" @click="go('/sandbox')">
+          <span class="icon">👑</span> 老板计划
         </button>
         <button v-if="can('/contracts')" class="btn-base top-card" @click="go('/contracts')">
           <span class="icon">📊</span> 合同管理
@@ -106,7 +106,7 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.permission
 }
 .top-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 24px;
   width: 100%;
 }
@@ -149,6 +149,10 @@ const can = (path: string) => canAccessPath(path, userStore.userInfo?.permission
 .top-card .icon {
   font-size: 42px;
   margin-bottom: 16px;
+}
+.boss-plan-card {
+  background: linear-gradient(135deg, #fff7d6, #ffffff);
+  border-color: rgba(218, 165, 32, 0.28);
 }
 
 .divider {

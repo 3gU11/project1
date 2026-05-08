@@ -30,7 +30,7 @@
         <div class="c status">状态</div>
         <div class="c loc">库位</div>
         <div class="c order">占用订单号</div>
-        <div class="c note">机台备注/配置</div>
+        <div class="c note">合同备注</div>
         <div class="c time">更新时间</div>
       </div>
       <VirtualScrollList :items="filteredRows" :height="500" :item-height="44" item-key="流水号" :overscan="12">
@@ -45,7 +45,7 @@
             <div class="c status">{{ row['状态'] || '-' }}</div>
             <div class="c loc">{{ row['Location_Code'] || '-' }}</div>
             <div class="c order">{{ row['占用订单号'] || '-' }}</div>
-            <div class="c note">{{ row['机台备注/配置'] || '-' }}</div>
+            <div class="c note">{{ row['合同备注'] || '-' }}</div>
             <div class="c time">{{ row['更新时间'] || '-' }}</div>
           </div>
         </template>
@@ -62,7 +62,7 @@
         </el-select>
       </el-col>
       <el-col :span="8">
-        <div class="label">新的机台备注/配置</div>
+        <div class="label">新的合同备注</div>
         <el-input v-model="batchNote" />
       </el-col>
       <el-col :span="8">
@@ -127,7 +127,7 @@ const loadData = async () => {
     rows.value = list.map((x: Row) => ({
       ...x,
       __draftModel: String(x['机型'] || ''),
-      __draftNote: String(x['机台备注/配置'] || ''),
+      __draftNote: String(x['合同备注'] || ''),
       __searchText: `${String(x['流水号'] || '')} ${String(x['占用订单号'] || '')} ${String(x['批次号'] || '')}`.toLowerCase(),
     }))
     const valid = new Set(rows.value.map((r) => String(r['流水号'] || '')).filter(Boolean))

@@ -1,0 +1,41 @@
+Starting server on :3001
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /ws                       --> smart-scheduling/server/internal/router.Setup.func1 (4 handlers)
+[GIN-debug] GET    /api/health               --> smart-scheduling/server/internal/router.Setup.func2 (4 handlers)
+[GIN-debug] POST   /api/auth/login           --> smart-scheduling/server/internal/handler.(*AuthHandler).Login-fm (4 handlers)
+[GIN-debug] GET    /api/auth/me              --> smart-scheduling/server/internal/handler.(*AuthHandler).Me-fm (5 handlers)
+[GIN-debug] GET    /api/model-types          --> smart-scheduling/server/internal/handler.(*MetaHandler).ModelTypes-fm (5 handlers)
+[GIN-debug] GET    /api/batches              --> smart-scheduling/server/internal/handler.(*BatchHandler).List-fm (5 handlers)
+[GIN-debug] GET    /api/batches/:id          --> smart-scheduling/server/internal/handler.(*BatchHandler).GetByID-fm (5 handlers)
+[GIN-debug] GET    /api/batches/:id/units    --> smart-scheduling/server/internal/handler.(*BatchHandler).GetBatchUnits-fm (5 handlers)
+[GIN-debug] POST   /api/batches/:id/confirm  --> smart-scheduling/server/internal/handler.(*BatchHandler).Confirm-fm (5 handlers)
+[GIN-debug] POST   /api/batches/batch-confirm --> smart-scheduling/server/internal/handler.(*BatchHandler).BatchConfirm-fm (5 handlers)
+[GIN-debug] POST   /api/batches/generate-next --> smart-scheduling/server/internal/handler.(*ForecastHandler).GenerateNext-fm (5 handlers)
+[GIN-debug] POST   /api/batches/:id/insert-empty-slot --> smart-scheduling/server/internal/handler.(*BatchHandler).InsertEmptySlot-fm (5 handlers)
+[GIN-debug] GET    /api/production-queue     --> smart-scheduling/server/internal/handler.(*QueueHandler).List-fm (5 handlers)
+[GIN-debug] GET    /api/units/empty-containers --> smart-scheduling/server/internal/handler.(*UnitHandler).EmptyContainers-fm (5 handlers)
+[GIN-debug] GET    /api/units/:id            --> smart-scheduling/server/internal/handler.(*UnitHandler).GetByID-fm (5 handlers)
+[GIN-debug] PATCH  /api/units/:id            --> smart-scheduling/server/internal/handler.(*UnitHandler).Update-fm (5 handlers)
+[GIN-debug] PATCH  /api/units/:id/unlock     --> smart-scheduling/server/internal/handler.(*UnitHandler).Unlock-fm (5 handlers)
+[GIN-debug] POST   /api/units/:id/move-batch --> smart-scheduling/server/internal/handler.(*UnitHandler).MoveBatch-fm (5 handlers)
+[GIN-debug] POST   /api/units/:id/reorder-slot --> smart-scheduling/server/internal/handler.(*UnitHandler).ReorderSlot-fm (5 handlers)
+[GIN-debug] POST   /api/units/repair-family-mismatches --> smart-scheduling/server/internal/handler.(*UnitHandler).RepairFamilyMismatches-fm (5 handlers)
+[GIN-debug] POST   /api/units/swap-content   --> smart-scheduling/server/internal/handler.(*UnitHandler).SwapContent-fm (5 handlers)
+[GIN-debug] POST   /api/units/rush-insert    --> smart-scheduling/server/internal/handler.(*UnitHandler).RushInsert-fm (5 handlers)
+[GIN-debug] POST   /api/units/:id/mark-spot  --> smart-scheduling/server/internal/handler.(*UnitHandler).MarkSpot-fm (5 handlers)
+[GIN-debug] POST   /api/forecast/recompute   --> smart-scheduling/server/internal/handler.(*ForecastHandler).Recompute-fm (5 handlers)
+[GIN-debug] GET    /api/forecast/achievement --> smart-scheduling/server/internal/handler.(*ForecastHandler).Achievement-fm (5 handlers)
+[GIN-debug] GET    /api/capacity-ratio       --> smart-scheduling/server/internal/handler.(*CapacityHandler).Get-fm (5 handlers)
+[GIN-debug] PATCH  /api/capacity-ratio       --> smart-scheduling/server/internal/handler.(*CapacityHandler).Update-fm (5 handlers)
+[GIN-debug] GET    /api/production-lines     --> smart-scheduling/server/internal/handler.(*LineHandler).List-fm (5 handlers)
+[GIN-debug] POST   /api/production-lines/:id/assign --> smart-scheduling/server/internal/handler.(*LineHandler).Assign-fm (5 handlers)
+[GIN-debug] POST   /api/production-lines/:id/manual-complete --> smart-scheduling/server/internal/handler.(*LineHandler).ManualComplete-fm (5 handlers)
+[GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
+Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.
+[GIN-debug] Listening and serving HTTP on :3001
+[GIN] 2026/05/06 - 11:12:13 | 200 |            0s |       127.0.0.1 | GET      "/api/health"

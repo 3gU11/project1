@@ -2,8 +2,9 @@ from io import BytesIO
 from typing import List, Dict, Any
 from datetime import datetime
 import asyncio
-import pandas as pd
+import logging
 import os
+import pandas as pd
 import re
 import tempfile
 import aiofiles
@@ -35,13 +36,7 @@ from crud.model_dictionary import find_disabled_models, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from database import get_engine
-from utils.parsers import (
-    build_import_payload,
-    diff_tracking_vs_inventory,
-    execute_import_transaction_payload,
-    generate_auto_inbound,
-    parse_tracking_xls,
-)
+
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
 MAX_INVENTORY_BULK_UPDATE_ROWS = 20000
@@ -74,21 +69,8 @@ class ImportStagingSavePayload(BaseModel):
     rows: List[Dict[str, Any]]
 
 
-class ImportConfirmPayload(BaseModel):
-    selected_track_nos: List[str] = Field(default_factory=list)
-    expected_inbound_date: str = ""
-
-
 class ImportStagingDeletePayload(BaseModel):
     serial_nos: List[str] = Field(default_factory=list)
-
-
-class AutoGeneratePayload(BaseModel):
-    batch: str
-    model: str
-    qty: int = Field(gt=0)
-    expected_inbound_date: str
-    machine_note: str = ""
 
 
 class ShippingActionPayload(BaseModel):
@@ -231,7 +213,7 @@ def machine_inline_update(
             df.loc[mask, "机型"] = model
             changes.append(f"机型改为 {model}")
         if payload.note is not None:
-            df.loc[mask, "机台备注/配置"] = str(payload.note).strip()
+            df.loc[mask, "合同备注"] = str(payload.note).strip()
             changes.append(f"备注改为 {payload.note}")
             
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -284,7 +266,7 @@ def machine_batch_update(
             note_parts.append("后导电")
         if note_parts:
             new_note = "；".join(note_parts)
-            df.loc[mask, "机台备注/配置"] = new_note
+            df.loc[mask, "合同备注"] = new_note
             changes.append(f"备注改为 {new_note}")
             
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -404,77 +386,6 @@ def get_import_staging_rows(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/import-staging/upload")
-async def upload_tracking_sheet(
-    file: UploadFile = File(...),
-    request: Request = None,
-    current_user: dict = Depends(get_current_user_context)
-):
-    try:
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="请选择跟踪单文件")
-        lower_name = file.filename.lower()
-        if not (lower_name.endswith(".xls") or lower_name.endswith(".xlsx")):
-            raise HTTPException(status_code=400, detail="仅支持 .xls / .xlsx 文件")
-
-        suffix = os.path.splitext(file.filename)[1].lower() or ".xlsx"
-        fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-        os.close(fd)
-        try:
-            async with aiofiles.open(tmp_path, "wb") as out:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    await out.write(chunk)
-        finally:
-            await file.close()
-
-        class _DiskUpload:
-            def __init__(self, name: str, path: str):
-                self.name = name
-                self._path = path
-
-            def read(self):
-                with open(self._path, "rb") as f:
-                    return f.read()
-
-        code, msg, parsed_df = await asyncio.to_thread(parse_tracking_xls, _DiskUpload(file.filename, tmp_path))
-        if code != 1:
-            raise HTTPException(status_code=422, detail=msg)
-
-        diff_df = await asyncio.to_thread(diff_tracking_vs_inventory, parsed_df)
-        if diff_df.empty:
-            return {"message": "所有解析到的流水号均已在库存中，无需导入。", "appended": 0}
-        for model in diff_df.get("机型", pd.Series(dtype=str)).astype(str).tolist():
-            if model.strip():
-                _assert_model_enabled(model)
-
-        appended = await asyncio.to_thread(append_import_staging, diff_df)
-        
-        if request and current_user:
-            append_audit_log(
-                user_id=current_user.get("username"),
-                username=current_user.get("name") or current_user.get("username") or "System",
-                action_type="上传",
-                module="入库作业",
-                biz_type="待入库数据",
-                content=f"解析文件 {file.filename}，追加 {appended} 条待入库数据"
-            )
-            
-        return {"message": f"解析成功！已追加 {appended} 条记录到待入库清单。", "appended": appended}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"上传解析失败: {e}")
-    finally:
-        try:
-            if "tmp_path" in locals() and tmp_path and os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
-
-
 @router.post("/import-staging/save")
 def save_import_staging_rows(
     payload: ImportStagingSavePayload,
@@ -505,6 +416,29 @@ def save_import_staging_rows(
         raise HTTPException(status_code=500, detail=f"保存失败: {e}")
 
 
+logger = logging.getLogger(__name__)
+
+
+def _auto_revoke_sandbox_batches(batch_codes: list):
+    """Revoke sandbox batches whose plan_import records were all deleted.
+    Updates the shared MySQL database directly instead of calling Go HTTP API.
+    """
+    engine = get_engine()
+    with engine.begin() as conn:
+        for bc in batch_codes:
+            result = conn.execute(
+                text(
+                    "UPDATE batches SET status = 'Predicted', batch_code = NULL "
+                    "WHERE batch_code = :bc AND status = 'Confirmed'"
+                ),
+                {"bc": bc},
+            )
+            if result.rowcount and result.rowcount > 0:
+                logger.info(
+                    f"Auto-revoked {result.rowcount} sandbox batch(es) for batch_code={bc}"
+                )
+
+
 @router.post("/import-staging/delete")
 def delete_import_staging_rows(
     payload: ImportStagingDeletePayload,
@@ -515,8 +449,10 @@ def delete_import_staging_rows(
         serial_nos = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not serial_nos:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 条数据")
-        deleted = delete_import_staging_by_serials(serial_nos)
-        
+        result = delete_import_staging_by_serials(serial_nos)
+        deleted = result["deleted"]
+        orphaned_codes = result["orphaned_batch_codes"]
+
         append_audit_log(
             user_id=current_user.get("username"),
             username=current_user.get("name") or current_user.get("username") or "System",
@@ -525,118 +461,16 @@ def delete_import_staging_rows(
             biz_type="待入库数据",
             content=f"删除 {deleted} 条待入库数据"
         )
-        
+
+        # Auto-revoke sandbox batches whose plan_import records are all deleted
+        if orphaned_codes:
+            _auto_revoke_sandbox_batches(orphaned_codes)
+
         return {"message": f"已删除 {deleted} 条待入库数据", "deleted": deleted}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
-
-
-@router.post("/import-staging/import-confirm")
-def import_confirm(
-    payload: ImportConfirmPayload,
-    request: Request,
-    current_user: dict = Depends(get_current_user_context)
-):
-    import pandas as pd
-
-    try:
-        if not payload.selected_track_nos:
-            raise HTTPException(status_code=422, detail="请先勾选至少 1 条数据")
-
-        plan_df = get_import_staging().copy()
-        if plan_df.empty:
-            raise HTTPException(status_code=422, detail="待入库清单为空")
-        plan_df["流水号"] = plan_df["流水号"].astype(str).str.strip()
-        selected = [str(x).strip() for x in payload.selected_track_nos if str(x).strip()]
-        selected_rows = plan_df[plan_df["流水号"].isin(selected)].copy()
-        if selected_rows.empty:
-            raise HTTPException(status_code=422, detail="所选记录已不存在，请刷新后重试")
-
-        payload_data, err = build_import_payload(selected_rows, payload.expected_inbound_date)
-        if err:
-            raise HTTPException(status_code=422, detail=err)
-
-        result = execute_import_transaction_payload(payload_data, retry_times=1)
-
-        success_items = result.get("success", [])
-        success_count = len(success_items)
-        if success_count > 0:
-            selected_row_map = {}
-            for _, row in selected_rows.iterrows():
-                serial_no = str(row.get("流水号", "")).strip()
-                if serial_no:
-                    selected_row_map[serial_no] = row
-
-            for item in success_items:
-                serial_no = str(item.get("trackNo", "")).strip()
-                row = selected_row_map.get(serial_no)
-                model_name = str((row.get("机型", "") if row is not None else "") or "").strip()
-                batch_no = str((row.get("批次号", "") if row is not None else "") or "").strip()
-                expected_date = str((row.get("预计入库时间", "") if row is not None else "") or "").strip()
-                if not expected_date:
-                    expected_date = str(payload.expected_inbound_date or "").strip()
-
-                content_parts = [f"开始生产；流水号：{serial_no}"]
-                if model_name:
-                    content_parts.append(f"机型：{model_name}")
-                if batch_no:
-                    content_parts.append(f"批次号：{batch_no}")
-                if expected_date:
-                    content_parts.append(f"预计入库日期：{expected_date}")
-
-                append_audit_log(
-                    user_id=current_user.get("username"),
-                    username=current_user.get("name") or current_user.get("username") or "System",
-                    action_type="开始生产",
-                    module="入库作业",
-                    biz_type="待入库数据",
-                    content="；".join(content_parts),
-                )
-            
-        return {
-            "success": result.get("success", []),
-            "failed": result.get("failed", []),
-            "success_count": success_count,
-            "failed_count": len(result.get("failed", [])),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"导入失败: {e}")
-
-
-@router.post("/import-staging/auto-generate")
-def auto_generate_import_rows(
-    payload: AutoGeneratePayload,
-    request: Request,
-    current_user: dict = Depends(get_current_user_context)
-):
-    try:
-        _assert_model_enabled(payload.model)
-        code, msg = generate_auto_inbound(
-            payload.batch,
-            payload.model,
-            int(payload.qty),
-            payload.expected_inbound_date,
-            payload.machine_note,
-        )
-        if code == 1:
-            append_audit_log(
-                user_id=current_user.get("username"),
-                username=current_user.get("name") or current_user.get("username") or "System",
-                action_type="自动生成",
-                module="入库作业",
-                biz_type="待入库数据",
-                content=f"自动生成待入库数据 {payload.qty} 台；批次号：{payload.batch}，机型：{payload.model}"
-            )
-            return {"message": msg}
-        raise HTTPException(status_code=422, detail=msg)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"自动生成失败: {e}")
 
 
 @router.get("/shipping/pending")
@@ -656,10 +490,9 @@ def get_shipping_pending():
         if not orders_df.empty:
             odf = orders_df.copy()
             odf["订单号"] = odf["订单号"].astype(str).str.strip()
-            order_note_map = odf.set_index("订单号")["备注"].to_dict()
             date_map = odf.set_index("订单号")["发货时间"].to_dict()
-            if "订单备注" not in pending.columns:
-                pending["订单备注"] = ""
+            if "合同备注" not in pending.columns:
+                pending["合同备注"] = ""
 
             def _clean_shipping_note(value):
                 if value is None:
@@ -694,18 +527,15 @@ def get_shipping_pending():
             def _resolve_note(row):
                 order_no = str(row.get("占用订单号", "")).strip()
                 model = str(row.get("机型", "")).strip()
-                existing = str(row.get("订单备注", "")).strip()
+                existing = str(row.get("合同备注", "")).strip()
                 if existing and existing.lower() not in {"none", "nan", "null"}:
                     return _clean_shipping_note(existing)
                 plan_note = model_note_map.get(order_no, {}).get(model, "")
                 if plan_note:
                     return plan_note
-                order_note = _clean_shipping_note(order_note_map.get(order_no, ""))
-                if order_note:
-                    return order_note
                 return ""
 
-            pending["订单备注"] = pending.apply(_resolve_note, axis=1)
+            pending["合同备注"] = pending.apply(_resolve_note, axis=1)
             raw_dates = pending["占用订单号"].map(date_map)
             pending["发货时间"] = pd.to_datetime(raw_dates, errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
         else:

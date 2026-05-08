@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Iterable
 
@@ -7,9 +7,22 @@ from sqlalchemy.exc import OperationalError
 
 from database import get_engine
 
+MODEL_CATEGORIES = {"大机AUTO", "小机AUTO", "大机XS", "小机XS", "小机G", "特殊"}
+
 
 def _clean_name(name: object) -> str:
     return str(name or "").strip()
+
+
+def _normalize_family(value: object) -> str:
+    family = str(value or "").strip()
+    if family == "小机/XS":
+        family = "小机XS"
+    if not family:
+        return ""
+    if family not in MODEL_CATEGORIES:
+        raise RuntimeError(f"model_family invalid: {family}")
+    return family
 
 
 def ensure_model_dictionary_table() -> None:
@@ -17,6 +30,7 @@ def ensure_model_dictionary_table() -> None:
     CREATE TABLE IF NOT EXISTS model_dictionary (
         `id` INT NOT NULL AUTO_INCREMENT,
         `model_name` VARCHAR(100) NOT NULL,
+        `model_family` VARCHAR(32) NULL,
         `sort_order` INT NOT NULL DEFAULT 0,
         `enabled` TINYINT(1) NOT NULL DEFAULT 1,
         `remark` VARCHAR(255) DEFAULT '',
@@ -27,6 +41,29 @@ def ensure_model_dictionary_table() -> None:
     """
     with get_engine().begin() as conn:
         conn.execute(text(ddl))
+        has_family = conn.execute(text("SHOW COLUMNS FROM model_dictionary LIKE 'model_family'")).fetchone()
+        if not has_family:
+            conn.execute(text("ALTER TABLE model_dictionary ADD COLUMN `model_family` VARCHAR(32) NULL AFTER `model_name`"))
+        next_order = int(conn.execute(text("SELECT COALESCE(MAX(`sort_order`), -1) + 1 FROM model_dictionary")).scalar() or 0)
+        exists = conn.execute(
+            text("SELECT `id` FROM model_dictionary WHERE UPPER(TRIM(`model_name`)) = 'FH-300C' LIMIT 1")
+        ).fetchone()
+        if exists:
+            conn.execute(
+                text(
+                    "UPDATE model_dictionary "
+                    "SET `model_name`='FH-300C', `model_family`='小机G', `enabled`=1 "
+                    "WHERE UPPER(TRIM(`model_name`)) = 'FH-300C'"
+                )
+            )
+        else:
+            conn.execute(
+                text(
+                    "INSERT INTO model_dictionary (`model_name`, `model_family`, `sort_order`, `enabled`, `remark`) "
+                    "VALUES ('FH-300C', '小机G', :sort_order, 1, '老板计划小机G机型')"
+                ),
+                {"sort_order": next_order},
+            )
 
 
 def get_model_dictionary() -> list[dict]:
@@ -35,7 +72,7 @@ def get_model_dictionary() -> list[dict]:
         with get_engine().connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT `id`, `model_name`, `sort_order`, `enabled`, `remark`, `updated_at` "
+                    "SELECT `id`, `model_name`, `model_family`, `sort_order`, `enabled`, `remark`, `updated_at` "
                     "FROM model_dictionary "
                     "ORDER BY `sort_order` ASC, `id` ASC"
                 )
@@ -60,6 +97,7 @@ def get_enabled_model_names() -> list[str]:
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"读取机型字典失败: {e}") from e
 
+
 def is_model_enabled(model_name: object) -> bool:
     clean = _clean_name(model_name).replace("(加高)", "").strip()
     if not clean:
@@ -71,7 +109,6 @@ def is_model_enabled(model_name: object) -> bool:
 
 
 def find_disabled_models(model_names: Iterable[object]) -> list[str]:
-    """批量校验机型，返回不在启用字典中的机型列表（去重后）。"""
     enabled = set(get_enabled_model_names())
     invalid: list[str] = []
     seen = set()
@@ -98,10 +135,12 @@ def save_model_dictionary(rows: Iterable[dict]) -> int:
             item_id = int(row.get("id")) if row.get("id") is not None and str(row.get("id")).strip() else None
             enabled = 1 if bool(row.get("enabled", True)) else 0
             remark = str(row.get("remark") or "").strip()
+            model_family = _normalize_family(row.get("model_family"))
             cleaned.append(
                 {
                     "id": item_id,
                     "model_name": model_name,
+                    "model_family": model_family or None,
                     "sort_order": idx,
                     "enabled": enabled,
                     "remark": remark,
@@ -134,7 +173,8 @@ def save_model_dictionary(rows: Iterable[dict]) -> int:
                     result = conn.execute(
                         text(
                             "UPDATE model_dictionary "
-                            "SET `model_name`=:model_name, `sort_order`=:sort_order, `enabled`=:enabled, `remark`=:remark "
+                            "SET `model_name`=:model_name, `model_family`=:model_family, "
+                            "`sort_order`=:sort_order, `enabled`=:enabled, `remark`=:remark "
                             "WHERE `id`=:id"
                         ),
                         row,
@@ -144,11 +184,12 @@ def save_model_dictionary(rows: Iterable[dict]) -> int:
 
                 conn.execute(
                     text(
-                        "INSERT INTO model_dictionary (`model_name`, `sort_order`, `enabled`, `remark`) "
-                        "VALUES (:model_name, :sort_order, :enabled, :remark)"
+                        "INSERT INTO model_dictionary (`model_name`, `model_family`, `sort_order`, `enabled`, `remark`) "
+                        "VALUES (:model_name, :model_family, :sort_order, :enabled, :remark)"
                     ),
                     {
                         "model_name": row["model_name"],
+                        "model_family": row["model_family"],
                         "sort_order": row["sort_order"],
                         "enabled": row["enabled"],
                         "remark": row["remark"],
