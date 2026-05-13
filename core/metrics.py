@@ -13,7 +13,7 @@ def get_urgent_production_count():
     for _, row in fp.iterrows():
         status = str(row['状态']).strip()
         deadline_str = str(row['要求交期']).strip()
-        if status == "未下单" and deadline_str:
+        if status == "待规划" and deadline_str:
             try:
                 d_date = datetime.strptime(deadline_str, "%Y-%m-%d").date()
                 if d_date <= target_date:

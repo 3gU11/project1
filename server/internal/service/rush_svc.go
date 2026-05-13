@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ type RushInsertReq struct {
 		ModelType  string `json:"model_type" binding:"required"`
 		DealerName string `json:"dealer_name"`
 		DueDate    string `json:"due_date"`
+		Remark     string `json:"remark"`
 	} `json:"rush_order" binding:"required"`
 	Reason string `json:"reason"`
 }
@@ -64,13 +66,10 @@ type orderPayload struct {
 	DueDate     *time.Time
 	SalesID     *string
 	OrderRemark *string
+	ModelType   string
 }
 
 func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
-	family := engine.NormalizeModelType(req.RushOrder.ModelType)
-	if family == "" {
-		return fmt.Errorf("invalid rush model type")
-	}
 	targetModel := strings.TrimSpace(req.RushOrder.ModelType)
 	if targetModel == "" {
 		return fmt.Errorf("invalid rush model type")
@@ -78,14 +77,24 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 
 	tx := s.db.Begin()
 	defer tx.Rollback()
-
-	// 1) Build production chain by exact model, ordered by earliest batch line then next lines.
-	chain, err := s.loadProductionModelChain(tx, family, targetModel)
+	family, err := s.resolveBatchFamily(tx, targetModel)
 	if err != nil {
-		return fmt.Errorf("load production model chain: %w", err)
+		return fmt.Errorf("resolve rush model family: %w", err)
 	}
-	if len(chain) == 0 {
-		return fmt.Errorf("no model-matched units in production batches")
+	if family == "" {
+		return fmt.Errorf("invalid rush model type")
+	}
+	affectedUnitIDs := map[string]struct{}{}
+
+	isHigh := strings.Contains(req.RushOrder.Remark, "加高")
+
+	var chain []model.Unit
+	if !isHigh {
+		// 1) Build production chain by exact model, ordered by earliest batch line then next lines.
+		chain, err = s.loadProductionModelChain(tx, family, targetModel)
+		if err != nil {
+			return fmt.Errorf("load production model chain: %w", err)
+		}
 	}
 
 	var dueDate *time.Time
@@ -99,49 +108,63 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 		Customer:   strings.TrimSpace(req.RushOrder.Customer),
 		DealerName: strings.TrimSpace(req.RushOrder.DealerName),
 		DueDate:    dueDate,
+		ModelType:  targetModel,
+	}
+	if remark := strings.TrimSpace(req.RushOrder.Remark); remark != "" {
+		carry.OrderRemark = &remark
 	}
 	if carry.ContractNo == "" {
 		return fmt.Errorf("rush contract_no is required")
 	}
 
 	overflow := (*orderPayload)(nil)
-	for i := range chain {
-		u := chain[i]
-		if u.IsLocked {
-			return fmt.Errorf("unit is locked: %s", u.UnitID)
-		}
-		next := orderPayload{}
-		if u.ContractNo != nil && strings.TrimSpace(*u.ContractNo) != "" {
-			next.ContractNo = strings.TrimSpace(*u.ContractNo)
-			next.Customer = strings.TrimSpace(strPtrVal(u.Customer))
-			next.DealerName = strings.TrimSpace(strPtrVal(u.DealerName))
-			next.DueDate = u.DueDate
-			next.SalesID = u.SalesID
-			next.OrderRemark = u.OrderRemark
-		}
+	if len(chain) > 0 {
+		for i := range chain {
+			u := chain[i]
+			if u.IsLocked {
+				return fmt.Errorf("unit is locked: %s", u.UnitID)
+			}
+			next := orderPayload{}
+			if u.ContractNo != nil && strings.TrimSpace(*u.ContractNo) != "" {
+				next.ContractNo = strings.TrimSpace(*u.ContractNo)
+				next.Customer = strings.TrimSpace(strPtrVal(u.Customer))
+				next.DealerName = strings.TrimSpace(strPtrVal(u.DealerName))
+				next.DueDate = u.DueDate
+				next.SalesID = u.SalesID
+				next.OrderRemark = u.OrderRemark
+				next.ModelType = strings.TrimSpace(u.ModelType)
+			}
 
-		updates := map[string]interface{}{
-			"contract_no": carry.ContractNo,
-			"customer":    carry.Customer,
-			"dealer_name": carry.DealerName,
-			"due_date":    carry.DueDate,
-			"is_locked":   false,
-			"locked_by":   nil,
-			"locked_at":   nil,
-		}
-		if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
-			return fmt.Errorf("write rush chain: %w", err)
-		}
+			updates := map[string]interface{}{
+				"contract_no":  carry.ContractNo,
+				"customer":     carry.Customer,
+				"dealer_name":  carry.DealerName,
+				"due_date":     carry.DueDate,
+				"sales_id":     carry.SalesID,
+				"order_remark": carry.OrderRemark,
+				"model_type":   carry.ModelType,
+				"is_locked":    false,
+				"locked_by":    nil,
+				"locked_at":    nil,
+			}
+			if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
+				return fmt.Errorf("write rush chain: %w", err)
+			}
+			affectedUnitIDs[u.UnitID] = struct{}{}
 
-		if next.ContractNo == "" {
-			overflow = nil
-			break
+			if next.ContractNo == "" {
+				overflow = nil
+				break
+			}
+			carry = next
+			if i == len(chain)-1 {
+				tmp := carry
+				overflow = &tmp
+			}
 		}
-		carry = next
-		if i == len(chain)-1 {
-			tmp := carry
-			overflow = &tmp
-		}
+	} else {
+		tmp := carry
+		overflow = &tmp
 	}
 
 	// 2) If overflow exists, insert into sandbox first predicted batch of same family.
@@ -169,19 +192,24 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 					next.DueDate = u.DueDate
 					next.SalesID = u.SalesID
 					next.OrderRemark = u.OrderRemark
+					next.ModelType = strings.TrimSpace(u.ModelType)
 				}
 				updates := map[string]interface{}{
-					"contract_no": c2.ContractNo,
-					"customer":    c2.Customer,
-					"dealer_name": c2.DealerName,
-					"due_date":    c2.DueDate,
-					"is_locked":   false,
-					"locked_by":   nil,
-					"locked_at":   nil,
+					"contract_no":  c2.ContractNo,
+					"customer":     c2.Customer,
+					"dealer_name":  c2.DealerName,
+					"due_date":     c2.DueDate,
+					"sales_id":     c2.SalesID,
+					"order_remark": c2.OrderRemark,
+					"model_type":   c2.ModelType,
+					"is_locked":    false,
+					"locked_by":    nil,
+					"locked_at":    nil,
 				}
 				if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
 					return fmt.Errorf("write sandbox chain: %w", err)
 				}
+				affectedUnitIDs[u.UnitID] = struct{}{}
 				if next.ContractNo == "" {
 					c2.ContractNo = ""
 					break
@@ -197,7 +225,7 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 	}
 
 	// Only lock the rush landing card, do not lock the whole shifted chain.
-	if len(chain) > 0 {
+	if !isHigh && len(chain) > 0 {
 		for i := 1; i < len(chain); i++ {
 			if err := s.unitRepo.UnlockUnitDB(tx, chain[i].UnitID); err != nil {
 				return fmt.Errorf("unlock shifted unit: %w", err)
@@ -208,6 +236,22 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 		}
 	}
 
+	// For high rush orders, chain is empty, they go to sandbox directly. We should log chain2 instead if applicable.
+	targetUnitIDForLog := ""
+	if !isHigh && len(chain) > 0 {
+		targetUnitIDForLog = chain[0].UnitID
+	} else {
+		// Attempt to get sandbox landing unit id
+		chain2, err := s.loadSandboxModelChain(tx, family, targetModel)
+		if err == nil && len(chain2) > 0 {
+			targetUnitIDForLog = chain2[0].UnitID
+			// Also lock the first card in sandbox
+			if err := s.unitRepo.LockUnit(tx, targetUnitIDForLog, actor); err != nil {
+				return fmt.Errorf("lock rush landing unit in sandbox: %w", err)
+			}
+		}
+	}
+
 	detail, _ := json.Marshal(map[string]interface{}{
 		"mode":          "auto",
 		"rush_contract": req.RushOrder.ContractNo,
@@ -215,8 +259,14 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 	})
 	tx.Create(&model.OperationLog{
 		Actor: actor, Action: "rush_insert_auto", TargetType: "unit",
-		TargetID: chain[0].UnitID, Detail: detail, CreatedAt: time.Now(),
+		TargetID: targetUnitIDForLog, Detail: detail, CreatedAt: time.Now(),
 	})
+	if err := s.markRushContractPlanned(tx, req.RushOrder.ContractNo, req.RushOrder.ModelType); err != nil {
+		return fmt.Errorf("mark rush contract planned: %w", err)
+	}
+	if err := s.syncFinishedGoodsByUnitIDs(tx, mapKeys(affectedUnitIDs)); err != nil {
+		return fmt.Errorf("sync finished_goods_data: %w", err)
+	}
 
 	if err := tx.Commit().Error; err != nil {
 		return fmt.Errorf("commit: %w", err)
@@ -226,10 +276,6 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 }
 
 func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
-	family := engine.NormalizeModelType(req.RushOrder.ModelType)
-	if family == "" {
-		return fmt.Errorf("invalid rush model type")
-	}
 	targetModel := strings.TrimSpace(req.RushOrder.ModelType)
 	if targetModel == "" {
 		return fmt.Errorf("invalid rush model type")
@@ -237,6 +283,16 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 
 	tx := s.db.Begin()
 	defer tx.Rollback()
+	family, err := s.resolveBatchFamily(tx, targetModel)
+	if err != nil {
+		return fmt.Errorf("resolve rush model family: %w", err)
+	}
+	if family == "" {
+		return fmt.Errorf("invalid rush model type")
+	}
+	affectedUnitIDs := map[string]struct{}{}
+
+	isHigh := strings.Contains(req.RushOrder.Remark, "加高")
 
 	target, err := s.unitRepo.LockForUpdate(tx, req.TargetUnitID)
 	if err != nil {
@@ -245,26 +301,48 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 	if target.IsLocked {
 		return fmt.Errorf("target unit is locked")
 	}
-	if engine.NormalizeModelType(target.ModelType) != family {
+	targetFamily, err := s.resolveBatchFamily(tx, target.ModelType)
+	if err != nil {
+		return fmt.Errorf("resolve target model family: %w", err)
+	}
+	if targetFamily != family {
 		return fmt.Errorf("model type mismatch")
 	}
 
-	chain, err := s.loadProductionModelChain(tx, family, targetModel)
-	if err != nil {
-		return fmt.Errorf("load production model chain: %w", err)
-	}
-	if len(chain) == 0 {
-		return fmt.Errorf("no model-matched units in production")
-	}
+	var chain []model.Unit
 	start := -1
-	for i := range chain {
-		if chain[i].UnitID == req.TargetUnitID {
-			start = i
-			break
+	if !isHigh {
+		chain, err = s.loadProductionModelChain(tx, family, targetModel)
+		if err != nil && err.Error() != "target model is empty" {
+			// ignore
+		}
+		for i := range chain {
+			if chain[i].UnitID == req.TargetUnitID {
+				start = i
+				break
+			}
 		}
 	}
+
+	var chain2 []model.Unit
+	start2 := -1
 	if start < 0 {
-		return fmt.Errorf("target unit not in production chain")
+		chain2, err = s.loadSandboxModelChain(tx, family, targetModel)
+		if err != nil {
+			return fmt.Errorf("load sandbox chain: %w", err)
+		}
+		for i := range chain2 {
+			if chain2[i].UnitID == req.TargetUnitID {
+				start2 = i
+				break
+			}
+		}
+		if start2 < 0 {
+			if isHigh {
+				return fmt.Errorf("加高急单不能插入到生产看板（生产中）的定死机台中，请插入沙盘批次")
+			}
+			return fmt.Errorf("target unit not found in any valid chain")
+		}
 	}
 
 	var dueDate *time.Time
@@ -278,54 +356,69 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 		Customer:   strings.TrimSpace(req.RushOrder.Customer),
 		DealerName: strings.TrimSpace(req.RushOrder.DealerName),
 		DueDate:    dueDate,
+		ModelType:  targetModel,
+	}
+	if remark := strings.TrimSpace(req.RushOrder.Remark); remark != "" {
+		carry.OrderRemark = &remark
 	}
 	if carry.ContractNo == "" {
 		return fmt.Errorf("rush contract_no is required")
 	}
 
 	overflow := (*orderPayload)(nil)
-	for i := start; i < len(chain); i++ {
-		u := chain[i]
-		if u.IsLocked {
-			return fmt.Errorf("unit is locked: %s", u.UnitID)
+	if start >= 0 {
+		for i := start; i < len(chain); i++ {
+			u := chain[i]
+			if u.IsLocked {
+				return fmt.Errorf("unit is locked: %s", u.UnitID)
+			}
+			next := orderPayload{}
+			if u.ContractNo != nil && strings.TrimSpace(*u.ContractNo) != "" {
+				next.ContractNo = strings.TrimSpace(*u.ContractNo)
+				next.Customer = strings.TrimSpace(strPtrVal(u.Customer))
+				next.DealerName = strings.TrimSpace(strPtrVal(u.DealerName))
+				next.DueDate = u.DueDate
+				next.SalesID = u.SalesID
+				next.OrderRemark = u.OrderRemark
+				next.ModelType = strings.TrimSpace(u.ModelType)
+			}
+			updates := map[string]interface{}{
+				"contract_no":  carry.ContractNo,
+				"customer":     carry.Customer,
+				"dealer_name":  carry.DealerName,
+				"due_date":     carry.DueDate,
+				"sales_id":     carry.SalesID,
+				"order_remark": carry.OrderRemark,
+				"model_type":   carry.ModelType,
+				"is_locked":    false,
+				"locked_by":    nil,
+				"locked_at":    nil,
+			}
+			if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
+				return fmt.Errorf("write manual rush chain: %w", err)
+			}
+			affectedUnitIDs[u.UnitID] = struct{}{}
+			if next.ContractNo == "" {
+				overflow = nil
+				break
+			}
+			carry = next
+			if i == len(chain)-1 {
+				tmp := carry
+				overflow = &tmp
+			}
 		}
-		next := orderPayload{}
-		if u.ContractNo != nil && strings.TrimSpace(*u.ContractNo) != "" {
-			next.ContractNo = strings.TrimSpace(*u.ContractNo)
-			next.Customer = strings.TrimSpace(strPtrVal(u.Customer))
-			next.DealerName = strings.TrimSpace(strPtrVal(u.DealerName))
-			next.DueDate = u.DueDate
-			next.SalesID = u.SalesID
-			next.OrderRemark = u.OrderRemark
-		}
-		updates := map[string]interface{}{
-			"contract_no": carry.ContractNo,
-			"customer":    carry.Customer,
-			"dealer_name": carry.DealerName,
-			"due_date":    carry.DueDate,
-			"is_locked":   false,
-			"locked_by":   nil,
-			"locked_at":   nil,
-		}
-		if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
-			return fmt.Errorf("write manual rush chain: %w", err)
-		}
-		if next.ContractNo == "" {
-			overflow = nil
-			break
-		}
-		carry = next
-		if i == len(chain)-1 {
-			tmp := carry
-			overflow = &tmp
-		}
+	} else {
+		tmp := carry
+		overflow = &tmp
 	}
 
 	if overflow != nil && overflow.ContractNo != "" {
-		// Reuse same overflow behavior as auto mode.
-		chain2, err := s.loadSandboxModelChain(tx, family, targetModel)
-		if err != nil {
-			return fmt.Errorf("load sandbox chain: %w", err)
+		if len(chain2) == 0 {
+			chain2, err = s.loadSandboxModelChain(tx, family, targetModel)
+			if err != nil {
+				return fmt.Errorf("load sandbox chain: %w", err)
+			}
 		}
 		if len(chain2) == 0 {
 			if err := s.enqueueOverflow(tx, family, overflow); err != nil {
@@ -333,7 +426,11 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 			}
 		} else {
 			c2 := *overflow
-			for i := range chain2 {
+			startIndex := 0
+			if start2 >= 0 {
+				startIndex = start2
+			}
+			for i := startIndex; i < len(chain2); i++ {
 				u := chain2[i]
 				if u.IsLocked {
 					return fmt.Errorf("sandbox unit locked: %s", u.UnitID)
@@ -344,19 +441,26 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 					next.Customer = strings.TrimSpace(strPtrVal(u.Customer))
 					next.DealerName = strings.TrimSpace(strPtrVal(u.DealerName))
 					next.DueDate = u.DueDate
+					next.SalesID = u.SalesID
+					next.OrderRemark = u.OrderRemark
+					next.ModelType = strings.TrimSpace(u.ModelType)
 				}
 				updates := map[string]interface{}{
-					"contract_no": c2.ContractNo,
-					"customer":    c2.Customer,
-					"dealer_name": c2.DealerName,
-					"due_date":    c2.DueDate,
-					"is_locked":   false,
-					"locked_by":   nil,
-					"locked_at":   nil,
+					"contract_no":  c2.ContractNo,
+					"customer":     c2.Customer,
+					"dealer_name":  c2.DealerName,
+					"due_date":     c2.DueDate,
+					"sales_id":     c2.SalesID,
+					"order_remark": c2.OrderRemark,
+					"model_type":   c2.ModelType,
+					"is_locked":    false,
+					"locked_by":    nil,
+					"locked_at":    nil,
 				}
 				if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
 					return fmt.Errorf("write sandbox chain: %w", err)
 				}
+				affectedUnitIDs[u.UnitID] = struct{}{}
 				if next.ContractNo == "" {
 					c2.ContractNo = ""
 					break
@@ -381,6 +485,15 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 		if err := s.unitRepo.LockUnit(tx, chain[start].UnitID, actor); err != nil {
 			return fmt.Errorf("lock rush landing unit: %w", err)
 		}
+	} else if start2 >= 0 && start2 < len(chain2) {
+		for i := start2 + 1; i < len(chain2); i++ {
+			if err := s.unitRepo.UnlockUnitDB(tx, chain2[i].UnitID); err != nil {
+				return fmt.Errorf("unlock shifted unit: %w", err)
+			}
+		}
+		if err := s.unitRepo.LockUnit(tx, chain2[start2].UnitID, actor); err != nil {
+			return fmt.Errorf("lock rush landing unit: %w", err)
+		}
 	}
 
 	detail, _ := json.Marshal(map[string]interface{}{
@@ -393,6 +506,12 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 		Actor: actor, Action: "rush_insert_manual_shift", TargetType: "unit",
 		TargetID: req.TargetUnitID, Detail: detail, CreatedAt: time.Now(),
 	})
+	if err := s.markRushContractPlanned(tx, req.RushOrder.ContractNo, req.RushOrder.ModelType); err != nil {
+		return fmt.Errorf("mark rush contract planned: %w", err)
+	}
+	if err := s.syncFinishedGoodsByUnitIDs(tx, mapKeys(affectedUnitIDs)); err != nil {
+		return fmt.Errorf("sync finished_goods_data: %w", err)
+	}
 	if err := tx.Commit().Error; err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
@@ -406,18 +525,17 @@ func (s *RushSvc) loadProductionModelChain(tx *gorm.DB, family, targetModel stri
 		return nil, fmt.Errorf("target model is empty")
 	}
 
-	// Production chain: exact model only, earliest in-production/confirmed batches first,
-	// then line order, then batch and slot order.
+	// Production chain: exact model only, earliest in-production batches first.
 	var units []model.Unit
 	err := tx.Model(&model.Unit{}).
+		Select("units.*").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Joins("JOIN batches b ON b.batch_id = units.batch_id").
 		Joins("LEFT JOIN production_lines pl ON pl.line_id = b.production_line_id").
 		Where("b.model_type = ?", family).
-		Where("b.status IN ?", []string{model.StatusInProduction, model.StatusConfirmed}).
+		Where("b.status = ?", model.StatusInProduction).
 		Where("units.is_locked = ?", false).
 		Where("TRIM(units.model_type) = ?", normalizedModel).
-		Order("CASE WHEN b.status = 'In_Production' THEN 0 ELSE 1 END ASC").
 		Order("COALESCE(pl.display_order, 999999) ASC").
 		Order("b.batch_no ASC").
 		Order("units.slot_index ASC").
@@ -428,24 +546,54 @@ func (s *RushSvc) loadProductionModelChain(tx *gorm.DB, family, targetModel stri
 	return units, nil
 }
 
+func (s *RushSvc) resolveBatchFamily(tx *gorm.DB, modelType string) (string, error) {
+	modelName := strings.TrimSpace(modelType)
+	if modelName == "" {
+		return "", nil
+	}
+
+	var row struct {
+		ModelFamily string `gorm:"column:model_family"`
+	}
+	if err := tx.Table("model_dictionary").
+		Select("model_family").
+		Where("enabled = 1").
+		Where("UPPER(TRIM(model_name)) = UPPER(?)", modelName).
+		Limit(1).
+		Scan(&row).Error; err != nil {
+		return "", err
+	}
+
+	family := strings.ToUpper(strings.TrimSpace(row.ModelFamily))
+	if family == "SPECIAL" || strings.Contains(row.ModelFamily, "特殊") {
+		return "SPECIAL", nil
+	}
+	if family == "G" || family == "XS" || family == "AUTO" {
+		return family, nil
+	}
+	return engine.NormalizeModelType(modelName), nil
+}
+
 func (s *RushSvc) loadSandboxModelChain(tx *gorm.DB, family, targetModel string) ([]model.Unit, error) {
 	normalizedModel := strings.TrimSpace(targetModel)
+	isHighModel := strings.Contains(normalizedModel, "加高")
 
-	// Sandbox insertion starts from first predicted batch in the same family.
-	// Prefer exact-model slots first; if insufficient, continue with same-family slots.
+	// Sandbox insertion starts from first confirmed or predicted batch in the same family.
 	var units []model.Unit
 	q := tx.Model(&model.Unit{}).
+		Select("units.*").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Joins("JOIN batches b ON b.batch_id = units.batch_id").
 		Where("b.model_type = ?", family).
-		Where("b.status = ?", model.StatusPredicted).
+		Where("b.status IN ?", []string{model.StatusConfirmed, model.StatusPredicted}).
 		Where("units.is_locked = ?", false).
+		Order("CASE WHEN b.status = 'Confirmed' THEN 0 ELSE 1 END ASC").
 		Order("b.batch_no ASC").
 		Order(clause.Expr{SQL: "CASE WHEN TRIM(units.model_type) = ? THEN 0 ELSE 1 END ASC", Vars: []interface{}{normalizedModel}}).
 		Order("units.slot_index ASC")
-	if normalizedModel != "" {
+	if normalizedModel != "" && !isHighModel {
 		q = q.Where("(TRIM(units.model_type) = ? OR units.model_type = ?)", normalizedModel, family)
-	} else {
+	} else if normalizedModel == "" {
 		q = q.Where("units.model_type = ?", family)
 	}
 	err := q.Find(&units).Error
@@ -537,6 +685,9 @@ func (s *RushSvc) SwapContent(req SwapContentReq, actor string) error {
 		Actor: actor, Action: "swap_content", TargetType: "unit",
 		TargetID: req.TargetUnitID, Detail: detail, CreatedAt: time.Now(),
 	})
+	if err := s.syncFinishedGoodsByUnitIDs(tx, []string{req.SourceUnitID, req.TargetUnitID, req.FallbackUnitID}); err != nil {
+		return fmt.Errorf("sync finished_goods_data: %w", err)
+	}
 
 	if err := tx.Commit().Error; err != nil {
 		return err
@@ -555,6 +706,143 @@ func strPtrVal(v *string) string {
 	return *v
 }
 
+func mapKeys(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (s *RushSvc) syncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
+	if len(unitIDs) == 0 {
+		return nil
+	}
+	cols, err := tableColumns(tx, "finished_goods_data")
+	if err != nil {
+		return err
+	}
+	if !cols["流水号"] {
+		return fmt.Errorf("finished_goods_data missing column: 流水号")
+	}
+
+	var units []model.Unit
+	if err := tx.Where("unit_id IN ?", unitIDs).Find(&units).Error; err != nil {
+		return err
+	}
+	for _, u := range units {
+		contractNo := strings.TrimSpace(strPtrVal(u.ContractNo))
+		salesID := strings.TrimSpace(strPtrVal(u.SalesID))
+		customer := strings.TrimSpace(strPtrVal(u.Customer))
+		dealerName := strings.TrimSpace(strPtrVal(u.DealerName))
+		orderRemark := strings.TrimSpace(strPtrVal(u.OrderRemark))
+
+		updates := map[string]interface{}{}
+		if cols["合同号"] {
+			updates["合同号"] = contractNo
+		}
+		if cols["占用订单号"] {
+			updates["占用订单号"] = salesID
+		}
+		if cols["客户"] {
+			updates["客户"] = customer
+		}
+		if cols["代理商"] {
+			updates["代理商"] = dealerName
+		}
+		if cols["合同备注"] {
+			updates["合同备注"] = orderRemark
+		}
+		if cols["状态"] {
+			if contractNo != "" {
+				updates["状态"] = "待发货"
+			} else {
+				updates["状态"] = "待入库"
+			}
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		serials := unitSerialCandidates(u)
+		if len(serials) == 0 {
+			continue
+		}
+		if err := tx.Table("finished_goods_data").
+			Where("TRIM(COALESCE(`流水号`, '')) IN ?", serials).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func unitSerialCandidates(u model.Unit) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, 3)
+	for _, v := range []string{strPtrVal(u.SerialNo), strPtrVal(u.ForecastSerialNo), u.UnitID} {
+		s := strings.TrimSpace(v)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		result = append(result, s)
+	}
+	return result
+}
+
+func tableColumns(tx *gorm.DB, tableName string) (map[string]bool, error) {
+	var rows []struct {
+		Field string `gorm:"column:Field"`
+	}
+	if err := tx.Raw("SHOW COLUMNS FROM " + tableName).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	cols := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		cols[r.Field] = true
+	}
+	return cols, nil
+}
+
+func (s *RushSvc) markRushContractPlanned(tx *gorm.DB, contractNo string, modelType string) error {
+	cn := strings.TrimSpace(contractNo)
+	mt := strings.TrimSpace(modelType)
+	if cn == "" {
+		return nil
+	}
+	// Rush orders are inserted as 未下单, while normal planning may already normalize them to 待规划.
+	// Treat both as plannable here because the board insertion is the planning action for rush orders.
+	ret := tx.Exec(
+		"UPDATE factory_plan SET `状态` = '已规划' "+
+			"WHERE TRIM(COALESCE(`合同号`, '')) = ? "+
+			"AND TRIM(COALESCE(`机型`, '')) COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci "+
+			"AND TRIM(COALESCE(`状态`, '')) IN ('待规划', '未下单', '')",
+		cn, mt,
+	)
+	if ret.Error != nil {
+		return ret.Error
+	}
+	if ret.RowsAffected > 0 || mt == "" {
+		return nil
+	}
+	return tx.Exec(
+		"UPDATE factory_plan SET `状态` = '已规划' "+
+			"WHERE TRIM(COALESCE(`合同号`, '')) = ? "+
+			"AND TRIM(COALESCE(`状态`, '')) IN ('待规划', '未下单', '')",
+		cn,
+	).Error
+}
+
 // enqueueOverflow 将溢出订单写入 production_queue。
 // 兼容旧版 schema：若表中无 priority/payload 列，仅写入基础字段。
 func (s *RushSvc) enqueueOverflow(tx *gorm.DB, family string, p *orderPayload) error {
@@ -567,11 +855,12 @@ func (s *RushSvc) enqueueOverflow(tx *gorm.DB, family string, p *orderPayload) e
 
 	if hasNewCols {
 		row := map[string]interface{}{
-			"model_type":  family,
-			"contract_no": p.ContractNo,
-			"status":      model.QueueWaiting,
-			"priority":    0,
-			"due_date":    dueStr,
+			"model_type":         family,
+			"contract_no":        p.ContractNo,
+			"status":             model.QueueWaiting,
+			"priority":           0,
+			"due_date":           dueStr,
+			"quantity_remaining": 1,
 		}
 		payload, _ := json.Marshal(map[string]interface{}{
 			"customer":    p.Customer,
@@ -599,6 +888,8 @@ func (s *RushSvc) enqueueOverflow(tx *gorm.DB, family string, p *orderPayload) e
 			row[c] = dueStr
 		case "status":
 			row[c] = model.QueueWaiting
+		case "quantity_remaining":
+			row[c] = 1
 		}
 	}
 	if len(row) == 0 {

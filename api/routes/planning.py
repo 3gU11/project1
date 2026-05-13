@@ -8,19 +8,21 @@ import os
 import uuid
 from datetime import datetime
 import pandas as pd
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query, Request, BackgroundTasks
+import httpx
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import json
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
-from config import BASE_DIR
+from config import BASE_DIR, GO_SANDBOX_URL, GO_INTERNAL_TOKEN
 from core.file_manager import delete_contract_file, save_contract_file
 from crud.audit_logs import append_audit_log
 from crud.contracts import get_contract_files
-from crud.inventory import get_data
+from crud.inventory import get_data, save_data
+from crud.logs import append_log
 from crud.model_dictionary import is_model_enabled
-from crud.planning import get_factory_plan, save_factory_plan
+from crud.planning import get_factory_plan, get_factory_plan_v2, save_factory_plan
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from utils.parsers import parse_alloc_dict
@@ -32,7 +34,7 @@ router = APIRouter(dependencies=[Depends(get_current_user_token)])
 def _parse_order_need_total(row: pd.Series) -> int:
     raw = str(row.get("需求机型", "") or "")
     total = 0
-    for token_raw in raw.split(";"):
+    for token_raw in re.split(r"[;；/,，]", raw):
         token = token_raw.strip()
         if not token:
             continue
@@ -47,6 +49,28 @@ def _parse_order_need_total(row: pd.Series) -> int:
     except Exception:
         fallback = 0
     return max(0, fallback)
+
+
+def _parse_order_demand_counts(row: pd.Series) -> dict[str, int]:
+    raw = str(row.get("需求机型", "") or "")
+    counts: dict[str, int] = {}
+    for token_raw in raw.split(";"):
+        token = token_raw.strip()
+        if not token:
+            continue
+        m = re.search(r"(?:[x×:：]\s*)(\d+)\s*$", token, flags=re.IGNORECASE)
+        qty = int(m.group(1)) if m else 0
+        model = re.sub(r"(?:[x×:：]\s*)\d+\s*$", "", token, flags=re.IGNORECASE).strip()
+        model = model.replace("(加高)", "").strip()
+        if model and qty > 0:
+            counts[model] = counts.get(model, 0) + qty
+    if counts:
+        return counts
+    fallback_model = raw.strip()
+    fallback_qty = _parse_order_need_total(row)
+    if fallback_model and fallback_qty > 0:
+        return {fallback_model: fallback_qty}
+    return {}
 
 
 def _extract_models_from_demand_text(raw_text: str) -> list[str]:
@@ -180,6 +204,7 @@ class BatchContractRowPayload(BaseModel):
 class BatchContractCreatePayload(BaseModel):
     rows: List[BatchContractRowPayload]
     is_rush: bool = False
+    save_mode: str = "sandbox"  # sandbox | spot
 
 
 class LinkOrderPayload(BaseModel):
@@ -225,6 +250,88 @@ def _insert_production_queue(rows: list[dict[str, Any]]) -> int:
     return len(insert_values)
 
 
+def _trigger_sandbox_recompute_sync(user_ctx: dict):
+    headers = {
+        "Content-Type": "application/json",
+        "X-Username": str(user_ctx.get("username") or ""),
+        "X-Role": str(user_ctx.get("role") or ""),
+    }
+    if GO_INTERNAL_TOKEN:
+        headers["X-Internal-Token"] = GO_INTERNAL_TOKEN
+    
+    try:
+        with httpx.Client(timeout=10.0, trust_env=False) as client:
+            client.post(f"{GO_SANDBOX_URL}/api/forecast/recompute", headers=headers)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Auto-recompute failed: {e}")
+
+
+def _is_high_rush_row(row: dict[str, Any]) -> bool:
+    return "加高" in str(row.get("remark") or "")
+
+
+def _auto_insert_high_rush_orders(rows: list[dict[str, Any]], user_ctx: dict, current_operator: str = "") -> int:
+    high_rows = [row for row in (rows or []) if _is_high_rush_row(row)]
+    if not high_rows:
+        return 0
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Username": str(user_ctx.get("username") or current_operator or ""),
+        "X-Role": str(user_ctx.get("role") or ""),
+        "X-User-ID": str(user_ctx.get("username") or current_operator or ""),
+    }
+    if GO_INTERNAL_TOKEN:
+        headers["X-Internal-Token"] = GO_INTERNAL_TOKEN
+
+    inserted = 0
+    import logging
+    logger = logging.getLogger(__name__)
+    with httpx.Client(timeout=20.0, trust_env=False) as client:
+        for row in high_rows:
+            qty = int(row.get("qty") or 0)
+            for _ in range(max(0, qty)):
+                payload = {
+                    "mode": "auto",
+                    "rush_order": {
+                        "contract_no": str(row.get("contract_no") or "").strip(),
+                        "customer": str(row.get("customer") or "").strip(),
+                        "model_type": str(row.get("model_type") or "").strip(),
+                        "dealer_name": str(row.get("dealer_name") or "").strip(),
+                        "due_date": str(row.get("due_date") or "").strip(),
+                        "remark": str(row.get("remark") or "").strip(),
+                    },
+                    "reason": "加高急单录入后自动进入沙盘",
+                }
+                try:
+                    resp = client.post(f"{GO_SANDBOX_URL}/api/units/rush-insert", headers=headers, json=payload)
+                    if resp.status_code >= 400:
+                        logger.warning("High rush auto insert failed for %s: %s", payload["rush_order"]["contract_no"], resp.text)
+                        break
+                    with get_engine().begin() as conn:
+                        conn.execute(text("""
+                            UPDATE rush_order_queue
+                            SET `status` = 'inserted', `updated_by` = :updated_by
+                            WHERE `contract_no` = :contract_no
+                              AND `model_type` = :model_type
+                              AND COALESCE(`remark`, '') = :remark
+                              AND `status` = 'pending'
+                            ORDER BY id ASC
+                            LIMIT 1
+                        """), {
+                            "updated_by": str(user_ctx.get("username") or current_operator or ""),
+                            "contract_no": payload["rush_order"]["contract_no"],
+                            "model_type": payload["rush_order"]["model_type"],
+                            "remark": payload["rush_order"]["remark"],
+                        })
+                    inserted += 1
+                except Exception as e:
+                    logger.warning("High rush auto insert exception for %s: %s", payload["rush_order"]["contract_no"], e)
+                    break
+    return inserted
+
+
 def _insert_rush_order_queue(rows: list[dict[str, Any]], created_by: str = "") -> int:
     if not rows:
         return 0
@@ -245,6 +352,7 @@ def _insert_rush_order_queue(rows: list[dict[str, Any]], created_by: str = "") -
                 "dealer_name": str(row.get("dealer_name") or "").strip(),
                 "model_type": model_type,
                 "due_date": due_date,
+                "remark": str(row.get("remark") or "").strip(),
                 "source": "contract",
                 "status": "pending",
                 "created_by": str(created_by or "").strip(),
@@ -256,9 +364,9 @@ def _insert_rush_order_queue(rows: list[dict[str, Any]], created_by: str = "") -
         conn.execute(
             text("""
                 INSERT INTO rush_order_queue
-                    (contract_no, customer, dealer_name, model_type, due_date, source, status, created_by, updated_by)
+                    (contract_no, customer, dealer_name, model_type, due_date, remark, source, status, created_by, updated_by)
                 VALUES
-                    (:contract_no, :customer, :dealer_name, :model_type, :due_date, :source, :status, :created_by, :updated_by)
+                    (:contract_no, :customer, :dealer_name, :model_type, :due_date, :remark, :source, :status, :created_by, :updated_by)
             """),
             insert_rows,
         )
@@ -266,6 +374,8 @@ def _insert_rush_order_queue(rows: list[dict[str, Any]], created_by: str = "") -
 
 
 def _clean_contract_ids(values: List[str] | None) -> list[str]:
+    if isinstance(values, str):
+        values = [v for v in re.split(r"[,\s;，；]+", values) if v]
     result: list[str] = []
     seen = set()
     for item in values or []:
@@ -280,24 +390,183 @@ def _user_id_from_context(current_user) -> str:
     return current_user.get("username") if isinstance(current_user, dict) else ""
 
 
-def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str = "已下单") -> int:
+def _occupy_inventory_for_order(contract_ids: list[str], order_id: str) -> int:
+    contract_ids = _clean_contract_ids(contract_ids)
+    order_id = str(order_id or "").strip()
+    if not contract_ids or not order_id:
+        return 0
+    with get_engine().begin() as conn:
+        if not (
+            _table_has_column(conn, "finished_goods_data", "合同号")
+            and _table_has_column(conn, "finished_goods_data", "占用订单号")
+            and _table_has_column(conn, "finished_goods_data", "状态")
+        ):
+            return 0
+        ret = conn.execute(
+            text(
+                "UPDATE finished_goods_data "
+                "SET `占用订单号` = :order_id "
+                "WHERE TRIM(COALESCE(`合同号`, '')) COLLATE utf8mb4_general_ci IN :contract_ids "
+                "AND TRIM(COALESCE(`状态`, '')) <> '已出库' "
+                "AND (COALESCE(TRIM(`占用订单号`), '') = '' OR TRIM(`占用订单号`) = :order_id)"
+            ).bindparams(bindparam("contract_ids", expanding=True)),
+            {"contract_ids": contract_ids, "order_id": order_id},
+        )
+    return int(ret.rowcount or 0)
+
+
+def _table_has_column(conn, table_name: str, column_name: str) -> bool:
+    try:
+        return conn.execute(
+            text(f"SHOW COLUMNS FROM `{table_name}` LIKE :column_name"),
+            {"column_name": column_name},
+        ).fetchone() is not None
+    except Exception:
+        return False
+
+
+def _ensure_plan_import_order_column(conn) -> None:
+    if not _table_has_column(conn, "plan_import", "订单号"):
+        conn.execute(text("ALTER TABLE plan_import ADD COLUMN `订单号` VARCHAR(100) DEFAULT '' AFTER `合同号`"))
+
+
+def _sync_order_to_units_and_import(contract_ids: list[str], order_id: str) -> dict[str, int]:
+    contract_ids = _clean_contract_ids(contract_ids)
+    order_id = str(order_id or "").strip()
+    if not contract_ids or not order_id:
+        return {"units": 0, "plan_import": 0}
+
+    with get_engine().begin() as conn:
+        conflicts = conn.execute(
+            text(
+                "SELECT DISTINCT contract_no, sales_id FROM units "
+                "WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci IN :contract_ids "
+                "AND COALESCE(TRIM(sales_id), '') <> '' "
+                "AND TRIM(sales_id) <> :order_id"
+            ).bindparams(bindparam("contract_ids", expanding=True)),
+            {"contract_ids": contract_ids, "order_id": order_id},
+        ).fetchall()
+        if conflicts:
+            conflict_contract = str(conflicts[0][0] or "").strip()
+            conflict_order = str(conflicts[0][1] or "").strip()
+            raise HTTPException(status_code=422, detail=f"合同 {conflict_contract} 已绑定其他订单 {conflict_order}")
+
+        unit_ret = conn.execute(
+            text(
+                "UPDATE units SET sales_id = :order_id, updated_at = NOW() "
+                "WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci IN :contract_ids "
+                "AND (sales_id IS NULL OR TRIM(sales_id) = '' OR TRIM(sales_id) = :order_id)"
+            ).bindparams(bindparam("contract_ids", expanding=True)),
+            {"contract_ids": contract_ids, "order_id": order_id},
+        )
+
+        finished_goods_rows = 0
+        if _table_has_column(conn, "finished_goods_data", "流水号") and _table_has_column(conn, "finished_goods_data", "占用订单号"):
+            unit_serial_rows = conn.execute(
+                text(
+                    "SELECT serial_no, forecast_serial_no, unit_id FROM units "
+                    "WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci IN :contract_ids"
+                ).bindparams(bindparam("contract_ids", expanding=True)),
+                {"contract_ids": contract_ids},
+            ).fetchall()
+            serials: list[str] = []
+            seen_serials: set[str] = set()
+            for row in unit_serial_rows:
+                for value in row:
+                    sn = str(value or "").strip()
+                    if not sn or sn in seen_serials:
+                        continue
+                    seen_serials.add(sn)
+                    serials.append(sn)
+            if serials:
+                set_sql = "`占用订单号` = :order_id"
+                if _table_has_column(conn, "finished_goods_data", "订单号"):
+                    set_sql += ", `订单号` = :order_id"
+                fg_ret = conn.execute(
+                    text(
+                        f"UPDATE finished_goods_data SET {set_sql} "
+                        "WHERE TRIM(COALESCE(`流水号`, '')) IN :serials "
+                        "AND TRIM(COALESCE(`状态`, '')) <> '已出库' "
+                        "AND (COALESCE(TRIM(`占用订单号`), '') = '' OR TRIM(`占用订单号`) = :order_id)"
+                    ).bindparams(bindparam("serials", expanding=True)),
+                    {"serials": serials, "order_id": order_id},
+                )
+                finished_goods_rows = int(fg_ret.rowcount or 0)
+
+        plan_import_rows = 0
+        if _table_has_column(conn, "plan_import", "合同号"):
+            _ensure_plan_import_order_column(conn)
+            import_conflicts = conn.execute(
+                text(
+                    "SELECT DISTINCT `合同号`, `订单号` FROM plan_import "
+                    "WHERE TRIM(COALESCE(`合同号`, '')) COLLATE utf8mb4_general_ci IN :contract_ids "
+                    "AND COALESCE(TRIM(`订单号`), '') <> '' "
+                    "AND TRIM(`订单号`) <> :order_id"
+                ).bindparams(bindparam("contract_ids", expanding=True)),
+                {"contract_ids": contract_ids, "order_id": order_id},
+            ).fetchall()
+            if import_conflicts:
+                conflict_contract = str(import_conflicts[0][0] or "").strip()
+                conflict_order = str(import_conflicts[0][1] or "").strip()
+                raise HTTPException(status_code=422, detail=f"合同 {conflict_contract} 已绑定其他订单 {conflict_order}")
+
+            import_ret = conn.execute(
+                text(
+                    "UPDATE plan_import SET `订单号` = :order_id "
+                    "WHERE TRIM(COALESCE(`合同号`, '')) COLLATE utf8mb4_general_ci IN :contract_ids "
+                    "AND (COALESCE(TRIM(`订单号`), '') = '' OR TRIM(`订单号`) = :order_id)"
+                ).bindparams(bindparam("contract_ids", expanding=True)),
+                {"contract_ids": contract_ids, "order_id": order_id},
+            )
+            plan_import_rows = int(import_ret.rowcount or 0)
+
+    return {"units": int(unit_ret.rowcount or 0), "plan_import": plan_import_rows, "finished_goods_data": finished_goods_rows}
+
+
+def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str | None = "已转订单") -> int:
     if not contract_ids:
         return 0
-    df_plan = get_factory_plan()
-    if df_plan.empty:
-        raise HTTPException(status_code=422, detail="未找到可绑定的合同")
-    mask = df_plan["合同号"].astype(str).isin(contract_ids)
-    if not mask.any():
-        raise HTTPException(status_code=422, detail="未找到可绑定的合同")
-    existing = df_plan.loc[mask, "订单号"].fillna("").astype(str).str.strip()
-    conflict = existing[(existing != "") & (existing != str(order_id))]
-    if not conflict.empty:
-        raise HTTPException(status_code=422, detail="所选合同中存在已绑定其他订单的记录")
-    df_plan.loc[mask, "订单号"] = str(order_id)
-    if status:
-        df_plan.loc[mask, "状态"] = status
-    save_factory_plan(df_plan)
-    return int(mask.sum())
+    
+    with get_engine().begin() as conn:
+        # 1. 检查是否存在冲突
+        existing = conn.execute(
+            text(
+                "SELECT `合同号`, `订单号` FROM factory_plan "
+                "WHERE TRIM(COALESCE(`合同号`, '')) COLLATE utf8mb4_general_ci IN :cids "
+                "AND COALESCE(TRIM(`订单号`), '') <> '' AND TRIM(`订单号`) <> :oid"
+            ).bindparams(bindparam("cids", expanding=True)),
+            {"cids": contract_ids, "oid": order_id}
+        ).fetchall()
+        
+        if existing:
+            conflict_contract = str(existing[0][0] or "").strip()
+            conflict_order = str(existing[0][1] or "").strip()
+            raise HTTPException(status_code=422, detail=f"合同 {conflict_contract} 已绑定其他订单 {conflict_order}")
+            
+        # 2. 直接使用 SQL UPDATE 更新状态和订单号，避免全表覆盖导致其他合同丢失
+        set_status = ""
+        params = {"oid": order_id, "cids": contract_ids}
+        if status:
+            set_status = ", `状态` = :status"
+            params["status"] = status
+            
+        ret = conn.execute(
+            text(f"UPDATE factory_plan SET `订单号` = :oid {set_status} "
+                 "WHERE TRIM(COALESCE(`合同号`, '')) COLLATE utf8mb4_general_ci IN :cids").bindparams(bindparam("cids", expanding=True)),
+            params
+        )
+        updated_count = int(ret.rowcount or 0)
+
+    # 3. 清理缓存
+    import crud.planning
+    if hasattr(crud.planning.get_factory_plan, "cache_clear"):
+        crud.planning.get_factory_plan.cache_clear()
+    if hasattr(crud.planning.get_factory_plan_v2, "cache_clear"):
+        crud.planning.get_factory_plan_v2.cache_clear()
+    
+    _sync_order_to_units_and_import(contract_ids, str(order_id))
+    _occupy_inventory_for_order(contract_ids, str(order_id))
+    return updated_count
 
 
 def _validate_contracts_available(contract_ids: list[str], order_id: str) -> None:
@@ -487,6 +756,7 @@ def get_sales_orders(
             total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
             df_orders = pd.read_sql(text(data_sql), conn, params=params)
 
+        df_orders = _reconcile_completed_orders(df_orders)
         df_orders = df_orders.where(df_orders.notnull(), None)
         return {"data": df_orders.to_dict(orient="records"), "total": total, "skip": skip, "limit": limit}
     except Exception as e:
@@ -680,6 +950,94 @@ def allocate_order_inventory_api(
         raise HTTPException(status_code=500, detail=f"配货失败: {e}")
 
 
+@router.post("/orders/{order_id}/complete-allocation")
+def complete_order_allocation_api(
+    order_id: str,
+    request: Request = None,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
+    try:
+        order_id = str(order_id).strip()
+        if not order_id:
+            raise HTTPException(status_code=422, detail="订单号不能为空")
+
+        orders_df = get_orders()
+        hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
+        if hit.empty:
+            raise HTTPException(status_code=404, detail="订单不存在")
+        order_idx = hit.index[0]
+        current_status = str(orders_df.at[order_idx, "status"] or "active")
+        if current_status == "ready":
+            return {"message": "配货已完成", "completed": True, "logged": 0}
+
+        demand_counts = _parse_order_demand_counts(hit.iloc[0])
+        if not demand_counts:
+            raise HTTPException(status_code=422, detail="订单需求机型为空，无法完成配货")
+
+        inv_df = get_data()
+        if inv_df.empty:
+            raise HTTPException(status_code=422, detail="配货未完成：未找到已配机台")
+        for col in ["流水号", "机型", "状态", "占用订单号"]:
+            if col not in inv_df.columns:
+                inv_df[col] = ""
+
+        allocated_df = inv_df[
+            (inv_df["占用订单号"].astype(str).str.strip() == order_id)
+            & (inv_df["状态"].astype(str).str.strip() != "已出库")
+            & (inv_df["流水号"].astype(str).str.strip() != "")
+        ].copy()
+        allocated_counts: dict[str, int] = {}
+        for _, row in allocated_df.iterrows():
+            model = str(row.get("机型", "") or "").strip()
+            if model:
+                allocated_counts[model] = allocated_counts.get(model, 0) + 1
+
+        missing: list[str] = []
+        for model, need in demand_counts.items():
+            allocated = allocated_counts.get(model, 0)
+            if allocated < need:
+                missing.append(f"{model} 缺少 {need - allocated} 台")
+        if missing:
+            raise HTTPException(status_code=422, detail=f"配货未完成：{'；'.join(missing)}")
+
+        serials = allocated_df["流水号"].astype(str).str.strip().tolist()
+        if serials:
+            from database import get_engine
+            from sqlalchemy import text, bindparam
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            try:
+                with get_engine().begin() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE finished_goods_data
+                            SET 状态 = '待发货',
+                                更新时间 = :now
+                            WHERE 流水号 IN :sns AND 状态 != '已出库'
+                        """).bindparams(bindparam("sns", expanding=True)),
+                        {"now": now_str, "sns": serials}
+                    )
+            except Exception as ex:
+                raise HTTPException(status_code=500, detail=f"更新机台状态为待发货失败: {ex}")
+            append_log("配货自动入库", serials, operator=current_operator)
+
+        orders_df.at[order_idx, "status"] = "ready"
+        save_orders(orders_df)
+        append_audit_log(
+            module="订单配货",
+            action_type="配货完成",
+            biz_type="订单",
+            content=f"订单 {order_id} 配货完成，记录配货自动入库 {len(serials)} 台；流水号：{', '.join(serials[:10])}",
+            user_id=_user_id_from_context(current_user),
+            username=current_operator,
+        )
+        return {"message": "配货完成，订单已满足", "completed": True, "logged": len(serials)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"配货完成失败: {e}")
+
+
 @router.post("/orders/{order_id}/release")
 def release_order_inventory_api(
     order_id: str,
@@ -712,6 +1070,13 @@ def release_order_inventory_api(
                 raise HTTPException(status_code=422, detail="所选机台不属于当前订单或已不可释放")
 
         revert_to_inbound(target_sns, reason=f"订单配货释放-{order_id}", operator=current_operator)
+        orders_df = get_orders()
+        hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
+        if not hit.empty:
+            order_idx = hit.index[0]
+            if str(orders_df.at[order_idx, "status"] or "active") == "ready":
+                orders_df.at[order_idx, "status"] = "active"
+                save_orders(orders_df)
         append_audit_log(
             module="订单配货",
             action_type="释放",
@@ -746,17 +1111,42 @@ def update_contract_status(
             )
             if result.rowcount == 0:
                 raise HTTPException(status_code=404, detail="合同不存在")
+            
+            if new_status == "已取消":
+                conn.execute(
+                    text("DELETE FROM production_queue WHERE contract_no = :cid AND status = 'Waiting'"),
+                    {"cid": str(contract_id)}
+                )
+                conn.execute(
+                    text("UPDATE rush_order_queue SET status = 'deleted' WHERE contract_no = :cid AND status = 'pending'"),
+                    {"cid": str(contract_id)}
+                )
+                conn.execute(
+                    text("""
+                        UPDATE units
+                        SET contract_no = NULL,
+                            customer = NULL,
+                            dealer_name = NULL,
+                            sales_id = NULL,
+                            due_date = NULL,
+                            order_remark = NULL,
+                            is_locked = 0
+                        WHERE contract_no = :cid
+                    """),
+                    {"cid": str(contract_id)}
+                )
+                
         get_factory_plan.cache_clear()
         get_factory_plan_v2.cache_clear()
         append_audit_log(
             module="合同管理",
             action_type="更新状态",
             biz_type="合同",
-            content=f"合同 {contract_id} 状态更新为：{new_status}",
+            content=f"合同 {contract_id} 状态更新为：{new_status}" + ("（已同步清空沙盘所有状态批次卡片及排产队列）" if new_status == "已取消" else ""),
             user_id=current_user.get("username"),
             username=current_operator,
         )
-        return {"message": f"合同状态已更新为 {new_status}"}
+        return {"message": f"合同状态已更新为 {new_status}" + ("，对应沙盘卡片及队列已同步清理" if new_status == "已取消" else "")}
     except HTTPException:
         raise
     except Exception as e:
@@ -786,15 +1176,12 @@ def link_contract_to_order(
         if not mask.any():
             raise HTTPException(status_code=404, detail="合同不存在")
 
-        # 检查合同是否已经关联了其他订单
-        existing_order = df_plan.loc[mask, "订单号"].iloc[0]
-        if existing_order and str(existing_order).strip():
-            raise HTTPException(status_code=400, detail=f"合同已关联订单 {existing_order}，请先解除关联")
+        existing = df_plan.loc[mask, "订单号"].fillna("").astype(str).str.strip()
+        conflict = existing[(existing != "") & (existing != order_id)]
+        if not conflict.empty:
+            raise HTTPException(status_code=400, detail=f"合同已关联订单 {conflict.iloc[0]}，请先解除关联")
 
-        # 更新合同状态为"已转订单"并设置订单号
-        df_plan.loc[mask, "状态"] = "已转订单"
-        df_plan.loc[mask, "订单号"] = order_id
-        save_factory_plan(df_plan)
+        _link_contracts_to_order([str(contract_id)], order_id)
         append_audit_log(
             module="合同管理",
             action_type="关联订单",
@@ -815,17 +1202,21 @@ def link_contract_to_order(
 def create_contracts_batch(
     payload: BatchContractCreatePayload,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_operator: str = Depends(get_current_operator_name),
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        save_mode = str(payload.save_mode or "sandbox").strip().lower()
+        if save_mode not in {"sandbox", "spot"}:
+            raise HTTPException(status_code=422, detail="save_mode 仅支持 sandbox 或 spot")
         rows = payload.rows or []
         if not rows:
             raise HTTPException(status_code=422, detail="请至少提供 1 条合同记录")
         _assert_models_in_dictionary([str(item.机型 or "").strip() for item in rows])
 
         df_plan = get_factory_plan()
-        now_status = "未下单"
+        now_status = "已规划" if save_mode == "spot" else "待规划"
         add_list: List[Dict[str, Any]] = []
         rush_source_rows: List[Dict[str, Any]] = []
         existed = 0
@@ -863,6 +1254,7 @@ def create_contracts_batch(
                     "model_type": model,
                     "due_date": due,
                     "qty": qty,
+                    "remark": str(item.备注 or "").strip(),
                 }
             )
 
@@ -872,23 +1264,44 @@ def create_contracts_batch(
         df_plan = pd.concat([df_plan, pd.DataFrame(add_list)], ignore_index=True)
         save_factory_plan(df_plan)
 
-        # 新合同同步写入 production_queue，优先走排产队列
-        _insert_production_queue(add_list)
+        # 仅“进入沙盘”模式触发沙盘重算；“使用现货”直接置为已规划，不进入沙盘排产。
+        if save_mode == "sandbox" and not payload.is_rush:
+            background_tasks.add_task(_trigger_sandbox_recompute_sync, current_user)
 
         rush_created = _insert_rush_order_queue(
-            rush_source_rows if payload.is_rush else [],
+            rush_source_rows if (payload.is_rush and save_mode == "sandbox") else [],
             created_by=current_user.get("username") or current_operator,
         )
-        
+        rush_auto_inserted = _auto_insert_high_rush_orders(
+            rush_source_rows if (payload.is_rush and save_mode == "sandbox") else [],
+            current_user,
+            current_operator,
+        )
+
         # 收集新录入的所有独立合同号
         added_contract_ids = list(set([str(item["合同号"]) for item in add_list]))
         contract_ids_str = "、".join(added_contract_ids)
+
+        # “使用现货”模式下，急单不应出现在 rush_order_queue 中；同时清理历史遗留 pending 卡片。
+        if save_mode == "spot" and added_contract_ids:
+            with get_engine().begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE rush_order_queue SET `status` = 'deleted', `updated_by` = :updated_by "
+                        "WHERE TRIM(COALESCE(`contract_no`, '')) COLLATE utf8mb4_general_ci IN :cids "
+                        "AND `status` = 'pending'"
+                    ).bindparams(bindparam("cids", expanding=True)),
+                    {
+                        "cids": added_contract_ids,
+                        "updated_by": str(current_user.get("username") or current_operator or ""),
+                    },
+                )
         
         append_audit_log(
             module="合同管理",
             action_type="批量录入",
             biz_type="合同",
-            content=f"批量录入合同 {len(add_list)} 条（合同号：{contract_ids_str}）；跳过重复 {existed} 条",
+            content=f"批量录入合同 {len(add_list)} 条（合同号：{contract_ids_str}）；跳过重复 {existed} 条；加高急单自动入沙盘 {rush_auto_inserted} 条",
             user_id=current_user.get("username"),
             username=current_operator,
         )
@@ -897,6 +1310,8 @@ def create_contracts_batch(
             "inserted": len(add_list),
             "skipped": existed,
             "rush_created": rush_created,
+            "rush_auto_inserted": rush_auto_inserted,
+            "save_mode": save_mode,
         }
     except HTTPException:
         raise
@@ -923,7 +1338,9 @@ def edit_contract(
             raise HTTPException(status_code=404, detail="合同不存在")
 
         existing = df_plan[target_mask]
-        status_now = str(existing.iloc[0].get("状态", "未下单"))
+        status_now = str(existing.iloc[0].get("状态", "待规划"))
+        if status_now == "未下单":
+            status_now = "待规划"
         order_id = str(existing.iloc[0].get("订单号", "") or "")
 
         # 删除旧行并重建

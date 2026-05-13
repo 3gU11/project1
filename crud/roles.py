@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from typing import Iterable
+import threading
 
 import pandas as pd
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from config import DEFAULT_ROLE_PERMISSIONS
 from database import get_engine
@@ -51,11 +52,14 @@ PERMISSION_CATALOG = [
     {"code": "QUERY", "label": "库存查询", "group": "查询"},
     {"code": "INBOUND", "label": "成品入库", "group": "生产/仓储"},
     {"code": "TRACEABILITY", "label": "汇总与追溯", "group": "查询"},
+    {"code": "KANBAN_VIEW", "label": "生产看板(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_VIEW", "label": "预测沙盘(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_EDIT", "label": "预测沙盘(编辑)", "group": "管理与统筹"},
 ]
 
 PERMISSION_CODES = {item["code"] for item in PERMISSION_CATALOG}
+_seed_lock = threading.Lock()
+_seed_done = False
 
 
 def normalize_role_id(role_id: str) -> str:
@@ -71,26 +75,38 @@ def get_all_permission_codes() -> list[str]:
 
 
 def seed_roles_and_permissions_if_empty() -> None:
+    global _seed_done
+    if _seed_done:
+        return
+    with _seed_lock:
+        if _seed_done:
+            return
     ensure_role_tables()
     engine = get_engine()
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM role_permissions WHERE func_code='PLANNING'"))
-        for role_id, func_codes in DEFAULT_ROLE_PERMISSIONS.items():
-            rid = normalize_role_id(role_id)
-            if not rid:
-                continue
-            conn.execute(
-                text("INSERT IGNORE INTO roles (role_id, role_name) VALUES (:rid, :rname)"),
-                {"rid": rid, "rname": rid},
-            )
-            # Backfill missing default permissions for existing roles as well.
-            # This keeps old databases compatible when new permissions are introduced.
-            for func_code in func_codes:
-                if func_code in PERMISSION_CODES:
-                    conn.execute(
-                        text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:rid, :func)"),
-                        {"rid": rid, "func": func_code},
-                    )
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM role_permissions WHERE func_code='PLANNING'"))
+            for role_id, func_codes in DEFAULT_ROLE_PERMISSIONS.items():
+                rid = normalize_role_id(role_id)
+                if not rid:
+                    continue
+                conn.execute(
+                    text("INSERT IGNORE INTO roles (role_id, role_name) VALUES (:rid, :rname)"),
+                    {"rid": rid, "rname": rid},
+                )
+                # Backfill missing default permissions for existing roles as well.
+                # This keeps old databases compatible when new permissions are introduced.
+                for func_code in func_codes:
+                    if func_code in PERMISSION_CODES:
+                        conn.execute(
+                            text("INSERT IGNORE INTO role_permissions (role_id, func_code) VALUES (:rid, :func)"),
+                            {"rid": rid, "func": func_code},
+                        )
+        _seed_done = True
+    except OperationalError:
+        # Avoid request-wide 500 when concurrent startup traffic triggers deadlocks.
+        # Permission lookup still has config-based fallback in get_role_permissions().
+        return
 
 
 def list_roles() -> list[dict]:

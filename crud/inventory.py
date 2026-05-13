@@ -14,7 +14,7 @@ from utils.local_cache import ttl_cache
 
 logger = logging.getLogger(__name__)
 INVENTORY_COLS = ["批次号", "机型", "流水号", "状态", "预计入库时间", "更新时间", "占用订单号", "客户", "代理商", "合同备注", "Location_Code", "合同号"]
-IMPORT_COLS = ["流水号", "批次号", "机型", "状态", "预计入库时间", "客户", "代理商", "合同备注", "合同号"]
+IMPORT_COLS = ["流水号", "批次号", "机型", "状态", "预计入库时间", "客户", "代理商", "合同备注", "合同号", "订单号"]
 WAREHOUSE_MAX_CAPACITY = 5
 
 
@@ -49,6 +49,7 @@ def _ensure_plan_import_trace_columns(conn):
         ("代理商", "VARCHAR(200) DEFAULT ''"),
         ("合同备注", "TEXT"),
         ("合同号", "VARCHAR(100) DEFAULT ''"),
+        ("订单号", "VARCHAR(100) DEFAULT ''"),
     ]:
         if _has_column(conn, "plan_import", col_name):
             continue
@@ -90,7 +91,6 @@ def _normalize_import_df(df):
     return normalized[IMPORT_COLS]
 
 
-@lru_cache(maxsize=1)
 def get_data():
     try:
         with get_engine().connect() as conn:
@@ -147,8 +147,7 @@ def get_data_v2():
 
 
 def save_data(df):
-    get_data.cache_clear()
-    get_data_v2.cache_clear()  # 同时清除 v2 版本缓存
+    get_data_v2.cache_clear()  # 清除 v2 版本缓存（get_data 已移除缓存，无需 clear）
     try:
         df = df.drop_duplicates(subset=['流水号'], keep='last')
         df = df.copy()
@@ -182,7 +181,6 @@ def save_data_v2(df):
     """
     from sqlalchemy import bindparam
 
-    get_data.cache_clear()
     get_data_v2.cache_clear()
 
     try:
@@ -540,7 +538,7 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False):
             {"status": f"库存中（{slot_code}）", "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
         )
         trans.commit()
-        get_data.cache_clear()  # 清除缓存，确保下次读取到最新库存状态
+        get_data_v2.cache_clear()  # 清除 v2 缓存，确保下次读取到最新库存状态
         try:
             import asyncio
             from api.websockets.manager import manager
@@ -630,7 +628,6 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False):
         trans.commit()
 
         # 清除所有缓存版本
-        get_data.cache_clear()
         get_data_v2.cache_clear()
 
         # WebSocket 广播（保持不变）

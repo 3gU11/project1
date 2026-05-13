@@ -33,7 +33,7 @@ from crud.inventory import (
 )
 from crud.logs import append_log
 from crud.model_dictionary import find_disabled_models, is_model_enabled
-from crud.orders import get_orders, revert_to_inbound
+from crud.orders import get_orders, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from database import get_engine
 
@@ -490,57 +490,62 @@ def get_shipping_pending():
         if not orders_df.empty:
             odf = orders_df.copy()
             odf["订单号"] = odf["订单号"].astype(str).str.strip()
+            # 修改点：只要是被占用的订单号存在于 sales_orders 中即可，不限制订单状态必须为 ready
+            # 因为发货复核主要是看机器实物的状态（是否为待发货）
+            ready_order_ids = set(odf["订单号"].tolist())
+            pending = pending[pending["占用订单号"].isin(ready_order_ids)].copy()
+            if pending.empty:
+                return {"data": [], "total": 0}
             date_map = odf.set_index("订单号")["发货时间"].to_dict()
             if "合同备注" not in pending.columns:
                 pending["合同备注"] = ""
-
-            def _clean_shipping_note(value):
-                if value is None:
-                    return ""
-                text = str(value).strip()
-                if not text:
-                    return ""
-                lowered = text.lower()
-                if lowered in {"none", "nan", "null"}:
-                    return ""
-                if text == "合同导入" or text.startswith("合同导入:") or text.startswith("合同导入："):
-                    return ""
-                if text.endswith(":None") or text.endswith("：None"):
-                    return ""
-                text = re.sub(r'^合同\S+自动生成[；;]?\s*', '', text)
-                if not text:
-                    return ""
-                return text
-
-            from crud.planning import get_factory_plan_v2
-            plan_df = get_factory_plan_v2()
-            if not plan_df.empty:
-                plan_df["订单号"] = plan_df["订单号"].astype(str).str.strip()
-                model_note_map = {}
-                for _, row in plan_df.iterrows():
-                    order_no = str(row.get("订单号", "")).strip()
-                    model = str(row.get("机型", "")).strip()
-                    note = _clean_shipping_note(row.get("备注", ""))
-                    if order_no and model and note:
-                        model_note_map.setdefault(order_no, {})[model] = note
-
-            def _resolve_note(row):
-                order_no = str(row.get("占用订单号", "")).strip()
-                model = str(row.get("机型", "")).strip()
-                existing = str(row.get("合同备注", "")).strip()
-                if existing and existing.lower() not in {"none", "nan", "null"}:
-                    return _clean_shipping_note(existing)
-                plan_note = model_note_map.get(order_no, {}).get(model, "")
-                if plan_note:
-                    return plan_note
-                return ""
-
-            pending["合同备注"] = pending.apply(_resolve_note, axis=1)
-            raw_dates = pending["占用订单号"].map(date_map)
-            pending["发货时间"] = pd.to_datetime(raw_dates, errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
         else:
-            if "发货时间" not in pending.columns:
-                pending["发货时间"] = ""
+            return {"data": [], "total": 0}
+
+        def _clean_shipping_note(value):
+            if value is None:
+                return ""
+            text = str(value).strip()
+            if not text:
+                return ""
+            lowered = text.lower()
+            if lowered in {"none", "nan", "null"}:
+                return ""
+            if text == "合同导入" or text.startswith("合同导入:") or text.startswith("合同导入："):
+                return ""
+            if text.endswith(":None") or text.endswith("：None"):
+                return ""
+            text = re.sub(r'^合同\S+自动生成[；;]?\s*', '', text)
+            if not text:
+                return ""
+            return text
+
+        from crud.planning import get_factory_plan_v2
+        plan_df = get_factory_plan_v2()
+        model_note_map = {}
+        if not plan_df.empty:
+            plan_df["订单号"] = plan_df["订单号"].astype(str).str.strip()
+            for _, row in plan_df.iterrows():
+                order_no = str(row.get("订单号", "")).strip()
+                model = str(row.get("机型", "")).strip()
+                note = _clean_shipping_note(row.get("备注", ""))
+                if order_no and model and note:
+                    model_note_map.setdefault(order_no, {})[model] = note
+
+        def _resolve_note(row):
+            order_no = str(row.get("占用订单号", "")).strip()
+            model = str(row.get("机型", "")).strip()
+            existing = str(row.get("合同备注", "")).strip()
+            if existing and existing.lower() not in {"none", "nan", "null"}:
+                return _clean_shipping_note(existing)
+            plan_note = model_note_map.get(order_no, {}).get(model, "")
+            if plan_note:
+                return plan_note
+            return ""
+
+        pending["合同备注"] = pending.apply(_resolve_note, axis=1)
+        raw_dates = pending["占用订单号"].map(date_map)
+        pending["发货时间"] = pd.to_datetime(raw_dates, errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
 
         pending = pending.where(pending.notnull(), None)
         return {"data": pending.to_dict(orient="records"), "total": len(pending)}
@@ -563,12 +568,52 @@ def confirm_shipping(
         hit = df[df["流水号"].astype(str).isin(sns)]
         if hit.empty:
             raise HTTPException(status_code=422, detail="所选机台不存在")
+        impacted_order_ids = {
+            str(x).strip()
+            for x in hit.get("占用订单号", pd.Series(dtype=str)).tolist()
+            if str(x).strip()
+        }
 
         now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
         mask = df["流水号"].astype(str).isin(sns)
         df.loc[mask, "状态"] = "已出库"
         df.loc[mask, "更新时间"] = now_text
         save_data(df)
+
+        if impacted_order_ids:
+            orders_df = get_orders()
+            changed = False
+            for idx, row in orders_df.iterrows():
+                order_id = str(row.get("订单号", "") or "").strip()
+                if order_id not in impacted_order_ids:
+                    continue
+                need = 0
+                raw = str(row.get("需求机型", "") or "")
+                for token_raw in re.split(r"[;；/,，]", raw):
+                    token = token_raw.strip()
+                    if not token:
+                        continue
+                    m = re.search(r"(?:[x×:：]\s*)(\d+)\s*$", token, re.IGNORECASE)
+                    if m:
+                        try:
+                            need += int(m.group(1))
+                        except Exception:
+                            pass
+                if need <= 0:
+                    try:
+                        need = int(float(row.get("需求数量", 0) or 0))
+                    except Exception:
+                        need = 0
+                shipped = df[
+                    (df["状态"].astype(str).str.strip() == "已出库")
+                    & (df["占用订单号"].astype(str).str.strip() == order_id)
+                ].shape[0]
+                if need > 0 and shipped >= need and str(row.get("status", "active") or "active") != "done":
+                    orders_df.at[idx, "status"] = "done"
+                    changed = True
+            if changed:
+                save_orders(orders_df)
+
         archive_shipped_data(df[df["流水号"].astype(str).isin(sns)])
         append_log("正式发货", sns, operator=current_operator)
         append_audit_log(

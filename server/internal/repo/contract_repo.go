@@ -79,9 +79,8 @@ func (r *ContractRepo) ReadValidContractUnits() ([]model.ContractUnit, error) {
 	statusFilter := ""
 	if hasStatus {
 		statusFilter = fmt.Sprintf(
-			"AND TRIM(COALESCE(fp.%s, '')) IN (%s, %s, 'WAITING', 'PENDING')",
+			"AND TRIM(COALESCE(fp.%s, '')) = %s",
 			quoteIdentifier(statusCol),
-			quoteSQLString("\u672a\u4e0b\u5355"),
 			quoteSQLString("\u5f85\u89c4\u5212"),
 		)
 	}

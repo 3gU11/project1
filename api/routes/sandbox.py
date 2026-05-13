@@ -157,7 +157,7 @@ def _model_category(model_type: str, family_map: dict) -> str:
     if "特殊" in v:
         return "特殊"
     family = family_map.get(v, "")
-    if family == "SPECIAL":
+    if family in ("SPECIAL", "特殊"):
         return "特殊"
     if "AUTO" in v or family == "AUTO":
         if "8055" in v or "7055" in v:
@@ -213,7 +213,7 @@ async def sync_batch_preview(request: Request, batch_id: str):
     for row in unit_rows:
         mt = str(row[0] or "").strip()
         cat = _model_category(mt, family_map)
-        if cat not in ("", "特殊"):
+        if cat != "":
             count += 1
 
     if count == 0:
@@ -244,7 +244,15 @@ async def sync_batch_preview(request: Request, batch_id: str):
             {"prefix": target_prefix, "like_prefix": f"{target_prefix}%"},
         ).scalar() or 0
 
-        max_seq = max(int(plan_max), int(fg_max))
+        units_max = conn.execute(
+            text(
+                "SELECT COALESCE(MAX(CAST(SUBSTRING(forecast_serial_no, LENGTH(:prefix) + 1) AS UNSIGNED)), 0) "
+                "FROM units WHERE forecast_serial_no LIKE :like_prefix"
+            ),
+            {"prefix": target_prefix, "like_prefix": f"{target_prefix}%"},
+        ).scalar() or 0
+
+        max_seq = max(int(plan_max), int(fg_max), int(units_max))
 
     first_seq = max_seq + 1
     last_seq = max_seq + count
@@ -370,7 +378,7 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
 
         unit_rows = conn.execute(
             text(
-                "SELECT unit_id, model_type, contract_no, customer, dealer_name, due_date, order_remark "
+                "SELECT unit_id, model_type, contract_no, customer, dealer_name, due_date, order_remark, forecast_serial_no "
                 "FROM units WHERE batch_id = :bid ORDER BY slot_index ASC"
             ),
             {"bid": batch_id},
@@ -387,18 +395,18 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
         if name:
             family_map[name] = family
 
-    # Filter: skip special / uncategorized models
+    # Filter: skip uncategorized models only
     filtered = []
     for row in unit_rows:
         mt = str(row[1] or "").strip()
         cat = _model_category(mt, family_map)
-        if cat in ("", "特殊"):
+        if cat == "":
             continue
         filtered.append(row)
 
     if not filtered:
         return JSONResponse(
-            content={"success": True, "count": 0, "message": "该批次无可同步的非特殊卡片"},
+            content={"success": True, "count": 0, "message": "该批次无可同步卡片"},
             status_code=200,
         )
 
@@ -428,19 +436,32 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
             {"prefix": target_prefix, "like_prefix": f"{target_prefix}%"},
         ).scalar() or 0
 
-        max_seq = max(int(plan_max), int(fg_max))
+        units_max = conn.execute(
+            text(
+                "SELECT COALESCE(MAX(CAST(SUBSTRING(forecast_serial_no, LENGTH(:prefix) + 1) AS UNSIGNED)), 0) "
+                "FROM units WHERE forecast_serial_no LIKE :like_prefix"
+            ),
+            {"prefix": target_prefix, "like_prefix": f"{target_prefix}%"},
+        ).scalar() or 0
+
+        max_seq = max(int(plan_max), int(fg_max), int(units_max))
 
     records = []
     serial_pairs = []
-    for i, row in enumerate(filtered):
-        seq = max_seq + i + 1
-        sn = f"{target_prefix}{seq:02d}"
+    next_seq = max_seq + 1
+    for row in filtered:
         unit_id = str(row[0] or "").strip()
         mt = str(row[1] or "").strip()
         customer = str(row[3] or "").strip()
         dealer_name = str(row[4] or "").strip()
         order_remark = str(row[6] or "").strip()
         contract_no = str(row[2] or "").strip()
+        existing_sn = str(row[7] or "").strip()
+        if existing_sn.startswith(target_prefix):
+            sn = existing_sn
+        else:
+            sn = f"{target_prefix}{next_seq:02d}"
+            next_seq += 1
 
         records.append({
             "流水号": sn,
@@ -474,8 +495,7 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
                         "UPDATE units "
                         "SET forecast_serial_no = :sn "
                         "WHERE unit_id = :uid "
-                        "AND batch_id = :bid "
-                        "AND (forecast_serial_no IS NULL OR TRIM(forecast_serial_no) = '')"
+                        "AND batch_id = :bid"
                     ),
                     {"sn": sn, "uid": unit_id, "bid": batch_id},
                 )

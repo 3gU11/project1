@@ -26,7 +26,14 @@ func (r *UnitRepo) CreateBatchInTx(tx *gorm.DB, units []model.Unit) error {
 
 func (r *UnitRepo) GetByBatch(batchID string) ([]model.Unit, error) {
 	var units []model.Unit
-	return units, r.db.Where("batch_id = ?", batchID).Order("slot_index ASC").Find(&units).Error
+	err := r.db.Table("units").
+		Select("units.*, md.model_family AS model_family, fg.状态 AS fg_status").
+		Joins("LEFT JOIN model_dictionary md ON md.model_name = units.model_type COLLATE utf8mb4_general_ci").
+		Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = units.serial_no COLLATE utf8mb4_general_ci").
+		Where("units.batch_id = ?", batchID).
+		Order("units.slot_index ASC").
+		Find(&units).Error
+	return units, err
 }
 
 func (r *UnitRepo) GetByID(unitID string) (*model.Unit, error) {

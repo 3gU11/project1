@@ -85,8 +85,8 @@ DEFAULT_USERS = {
 }
 
 DEFAULT_ROLE_PERMISSIONS = {
-    "Admin": ["CONTRACT", "MODEL_DICTIONARY", "USER_MANAGE", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY", "SANDBOX_VIEW", "SANDBOX_EDIT"],
-    "Boss": ["CONTRACT", "MODEL_DICTIONARY", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY", "SANDBOX_VIEW", "SANDBOX_EDIT"],
+    "Admin": ["CONTRACT", "MODEL_DICTIONARY", "USER_MANAGE", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY", "KANBAN_VIEW", "SANDBOX_VIEW", "SANDBOX_EDIT"],
+    "Boss": ["CONTRACT", "MODEL_DICTIONARY", "SALES_CREATE", "SALES_ALLOC", "SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND", "TRACEABILITY", "KANBAN_VIEW", "SANDBOX_VIEW", "SANDBOX_EDIT"],
     "Sales": ["CONTRACT", "SALES_CREATE", "SALES_ALLOC", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "TRACEABILITY"],
     "Prod": ["SHIP_CONFIRM", "ARCHIVE", "MACHINE_EDIT", "WAREHOUSE_MAP", "LOG_VIEW", "QUERY", "INBOUND"],
     "Inbound": ["WAREHOUSE_MAP", "INBOUND"],
@@ -123,7 +123,7 @@ FUNC_MAP = {
     "SHIP_CONFIRM": {"label": "🚛 发货复核", "page": "ship_confirm", "class": "ship-btn"},
     "MACHINE_EDIT": {"label": "🛠️ 机台编辑", "page": "machine_edit", "class": "machine-edit-btn"},
     "WAREHOUSE_MAP": {"label": "🗺️ 库位大屏", "page": "warehouse_dashboard", "class": "inbound-btn"},
-    "SANDBOX_VIEW": {"label": "👑 老板计划", "page": "sandbox", "class": "boss-btn"},
+    "SANDBOX_VIEW": {"label": "👑 预测沙盘", "page": "sandbox", "class": "boss-btn"},
 }
 
 GLOBAL_CSS = """

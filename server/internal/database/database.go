@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS forecast_batch_slots (
 	if err := alignForecastSlotCollation(db); err != nil {
 		return err
 	}
+	if err := normalizeFactoryPlanStatus(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeFactoryPlanStatus(db *gorm.DB) error {
+	if err := db.Exec("UPDATE factory_plan SET `状态`='待规划' WHERE TRIM(COALESCE(`状态`, ''))='未下单'").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("UPDATE factory_plan SET `状态`='待规划' WHERE TRIM(COALESCE(`状态`, ''))=''").Error; err != nil {
+		return err
+	}
 	return nil
 }
 

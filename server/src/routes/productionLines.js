@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
               NULLIF(\`\u673a\u578b\`, '') AS model_type_detail,
               NULLIF(\`\u4ee3\u7406\u5546\`, '') AS dealer_name
             FROM factory_plan
-            WHERE TRIM(COALESCE(状态, '')) IN ('未下单', '待规划')
+            WHERE TRIM(COALESCE(状态, '')) = '待规划'
           ) x
           GROUP BY contract_no, model_type_detail
         ) fp ON fp.contract_no COLLATE utf8mb4_general_ci = u.contract_no COLLATE utf8mb4_general_ci
@@ -177,11 +177,44 @@ router.post('/:id/assign', adminOnly, async (req, res) => {
       [req.params.id, batch_id]
     );
 
+    // Move related contract-model rows into "已规划" once batch enters production line.
+    const [batchContractModels] = await conn.query(
+      `SELECT DISTINCT contract_no, model_type
+       FROM units
+       WHERE batch_id = ?
+         AND contract_no IS NOT NULL
+         AND TRIM(contract_no) <> ''
+         AND model_type IS NOT NULL
+         AND TRIM(model_type) <> ''`,
+      [batch_id]
+    );
+    let plannedUpdatedRows = 0;
+    let plannedPairs = 0;
+    for (const pair of batchContractModels) {
+      const contractNo = String(pair.contract_no || '').trim();
+      const modelType = String(pair.model_type || '').trim();
+      if (!contractNo || !modelType) continue;
+      plannedPairs += 1;
+      const [updateRet] = await conn.query(
+        `UPDATE factory_plan
+         SET \`状态\` = '已规划'
+         WHERE \`合同号\` = ?
+           AND \`机型\` COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci
+           AND \`状态\` = '待规划'`,
+        [contractNo, modelType]
+      );
+      plannedUpdatedRows += Number(updateRet?.affectedRows || 0);
+    }
+
     // Audit
     await conn.query(
       `INSERT INTO sys_operation_log (user_id, username, operate_time, module, action_type, biz_type, content)
        VALUES (?, ?, NOW(), 'production_line', 'assign', 'batch', ?)`,
-      [req.user.username, req.user.username, `Assign batch ${batch_id} to line ${req.params.id}`]
+      [
+        req.user.username,
+        req.user.username,
+        `Assign batch ${batch_id} to line ${req.params.id}; factory_plan status migrated to 已规划: pairs=${plannedPairs}, rows=${plannedUpdatedRows}`
+      ]
     );
 
     await conn.commit();
@@ -193,7 +226,15 @@ router.post('/:id/assign', adminOnly, async (req, res) => {
       io.emit('batch:updated', { batch_id });
     }
 
-    res.json({ success: true, line_id: req.params.id, batch_id });
+    res.json({
+      success: true,
+      line_id: req.params.id,
+      batch_id,
+      factory_plan_status_update: {
+        pairs: plannedPairs,
+        rows: plannedUpdatedRows
+      }
+    });
   } catch (err) {
     await conn.rollback();
     conn.release();

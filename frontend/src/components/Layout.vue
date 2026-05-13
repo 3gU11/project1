@@ -62,7 +62,7 @@ const visibleMenus = computed(() => {
   return getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
     if (onHome) {
       // 在首页时，侧边栏仅保留高频入口
-      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/sandbox']
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban']
       return allowedInHome.includes(m.path)
     }
     return true
@@ -87,8 +87,8 @@ const warmupByRole = () => {
   const role = normalizeRole(userStore.userInfo?.role || '')
   const common = ['/inventory', '/warehouse-dashboard']
   const byRole: Record<string, string[]> = {
-    Admin: ['/users', '/logs', '/sandbox', '/contracts', '/model-dictionary'],
-    Boss: ['/sandbox', '/contracts', '/sales-orders', '/order-allocation', '/model-dictionary'],
+    Admin: ['/users', '/logs', '/prediction-sandbox', '/production-kanban', '/contracts', '/model-dictionary'],
+    Boss: ['/prediction-sandbox', '/production-kanban', '/contracts', '/sales-orders', '/order-allocation', '/model-dictionary'],
     Sales: ['/sales-orders', '/order-allocation', '/contracts'],
     Prod: ['/inbound', '/machine-archive', '/machine-edit', '/shipping-review'],
     Inbound: ['/inbound', '/warehouse-dashboard', '/inventory'],

@@ -1,20 +1,23 @@
-# V7ex 成品库存管理系统
+# V7STD1.0 成品库存管理系统
 
 > 面向制造业的机台库存全生命周期管理平台
 
 ## 项目概述
 
-V7ex 是一个专为制造企业设计的成品库存管理系统，围绕 **"合同 → 订单 → 库存 → 入库 → 发货 → 档案"** 形成业务闭环，支持多角色协作、库位可视化、交易追溯等核心功能。
+V7STD1.0 是一个专为制造企业设计的成品库存管理系统，围绕 **"合同 → 排产 → 入库 → 订单配货 → 发货 → 档案"** 形成业务闭环，支持多角色协作、生产沙盘规划、库位可视化、交易追溯等核心功能。
+
+系统由 **FastAPI（Python）** 与 **Go** 双后端协同驱动：FastAPI 负责库存、合同、用户等业务逻辑，Go 服务负责沙盘预测排产（Sandbox）与全量重算。
 
 ## 技术架构
 
 | 层级 | 技术栈 |
 |------|--------|
 | **前端** | Vue 3 + TypeScript + Element Plus + Pinia + Vite |
-| **后端** | FastAPI + Python 3.10+ |
-| **数据库** | MySQL 8.0 (SQLAlchemy + pandas) |
+| **业务后端** | FastAPI + Python 3.10+ |
+| **沙盘后端** | Go 1.21+（独立服务，负责预测排产/全量重算） |
+| **数据库** | MySQL 8.0（SQLAlchemy 原生 SQL + pandas） |
 | **文档解析** | PaddleOCR + pdfplumber + mammoth |
-| **部署** | Uvicorn + 静态文件服务 |
+| **部署** | Uvicorn + Go binary + `launcher.exe` 一键启动 |
 
 ## 核心功能模块
 
@@ -35,14 +38,15 @@ V7ex 是一个专为制造企业设计的成品库存管理系统，围绕 **"�
 | 模块 | 功能描述 | 对应角色 |
 |------|----------|----------|
 | 👑 生产统筹 | 订单规划、合同状态管理、生产排期 | Boss, Sales |
-| 🏭 合同管理 | 合同录入、附件上传、状态流转 | Boss, Sales |
+| 🏭 合同管理 | 合同录入（录入后自动触发沙盘全量重算）、附件上传、状态流转 | Boss, Sales |
+| 🧩 生产沙盘 | 预测排产批次管理、拖拽调序、急单插入、批次审核、特殊机型管理 | Boss |
 | 📝 销售下单 | 创建销售订单、指定机型数量 | Sales |
-| 📦 订单配货 | 从库存锁定机台、释放配货 | Sales |
-| 📥 成品入库 | 跟踪单解析、待入库清单、按库位入库 | Prod, Inbound |
+| 📦 订单配货 | 从库存锁定机台（直接 SQL 更新，避免缓存脏写）、释放配货 | Sales |
+| 📥 成品入库 | 跟踪单解析、待入库清单（自动屏蔽「已绑定」机台）、按库位入库 | Prod, Inbound |
 | 🚛 发货复核 | 确认发货、发货撤回 | Prod |
 | 🔧 机台档案 | 机台文件上传、预览、下载 | Prod |
 | 🗺️ 库位大屏 | 可视化库位占用情况 | 全角色 |
-| 🔍 库存查询 | 多条件筛选、状态统计 | 全角色 |
+| 🔍 库存查询 | 多条件筛选、状态统计（含「已绑定」机台独立计数） | 全角色 |
 | 🔍 汇总追溯 | 批次追溯、交易链路查询 | Boss, Sales |
 
 ## 角色权限体系
@@ -179,13 +183,16 @@ V7STD/
 
 ## 状态流转说明
 
-### 库存机台状态
-
 ```
-待入库 → 库存中(库位) → 待发货 → 已出库
+待入库 / 已绑定 → 库存中(库位) → 待发货 → 已出库
             ↑___________________________↓
                     (发货撤回可回退)
 ```
+
+> **注：** `已绑定` 状态用于跟踪已在排产计划中指派合同、但尚未实物入库的机台。
+> - 沙盘批次写入（`api/routes/sandbox.py`）与跟踪单导入（`utils/parsers.py`）时，检测到合同号则状态记为 `已绑定`，否则为 `待入库`。
+> - 入库审核待入库清单（`Inbound.vue`）通过 `includes('待入库')` 过滤，`已绑定` 机台不出现在该列表中。
+> - 库存查询（`InventoryQuery.vue`）新增「🔗 已绑定」独立计数块与筛选选项卡。
 
 ### 订单状态
 
@@ -194,6 +201,8 @@ V7STD/
 ### 合同状态
 
 `待规划` → `已规划` → `已下单` → `已转订单` → `已取消`
+
+> **合同录入触发重算：** 非急单合同录入成功后，FastAPI 在后台线程自动向 Go 服务发起 `POST /api/forecast/recompute`，无需手动点击全量重算，约 1~2 秒后沙盘卡片即可见。
 
 ## 文档
 
@@ -230,7 +239,24 @@ MIT License
   - Read APIs require `SANDBOX_VIEW`
   - Write APIs require `SANDBOX_EDIT`
   - `Admin`/`Boss` remain compatible through role permissions.
+- The sandbox automatically synchronizes (triggers background recompute) when new contracts are imported, ensuring real-time visibility without manual refreshes.
 - Mobile note: `frontend-mobile` remains lightweight warehouse-facing; Boss Plan sandbox is not included by default.
+
+### 沙盘近期重要改动（2026-05-07 / 2026-05-09）
+
+| 类别 | 改动摘要 |
+|------|----------|
+| **特殊机型列修复** | 信息强改抽屉中特殊列只显示归属「特殊」的具体机型，过滤 `SPECIAL/AUTO/XS/G` 大类占位值；保存时校验机型与批次系列匹配 |
+| **拖拽规则修复** | 普通批次内限同系列、同大小机列拖拽；增加混放数量提示「混放 N」；拖拽后临时锁定排序，手动刷新后恢复自动排序 |
+| **急单字段一致性** | 卡片增加合同备注展示；已确认/生产中卡片显示流水号；急单插入携带 `remark/order_remark/sales_id` 等字段 |
+| **老板计划同步** | 批次分配产线时按「合同号+机型」将 `factory_plan` 状态从 `待规划` 更新为 `已规划`；急单插入后同步更新 |
+| **成品库同步** | 急单插入/内容交换后同步 `finished_goods_data`；有合同号→`待发货`，无合同号→`待入库` |
+| **批次顺延规则** | `enforceFamilyGapDays` 顺延时寻找相同容量批次，避免大小机跨列错位 |
+| **合同取消联动** | 标记现货 / 合同管理取消时同步将 `rush_order_queue` 中对应急单置为 `deleted` |
+| **配货双向同步** | 配货成功后通过流水号匹配将 `customer/dealer_name` 写入 `units` 表；撤回配货时清空归属信息但保留 `order_remark` |
+| **移除 lru_cache** | `crud/inventory.py` 的 `get_data()` 移除 `@lru_cache`，改为每次直接查数据库，彻底消除缓存脏写覆盖机台真实状态的 Bug |
+| **合同录入自动重算** | `create_contracts_batch` 录入成功后通过 `BackgroundTasks` 异步触发 Go 全量重算，无需手动点击 |
+| **Vite 代理修复** | `frontend/vite.config.ts` 补充 `ws: true`，修复开发环境 WebSocket 升级请求代理失败问题 |
 
 ## Launcher EXE
 

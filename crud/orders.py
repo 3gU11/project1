@@ -4,7 +4,7 @@ import json
 import uuid
 
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 from sqlalchemy.exc import OperationalError
 
 from crud.inventory import get_data, save_data
@@ -216,28 +216,69 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     df = get_data()
     model_note_map = _build_model_note_map(order_id)
 
+    # 记录原先是 待入库 的机台（用于日志）
     current_status_df = df[df['流水号'].isin(selected_sns)]
     pending_inbound_sns = current_status_df[current_status_df['状态'] == '待入库']['流水号'].tolist()
     if pending_inbound_sns:
         append_log("直接配货-自动入库", pending_inbound_sns, operator=operator)
 
-    mask = df['流水号'].isin(selected_sns)
-    df.loc[mask, '状态'] = '待发货'
-    df.loc[mask, '占用订单号'] = order_id
-    df.loc[mask, '客户'] = customer
-    df.loc[mask, '代理商'] = agent
-    if model_note_map:
-        for sn in selected_sns:
-            row_mask = df['流水号'] == sn
-            if not row_mask.any():
-                continue
-            model = str(df.loc[row_mask, '机型'].iloc[0]).strip()
-            note = model_note_map.get(model, "")
-            if note:
-                df.loc[row_mask, '合同备注'] = note
-    df.loc[mask, '更新时间'] = datetime.now()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    save_data(df)
+    # 直接用 SQL UPDATE 写入，避免全量 DataFrame 读写导致真实状态（库中(A01区)等）被缓存旧值覆盖
+    if selected_sns:
+        try:
+            with get_engine().begin() as conn:
+                sns_list = list(selected_sns)
+                conn.execute(
+                    text("""
+                        UPDATE finished_goods_data
+                        SET 状态 = '待发货',
+                            占用订单号 = :order_id,
+                            客户 = :customer,
+                            代理商 = :agent,
+                            更新时间 = :now
+                        WHERE 流水号 IN :sns AND 状态 != '已出库'
+                    """).bindparams(bindparam("sns", expanding=True)),
+                    {"order_id": order_id, "customer": customer, "agent": agent,
+                     "now": now_str, "sns": sns_list}
+                )
+                # 按机型写入合同备注（如果有对应备注）
+                if model_note_map:
+                    for sn in selected_sns:
+                        row = df[df['流水号'] == sn]
+                        if row.empty:
+                            continue
+                        model = str(row.iloc[0].get('机型', '')).strip()
+                        note = model_note_map.get(model, "")
+                        if note:
+                            conn.execute(
+                                text("UPDATE finished_goods_data SET 合同备注 = :note WHERE 流水号 = :sn"),
+                                {"note": note, "sn": sn}
+                            )
+        except Exception as e:
+            raise RuntimeError(f"配货写入失败: {e}") from e
+
+        # 清除缓存，确保后续读取到最新状态
+        import crud.inventory
+        if hasattr(crud.inventory.get_data, "cache_clear"):
+            crud.inventory.get_data.cache_clear()
+
+    # 同步客户/代理商信息到沙盘 units 表
+    if selected_sns:
+        try:
+            with get_engine().begin() as conn:
+                conn.execute(
+                    text("""
+                        UPDATE units
+                        SET customer = :customer,
+                            dealer_name = :agent
+                        WHERE serial_no IN :sns OR forecast_serial_no IN :sns
+                    """).bindparams(bindparam("sns", expanding=True)),
+                    {"customer": customer, "agent": agent, "sns": list(selected_sns)}
+                )
+        except Exception as e:
+            print(f"Warning: Failed to sync units table on allocate_inventory: {e}")
+
     append_log(f"配货锁定-{order_id}", selected_sns, operator=operator)
 
 
@@ -255,8 +296,30 @@ def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
     df.loc[mask, '占用订单号'] = ""
     df.loc[mask, '客户'] = ""
     df.loc[mask, '代理商'] = ""
+    df.loc[mask, '合同号'] = ""
     df.loc[mask, '更新时间'] = datetime.now()
     save_data(df)
+
+    # 同步抹除沙盘中的相关订单/合同信息，彻底变为现货
+    if selected_sns:
+        try:
+            with get_engine().begin() as conn:
+                conn.execute(
+                    text("""
+                        UPDATE units
+                        SET contract_no = NULL,
+                            customer = NULL,
+                            dealer_name = NULL,
+                            sales_id = NULL,
+                            due_date = NULL,
+                            is_locked = 0
+                        WHERE serial_no IN :sns OR forecast_serial_no IN :sns
+                    """).bindparams(bindparam("sns", expanding=True)),
+                    {"sns": list(selected_sns)}
+                )
+        except Exception as e:
+            print(f"Warning: Failed to clear units table on revert_to_inbound: {e}")
+
     append_log(f"{reason}-退回待入库", selected_sns, operator=operator)
 
 

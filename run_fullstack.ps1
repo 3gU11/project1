@@ -16,11 +16,11 @@ function Stop-PortOwner([string]$port) {
   $conns = Get-NetTCPConnection -State Listen -LocalPort ([int]$port) -ErrorAction SilentlyContinue
   if ($conns) {
     $pids = $conns | Select-Object -ExpandProperty OwningProcess -Unique
-    foreach ($pid in $pids) {
+    foreach ($ownerPid in $pids) {
       try {
-        if ($pid -and $pid -gt 0) {
-          Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-          Log "Freed port $port by stopping PID=$pid"
+        if ($ownerPid -and $ownerPid -gt 0) {
+          Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+          Log "Freed port $port by stopping PID=$ownerPid"
         }
       } catch {}
     }

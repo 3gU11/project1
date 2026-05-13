@@ -30,7 +30,7 @@ export const filterInventoryRows = (indexedRows: IndexedInventoryRow[], params: 
   const statusPrefix = params.statusFilter
 
   return indexedRows
-    .filter((x) => x.status.startsWith('库存中') || x.status === '待入库')
+    .filter((x) => x.status.startsWith('库存中') || x.status === '待入库' || x.status === '已绑定')
     .filter((x) => !hasModels || pickedModels.includes(x.model))
     .filter((x) => !statusPrefix || x.status.startsWith(statusPrefix))
     .filter((x) => !q || x.searchText.includes(q))

@@ -139,11 +139,18 @@ func (h *BatchHandler) AssignToLine(c *gin.Context) {
 	if actor == "" {
 		actor = "system"
 	}
-	if err := h.svc.AssignToLine(req.BatchID, c.Param("id"), actor); err != nil {
+	stats, err := h.svc.AssignToLine(req.BatchID, c.Param("id"), actor)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"factory_plan_status_update": gin.H{
+			"pairs": stats.Pairs,
+			"rows":  stats.Rows,
+		},
+	})
 }
 
 func (h *BatchHandler) ManualComplete(c *gin.Context) {

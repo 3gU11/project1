@@ -110,7 +110,7 @@
         @selection-change="onPlannedImportSelectionChange"
         @row-click="onPlannedImportRowClick"
       >
-        <el-table-column type="selection" width="48" />
+        <el-table-column type="selection" width="48" :selectable="isPlannedImportRowSelectable" />
         <el-table-column prop="合同号" label="合同号" min-width="160" />
         <el-table-column prop="客户名" label="客户名" min-width="240" />
         <el-table-column prop="机型" label="机型" min-width="160" />
@@ -552,7 +552,9 @@ const manageRowsPaged = computed(() => {
 })
 
 const plannedContractRows = computed(() => {
-  let list = planRows.value.filter((r) => String(r['状态'] || '') === '已规划')
+  let list = planRows.value.filter((r) => {
+    return String(r['状态'] || '') === '已规划' && String(r['订单号'] || '').trim() === ''
+  })
   const term = importSearch.keyword.trim().toLowerCase()
   if (term) {
     list = list.filter((r) => {
@@ -563,7 +565,10 @@ const plannedContractRows = computed(() => {
   return list
 })
 const selectedImportRows = computed(() => {
-  return plannedContractRows.value.filter((r) => selectedImportContractIds.value.includes(String(r['合同号'] || '')))
+  return plannedContractRows.value.filter((r) => {
+    const cid = String(r['合同号'] || '')
+    return selectedImportContractIds.value.includes(cid) && !isContractAlreadyBound(cid)
+  })
 })
 const mergeWarningText = computed(() => {
   const customers = new Set<string>()
@@ -618,6 +623,18 @@ const getPlannedImportRowKey = (row: RowData) => {
   ].join('::')
 }
 
+const isContractAlreadyBound = (contractId: string) => {
+  const cid = String(contractId || '').trim()
+  if (!cid) return false
+  return planRows.value.some((row) => {
+    return String(row['合同号'] || '').trim() === cid && String(row['订单号'] || '').trim() !== ''
+  })
+}
+
+const isPlannedImportRowSelectable = (row: RowData) => {
+  return !isContractAlreadyBound(String(row['合同号'] || ''))
+}
+
 const syncSelectedImportContractIds = (rows: RowData[]) => {
   selectedPlannedImportRows.value = rows
   const ids = new Set<string>()
@@ -633,6 +650,10 @@ const onPlannedImportSelectionChange = (rows: RowData[]) => {
 }
 
 const onPlannedImportRowClick = (row: RowData) => {
+  if (!isPlannedImportRowSelectable(row)) {
+    ElMessage.info(`合同 ${String(row['合同号'] || '').trim()} 已绑定订单 ${String(row['订单号'] || '').trim()}，无需重复生成`)
+    return
+  }
   plannedImportTableRef.value?.toggleRowSelection(row)
 }
 

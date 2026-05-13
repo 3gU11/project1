@@ -1,7 +1,7 @@
 <template>
   <div
     class="unit-card"
-    :class="[typeClass, { locked: unit.is_locked, empty: isEmpty }]"
+    :class="[typeClass, progressClass, { locked: unit.is_locked, empty: isEmpty }]"
     :data-unit-id="unit.unit_id"
     @dblclick="$emit('edit', unit)"
     @contextmenu.prevent="$emit('contextmenu', { event: $event, unit })"
@@ -10,9 +10,14 @@
     <template v-if="!isEmpty">
       <div class="primary-info">
         <div class="model-detail">{{ displayModelDetail }}</div>
+        <div v-if="showCrossLane" class="cross-lane-badge">跨列生产</div>
         <div class="contract-no">{{ unit.contract_no || '-' }}</div>
         <div class="due-date">{{ formatDate(displayDueDate) }}</div>
         <div v-if="displayDealerName" class="dealer">{{ displayDealerName }}</div>
+        <template v-if="showSerialNo">
+          <div class="serial-no">{{ displaySerialNo }}</div>
+        </template>
+        <div class="remark-line">{{ displayRemark }}</div>
       </div>
       <div class="secondary-info">
         <span>{{ unit.customer || '-' }}</span>
@@ -30,7 +35,9 @@ import { computed } from 'vue'
 import { normalizeModelType, formatDate } from '../../utils/sandboxModelType'
 
 const props = defineProps({
-  unit: { type: Object, required: true }
+  unit: { type: Object, required: true },
+  disableProgressColor: { type: Boolean, default: false },
+  showCrossLane: { type: Boolean, default: false }
 })
 
 defineEmits(['edit', 'contextmenu'])
@@ -67,11 +74,68 @@ const displayDealerName = computed(() => {
   return String(v).trim()
 })
 
+const showSerialNo = computed(() => {
+  const bs = String(props.unit.batch_status || '').trim()
+  const us = String(props.unit.status || '').trim()
+  return bs === 'Confirmed' || bs === 'In_Production' || us === 'In_Production'
+})
+
+const displaySerialNo = computed(() => {
+  const v = props.unit.serial_no || props.unit.forecast_serial_no || ''
+  return String(v).trim() || '-'
+})
+
+const displayRemark = computed(() => {
+  const v = props.unit.order_remark || ''
+  return String(v).trim() || '-'
+})
+
 const typeClass = computed(() => {
-  const batchModel = String(props.unit.batch_model_type || '').trim().toUpperCase()
-  const batchID = String(props.unit.batch_id || '').trim().toUpperCase()
-  if (batchModel === 'SPECIAL' || batchID.includes('-SPECIAL-')) return 'type-SPECIAL'
+  if (props.unit.model_family === '特殊') return 'type-SPECIAL'
+  
   const mt = normalizeModelType(props.unit.model_type)
+  if (mt === 'SPECIAL') return 'type-SPECIAL'
+  if (mt === 'AUTO') return 'type-AUTO'
+  if (mt === 'XS') return 'type-XS'
+  if (mt === 'G') return 'type-G'
+
+  const batchID = String(props.unit.batch_id || '').trim().toUpperCase()
+  if (batchID.includes('-SPECIAL-')) return 'type-SPECIAL'
+
+  if (isEmpty.value) {
+    const batchModel = String(props.unit.batch_model_type || '').trim().toUpperCase()
+    if (batchModel === 'SPECIAL') return 'type-SPECIAL'
+    if (batchModel === 'AUTO') return 'type-AUTO'
+    if (batchModel === 'XS') return 'type-XS'
+    if (batchModel === 'G') return 'type-G'
+  }
+
   return `type-${mt}`
 })
+
+const progressClass = computed(() => {
+  if (props.disableProgressColor) return ''
+  if (isEmpty.value) return ''
+  const contractNo = String(props.unit.contract_no || '').trim()
+  const status = String(props.unit.fg_status || props.unit.status || '').trim()
+  const hasContract = contractNo.length > 0
+  const isCompleted = hasContract
+    ? (status === '待发货' || status === '已出库')
+    : (status !== '待入库')
+  return isCompleted ? 'state-completed' : 'state-in-progress'
+})
 </script>
+
+<style scoped>
+.cross-lane-badge {
+  display: inline-block;
+  margin: 2px 0 4px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid #b7bec7;
+  color: #5f6975;
+  background: #f5f7fa;
+  font-size: 11px;
+  line-height: 1.4;
+}
+</style>

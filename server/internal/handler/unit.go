@@ -147,14 +147,36 @@ func (h *UnitHandler) Unlock(c *gin.Context) {
 }
 
 func (h *UnitHandler) MoveBatch(c *gin.Context) {
-	var req struct {
-		TargetBatchID         string `json:"target_batch_id" binding:"required"`
-		InsertBeforeSlotIndex *int   `json:"insert_before_slot_index"`
-		TargetSlot            *int   `json:"target_slot"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var raw map[string]interface{}
+	if err := c.ShouldBindJSON(&raw); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	forbiddenFields := []string{"contract_no", "customer", "dealer_id", "dealer_name", "sales_id", "order_remark", "model_type"}
+	for _, key := range forbiddenFields {
+		if _, exists := raw[key]; exists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "move-batch cannot update contract ownership fields"})
+			return
+		}
+	}
+	targetBatchID := strings.TrimSpace(fmt.Sprintf("%v", raw["target_batch_id"]))
+	if targetBatchID == "" || strings.EqualFold(targetBatchID, "<nil>") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_batch_id is required"})
+		return
+	}
+	var req struct {
+		TargetBatchID         string
+		InsertBeforeSlotIndex *int
+		TargetSlot            *int
+	}
+	req.TargetBatchID = targetBatchID
+	if v, ok := raw["insert_before_slot_index"]; ok && v != nil {
+		i := toInt(v)
+		req.InsertBeforeSlotIndex = &i
+	}
+	if v, ok := raw["target_slot"]; ok && v != nil {
+		i := toInt(v)
+		req.TargetSlot = &i
 	}
 
 	tx := h.db.Begin()
@@ -229,7 +251,16 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": true, "new_slot": newSlot})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": "use move-to-special to move regular units into special columns"})
+		newSlot, err := h.moveRegularUnitToSpecialBatch(tx, unit, sourceBatch, targetBatch, requestedSlot)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := tx.Commit().Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "new_slot": newSlot})
 		return
 	}
 
@@ -574,8 +605,8 @@ func (h *UnitHandler) moveSpecialUnitToRegularBatch(tx *gorm.DB, unit *model.Uni
 
 	sourceMT := engine.NormalizeModelType(unit.ModelType)
 	targetMT := engine.NormalizeModelType(targetBatch.ModelType)
-	if sourceMT != targetMT {
-		return 0, fmt.Errorf("model type mismatch: cannot move between different model types")
+	if sourceMT != targetMT || !isLargeFamilyBatch(targetBatch) || (sourceMT != "XS" && sourceMT != "AUTO") {
+		return 0, fmt.Errorf("only special <-> large XS/AUTO cross-column moves are allowed")
 	}
 
 	preferredSlot := slotFromRequest(requestedSlot, 1)
@@ -643,6 +674,55 @@ func (h *UnitHandler) moveSpecialUnitToRegularBatch(tx *gorm.DB, unit *model.Uni
 	}
 
 	return newSlot, nil
+}
+
+func (h *UnitHandler) moveRegularUnitToSpecialBatch(tx *gorm.DB, unit *model.Unit, sourceBatch *model.Batch, targetBatch *model.Batch, requestedSlot *int) (int, error) {
+	unitID := strings.TrimSpace(unit.UnitID)
+	if unitID == "" {
+		return 0, fmt.Errorf("unit id is empty")
+	}
+	if unit.ContractNo == nil || strings.TrimSpace(*unit.ContractNo) == "" {
+		return 0, fmt.Errorf("stock/empty unit cannot move across columns")
+	}
+	if sourceBatch.Status != model.StatusPredicted || targetBatch.Status != model.StatusPredicted {
+		return 0, fmt.Errorf("cross-batch move is only supported in predicted columns")
+	}
+	if !strings.EqualFold(strings.TrimSpace(targetBatch.ModelType), "SPECIAL") {
+		return 0, fmt.Errorf("target must be special column")
+	}
+	sourceMT := engine.NormalizeModelType(unit.ModelType)
+	if sourceMT != "XS" && sourceMT != "AUTO" {
+		return 0, fmt.Errorf("only large XS/AUTO can move to special columns")
+	}
+	if engine.NormalizeModelType(sourceBatch.ModelType) != sourceMT || !isLargeFamilyBatch(sourceBatch) {
+		return 0, fmt.Errorf("only large XS/AUTO can move to special columns")
+	}
+
+	newSlot := slotFromRequest(requestedSlot, 1)
+	if err := h.repo.MoveToBatch(tx, unitID, targetBatch.BatchID, 0); err != nil {
+		return 0, err
+	}
+	if err := h.repo.CompactSlots(tx, sourceBatch.BatchID); err != nil {
+		return 0, err
+	}
+	if err := h.fillBatchToCapacity(tx, sourceBatch); err != nil {
+		return 0, err
+	}
+	if err := h.repo.ReorderBatchWithUnit(tx, targetBatch.BatchID, unitID, newSlot); err != nil {
+		return 0, err
+	}
+	if err := h.normalizeSpecialBatchSlots(tx, targetBatch.BatchID); err != nil {
+		return 0, err
+	}
+	return newSlot, nil
+}
+
+func isLargeFamilyBatch(batch *model.Batch) bool {
+	if batch == nil {
+		return false
+	}
+	family := engine.NormalizeModelType(batch.ModelType)
+	return batch.Capacity == 16 && (family == "XS" || family == "AUTO")
 }
 
 func (h *UnitHandler) moveSpecialUnit(tx *gorm.DB, unit *model.Unit, sourceBatchID string, targetBatchID string, requestedSlot *int) (int, error) {
@@ -1234,6 +1314,19 @@ func (h *UnitHandler) enforceFamilyGapDays(tx *gorm.DB, family string) ([]string
 		touched = append(touched, bid)
 	}
 
+	findNextSameCapacityIdx := func(curIdx int) int {
+		if curIdx < 0 || curIdx >= len(batches) {
+			return -1
+		}
+		curCap := batches[curIdx].Capacity
+		for j := curIdx + 1; j < len(batches); j++ {
+			if batches[j].Capacity == curCap {
+				return j
+			}
+		}
+		return -1
+	}
+
 	for i := 0; i < len(batches); i++ {
 		batchID := batches[i].BatchID
 
@@ -1278,7 +1371,8 @@ func (h *UnitHandler) enforceFamilyGapDays(tx *gorm.DB, family string) ([]string
 
 			addTouched(batchID)
 
-			if i+1 >= len(batches) {
+			nextIdx := findNextSameCapacityIdx(i)
+			if nextIdx < 0 {
 				if err := h.enqueueOverflowUnit(tx, candidate, family); err != nil {
 					return touched, err
 				}
@@ -1294,7 +1388,7 @@ func (h *UnitHandler) enforceFamilyGapDays(tx *gorm.DB, family string) ([]string
 				continue
 			}
 
-			nextBatchID := batches[i+1].BatchID
+			nextBatchID := batches[nextIdx].BatchID
 			nextEjectUnit, err := h.pickEjectableUnboundUnit(tx, nextBatchID, 0)
 			if err != nil {
 				return touched, err
@@ -1334,7 +1428,7 @@ func (h *UnitHandler) enforceFamilyGapDays(tx *gorm.DB, family string) ([]string
 			if err != nil {
 				return touched, err
 			}
-			if int(count) > batches[i+1].Capacity {
+			if int(count) > batches[nextIdx].Capacity {
 				extraTouched, err := h.cascadeOverflowBySlot(tx, nextBatchID, family, candidate.UnitID)
 				if err != nil {
 					return touched, err
@@ -1973,18 +2067,90 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 	tx := h.db.Begin()
 	defer tx.Rollback()
 
-	if err := h.repo.ClearOrderFields(tx, c.Param("id")); err != nil {
+	unitID := c.Param("id")
+	unit, err := h.repo.LockForUpdate(tx, unitID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "unit not found"})
+		return
+	}
+
+	var contractNo string
+	if unit.ContractNo != nil {
+		contractNo = strings.TrimSpace(*unit.ContractNo)
+	}
+
+	if err := h.repo.ClearOrderFields(tx, unitID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.repo.UnlockUnitDB(tx, c.Param("id")); err != nil {
+	if err := h.repo.UnlockUnitDB(tx, unitID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if contractNo != "" {
+		if err := tx.Exec(
+			"UPDATE factory_plan SET 状态 = '已取消' "+
+				"WHERE TRIM(COALESCE(合同号, '')) COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci",
+			contractNo,
+		).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update factory_plan: " + err.Error()})
+			return
+		}
+
+		if err := tx.Exec(
+			"DELETE FROM production_queue "+
+				"WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci "+
+				"AND status = 'Waiting'",
+			contractNo,
+		).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear production_queue: " + err.Error()})
+			return
+		}
+
+		if err := tx.Exec(
+			"UPDATE rush_order_queue SET status = 'deleted' "+
+				"WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci "+
+				"AND status = 'pending'",
+			contractNo,
+		).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear rush_order_queue: " + err.Error()})
+			return
+		}
+
+		type UnitBatch struct {
+			UnitID string
+			Status string
+		}
+		var siblingUnits []UnitBatch
+		if err := tx.Raw(`
+			SELECT u.unit_id, b.status 
+			FROM units u 
+			JOIN batches b ON u.batch_id = b.batch_id 
+			WHERE TRIM(COALESCE(u.contract_no, '')) COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci
+			  AND u.unit_id != ?
+		`, contractNo, unitID).Scan(&siblingUnits).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to find sibling units: " + err.Error()})
+			return
+		}
+
+		for _, su := range siblingUnits {
+			// 强制清除所有状态的兄弟卡片（Predicted / Confirmed / In_Production）
+			if err := h.repo.ClearOrderFields(tx, su.UnitID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear sibling unit: " + err.Error()})
+				return
+			}
+			if err := h.repo.UnlockUnitDB(tx, su.UnitID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to unlock sibling unit: " + err.Error()})
+				return
+			}
+		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

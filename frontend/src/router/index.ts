@@ -33,7 +33,8 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/inventory', name: 'Inventory', label: '🔎 库存查询', title: '库存查询', permission: 'QUERY', component: () => import('../views/InventoryQuery.vue') },
   { path: '/inbound', name: 'Inbound', label: '⬇️ 成品入库', title: '成品入库', permission: 'INBOUND', component: () => import('../views/Inbound.vue') },
   { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', permission: 'TRACEABILITY', isManagement: true, component: () => import('../views/Traceability.vue') },
-  { path: '/sandbox', name: 'BossPlan', label: '👑 老板计划', title: '老板计划', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/BossPlan.vue') },
+  { path: '/production-kanban', name: 'ProductionKanban', label: '🏭 生产看板', title: '生产看板', permission: 'KANBAN_VIEW', isManagement: true, component: () => import('../views/sandbox/ProductionKanban.vue') },
+  { path: '/prediction-sandbox', name: 'PredictionSandbox', label: '👑 预测沙盘', title: '预测沙盘', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/PredictionSandbox.vue') },
 ]
 
 export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({

@@ -49,7 +49,6 @@
               <div>订单号：{{ selectedOrderId }}</div>
               <div>客户：{{ selectedOrder?.['客户名'] || '-' }}</div>
               <div>需求总量：{{ totalDemandQty }}</div>
-              <div>应配机台：{{ allocations.length }}</div>
               <div class="summary-note">备注：{{ selectedOrder?.['备注'] || '-' }}</div>
             </div>
 
@@ -70,17 +69,27 @@
             </el-table>
 
             <el-divider />
-            <div class="field-label">应配机台清单（按合同自动带出）</div>
+            <div class="field-head">
+              <div class="field-label">应配机台清单（按合同自动带出）</div>
+              <div class="field-head-right" style="display: flex; gap: 8px; align-items: center;">
+                <el-input v-model="candidateKeyword" placeholder="搜索流水号/机型/批次" clearable style="width: 200px" />
+                <el-select v-model="candidateStatusFilter" style="width: 200px">
+                  <el-option label="全部状态" value="" />
+                  <el-option label="待入库" value="待入库" />
+                  <el-option label="库存中" value="库存中" />
+                </el-select>
+              </div>
+            </div>
             <el-table
               :data="candidateRows"
               border
               stripe
               size="small"
               height="230"
+              :row-class-name="getAllocationRowClassName"
               @selection-change="onCandidateSelectionChange"
             >
               <el-table-column type="selection" width="48" />
-              <el-table-column prop="合同号" label="合同号" width="140" />
               <el-table-column prop="流水号" label="流水号" width="150" />
               <el-table-column prop="机型" label="机型" min-width="160" />
               <el-table-column prop="状态" label="状态" width="120" />
@@ -99,10 +108,10 @@
               stripe
               size="small"
               height="230"
+              :row-class-name="getAllocationRowClassName"
               @selection-change="onAllocatedSelectionChange"
             >
               <el-table-column type="selection" width="48" />
-              <el-table-column prop="合同号" label="合同号" width="140" />
               <el-table-column prop="流水号" label="流水号" width="150" />
               <el-table-column prop="机型" label="机型" min-width="160" />
               <el-table-column prop="状态" label="状态" width="90" />
@@ -111,6 +120,7 @@
             </el-table>
             <div class="ops">
               <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
+              <el-button type="success" :loading="saving" @click="completeAllocation">配货完成</el-button>
             </div>
           </template>
         </el-card>
@@ -120,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
@@ -146,6 +156,8 @@ const selectedOrderId = ref('')
 const selectedOrder = ref<Row | null>(null)
 const selectedCandidateSerials = ref<string[]>([])
 const selectedAllocatedSerials = ref<string[]>([])
+const candidateStatusFilter = ref('')
+const candidateKeyword = ref('')
 
 const parseDemandEntries = (order: Row | null) => {
   const entries: Array<{ model: string; qty: number }> = []
@@ -190,12 +202,17 @@ const shippedByOrderId = computed(() => {
 
 const filteredOrders = computed(() => {
   const term = orderKeyword.value.trim().toLowerCase()
-  return orders.value
-    .filter((o) => ['active', 'ready', 'packed'].includes(String(o.status || 'active')))
+  let result = orders.value
+    .filter((o) => {
+      const s = String(o.status || 'active').toLowerCase()
+      // Exclude finished/canceled orders
+      return !['done', 'shipped', 'completed', 'canceled'].includes(s)
+    })
     .filter((o) => {
       const orderId = String(o['订单号'] || '')
       const need = parseOrderDemandTotal(o)
       const shipped = shippedByOrderId.value.get(orderId) || 0
+      // If we have shipping data, use it. But status 'done' is the primary filter above.
       return !(need > 0 && shipped >= need)
     })
     .filter((o) => {
@@ -203,6 +220,13 @@ const filteredOrders = computed(() => {
       const hit = `${o['订单号'] || ''} ${o['客户名'] || ''}`.toLowerCase()
       return hit.includes(term)
     })
+    
+  // Sort by order creation time (oldest first for FIFO, or newest first, let's do descending newest first)
+  return result.sort((a, b) => {
+    const timeA = new Date(a['下单时间'] || 0).getTime()
+    const timeB = new Date(b['下单时间'] || 0).getTime()
+    return timeB - timeA
+  })
 })
 
 const parseDemandMap = (order: Row | null) => {
@@ -223,10 +247,10 @@ const totalDemandQty = computed(() => {
 const allocationModelCountMap = computed(() => {
   const map = new Map<string, number>()
   for (const r of allocations.value) {
-    const status = String(r['状态'] || '').trim()
     const occupied = String(r['占用订单号'] || '').trim()
-    if (status === '未入库') continue
-    if (occupied !== selectedOrderId.value && status !== '待发货') continue
+    const status = String(r['状态'] || '').trim()
+    if (occupied !== selectedOrderId.value) continue
+    if (status === '已出库' || status === '未入库') continue
     const model = normalizeModelName(r['机型'])
     if (!model) continue
     map.set(model, (map.get(model) || 0) + 1)
@@ -250,13 +274,26 @@ const demandRows = computed(() => {
 
 const candidateRows = computed(() => {
   if (!selectedOrderId.value) return []
+  const kw = candidateKeyword.value.trim().toLowerCase()
   return sortRowsByModel(allocations.value.filter((r) => {
     const serialNo = String(r['流水号'] || '').trim()
-    const status = String(r['状态'] || '')
+    const status = String(r['状态'] || '').trim()
     const occupied = String(r['占用订单号'] || '')
+    const model = String(r['机型'] || '').trim()
+    const batch = String(r['批次号'] || '').trim()
+    
     if (!serialNo) return false
-    if (status === '未入库' || status === '已出库') return false
+    if (status === '未入库' || status === '已出库' || status === '已绑定') return false
     if (occupied) return false
+    
+    if (candidateStatusFilter.value === '待入库' && status !== '待入库') return false
+    if (candidateStatusFilter.value === '库存中' && !status.startsWith('库存中')) return false
+    
+    if (kw) {
+      const hit = `${model} ${batch} ${serialNo}`.toLowerCase()
+      if (!hit.includes(kw)) return false
+    }
+    
     return true
   }), (r) => String(r['机型'] || ''))
 })
@@ -269,6 +306,7 @@ const confirmedRows = computed(() => {
     return serialNo && occupied === selectedOrderId.value && status !== '已出库'
   }), (r) => String(r['机型'] || ''))
 })
+const confirmedAllocatedTotal = computed(() => confirmedRows.value.length)
 
 const CACHE_ORDERS = 'allocation:orders'
 const CACHE_INVENTORY = 'allocation:inventory'
@@ -347,6 +385,14 @@ const onAllocatedSelectionChange = (rows: Row[]) => {
   selectedAllocatedSerials.value = rows.map((r) => String(r['流水号'] || '')).filter(Boolean)
 }
 
+const getAllocationRowClassName = ({ row }: { row: Row }) => {
+  return String(row['合同号'] || '').trim() ? 'contract-specified-row' : ''
+}
+
+watch(candidateStatusFilter, () => {
+  selectedCandidateSerials.value = []
+})
+
 const allocateSelected = async () => {
   if (!selectedOrderId.value) return
   if (selectedCandidateSerials.value.length === 0) {
@@ -354,8 +400,8 @@ const allocateSelected = async () => {
     return
   }
   const demandTotal = totalDemandQty.value
-  if (demandTotal > 0 && allocations.value.length + selectedCandidateSerials.value.length > demandTotal) {
-    ElMessage.warning(`超出总需求数量：需求 ${demandTotal}，当前已配 ${allocations.value.length}，本次勾选 ${selectedCandidateSerials.value.length}`)
+  if (demandTotal > 0 && confirmedAllocatedTotal.value + selectedCandidateSerials.value.length > demandTotal) {
+    ElMessage.warning(`超出总需求数量：需求 ${demandTotal}，当前已配 ${confirmedAllocatedTotal.value}，本次勾选 ${selectedCandidateSerials.value.length}`)
     return
   }
 
@@ -420,6 +466,22 @@ const releaseSelected = async () => {
   }
 }
 
+const completeAllocation = async () => {
+  if (!selectedOrderId.value) return
+  saving.value = true
+  try {
+    const res = await apiPost<{ message?: string }>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`, {})
+    ElMessage.success(res.message || '配货完成')
+    await loadData(true)
+    refreshSelectedOrderFromList()
+    await loadAllocations()
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '配货完成失败')
+  } finally {
+    saving.value = false
+  }
+}
+
 const allocatedByOrderId = computed(() => {
   const map = new Map<string, number>()
   for (const row of inventoryRows.value) {
@@ -440,14 +502,16 @@ const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
   const need = parseOrderDemandTotal(o)
   const allocated = allocatedByOrderId.value.get(orderId) || 0
 
-  if (s === 'ready' || (need > 0 && allocated >= need)) {
+  if (s === 'ready') {
     return { text: '已满足', type: 'success' }
   }
-  return { text: '待配齐', type: 'warning' }
+  if (need > 0 && allocated >= need) return { text: '待完成', type: 'warning' }
+  return { text: '待配齐', type: 'danger' }
 }
 
 onMounted(() => {
-  loadData()
+  // Always force refresh when entering the allocation page to ensure dispatched orders are removed
+  loadData(true)
 })
 </script>
 
@@ -530,8 +594,14 @@ onMounted(() => {
   white-space: normal;
   word-break: break-word;
 }
-.field-label {
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 6px;
+}
+.field-label {
   font-size: var(--font-size-base); /* 放大配货面板模块小标题字号 */
   font-weight: 600;
   color: var(--color-gray-800);
@@ -540,5 +610,11 @@ onMounted(() => {
   margin-top: var(--space-2);
   display: flex;
   gap: 8px;
+}
+:deep(.contract-specified-row td) {
+  background-color: #ecfdf5 !important;
+}
+:deep(.contract-specified-row:hover td) {
+  background-color: #d1fae5 !important;
 }
 </style>

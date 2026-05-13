@@ -14,15 +14,17 @@ Starting server on :3001
 [GIN-debug] GET    /api/batches/:id          --> smart-scheduling/server/internal/handler.(*BatchHandler).GetByID-fm (5 handlers)
 [GIN-debug] GET    /api/batches/:id/units    --> smart-scheduling/server/internal/handler.(*BatchHandler).GetBatchUnits-fm (5 handlers)
 [GIN-debug] POST   /api/batches/:id/confirm  --> smart-scheduling/server/internal/handler.(*BatchHandler).Confirm-fm (5 handlers)
+[GIN-debug] POST   /api/batches/:id/revoke   --> smart-scheduling/server/internal/handler.(*BatchHandler).Revoke-fm (5 handlers)
 [GIN-debug] POST   /api/batches/batch-confirm --> smart-scheduling/server/internal/handler.(*BatchHandler).BatchConfirm-fm (5 handlers)
-[GIN-debug] POST   /api/batches/generate-next --> smart-scheduling/server/internal/handler.(*ForecastHandler).GenerateNext-fm (5 handlers)
 [GIN-debug] POST   /api/batches/:id/insert-empty-slot --> smart-scheduling/server/internal/handler.(*BatchHandler).InsertEmptySlot-fm (5 handlers)
 [GIN-debug] GET    /api/production-queue     --> smart-scheduling/server/internal/handler.(*QueueHandler).List-fm (5 handlers)
 [GIN-debug] GET    /api/units/empty-containers --> smart-scheduling/server/internal/handler.(*UnitHandler).EmptyContainers-fm (5 handlers)
+[GIN-debug] POST   /api/units/special-card   --> smart-scheduling/server/internal/handler.(*UnitHandler).CreateSpecialCard-fm (5 handlers)
 [GIN-debug] GET    /api/units/:id            --> smart-scheduling/server/internal/handler.(*UnitHandler).GetByID-fm (5 handlers)
 [GIN-debug] PATCH  /api/units/:id            --> smart-scheduling/server/internal/handler.(*UnitHandler).Update-fm (5 handlers)
 [GIN-debug] PATCH  /api/units/:id/unlock     --> smart-scheduling/server/internal/handler.(*UnitHandler).Unlock-fm (5 handlers)
 [GIN-debug] POST   /api/units/:id/move-batch --> smart-scheduling/server/internal/handler.(*UnitHandler).MoveBatch-fm (5 handlers)
+[GIN-debug] POST   /api/units/:id/move-to-special --> smart-scheduling/server/internal/handler.(*UnitHandler).MoveToSpecial-fm (5 handlers)
 [GIN-debug] POST   /api/units/:id/reorder-slot --> smart-scheduling/server/internal/handler.(*UnitHandler).ReorderSlot-fm (5 handlers)
 [GIN-debug] POST   /api/units/repair-family-mismatches --> smart-scheduling/server/internal/handler.(*UnitHandler).RepairFamilyMismatches-fm (5 handlers)
 [GIN-debug] POST   /api/units/swap-content   --> smart-scheduling/server/internal/handler.(*UnitHandler).SwapContent-fm (5 handlers)
@@ -38,4 +40,21 @@ Starting server on :3001
 [GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
 Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.
 [GIN-debug] Listening and serving HTTP on :3001
-[GIN] 2026/05/06 - 11:12:13 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
+[GIN] 2026/05/12 - 18:57:00 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
+[GIN] 2026/05/12 - 18:57:17 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
+[GIN] 2026/05/12 - 18:58:54 | 200 |      1.7713ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/12 - 18:58:54 | 200 |      7.7541ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/12 - 18:58:54 | 200 |     11.3781ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/12 - 18:58:54 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/05/12 - 18:59:37 | 200 |       501.8µs |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/05/12 - 18:59:37 | 200 |      5.7222ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/12 - 18:59:37 | 200 |      6.7431ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/12 - 18:59:37 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/05/12 - 18:59:38 | 200 |      5.2159ms |       127.0.0.1 | GET      "/api/batches?status=In_Production%2CConfirmed%2CPredicted&limit=2000"
+[GIN] 2026/05/12 - 18:59:38 | 200 |     15.8935ms |       127.0.0.1 | POST     "/api/units/rush-insert"
+[GIN] 2026/05/12 - 18:59:38 | 200 |      5.2782ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/12 - 18:59:38 | 200 |      6.9702ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/12 - 18:59:38 | 200 |      3.5907ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/05/12 - 18:59:38 | 200 |      6.2401ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/12 - 19:01:30 | 200 |      6.1785ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/05/12 - 19:01:30 | 200 |      7.2147ms |       127.0.0.1 | GET      "/api/production-lines"

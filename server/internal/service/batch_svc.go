@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,6 +19,11 @@ type BatchSvc struct {
 	unitRepo  *repo.UnitRepo
 	cfgRepo   *repo.ConfigRepo
 	wsHub     *ws.Hub
+}
+
+type FactoryPlanStatusUpdateStats struct {
+	Pairs int `json:"pairs"`
+	Rows  int `json:"rows"`
 }
 
 func NewBatchSvc(db *gorm.DB, br *repo.BatchRepo, ur *repo.UnitRepo, cr *repo.ConfigRepo, hub *ws.Hub) *BatchSvc {
@@ -106,34 +112,51 @@ func (s *BatchSvc) BatchConfirm(batchIDs []string, actor string) error {
 	return nil
 }
 
-func (s *BatchSvc) AssignToLine(batchID string, lineID string, actor string) error {
+func (s *BatchSvc) AssignToLine(batchID string, lineID string, actor string) (*FactoryPlanStatusUpdateStats, error) {
 	tx := s.db.Begin()
 	defer tx.Rollback()
 
 	var line model.ProductionLine
 	if err := tx.Where("line_id = ?", lineID).First(&line).Error; err != nil {
-		return fmt.Errorf("production line not found: %w", err)
-	}
-	if line.Status != model.LineIdle {
-		return fmt.Errorf("line %s is not idle", lineID)
+		return nil, fmt.Errorf("production line not found: %w", err)
 	}
 
 	b, err := s.batchRepo.LockBatchForUpdate(tx, batchID)
 	if err != nil {
-		return fmt.Errorf("batch not found: %w", err)
+		return nil, fmt.Errorf("batch not found: %w", err)
 	}
 	if b.Status != model.StatusConfirmed {
-		return fmt.Errorf("batch %s status is %s, expected Confirmed", b.BatchID, b.Status)
+		return nil, fmt.Errorf("batch %s status is %s, expected Confirmed", b.BatchID, b.Status)
+	}
+	if b.ProductionLineID != nil && strings.TrimSpace(*b.ProductionLineID) != "" {
+		return nil, fmt.Errorf("batch %s is already assigned to line %s", b.BatchID, *b.ProductionLineID)
+	}
+
+	isSpecial := isSpecialBatchModel(b.ModelType)
+	if line.Status != model.LineIdle {
+		if !isSpecial {
+			return nil, fmt.Errorf("line %s is not idle", lineID)
+		}
+		ok, err := s.lineHasOnlySpecialBatches(tx, lineID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("line %s is busy with non-special batches", lineID)
+		}
 	}
 
 	if err := s.batchRepo.AssignLine(tx, batchID, lineID); err != nil {
-		return err
+		return nil, err
 	}
-	if err := tx.Model(&line).Updates(map[string]interface{}{
-		"status":           model.LineBusy,
-		"current_batch_id": batchID,
-	}).Error; err != nil {
-		return err
+	lineUpdates := map[string]interface{}{
+		"status": model.LineBusy,
+	}
+	if line.CurrentBatchID == nil || strings.TrimSpace(*line.CurrentBatchID) == "" {
+		lineUpdates["current_batch_id"] = batchID
+	}
+	if err := tx.Model(&line).Updates(lineUpdates).Error; err != nil {
+		return nil, err
 	}
 
 	// Sync all units in this batch to In_Production with the production line
@@ -141,16 +164,74 @@ func (s *BatchSvc) AssignToLine(batchID string, lineID string, actor string) err
 		"status":             model.StatusInProduction,
 		"production_line_id": lineID,
 	}).Error; err != nil {
-		return err
+		return nil, err
+	}
+
+	// Sync factory_plan status by contract_no + model_type: 待规划 -> 已规划.
+	type contractModelPair struct {
+		ContractNo string `gorm:"column:contract_no"`
+		ModelType  string `gorm:"column:model_type"`
+	}
+	var pairs []contractModelPair
+	if err := tx.Raw(`
+SELECT DISTINCT contract_no, model_type
+FROM units
+WHERE batch_id = ?
+  AND contract_no IS NOT NULL
+  AND TRIM(contract_no) <> ''
+  AND model_type IS NOT NULL
+  AND TRIM(model_type) <> ''`, batchID).Scan(&pairs).Error; err != nil {
+		return nil, err
+	}
+
+	stats := &FactoryPlanStatusUpdateStats{Pairs: 0, Rows: 0}
+	for _, pair := range pairs {
+		cn := pair.ContractNo
+		mt := pair.ModelType
+		if cn == "" || mt == "" {
+			continue
+		}
+		stats.Pairs++
+		ret := tx.Exec("UPDATE factory_plan SET `状态` = '已规划' "+
+			"WHERE `合同号` = ? AND `机型` COLLATE utf8mb4_general_ci = ? COLLATE utf8mb4_general_ci AND `状态` = '待规划'",
+			cn, mt)
+		if ret.Error != nil {
+			return nil, ret.Error
+		}
+		stats.Rows += int(ret.RowsAffected)
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		return err
+		return nil, err
 	}
 
-	s.log(actor, "assign_line", "production_line", lineID, map[string]string{"batch_id": batchID})
+	s.log(actor, "assign_line", "production_line", lineID, map[string]string{
+		"batch_id": batchID,
+		"pairs":    fmt.Sprintf("%d", stats.Pairs),
+		"rows":     fmt.Sprintf("%d", stats.Rows),
+	})
 	s.wsHub.Broadcast("line:updated", map[string]string{"line_id": lineID, "batch_id": batchID, "status": model.LineBusy})
-	return nil
+	return stats, nil
+}
+
+func (s *BatchSvc) lineHasOnlySpecialBatches(tx *gorm.DB, lineID string) (bool, error) {
+	var batches []model.Batch
+	if err := tx.Where("production_line_id = ? AND status = ?", lineID, model.StatusInProduction).Find(&batches).Error; err != nil {
+		return false, err
+	}
+	if len(batches) == 0 {
+		return false, nil
+	}
+	for _, batch := range batches {
+		if !isSpecialBatchModel(batch.ModelType) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func isSpecialBatchModel(modelType string) bool {
+	return strings.EqualFold(strings.TrimSpace(modelType), "SPECIAL")
 }
 
 func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
@@ -161,12 +242,22 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 	if err := tx.Where("line_id = ?", lineID).First(&line).Error; err != nil {
 		return fmt.Errorf("line not found: %w", err)
 	}
-	if line.CurrentBatchID == nil {
+	var batchIDs []string
+	if err := tx.Model(&model.Batch{}).
+		Where("production_line_id = ? AND status = ?", lineID, model.StatusInProduction).
+		Pluck("batch_id", &batchIDs).Error; err != nil {
+		return err
+	}
+	if len(batchIDs) == 0 && line.CurrentBatchID != nil && strings.TrimSpace(*line.CurrentBatchID) != "" {
+		batchIDs = append(batchIDs, *line.CurrentBatchID)
+	}
+	if len(batchIDs) == 0 {
 		return fmt.Errorf("line %s has no active batch", lineID)
 	}
 
-	batchID := *line.CurrentBatchID
-	if err := s.batchRepo.UpdateStatus(tx, batchID, model.StatusCompleted); err != nil {
+	if err := tx.Model(&model.Batch{}).Where("batch_id IN ?", batchIDs).Updates(map[string]interface{}{
+		"status": model.StatusCompleted,
+	}).Error; err != nil {
 		return err
 	}
 	if err := tx.Model(&line).Updates(map[string]interface{}{
@@ -176,8 +267,8 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 		return err
 	}
 
-	// Sync all units in this batch to Completed, clear production_line_id
-	if err := tx.Model(&model.Unit{}).Where("batch_id = ?", batchID).Updates(map[string]interface{}{
+	// Sync all units in active batches to Completed, clear production_line_id.
+	if err := tx.Model(&model.Unit{}).Where("batch_id IN ?", batchIDs).Updates(map[string]interface{}{
 		"status":             model.StatusCompleted,
 		"production_line_id": nil,
 	}).Error; err != nil {
@@ -188,8 +279,9 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 		return err
 	}
 
-	s.log(actor, "manual_complete", "production_line", lineID, map[string]string{"batch_id": batchID})
-	s.wsHub.Broadcast("line:completed", map[string]string{"line_id": lineID, "batch_id": batchID})
+	joinedBatchIDs := strings.Join(batchIDs, ",")
+	s.log(actor, "manual_complete", "production_line", lineID, map[string]string{"batch_ids": joinedBatchIDs})
+	s.wsHub.Broadcast("line:completed", map[string]string{"line_id": lineID, "batch_ids": joinedBatchIDs})
 	return nil
 }
 

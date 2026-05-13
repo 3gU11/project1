@@ -32,6 +32,7 @@ export const useRushStore = defineStore('sandbox-rush', {
           model_type: row.model_type,
           dealer_name: row.dealer_name || '',
           due_date: row.due_date || '',
+          remark: row.remark || '',
           status: row.status || 'pending'
         }))
       } finally {
@@ -40,6 +41,7 @@ export const useRushStore = defineStore('sandbox-rush', {
     },
     async markRushOrderStatus(id: string | number, status: string) {
       await sandboxApi.updateRushOrderStatus(id, status)
+      // Remove it from local state immediately for snappy UI
       this.removeRushOrder(id)
     },
     clearRushOrders() {
@@ -63,7 +65,8 @@ export const useRushStore = defineStore('sandbox-rush', {
           customer: rushOrder.customer || '',
           model_type: rushOrder.model_type,
           dealer_name: rushOrder.dealer_name || '',
-          due_date: rushOrder.due_date || ''
+          due_date: rushOrder.due_date || '',
+          remark: rushOrder.remark || ''
         },
         reason: '急单插入'
       })
@@ -77,7 +80,8 @@ export const useRushStore = defineStore('sandbox-rush', {
           customer: rushOrder.customer || '',
           model_type: rushOrder.model_type,
           dealer_name: rushOrder.dealer_name || '',
-          due_date: rushOrder.due_date || ''
+          due_date: rushOrder.due_date || '',
+          remark: rushOrder.remark || ''
         },
         reason: '拖拽急单插入'
       })
@@ -90,7 +94,8 @@ export const useRushStore = defineStore('sandbox-rush', {
           customer: rushOrder.customer || '',
           model_type: rushOrder.model_type,
           dealer_name: rushOrder.dealer_name || '',
-          due_date: rushOrder.due_date || ''
+          due_date: rushOrder.due_date || '',
+          remark: rushOrder.remark || ''
         },
         reason: '自动急单插入'
       })

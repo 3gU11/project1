@@ -168,18 +168,20 @@ def execute_import_transaction_payload(payload, retry_times=1):
             result["failed"].append({"trackNo": track_no, "reason": "流水号已在库存中"})
             continue
         row = staged_map[track_no]
+        order_no = str(row.get("订单号", "") or "").strip()
+        contract_no = str(row.get("合同号", "") or "").strip()
+        
         rows_to_add.append({
             "批次号": row.get("批次号", ""),
             "机型": row.get("机型", ""),
             "流水号": track_no,
-            "状态": "待入库",
+            "状态": "已绑定" if contract_no else "待入库",
             "预计入库时间": expect_date,
             "更新时间": current_time,
-            "占用订单号": "",
+            "占用订单号": order_no,
             "客户": row.get("客户", ""),
             "代理商": row.get("代理商", ""),
-            "订单备注": "",
-            "机台备注/配置": row.get("合同备注", ""),
+            "合同备注": row.get("合同备注", ""),
             "Location_Code": "",
             "合同号": row.get("合同号", ""),
         })

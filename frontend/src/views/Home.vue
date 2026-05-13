@@ -6,8 +6,8 @@
     <section class="section">
       <h2 class="section-title">👑 管理与统筹</h2>
       <div class="top-cards">
-        <button v-if="can('/sandbox')" class="btn-base top-card boss-plan-card" @click="go('/sandbox')">
-          <span class="icon">👑</span> 老板计划
+        <button v-if="can('/prediction-sandbox')" class="btn-base top-card boss-plan-card" @click="go('/prediction-sandbox')">
+          <span class="icon">👑</span> 预测沙盘
         </button>
         <button v-if="can('/contracts')" class="btn-base top-card" @click="go('/contracts')">
           <span class="icon">📊</span> 合同管理

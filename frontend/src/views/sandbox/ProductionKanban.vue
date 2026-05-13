@@ -14,6 +14,7 @@
               {{ line.status === 'Idle' ? '空闲' : '忙碌' }}
             </span>
             <span v-if="line.model_type" style="font-size:12px;color:#888;">{{ line.model_type }}</span>
+            <span v-if="lineBatchLabels(line)" style="font-size:12px;color:#999;">{{ lineBatchLabels(line) }}</span>
             <span style="flex:1;"></span>
             <el-button
               v-if="line.status === 'Busy'"
@@ -70,7 +71,7 @@
                 <el-button
                   size="small" type="primary"
                   @click="showAssignDialog(batch)"
-                  :disabled="!idleLines.length"
+                  :disabled="assignableLinesForBatch(batch).length === 0"
                 >
                   整批分配
                 </el-button>
@@ -122,7 +123,7 @@
     <el-dialog v-model="assignVisible" title="整批分配" width="400px">
       <p>选择空闲产线分配批次 {{ assigningBatch?.batch_id?.slice(0,25) }}...</p>
       <el-select v-model="selectedLineId" placeholder="选择产线" style="width:100%">
-        <el-option v-for="l in idleLines" :key="l.production_line_id" :label="l.line_name" :value="l.production_line_id" />
+        <el-option v-for="l in assignableLines" :key="l.production_line_id" :label="assignableLineLabel(l)" :value="l.production_line_id" />
       </el-select>
       <template #footer>
         <el-button @click="assignVisible = false">取消</el-button>
@@ -198,7 +199,46 @@ const inProductionBatches = computed(() =>
   batchStore.batches.filter((b: any) => b.status === 'In_Production')
 )
 
-const idleLines = computed(() => lineStore.lines.filter((l: any) => l.status === 'Idle'))
+const assignableLines = computed(() => assignableLinesForBatch(assigningBatch.value))
+
+function isSpecialBatch(batch: any) {
+  return String(batch?.model_type || '').trim().toUpperCase() === 'SPECIAL'
+}
+
+function isSpecialLine(line: any) {
+  const batches = Array.isArray(line?.batches) ? line.batches : []
+  if (!batches.length) return false
+  return batches.every((b: any) => isSpecialBatch(b))
+}
+
+function lineBatchCodes(line: any) {
+  const batches = Array.isArray(line?.batches) ? line.batches : []
+  return batches.map((b: any) => displayBatchCode(b)).filter((s: string) => Boolean(String(s).trim()))
+}
+
+function lineBatchLabels(line: any) {
+  const codes = lineBatchCodes(line)
+  if (!codes.length) return ''
+  return `批次: ${codes.join(', ')}`
+}
+
+function assignableLinesForBatch(batch: any) {
+  if (!batch) return []
+  const special = isSpecialBatch(batch)
+  return lineStore.lines.filter((line: any) => {
+    if (line.status === 'Idle') return true
+    if (!special) return false
+    return isSpecialLine(line)
+  })
+}
+
+function assignableLineLabel(line: any) {
+  const lineName = String(line.line_name || line.production_line_id || '')
+  if (line.status === 'Idle') return `${lineName} (空闲)`
+  const codes = lineBatchCodes(line)
+  if (!codes.length) return `${lineName} (特殊在产)`
+  return `${lineName} (特殊在产: ${codes.join(', ')})`
+}
 
 function scrollToLine(lineId: string | null | undefined) {
   if (!lineId) return
@@ -333,7 +373,8 @@ async function onDragEnd() {
 
 function showAssignDialog(batch: any) {
   assigningBatch.value = batch
-  selectedLineId.value = null
+  const candidates = assignableLinesForBatch(batch)
+  selectedLineId.value = candidates.length ? candidates[0].production_line_id : null
   assignVisible.value = true
 }
 

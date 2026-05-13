@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="sandbox-layout">
     <div class="sandbox-header">
       <CapacityRatioEditor />
@@ -23,7 +23,7 @@
           :value="series"
         />
       </el-select>
-      <el-button size="small" @click="refresh" :loading="batchStore.loading">刷新</el-button>
+      <el-button size="small" @click="handleManualRefresh" :loading="batchStore.loading">刷新</el-button>
       <el-button size="small" type="primary" @click="handleRecompute" :loading="recomputing">
         全量重算
       </el-button>
@@ -85,9 +85,15 @@
               <template v-if="displayBatchCategory(batch) !== '特殊'">
                 / 备货 {{ stockCount(batch) }}
               </template>
+              <template v-if="familyMismatchCount(batch) > 0">
+                / <span class="mismatch-text">混放 {{ familyMismatchCount(batch) }}</span>
+              </template>
             </span>
             <div class="batch-meta batch-meta-due">
               {{ batchDueRangeText(batch) }}
+            </div>
+            <div class="batch-meta batch-meta-models">
+              {{ batchModelSummary(batch) }}
             </div>
           </div>
           <div>
@@ -98,7 +104,7 @@
         </div>
         <VueDraggable
           :model-value="batch.units || []"
-          :group="{ name: batch.model_type, pull: true, put: majorFamilyOfModel(batch.model_type) === dragFamily || !dragFamily }"
+          :group="{ name: batch.model_type, pull: true, put: true }"
           item-key="unit_id"
           :animation="180"
           draggable=".unit-card"
@@ -112,7 +118,14 @@
           @end="onDragEnd"
         >
           <template v-for="u in batch.units" :key="u.unit_id">
-            <UnitCard :unit="{ ...u, batch_model_type: batch.model_type }" @edit="openEditDrawer" @contextmenu="onContextMenu" />
+            <UnitCard
+              :class="{ 'unit-lane-mismatch': isUnitFamilyMismatch(u, batch) }"
+              :unit="{ ...u, batch_model_type: batch.model_type }"
+              :show-cross-lane="isCrossLanePlacement(u, batch)"
+              :disable-progress-color="true"
+              @edit="openEditDrawer"
+              @contextmenu="onContextMenu"
+            />
           </template>
         </VueDraggable>
         <button
@@ -139,7 +152,13 @@
           <el-input v-model="editForm.dealer_name" />
         </el-form-item>
         <el-form-item label="机型">
-          <el-select v-model="editForm.model_type" filterable allow-create default-first-option style="width:100%">
+          <el-select
+            v-model="editForm.model_type"
+            filterable
+            :allow-create="!isEditingSpecialBatch"
+            default-first-option
+            style="width:100%"
+          >
             <el-option v-for="m in editModelTypes" :key="m" :label="m" :value="m" />
           </el-select>
         </el-form-item>
@@ -226,8 +245,11 @@ const contextMenu = ref<{ visible: boolean; x: number; y: number; unit: any }>({
 const dragging = ref(false)
 const moving = ref(false)
 const pendingRefresh = ref(false)
+const suspendAutoSort = ref(false)
+const pinnedBatchOrder = ref<string[]>([])
 const dragSource = ref<{ unit: any; sourceBatchId: string } | null>(null)
 const dragFamily = ref<string>('')
+const dragLane = ref<string>('')
 const modelTypes = ref<string[]>([])
 const modelFamilyMap = ref<Record<string, string>>({})
 const selectedSeriesFilters = ref<string[]>([])
@@ -250,22 +272,37 @@ const filteredBatches = computed(() => {
     const selected = new Set(selectedSeriesFilters.value)
     batches = batches.filter((b: any) => selected.has(displayBatchCategory(b)))
   }
-  // 预测列排序：
-  // 1) 按交期范围起始日期升序
-  // 2) 有合同的批次排在无合同批次前
-  // 3) 再按 slot_no / batch_no 稳定兜底
-  batches.sort((a: any, b: any) => {
-    const da = batchDueStartTime(a)
-    const db = batchDueStartTime(b)
-    if (da !== db) return da - db
-    const ha = hasAnyContract(a) ? 1 : 0
-    const hb = hasAnyContract(b) ? 1 : 0
-    if (ha !== hb) return hb - ha
-    const sa = batchSlotOrder(a)
-    const sb = batchSlotOrder(b)
-    if (sa !== sb) return sa - sb
-    return (Number(a.batch_no) || 0) - (Number(b.batch_no) || 0)
-  })
+  const pinnedIndex = new Map<string, number>()
+  if (suspendAutoSort.value && pinnedBatchOrder.value.length > 0) {
+    pinnedBatchOrder.value.forEach((id, idx) => pinnedIndex.set(String(id), idx))
+  }
+  if (!suspendAutoSort.value) {
+    // 预测列排序：
+    // 1) 按交期范围起始日期升序
+    // 2) 有合同的批次排在无合同批次前
+    // 3) 再按 slot_no / batch_no 稳定兜底
+    batches.sort((a: any, b: any) => {
+      const da = batchDueStartTime(a)
+      const db = batchDueStartTime(b)
+      if (da !== db) return da - db
+      const ha = hasAnyContract(a) ? 1 : 0
+      const hb = hasAnyContract(b) ? 1 : 0
+      if (ha !== hb) return hb - ha
+      const sa = batchSlotOrder(a)
+      const sb = batchSlotOrder(b)
+      if (sa !== sb) return sa - sb
+      return (Number(a.batch_no) || 0) - (Number(b.batch_no) || 0)
+    })
+  } else if (pinnedIndex.size > 0) {
+    batches.sort((a: any, b: any) => {
+      const ia = pinnedIndex.get(String(a?.batch_id || ''))
+      const ib = pinnedIndex.get(String(b?.batch_id || ''))
+      if (ia !== undefined && ib !== undefined) return ia - ib
+      if (ia !== undefined) return -1
+      if (ib !== undefined) return 1
+      return (Number(a?.batch_no) || 0) - (Number(b?.batch_no) || 0)
+    })
+  }
   return batches
 })
 
@@ -298,12 +335,44 @@ const editingBatchFamily = computed(() => {
   return majorFamilyOfModel(batch?.model_type)
 })
 
-// 信息强改抽屉里的机型下拉：只显示同系列机型
+const editingBatchCategory = computed(() => {
+  if (!editingUnit.value) return ''
+  const batch = batchStore.batches.find((b: any) => b.batch_id === editingUnit.value?.batch_id)
+  return batch ? displayBatchCategory(batch) : ''
+})
+const isEditingSpecialBatch = computed(() => {
+  if (!editingUnit.value) return false
+  const batch = batchStore.batches.find((b: any) => b.batch_id === editingUnit.value?.batch_id)
+  if (!batch) return false
+  return String(batch?.model_type || '').trim().toUpperCase() === 'SPECIAL' || displayBatchCategory(batch) === '特殊'
+})
+
+function isFamilyToken(modelType: string) {
+  const upper = String(modelType || '').trim().toUpperCase()
+  return upper === 'G' || upper === 'XS' || upper === 'AUTO' || upper === 'SPECIAL'
+}
+
+// 信息强改抽屉里的机型下拉：按当前列类别精确过滤，并排除大类名
 const editModelTypes = computed(() => {
   const family = editingBatchFamily.value
+  const category = editingBatchCategory.value
   const merged = new Set<string>([...modelTypes.value, ...batchStore.modelTypes])
-  const all = [...merged].filter(Boolean).sort()
+  const all = [...merged]
+    .map((m) => String(m || '').trim())
+    .filter(Boolean)
+    .filter((m) => !isFamilyToken(m))
+    .sort()
+  if (category === '特殊') {
+    const filtered = all.filter((m: string) => {
+      const mf = String(modelFamilyMap.value[m.toUpperCase()] || '')
+      return normalizeMajorFamily(mf) === 'SPECIAL' || mf.includes('特殊') || mf.includes('鐗规畩')
+    })
+    return filtered
+  }
   if (!family) return all
+  if (category) {
+    return all.filter((m: string) => categoryOfModel(m, modelFamilyMap.value[m.toUpperCase()] || '') === category)
+  }
   return all.filter((m: string) => majorFamilyOfModel(m) === family)
 })
 
@@ -386,12 +455,29 @@ function sortBatchUnitsInPlace() {
 }
 
 function batchDueRangeText(batch: any) {
+  const inbound = String(batch?.expected_inbound_date || '').slice(0, 10)
+  if (inbound) return `预计入库: ${inbound}`
+
   const dates = (batch.units || [])
     .map((u: any) => String(u?.due_date || '').slice(0, 10))
     .filter((d: string) => d && d !== 'null' && d !== 'undefined')
     .sort()
   if (!dates.length) return '-'
   return dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} ~ ${dates[dates.length - 1]}`
+}
+
+function batchModelSummary(batch: any) {
+  const units = Array.isArray(batch?.units) ? batch.units : []
+  const counter = new Map<string, number>()
+  for (const u of units) {
+    if (isSpecialPlaceholder(u)) continue
+    const model = String(u?.model_type || '').trim()
+    if (!model) continue
+    counter.set(model, Number(counter.get(model) || 0) + 1)
+  }
+  if (counter.size === 0) return '机型数量: -'
+  const sorted = [...counter.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  return `机型数量: ${sorted.map(([model, count]) => `${model}×${count}`).join(' / ')}`
 }
 
 function plannedCount(batch: any) {
@@ -413,8 +499,80 @@ function isLargeMachineBatch(batch: any) {
   return Number(batch?.capacity || 0) === 16 && (family === 'XS' || family === 'AUTO')
 }
 
+function laneKeyOfBatch(batch: any) {
+  if (!batch) return ''
+  if (isSpecialBatch(batch)) return 'SPECIAL'
+  const family = majorFamilyOfModel(batch?.model_type || '')
+  if (!family) return ''
+  if (family === 'G') return 'G-SMALL'
+  const size = isLargeMachineBatch(batch) ? 'LARGE' : 'SMALL'
+  return `${family}-${size}`
+}
+
+function canMoveAcrossLanes(sourceBatch: any, targetBatch: any, unit: any) {
+  if (!sourceBatch || !targetBatch || !unit) return false
+  if (sourceBatch?.status !== 'Predicted' || targetBatch?.status !== 'Predicted') return false
+  const sourceSpecial = isSpecialBatch(sourceBatch)
+  const targetSpecial = isSpecialBatch(targetBatch)
+  if (sourceSpecial === targetSpecial) return false
+  if (!sourceSpecial && !isLargeMachineBatch(sourceBatch)) return false
+  if (!targetSpecial && !isLargeMachineBatch(targetBatch)) return false
+  if (isStockUnit(unit) || isSpecialPlaceholder(unit)) return false
+  const uf = majorFamilyOfModel(String(unit?.model_type || ''))
+  if (!uf || (uf !== 'XS' && uf !== 'AUTO')) return false
+  const anchorFamily = sourceSpecial
+    ? majorFamilyOfModel(String(targetBatch?.model_type || ''))
+    : majorFamilyOfModel(String(sourceBatch?.model_type || ''))
+  return uf === anchorFamily
+}
+
+function isUnitFamilyMismatch(unit: any, batch: any) {
+  if (!unit || !batch) return false
+  if (isSpecialPlaceholder(unit)) return false
+  if (isCrossLanePlacement(unit, batch)) return false
+  const uf = majorFamilyOfModel(String(unit?.model_type || ''))
+  const bf = majorFamilyOfModel(String(batch?.model_type || ''))
+  if (!uf || !bf) return false
+  return uf !== bf
+}
+
+function familyMismatchCount(batch: any) {
+  const units = Array.isArray(batch?.units) ? batch.units : []
+  return units.filter((u: any) => isUnitFamilyMismatch(u, batch)).length
+}
+
 function specialContractCount(batch: any) {
   return (batch?.units || []).filter((u: any) => !isSpecialPlaceholder(u)).length
+}
+
+function ownershipLaneKeyOfUnit(unit: any) {
+  const model = String(unit?.model_type || '').trim()
+  if (!model) return ''
+  const category = categoryOfModel(model, modelFamilyMap.value[model.toUpperCase()] || '')
+  if (category === '特殊') return 'SPECIAL'
+  if (category === '大机XS') return 'XS-LARGE'
+  if (category === '小机XS') return 'XS-SMALL'
+  if (category === '大机AUTO') return 'AUTO-LARGE'
+  if (category === '小机AUTO') return 'AUTO-SMALL'
+  if (category === '小机G') return 'G-SMALL'
+  const family = majorFamilyOfModel(model)
+  if (family === 'SPECIAL') return 'SPECIAL'
+  if (family === 'G') return 'G-SMALL'
+  if (family === 'XS') return 'XS-SMALL'
+  if (family === 'AUTO') return 'AUTO-SMALL'
+  return ''
+}
+
+function isCrossLanePlacement(unit: any, batch: any) {
+  if (!unit || !batch || isSpecialPlaceholder(unit)) return false
+  const placed = laneKeyOfBatch(batch)
+  const owner = ownershipLaneKeyOfUnit(unit)
+  if (!placed || !owner || placed === owner) return false
+  const ownerIsSpecial = owner === 'SPECIAL'
+  const placedIsSpecial = placed === 'SPECIAL'
+  if (ownerIsSpecial === placedIsSpecial) return false
+  const otherLane = ownerIsSpecial ? placed : owner
+  return otherLane === 'XS-LARGE' || otherLane === 'AUTO-LARGE'
 }
 
 function canAddSpecialCard(batch: any) {
@@ -506,6 +664,12 @@ async function refresh() {
   await batchStore.fetchBatches({ status: SANDBOX_STATUS })
   sortBatchUnitsInPlace()
   await syncScrollMetrics()
+}
+
+async function handleManualRefresh() {
+  suspendAutoSort.value = false
+  pinnedBatchOrder.value = []
+  await refresh()
 }
 
 async function forceRefresh() {
@@ -608,11 +772,7 @@ async function batchConfirm() {
         inputPattern: /^\d{2}-\d{2}$/,
         inputErrorMessage: '格式必须为 MM-SS'
       })
-    const expected = String(batch.batch_code || '').slice(-5)
-    if (expected && input.value !== expected) {
-      ElMessage.error(`批次号不匹配，应为 ${expected}`)
-      return
-    }
+    
     const batchCode = input.value
 
     // Ask for expected inbound date (default to batch's due_date_end or today)
@@ -625,13 +785,18 @@ async function batchConfirm() {
       title: '预计入库时间',
       message: h('div', { style: 'padding: 8px 0' }, [
         h('p', { style: 'margin-bottom: 10px; color: #606266' }, '请选择预计入库时间'),
-        h(ElDatePicker, {
-          modelValue: selectedDate.value,
-          'onUpdate:modelValue': (v: string) => { selectedDate.value = v },
+        h('input', {
           type: 'date',
-          placeholder: '选择日期',
-          format: 'YYYY-MM-DD',
-          valueFormat: 'YYYY-MM-DD',
+          value: defaultDate,
+          style: 'width: 220px; height: 32px; padding: 0 10px; border: 1px solid #dcdfe6; border-radius: 4px;',
+          onInput: (e: Event) => {
+            const target = e.target as HTMLInputElement | null
+            selectedDate.value = target?.value || ''
+          },
+          onChange: (e: Event) => {
+            const target = e.target as HTMLInputElement | null
+            selectedDate.value = target?.value || ''
+          }
         }),
       ]),
       confirmButtonText: '下一步',
@@ -680,11 +845,13 @@ function onDragStart(evt: any, sourceBatch: any) {
     ? { unit, sourceBatchId: sourceBatch?.batch_id || unit.batch_id }
     : null
   dragFamily.value = majorFamilyOfModel(sourceBatch?.model_type || '')
+  dragLane.value = laneKeyOfBatch(sourceBatch)
 }
 
 async function onDragEnd() {
   dragging.value = false
   dragFamily.value = ''
+  dragLane.value = ''
   dragSource.value = null
   stopEdgeAutoScroll()
   await flushPendingRefresh()
@@ -713,6 +880,17 @@ async function onUnitMoved(evt: any, targetBatch: any) {
     await forceRefresh()
     return
   }
+  if (isUnitFamilyMismatch(unit, targetBatch)) {
+    ElMessage.warning('仅允许同系列机型在同系列批次内移动')
+    await forceRefresh()
+    return
+  }
+  const sourceBatch = batchStore.batches.find((b: any) => b.batch_id === sourceBatchId)
+  if (sourceBatch && laneKeyOfBatch(sourceBatch) !== laneKeyOfBatch(targetBatch) && !canMoveAcrossLanes(sourceBatch, targetBatch, unit)) {
+    ElMessage.warning('仅允许在同列（同系列且同大小机）内拖拽')
+    await forceRefresh()
+    return
+  }
   moving.value = true
   try {
     if (sourceBatchId === targetBatch.batch_id) {
@@ -720,6 +898,10 @@ async function onUnitMoved(evt: any, targetBatch: any) {
     } else {
       await sandboxApi.moveUnitBatch(unit.unit_id, targetBatch.batch_id, targetSlot)
     }
+    if (!suspendAutoSort.value) {
+      pinnedBatchOrder.value = filteredBatches.value.map((b: any) => String(b?.batch_id || ''))
+    }
+    suspendAutoSort.value = true
     ElMessage.success('机台位置已更新')
     await forceRefresh()
   } catch (e: any) {
@@ -740,6 +922,9 @@ function openEditDrawer(unit: any) {
     model_type: unit.model_type || '',
     order_remark: unit.order_remark || ''
   }
+  if (isEditingSpecialBatch.value && isFamilyToken(editForm.value.model_type)) {
+    editForm.value.model_type = ''
+  }
   editVisible.value = true
 }
 
@@ -747,6 +932,11 @@ async function saveEdit() {
   if (!editingUnit.value) return
   saving.value = true
   try {
+    const batch = batchStore.batches.find((b: any) => b.batch_id === editingUnit.value?.batch_id)
+    if (batch && isUnitFamilyMismatch({ ...editingUnit.value, model_type: editForm.value.model_type }, batch)) {
+      ElMessage.warning('机型与批次系列不匹配，请选择同系列机型')
+      return
+    }
     await sandboxApi.updateUnit(editingUnit.value.unit_id, editForm.value)
     ElMessage.success('已保存并锁定')
     editVisible.value = false
@@ -819,8 +1009,12 @@ async function handleMarkSpot() {
   if (!unit) return
   try {
     await ElMessageBox.confirm('确认将此机台标记为现货（清除订单信息）？', '确认', { type: 'warning' })
-    await sandboxApi.markSpot(unit.unit_id)
-    ElMessage.success('已标记为现货')
+    const res: any = await sandboxApi.markSpot(unit.unit_id)
+    if (res && res.blocked_or_warned_units && res.blocked_or_warned_units.length > 0) {
+      ElMessage.warning(`已标记为现货，但同合同下仍有 ${res.blocked_or_warned_units.length} 台设备已确认或生产中，需人工处理`)
+    } else {
+      ElMessage.success('已标记为现货，同合同计划已取消')
+    }
     refresh()
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message)
@@ -957,9 +1151,23 @@ onUnmounted(() => {
 }
 .ctx-item:hover { background: #f5f5f5; }
 
+
 .batch-meta-due {
   display: block;
   text-align: center;
+}
+
+.batch-meta-models {
+  display: inline-block;
+  text-align: center;
+  color: #1f2d3d;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #eef3ff;
+  border: 1px solid #c9d7ff;
 }
 
 .special-card-add {
@@ -981,5 +1189,14 @@ onUnmounted(() => {
 .special-card-add:hover {
   background: #ffeaf3;
   border-color: #b81250;
+}
+
+.mismatch-text {
+  color: #d4380d;
+  font-weight: 600;
+}
+
+.unit-lane-mismatch :deep(.unit-card) {
+  box-shadow: 0 0 0 2px rgba(212, 56, 13, 0.45) inset;
 }
 </style>

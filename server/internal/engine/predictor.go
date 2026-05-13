@@ -318,28 +318,29 @@ func (p *Predictor) FullRecompute() ([]model.Batch, error) {
 		allBatches = append(allBatches, b)
 	}
 
-	// 特殊机型固定两条线：不参与比例，仅承载合同卡片，空槽基线为4。
+	// 特殊机型固定两条线：不参与比例，仅承载合同卡片。没有待排特殊合同时保留空占位列，供手动新增特殊卡片。
 	specialContracts := grouped["特殊"]
+	const specialCapacity = 15
+	var specialLines [2][]model.ContractUnit
 	if len(specialContracts) > 0 {
 		sort.Slice(specialContracts, func(i, j int) bool {
 			return specialContracts[i].DueDate.Before(specialContracts[j].DueDate)
 		})
-		const specialCapacity = 15
-		lines := splitSpecialContractsIntoLines(specialContracts, specialCapacity, gapDays)
-		for _, lineContracts := range lines {
-			b := model.Batch{
-				BatchID:   generateBatchID("SPECIAL", len(allBatches)+1),
-				BatchNo:   len(allBatches) + 1,
-				ModelType: "SPECIAL",
-				Capacity:  specialCapacity,
-				Status:    model.StatusPredicted,
-				Source:    "special",
-				Units:     buildSpecialUnits(specialCapacity, lineContracts),
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
-			}
-			allBatches = append(allBatches, b)
+		specialLines = splitSpecialContractsIntoLines(specialContracts, specialCapacity, gapDays)
+	}
+	for _, lineContracts := range specialLines {
+		b := model.Batch{
+			BatchID:   generateBatchID("SPECIAL", len(allBatches)+1),
+			BatchNo:   len(allBatches) + 1,
+			ModelType: "SPECIAL",
+			Capacity:  specialCapacity,
+			Status:    model.StatusPredicted,
+			Source:    "special",
+			Units:     buildSpecialUnits(specialCapacity, lineContracts),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
+		allBatches = append(allBatches, b)
 	}
 
 	for _, cat := range []string{"小机G", "小机XS", "大机XS", "小机AUTO", "大机AUTO"} {

@@ -207,6 +207,28 @@
       </div>
     </div>
 
+    <el-dialog
+      v-model="saveModeDialogVisible"
+      title="保存方式"
+      width="460px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      @closed="onSaveModeDialogClosed"
+    >
+      <div class="save-mode-body">
+        <div>请选择保存方式：</div>
+        <div class="save-mode-sub">进入沙盘（参与老板计划排产）或使用现货（直接置为已规划）。</div>
+        <div v-if="!canUseSpotMode" class="save-mode-hint">
+          当前“使用现货”不可用：{{ spotModeBlockReason }}
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="closeSaveModeDialog">取消</el-button>
+        <el-button type="warning" :disabled="!canUseSpotMode" @click="chooseSaveMode('spot')">使用现货</el-button>
+        <el-button type="primary" @click="chooseSaveMode('sandbox')">进入沙盘</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -214,7 +236,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Document } from '@element-plus/icons-vue'
-import { apiGet, apiPost, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiGetAll, apiPost, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
@@ -223,7 +245,12 @@ import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
 
 type OperationType = 'ordered' | 'cancelled' | 'done' | 'linked'
-type MessageResponse = { message?: string; rush_created?: number }
+type MessageResponse = {
+  message?: string
+  rush_created?: number
+  rush_auto_inserted?: number
+  save_mode?: 'sandbox' | 'spot'
+}
 
 const loading = ref(false)
 const executing = ref(false)
@@ -252,6 +279,10 @@ const batchItems = ref<Array<{ model: string; qty: number; high: boolean; rowNot
   { model: '', qty: 1, high: false, rowNote: '' },
 ])
 const modelOptions = computed(() => getModelOrderList())
+const saveModeDialogVisible = ref(false)
+const canUseSpotMode = ref(true)
+const spotModeBlockReason = ref('')
+let saveModeDialogResolver: ((mode: 'sandbox' | 'spot' | null) => void) | null = null
 
 const todayYmd = () => new Date().toISOString().slice(0, 10)
 const genContractId = () => {
@@ -406,6 +437,71 @@ const onBatchFileRemove = (uploadFile: any) => {
   batchPickedFiles.value = batchPickedFiles.value.filter((f) => !(f.name === raw.name && f.size === raw.size))
 }
 
+const getInStockCountByModel = async () => {
+  const inventoryRows = await apiGetAll<any>('/inventory/')
+  const map = new Map<string, number>()
+  for (const row of inventoryRows) {
+    const model = String(row['机型'] || '').trim()
+    const status = String(row['状态'] || '').trim()
+    if (!model || !status.startsWith('库存中')) continue
+    map.set(model, (map.get(model) || 0) + 1)
+  }
+  return map
+}
+
+const evaluateSpotModeAvailability = async (
+  rows: Array<{ model: string; qty: number }>
+) => {
+  const requiredByModel = new Map<string, number>()
+  for (const row of rows) {
+    const model = String(row.model || '').trim()
+    if (!model) continue
+    requiredByModel.set(model, (requiredByModel.get(model) || 0) + Number(row.qty || 0))
+  }
+  const stockByModel = await getInStockCountByModel()
+  const blocked: string[] = []
+  for (const [model, required] of requiredByModel.entries()) {
+    const inStock = Number(stockByModel.get(model) || 0)
+    if (inStock <= 0) blocked.push(`${model}(无机台)`)
+    else if (inStock < required) blocked.push(`${model}(库存${inStock} < 需求${required})`)
+  }
+  return {
+    canUseSpot: blocked.length === 0,
+    reason: blocked.length === 0 ? '' : blocked.join('，'),
+  }
+}
+
+const askSaveMode = async (canSpot: boolean, reason: string) => {
+  canUseSpotMode.value = canSpot
+  spotModeBlockReason.value = reason
+  saveModeDialogVisible.value = true
+  return await new Promise<'sandbox' | 'spot' | null>((resolve) => {
+    saveModeDialogResolver = resolve
+  })
+}
+
+const chooseSaveMode = (mode: 'sandbox' | 'spot') => {
+  if (mode === 'spot' && !canUseSpotMode.value) return
+  saveModeDialogVisible.value = false
+  const resolver = saveModeDialogResolver
+  saveModeDialogResolver = null
+  resolver?.(mode)
+}
+
+const closeSaveModeDialog = () => {
+  saveModeDialogVisible.value = false
+  const resolver = saveModeDialogResolver
+  saveModeDialogResolver = null
+  resolver?.(null)
+}
+
+const onSaveModeDialogClosed = () => {
+  if (!saveModeDialogResolver) return
+  const resolver = saveModeDialogResolver
+  saveModeDialogResolver = null
+  resolver(null)
+}
+
 const submitBatchContracts = async () => {
   const cid = batchForm.value.contractId.trim()
   const customer = batchForm.value.customer.trim()
@@ -425,6 +521,20 @@ const submitBatchContracts = async () => {
     return
   }
 
+  let saveMode: 'sandbox' | 'spot' | null = null
+  try {
+    const spotAvailability = await evaluateSpotModeAvailability(validRows)
+    saveMode = await askSaveMode(spotAvailability.canUseSpot, spotAvailability.reason)
+    if (saveMode === 'spot' && !spotAvailability.canUseSpot) {
+      ElMessage.warning(`“使用现货”不可用：${spotAvailability.reason}`)
+      return
+    }
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '校验现货可用机台失败')
+    return
+  }
+  if (!saveMode) return
+
   await submitWithLock(batchSaving, async () => {
     const payloadRows = validRows.map((r) => ({
       合同号: cid,
@@ -438,6 +548,7 @@ const submitBatchContracts = async () => {
     const res = await apiPost<MessageResponse>('/planning/contracts/batch-create', {
       rows: payloadRows,
       is_rush: Boolean(batchForm.value.isRush),
+      save_mode: saveMode,
     })
 
     if (batchPickedFiles.value.length > 0) {
@@ -450,8 +561,14 @@ const submitBatchContracts = async () => {
         })
       }
     }
-    const rushText = Number(res.rush_created || 0) > 0 ? `，已生成 ${res.rush_created} 张急单卡` : ''
-    ElMessage.success(`${res.message || '批量录入成功'}${rushText}`)
+    const autoInserted = Number(res.rush_auto_inserted || 0)
+    const pendingRushCards = Math.max(0, Number(res.rush_created || 0) - autoInserted)
+    const rushText = [
+      autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
+      pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
+    ].filter(Boolean).join('，')
+    const modeText = saveMode === 'spot' ? '已按“使用现货”处理（合同状态=已规划）' : '已按“进入沙盘”处理'
+    ElMessage.success(`${res.message || '批量录入成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
     batchPanelOpen.value = false
     resetBatchForm()
     batchFormDraft.clearDraft()
@@ -699,6 +816,18 @@ onMounted(() => {
 }
 .form-table :deep(.cell) {
   padding: 0 4px !important;
+}
+.save-mode-body {
+  display: grid;
+  gap: 8px;
+}
+.save-mode-sub {
+  color: var(--color-gray-600);
+  font-size: var(--font-size-sm);
+}
+.save-mode-hint {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
 }
 
 /* 合同附件面板 */

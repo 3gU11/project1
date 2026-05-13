@@ -71,19 +71,44 @@ async function autoInsert(order: any) {
     ElMessage.warning('急单机型为空，无法自动插入')
     return
   }
+
+  const isHigh = String(order?.remark || '').includes('加高')
+  const family = rushModel.replace(/加高$/, '').replace(/标准$/, '')
+
   try {
-    const res = await sandboxApi.getBatches({ status: 'In_Production,Confirmed', limit: 2000 }) as any
+    const res = await sandboxApi.getBatches({ status: 'In_Production,Confirmed,Predicted', limit: 2000 }) as any
     const batches = Array.isArray(res)
       ? res
       : (res?.batches || res?.data || [])
-    const hasExactModelSlot = (batches || []).some((b: any) =>
-      ['In_Production', 'Confirmed'].includes(String(b?.status || '')) &&
-      (b?.units || []).some((u: any) =>
-        String(u?.model_type || '').trim() === rushModel && !Boolean(u?.is_locked)
-      )
-    )
-    if (!hasExactModelSlot) {
-      ElMessage.warning(`自动插入失败：当前生产链无可用机型位（${rushModel}）`)
+    
+    const hasAvailableSlot = (batches || []).some((b: any) => {
+      const bStatus = String(b?.status || '')
+      if (!['In_Production', 'Confirmed', 'Predicted'].includes(bStatus)) return false
+      
+      // 如果是加高急单，不能插入 In_Production
+      if (isHigh && bStatus === 'In_Production') return false
+      
+      return (b?.units || []).some((u: any) => {
+        if (Boolean(u?.is_locked)) return false
+        
+        // 如果该卡片已有合同号，说明它已经被占用（不能算作“空位”直接插入，虽然会顺延，但为了自动插入的稳妥，我们倾向于找真正可承接的位子）
+        // 但沙盘的机制是“抢卡片顺延”，所以这里其实只要没有被锁定(is_locked)都可以被抢。
+        // 不过如果是加高急单，我们必须确保它能落入一个非生产中的批次。
+        const uModel = String(u?.model_type || '').trim()
+        if (isHigh) {
+          // 加高急单可以抢占同大类的任何未锁定卡片
+          return uModel.replace(/加高$/, '').replace(/标准$/, '') === family
+        }
+        return uModel === rushModel
+      })
+    })
+
+    if (!hasAvailableSlot) {
+      if (isHigh) {
+        ElMessage.warning(`自动插入失败：沙盘中无同大类机位（${family}）可供抢占`)
+      } else {
+        ElMessage.warning(`自动插入失败：当前生产链无可用机型位（${rushModel}）`)
+      }
       return
     }
   } catch {
@@ -95,6 +120,7 @@ async function autoInsert(order: any) {
     await rushStore.markRushOrderStatus(order.id, 'inserted')
     emit('auto-inserted')
     ElMessage.success('急单已自动插入')
+    await loadRushOrders()
   } catch (e: any) {
     const detail = getApiErrorMessage(e)
     if (detail) {
@@ -107,6 +133,7 @@ async function deleteRushOrder(order: any) {
   try {
     await rushStore.markRushOrderStatus(order.id, 'deleted')
     ElMessage.success('急单卡已删除')
+    await loadRushOrders()
   } catch (e: any) {
     ElMessage.error(getApiErrorMessage(e) || '删除急单卡失败')
   }

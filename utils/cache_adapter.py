@@ -63,7 +63,6 @@ class CacheAdapter:
 
         @staticmethod
         def cache_clear():
-            get_data.cache_clear()
             get_data_v2.cache_clear()
 
         @staticmethod

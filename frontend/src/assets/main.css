@@ -281,6 +281,12 @@ h4, h5, h6, .section-title, .panel-title, .card-head {
   border: 1.5px solid transparent;
   background: #fff;
 }
+.unit-card.state-in-progress {
+  background: #fff7e8;
+}
+.unit-card.state-completed {
+  background: #ecfdf3;
+}
 .unit-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
 }

@@ -232,13 +232,13 @@ async function loadContractsByModel() {
       FROM model_dictionary
       WHERE enabled = 1
     )
-      AND TRIM(COALESCE(\`状态\`, '')) IN ('未下单', '待规划')
+      AND TRIM(COALESCE(\`状态\`, '')) = '待规划'
       AND \`要求交期\` IS NOT NULL
       AND \`要求交期\` != ''
       AND NOT EXISTS (
         SELECT 1 FROM production_queue pq
-        WHERE pq.contract_no = factory_plan.\`合同号\`
-          AND pq.model_type = factory_plan.\`机型\`
+        WHERE pq.contract_no COLLATE utf8mb4_general_ci = factory_plan.\`合同号\` COLLATE utf8mb4_general_ci
+          AND pq.model_type COLLATE utf8mb4_general_ci = factory_plan.\`机型\` COLLATE utf8mb4_general_ci
           AND pq.status = 'Waiting'
       )
     ORDER BY \`要求交期\` ASC
@@ -1020,5 +1020,3 @@ module.exports = {
   normalizeModelFamily,
   getEnabledModelTypes
 };
-
-

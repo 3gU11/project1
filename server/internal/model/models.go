@@ -20,22 +20,22 @@ const (
 )
 
 type Batch struct {
-	BatchID          string         `gorm:"column:batch_id;primaryKey" json:"batch_id"`
-	BatchNo          int            `gorm:"column:batch_no" json:"batch_no"`
-	BatchCode        *string        `gorm:"column:batch_code" json:"batch_code"`
-	ForecastSlotNo   *int           `gorm:"->;column:forecast_slot_no" json:"forecast_slot_no,omitempty"`
-	ModelType        string         `gorm:"column:model_type" json:"model_type"`
-	Capacity         int            `gorm:"column:capacity" json:"capacity"`
-	Status           string         `gorm:"column:status" json:"status"`
-	DueDateStart          *time.Time     `gorm:"column:due_date_start" json:"due_date_start"`
-	DueDateEnd            *time.Time     `gorm:"column:due_date_end" json:"due_date_end"`
-	ExpectedInboundDate   *time.Time     `gorm:"column:expected_inbound_date" json:"expected_inbound_date"`
-	CapacitySnapshot datatypes.JSON `gorm:"column:capacity_snapshot" json:"capacity_snapshot"`
-	Source           string         `gorm:"column:source" json:"source"`
-	ProductionLineID *string        `gorm:"column:production_line_id" json:"production_line_id"`
-	Units            []Unit         `gorm:"foreignKey:BatchID;references:BatchID" json:"units,omitempty"`
-	CreatedAt        time.Time      `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt        time.Time      `gorm:"column:updated_at" json:"updated_at"`
+	BatchID             string         `gorm:"column:batch_id;primaryKey" json:"batch_id"`
+	BatchNo             int            `gorm:"column:batch_no" json:"batch_no"`
+	BatchCode           *string        `gorm:"column:batch_code" json:"batch_code"`
+	ForecastSlotNo      *int           `gorm:"->;column:forecast_slot_no" json:"forecast_slot_no,omitempty"`
+	ModelType           string         `gorm:"column:model_type" json:"model_type"`
+	Capacity            int            `gorm:"column:capacity" json:"capacity"`
+	Status              string         `gorm:"column:status" json:"status"`
+	DueDateStart        *time.Time     `gorm:"column:due_date_start" json:"due_date_start"`
+	DueDateEnd          *time.Time     `gorm:"column:due_date_end" json:"due_date_end"`
+	ExpectedInboundDate *time.Time     `gorm:"column:expected_inbound_date" json:"expected_inbound_date"`
+	CapacitySnapshot    datatypes.JSON `gorm:"column:capacity_snapshot" json:"capacity_snapshot"`
+	Source              string         `gorm:"column:source" json:"source"`
+	ProductionLineID    *string        `gorm:"column:production_line_id" json:"production_line_id"`
+	Units               []Unit         `gorm:"foreignKey:BatchID;references:BatchID" json:"units,omitempty"`
+	CreatedAt           time.Time      `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt           time.Time      `gorm:"column:updated_at" json:"updated_at"`
 }
 
 func (Batch) TableName() string { return "batches" }
@@ -75,6 +75,11 @@ type Unit struct {
 	IsContractPinned bool       `gorm:"column:is_contract_pinned" json:"is_contract_pinned"`
 	CreatedAt        time.Time  `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt        time.Time  `gorm:"column:updated_at" json:"updated_at"`
+	BatchCode        *string    `gorm:"->;column:batch_code" json:"batch_code,omitempty"`
+	BatchModelType   *string    `gorm:"->;column:batch_model_type" json:"batch_model_type,omitempty"`
+	BatchStatus      *string    `gorm:"->;column:batch_status" json:"batch_status,omitempty"`
+	ModelFamily      *string    `gorm:"->;column:model_family" json:"model_family,omitempty"`
+	FgStatus         *string    `gorm:"->;column:fg_status" json:"fg_status,omitempty"`
 }
 
 func (Unit) TableName() string { return "units" }
@@ -89,6 +94,7 @@ type ProductionLine struct {
 	ModelType        *string   `gorm:"column:model_type" json:"model_type"`
 	Region           *string   `gorm:"column:region" json:"region"`
 	Units            []Unit    `gorm:"-" json:"units,omitempty"`
+	Batches          []Batch   `gorm:"-" json:"batches,omitempty"`
 	CreatedAt        time.Time `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt        time.Time `gorm:"column:updated_at" json:"updated_at"`
 }

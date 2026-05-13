@@ -9,6 +9,7 @@
               <el-option label="全部" value="" />
               <el-option label="库存中" value="库存中" />
               <el-option label="待入库" value="待入库" />
+              <el-option label="已绑定" value="已绑定" />
             </el-select>
             <el-select
               v-model="selectedModels"
@@ -50,6 +51,10 @@
             <div class="summary-block">
               <div class="summary-title">⏳ 待入库 (Pending)</div>
               <div class="summary-value">{{ pendingCount }}</div>
+            </div>
+            <div class="summary-block">
+              <div class="summary-title">🔗 已绑定 (Bound)</div>
+              <div class="summary-value">{{ boundCount }}</div>
             </div>
           </div>
           <div class="summary-title chart-title">机型分布</div>
@@ -103,6 +108,7 @@
             <el-table-column prop="机型" label="机型" />
             <el-table-column prop="库存中" label="库存中" width="100" />
             <el-table-column prop="待入库" label="待入库" width="100" />
+            <el-table-column prop="已绑定" label="已绑定" width="100" />
             <el-table-column prop="全部" label="全部" width="100" />
           </el-table>
           <div v-else class="model-detail-virtual-table">
@@ -248,6 +254,7 @@ const totalCount = computed(() => filteredForStats.value.length)
 
 const inStockCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '').startsWith('库存中')).length)
 const pendingCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '') === '待入库').length)
+const boundCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '') === '已绑定').length)
 
 const modelSummarySource = computed(() => {
   return buildModelInventorySummary(filteredForStats.value)

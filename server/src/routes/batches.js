@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
             NULLIF(\`\u673a\u578b\`, '') AS model_type_detail,
             NULLIF(\`\u4ee3\u7406\u5546\`, '') AS dealer_name
           FROM factory_plan
-          WHERE TRIM(COALESCE(\`状态\`, '')) IN ('未下单', '待规划')
+          WHERE TRIM(COALESCE(\`状态\`, '')) = '待规划'
         ) x
         GROUP BY contract_no, model_type_detail
       ) fp ON fp.contract_no COLLATE utf8mb4_general_ci = u.contract_no COLLATE utf8mb4_general_ci

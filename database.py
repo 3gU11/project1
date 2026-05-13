@@ -242,6 +242,7 @@ def init_mysql_tables():
             `代理商`        VARCHAR(200) DEFAULT '',
             `合同备注`      TEXT,
             `合同号`        VARCHAR(100) DEFAULT '',
+            `订单号`        VARCHAR(100) DEFAULT '',
             PRIMARY KEY (`流水号`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
@@ -274,6 +275,7 @@ def init_mysql_tables():
             `dealer_name` VARCHAR(200) DEFAULT '',
             `model_type` VARCHAR(100) NOT NULL,
             `due_date` DATE NULL,
+            `remark` TEXT NULL,
             `source` VARCHAR(50) NOT NULL DEFAULT 'contract',
             `status` VARCHAR(30) NOT NULL DEFAULT 'pending',
             `created_by` VARCHAR(100) DEFAULT '',
@@ -412,6 +414,14 @@ def init_mysql_tables():
             "UPDATE factory_plan fp LEFT JOIN sales_orders so ON fp.`订单号`=so.`订单号` "
             "SET fp.`订单号`=NULL WHERE fp.`订单号` IS NOT NULL AND so.`订单号` IS NULL"
         ))
+        # Normalize legacy/invalid factory_plan status into 待规划.
+        conn.execute(text("UPDATE factory_plan SET `状态`='待规划' WHERE TRIM(COALESCE(`状态`, ''))='未下单'"))
+        conn.execute(text("UPDATE factory_plan SET `状态`='待规划' WHERE TRIM(COALESCE(`状态`, ''))=''"))
+        conn.execute(text(
+            "UPDATE factory_plan SET `状态`='已转订单' "
+            "WHERE TRIM(COALESCE(`状态`, ''))='已规划' "
+            "AND COALESCE(TRIM(`订单号`), '') <> ''"
+        ))
         conn.execute(text("UPDATE sales_orders SET `需求数量`=0 WHERE `需求数量` IS NULL OR `需求数量`=''"))
 
         date_columns = [
@@ -496,6 +506,7 @@ def init_mysql_tables():
             ("代理商", "VARCHAR(200) DEFAULT '' AFTER `客户`"),
             ("合同备注", "TEXT AFTER `代理商`"),
             ("合同号", "VARCHAR(100) DEFAULT '' AFTER `合同备注`"),
+            ("订单号", "VARCHAR(100) DEFAULT '' AFTER `合同号`"),
         ]:
             if not _column_exists("plan_import", col_name):
                 try:
@@ -709,7 +720,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 8
 
 
 def _ensure_schema_version_table(conn):
@@ -834,6 +845,7 @@ def init_mysql_tables_v2():
                     `代理商`        VARCHAR(200) DEFAULT '',
                     `合同备注`      TEXT,
                     `合同号`        VARCHAR(100) DEFAULT '',
+                    `订单号`        VARCHAR(100) DEFAULT '',
                     PRIMARY KEY (`流水号`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """,
@@ -866,6 +878,7 @@ def init_mysql_tables_v2():
                     `dealer_name` VARCHAR(200) DEFAULT '',
                     `model_type` VARCHAR(100) NOT NULL,
                     `due_date` DATE NULL,
+                    `remark` TEXT NULL,
                     `source` VARCHAR(50) NOT NULL DEFAULT 'contract',
                     `status` VARCHAR(30) NOT NULL DEFAULT 'pending',
                     `created_by` VARCHAR(100) DEFAULT '',
@@ -925,6 +938,7 @@ def init_mysql_tables_v2():
                 ("代理商", "VARCHAR(200) DEFAULT '' AFTER `客户`"),
                 ("合同备注", "TEXT AFTER `代理商`"),
                 ("合同号", "VARCHAR(100) DEFAULT '' AFTER `合同备注`"),
+                ("订单号", "VARCHAR(100) DEFAULT '' AFTER `合同号`"),
             ]:
                 if not _column_exists_v2("plan_import", col_name):
                     try:
@@ -972,6 +986,7 @@ def init_mysql_tables_v2():
                     `dealer_name` VARCHAR(200) DEFAULT '',
                     `model_type` VARCHAR(100) NOT NULL,
                     `due_date` DATE NULL,
+                    `remark` TEXT NULL,
                     `source` VARCHAR(50) NOT NULL DEFAULT 'contract',
                     `status` VARCHAR(30) NOT NULL DEFAULT 'pending',
                     `created_by` VARCHAR(100) DEFAULT '',
@@ -1073,6 +1088,32 @@ def init_mysql_tables_v2():
                         except Exception:
                             pass
             _record_schema_version(conn, 5, "unify machine/order notes into contract remarks")
+
+        if current_version < 6:
+            conn.execute(text("UPDATE factory_plan SET `状态`='待规划' WHERE TRIM(COALESCE(`状态`, ''))='未下单'"))
+            conn.execute(text("UPDATE factory_plan SET `状态`='待规划' WHERE TRIM(COALESCE(`状态`, ''))=''"))
+            _record_schema_version(conn, 6, "normalize factory_plan status to 待规划")
+
+        if current_version < 7:
+            raw = conn.execute(text(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA=:db AND TABLE_NAME='rush_order_queue' AND COLUMN_NAME='remark'"
+            ), {"db": MYSQL_DB}).scalar()
+            try:
+                has_remark = int(raw or 0) > 0
+            except Exception:
+                has_remark = False
+            if not has_remark:
+                conn.execute(text("ALTER TABLE rush_order_queue ADD COLUMN `remark` TEXT NULL AFTER `due_date`"))
+            _record_schema_version(conn, 7, "add remark column for rush order queue")
+
+        if current_version < 8:
+            conn.execute(text(
+                "UPDATE factory_plan SET `状态`='已转订单' "
+                "WHERE TRIM(COALESCE(`状态`, ''))='已规划' "
+                "AND COALESCE(TRIM(`订单号`), '') <> ''"
+            ))
+            _record_schema_version(conn, 8, "normalize planned contracts linked to orders")
 
         return {
             "initialized": True,
