@@ -55,6 +55,8 @@ PERMISSION_CATALOG = [
     {"code": "KANBAN_VIEW", "label": "生产看板(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_VIEW", "label": "预测沙盘(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_EDIT", "label": "预测沙盘(编辑)", "group": "管理与统筹"},
+    {"code": "MOBILE_KANBAN_VIEW", "label": "移动端生产看板(查看)", "group": "移动端"},
+    {"code": "MOBILE_KANBAN_ASSIGN", "label": "移动端待产批次分配", "group": "移动端"},
 ]
 
 PERMISSION_CODES = {item["code"] for item in PERMISSION_CATALOG}
@@ -90,9 +92,10 @@ def seed_roles_and_permissions_if_empty() -> None:
                 rid = normalize_role_id(role_id)
                 if not rid:
                     continue
+                role_name = "产线操作员" if rid == "LineOperator" else rid
                 conn.execute(
                     text("INSERT IGNORE INTO roles (role_id, role_name) VALUES (:rid, :rname)"),
-                    {"rid": rid, "rname": rid},
+                    {"rid": rid, "rname": role_name},
                 )
                 # Backfill missing default permissions for existing roles as well.
                 # This keeps old databases compatible when new permissions are introduced.

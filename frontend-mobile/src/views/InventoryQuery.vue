@@ -290,11 +290,6 @@ const confirmInbound = async (slotCode?: string) => {
   }
 }
 
-const selectSlotAndInbound = async (slotCode: string) => {
-  selectedSlotCode.value = slotCode
-  await confirmInbound(slotCode)
-}
-
 onMounted(load)
 </script>
 

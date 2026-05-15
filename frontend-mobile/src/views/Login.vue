@@ -23,6 +23,7 @@
                 <van-radio-group v-model="reg.role" direction="horizontal">
                   <van-radio name="Inbound">入库员</van-radio>
                   <van-radio name="Prod">库管</van-radio>
+                  <van-radio name="LineOperator">产线操作员</van-radio>
                 </van-radio-group>
               </template>
             </van-field>
@@ -55,15 +56,19 @@ const reg = ref({
   name: '',
   username: '',
   password: '',
-  role: 'Inbound' as 'Inbound' | 'Prod',
+  role: 'Inbound' as 'Inbound' | 'Prod' | 'LineOperator',
 })
+
+const canViewProduction = () =>
+  userStore.userInfo?.role === 'LineOperator' ||
+  (userStore.userInfo?.permissions || []).includes('MOBILE_KANBAN_VIEW')
 
 const onSubmit = async () => {
   loading.value = true
   try {
     await userStore.login(username.value, password.value)
     showToast('登录成功')
-    router.replace('/query')
+    router.replace(canViewProduction() ? '/production' : '/query')
   } finally {
     loading.value = false
   }

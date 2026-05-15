@@ -7,13 +7,14 @@ export type LoginResponse = {
     username: string
     role: string
     name: string
+    permissions?: string[]
   }
 }
 
 export type RegisterPayload = {
   username: string
   password: string
-  role: 'Boss' | 'Admin' | 'Sales' | 'Prod' | 'Inbound'
+  role: 'Boss' | 'Admin' | 'Sales' | 'Prod' | 'Inbound' | 'LineOperator'
   name: string
 }
 

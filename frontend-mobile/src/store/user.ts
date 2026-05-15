@@ -5,6 +5,7 @@ type UserInfo = {
   username: string
   role: string
   name: string
+  permissions?: string[]
 }
 
 export const useUserStore = defineStore('user', {
@@ -32,6 +33,13 @@ export const useUserStore = defineStore('user', {
     hasRole(roles: string[]) {
       const role = String(this.userInfo?.role || '').toLowerCase()
       return roles.map((x) => x.toLowerCase()).includes(role)
+    },
+    hasPermission(permission: string) {
+      return (this.userInfo?.permissions || []).includes(permission)
+    },
+    hasAnyPermission(permissions: string[]) {
+      const owned = new Set(this.userInfo?.permissions || [])
+      return permissions.some((permission) => owned.has(permission))
     },
   },
   persist: true,

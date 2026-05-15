@@ -3,7 +3,9 @@
     <div class="kanban-left">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
         <h3 style="font-size:16px;">产线监控 ({{ lineStore.lines.length }} 条)</h3>
-        <el-button size="small" @click="() => refreshAll()" :loading="lineStore.loading">刷新</el-button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <el-button size="small" @click="() => refreshAll()" :loading="lineStore.loading">刷新</el-button>
+        </div>
       </div>
 
       <div>
@@ -118,12 +120,6 @@
                   <strong>[{{ displayBatchCategory(batch) }}] {{ displayBatchCode(batch) }}</strong>
                   ({{ batch.units?.length || 0 }}/{{ batch.capacity }})
                 </span>
-                <el-button
-                  size="small" type="primary" link
-                  @click="scrollToLine(batch.production_line_id)"
-                >
-                  跳转产线
-                </el-button>
               </div>
               <div style="font-size:11px;color:#999;">
                 {{ fmtDate(batch.due_date_start) }} ~ {{ fmtDate(batch.due_date_end) }}
@@ -137,6 +133,63 @@
       </div>
     </div>
   </div>
+
+  <el-button
+    class="stats-floating-toggle"
+    type="primary"
+    @click="statsPanelOpen = !statsPanelOpen"
+  >
+    {{ statsPanelOpen ? '收起列表' : '打开列表' }}
+  </el-button>
+
+  <el-collapse-transition>
+    <div v-show="statsPanelOpen" class="kanban-stats-panel stats-floating-panel">
+      <el-table
+        :data="kanbanStatsRows"
+        size="small"
+        border
+        stripe
+        empty-text="暂无统计数据"
+        max-height="calc(100vh - 150px)"
+        :span-method="statsSpanMethod"
+        :row-class-name="statsRowClassName"
+      >
+        <el-table-column prop="groupName" label="分组" min-width="180">
+          <template #default="{ row }">
+            <div class="stat-group-cell" :class="{ 'queue-group': !row.lineId }">
+              <span class="stat-group-name">{{ row.groupName }}</span>
+              <el-button
+                v-if="row.lineId"
+                size="small"
+                type="primary"
+                link
+                @click.stop="navigateToLine(row.lineId)"
+              >
+                定位
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="batchLabel" label="批次号" min-width="160" />
+        <el-table-column prop="modelType" label="机型" min-width="180" />
+        <el-table-column prop="ordered" label="已订数量" width="130" align="right">
+          <template #default="{ row }">
+            <span class="stat-number ordered">{{ row.ordered }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="stock" label="备货数量" width="130" align="right">
+          <template #default="{ row }">
+            <span class="stat-number stock">{{ row.stock }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="total" label="合计" width="120" align="right">
+          <template #default="{ row }">
+            <span class="stat-number total">{{ row.total }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+  </el-collapse-transition>
 
     <el-dialog v-model="assignVisible" title="整批分配" width="400px">
       <p>选择空闲产线分配批次 {{ assigningBatch?.batch_id?.slice(0,25) }}...</p>
@@ -208,6 +261,7 @@ const lineStore = useLineStore()
 const rushStore = useRushStore()
 
 const queueFilter = ref('')
+const statsPanelOpen = ref(false)
 const assignVisible = ref(false)
 const assigningBatch = ref<any>(null)
 const selectedLineId = ref<string | null>(null)
@@ -228,11 +282,158 @@ const modelFamilyMap = ref<Record<string, string>>({})
 
 const editForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', order_remark: '' })
 
+type KanbanStatRow = {
+  groupName: string
+  lineId: string
+  groupOrder: number
+  batchKey: string
+  batchLabel: string
+  batchOrder: number
+  modelType: string
+  ordered: number
+  stock: number
+  total: number
+}
+
+function addUnitToStats(group: Map<string, { ordered: number; stock: number }>, unit: any) {
+  const modelType = String(unit?.model_type || '').trim()
+  if (!modelType) return
+  const current = group.get(modelType) || { ordered: 0, stock: 0 }
+  if (String(unit?.contract_no || '').trim()) {
+    current.ordered += 1
+  } else {
+    current.stock += 1
+  }
+  group.set(modelType, current)
+}
+
+function buildStatRows(
+  groupName: string,
+  lineId: string,
+  batchKey: string,
+  batchLabel: string,
+  units: any[],
+  groupOrder: number,
+  batchOrder: number
+): KanbanStatRow[] {
+  const group = new Map<string, { ordered: number; stock: number }>()
+  for (const unit of units) addUnitToStats(group, unit)
+  return Array.from(group.entries())
+    .map(([modelType, counts]) => ({
+      groupName,
+      lineId,
+      groupOrder,
+      batchKey,
+      batchLabel,
+      batchOrder,
+      modelType,
+      ordered: counts.ordered,
+      stock: counts.stock,
+      total: counts.ordered + counts.stock
+    }))
+    .sort((a, b) => b.total - a.total || a.modelType.localeCompare(b.modelType, 'zh-Hans-CN'))
+}
+
+function batchIdentity(batch: any, fallback: string) {
+  return String(batch?.batch_id || batch?.id || fallback).trim()
+}
+
 const queueBatches = computed(() => {
   let batches = batchStore.batches.filter((b: any) => b.status === 'Confirmed')
   if (queueFilter.value) batches = batches.filter((b: any) => displayBatchCategory(b) === queueFilter.value)
   return batches
 })
+
+const kanbanStatsRows = computed<KanbanStatRow[]>(() => {
+  const rows: KanbanStatRow[] = []
+  lineStore.lines.forEach((line: any, index: number) => {
+    const units = Array.isArray(line?.units) ? line.units : []
+    const batches = Array.isArray(line?.batches) ? line.batches : []
+    const batchById = new Map<string, any>()
+    batches.forEach((batch: any, batchIndex: number) => {
+      const id = batchIdentity(batch, `line-${index}-batch-${batchIndex}`)
+      if (id) batchById.set(id, batch)
+    })
+
+    if (!batchById.size && batches.length === 1) {
+      batchById.set(batchIdentity(batches[0], `line-${index}-batch-0`), batches[0])
+    }
+
+    const unitsByBatch = new Map<string, any[]>()
+    units.forEach((unit: any) => {
+      const fallbackBatchId = batches.length === 1 ? batchIdentity(batches[0], `line-${index}-batch-0`) : ''
+      const unitBatchId = String(unit?.batch_id || fallbackBatchId || 'unknown').trim()
+      const list = unitsByBatch.get(unitBatchId) || []
+      list.push(unit)
+      unitsByBatch.set(unitBatchId, list)
+    })
+
+    Array.from(unitsByBatch.entries()).forEach(([batchId, batchUnits], batchIndex) => {
+      const batch = batchById.get(batchId)
+      const batchLabel = batch ? displayBatchCode(batch) : (batchId === 'unknown' ? '-' : batchId)
+      rows.push(...buildStatRows(
+        String(line?.line_name || line?.production_line_id || '未命名产线'),
+        String(line?.production_line_id || ''),
+        batchId,
+        batchLabel,
+        batchUnits,
+        index,
+        batchIndex
+      ))
+    })
+  })
+
+  queueBatches.value.forEach((batch: any, index: number) => {
+    const units = Array.isArray(batch?.units) ? batch.units : []
+    const batchId = batchIdentity(batch, `queue-batch-${index}`)
+    rows.push(...buildStatRows(
+      '待排产队列',
+      '',
+      batchId,
+      displayBatchCode(batch),
+      units,
+      Number.MAX_SAFE_INTEGER,
+      index
+    ))
+  })
+  return rows
+})
+
+function statsRowspan(rowIndex: number, sameAs: (row: KanbanStatRow, current: KanbanStatRow) => boolean) {
+  const rows = kanbanStatsRows.value
+  const current = rows[rowIndex]
+  if (!current) return 1
+  if (rowIndex > 0 && sameAs(rows[rowIndex - 1], current)) return 0
+  let span = 1
+  for (let i = rowIndex + 1; i < rows.length; i += 1) {
+    if (!sameAs(rows[i], current)) break
+    span += 1
+  }
+  return span
+}
+
+function statsSpanMethod({ rowIndex, columnIndex }: { rowIndex: number; columnIndex: number }) {
+  if (columnIndex === 0) {
+    const rowspan = statsRowspan(rowIndex, (row, current) => row.groupName === current.groupName)
+    return { rowspan, colspan: rowspan ? 1 : 0 }
+  }
+  if (columnIndex === 1) {
+    const rowspan = statsRowspan(rowIndex, (row, current) =>
+      row.groupName === current.groupName && row.batchKey === current.batchKey
+    )
+    return { rowspan, colspan: rowspan ? 1 : 0 }
+  }
+  return { rowspan: 1, colspan: 1 }
+}
+
+function statsRowClassName({ row, rowIndex }: { row: KanbanStatRow; rowIndex: number }) {
+  const prev = kanbanStatsRows.value[rowIndex - 1]
+  const classes: string[] = []
+  if (!prev || prev.groupName !== row.groupName) classes.push('stats-group-start')
+  if (row.lineId) classes.push('stats-production-line-row')
+  else classes.push('stats-queue-row')
+  return classes.join(' ')
+}
 
 const inProductionBatches = computed(() =>
   batchStore.batches.filter((b: any) => b.status === 'In_Production')
@@ -300,6 +501,11 @@ function scrollToLine(lineId: string | null | undefined) {
   if (!lineId) return
   const el = document.querySelector(`[data-line-id="${lineId}"]`) as HTMLElement | null
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function navigateToLine(lineId: string | null | undefined) {
+  scrollToLine(lineId)
+  statsPanelOpen.value = false
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -705,6 +911,113 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.stats-floating-toggle {
+  position: fixed;
+  top: 42px;
+  right: 640px;
+  z-index: 2000;
+  min-width: 92px;
+  height: 38px;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(22, 119, 255, 0.22);
+}
+
+.stats-floating-panel {
+  position: fixed;
+  top: 88px;
+  right: 390px;
+  z-index: 1990;
+  width: min(1320px, calc(100vw - 620px));
+  max-height: calc(100vh - 104px);
+  overflow: hidden;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.16);
+}
+
+.kanban-stats-panel {
+  padding: 14px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+}
+
+.kanban-stats-panel :deep(.el-table) {
+  font-size: 14px;
+}
+
+.kanban-stats-panel :deep(.el-table__header th) {
+  background: #f5f7fa;
+  color: #303133;
+  font-weight: 700;
+}
+
+.kanban-stats-panel :deep(.el-table__cell) {
+  padding: 10px 0;
+  border-color: #e5e7eb;
+}
+
+.kanban-stats-panel :deep(.stats-group-start > td) {
+  border-top: 2px solid #d7dee8 !important;
+}
+
+.kanban-stats-panel :deep(.stats-group-start:first-child > td) {
+  border-top-color: #e5e7eb !important;
+}
+
+.stat-group-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  margin: -4px 0;
+  padding: 12px 14px;
+  background: #f7fbff;
+  border-left: 4px solid #1677ff;
+  border-radius: 6px;
+}
+
+.stat-group-cell.queue-group {
+  background: #fffaf0;
+  border-left-color: #faad14;
+}
+
+.stat-group-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.stat-group-cell.queue-group .stat-group-name {
+  color: #ad6800;
+}
+
+.stat-number {
+  display: inline-flex;
+  min-width: 52px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.stat-number.ordered {
+  color: #0958d9;
+  background: #e6f4ff;
+}
+
+.stat-number.stock {
+  color: #ad6800;
+  background: #fff7e6;
+}
+
+.stat-number.total {
+  color: #237804;
+  background: #f6ffed;
+}
+
 .ctx-item {
   padding: 6px 16px;
   cursor: pointer;
@@ -720,5 +1033,17 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: bold;
   margin-left: 8px;
+}
+
+@media (max-width: 1280px) {
+  .stats-floating-toggle {
+    right: 24px;
+  }
+
+  .stats-floating-panel {
+    left: 24px;
+    right: 24px;
+    width: auto;
+  }
 }
 </style>

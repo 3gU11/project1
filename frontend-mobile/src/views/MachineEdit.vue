@@ -47,6 +47,11 @@ const route = useRoute()
 const router = useRouter()
 const inventoryStore = useInventoryStore()
 const serialNo = computed(() => String(route.params.id || ''))
+type ArchiveUploaderItem = UploaderFileListItem & {
+  file_name?: string
+  fullUrl?: string
+}
+
 const extByMime: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/jpg': '.jpg',
@@ -112,53 +117,7 @@ const machineInfo = ref({
   slotCode: ''
 })
 
-const fileList = ref<UploaderFileListItem[]>([])
-
-/** 图片压缩逻辑 */
-const compressImage = (file: File, maxWidth = 1280): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.readAsDataURL(file)
-    reader.onload = (e) => {
-      const img = new Image()
-      img.src = e.target?.result as string
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        let width = img.width
-        let height = img.height
-
-        if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width)
-            width = maxWidth
-          }
-        } else {
-          if (height > maxWidth) {
-            width = Math.round((width * maxWidth) / height)
-            height = maxWidth
-          }
-        }
-
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        ctx?.drawImage(img, 0, 0, width, height)
-
-        canvas.toBlob(
-          (blob) => {
-            if (blob) resolve(blob)
-            else reject(new Error('Canvas 转 Blob 失败'))
-          },
-          'image/jpeg',
-          0.85
-        )
-      }
-      img.onerror = () => reject(new Error('图片加载失败'))
-    }
-    reader.onerror = () => reject(new Error('文件读取失败'))
-  })
-}
-const previewImageUrls = computed(() => fileList.value.map((item) => String(item.url || '')).filter(Boolean))
+const fileList = ref<ArchiveUploaderItem[]>([])
 
 const revokeObjectUrls = () => {
   fileList.value.forEach((item: any) => {
@@ -256,7 +215,7 @@ const loadFiles = async () => {
   }
 }
 
-const handlePreview = (payload: { file: UploaderFileListItem }) => {
+const handlePreview = (payload: { file: ArchiveUploaderItem }) => {
   const images = fileList.value.map((item) => item.url || '').filter(Boolean)
   const index = fileList.value.findIndex((i: any) => i.file_name === (payload.file as any).file_name)
   
@@ -268,7 +227,7 @@ const handlePreview = (payload: { file: UploaderFileListItem }) => {
 }
 
 const afterRead = async (items: UploaderFileListItem | UploaderFileListItem[]) => {
-  const uploadItems = Array.isArray(items) ? items : [items]
+  const uploadItems = (Array.isArray(items) ? items : [items]) as ArchiveUploaderItem[]
   
   for (const item of uploadItems) {
     if (!item.file) continue
@@ -278,8 +237,7 @@ const afterRead = async (items: UploaderFileListItem | UploaderFileListItem[]) =
 
     try {
       // 1. 获取原图和文件名 (不压缩)
-      const rawFile = item.file as File
-      const fileName = getUploadFileName(rawFile)
+      const { file: rawFile, fileName } = normalizeUploadPayload(item)
 
       item.message = '上传原图...'
       const formData = new FormData()

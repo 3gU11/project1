@@ -23,7 +23,18 @@ import { useUserStore } from '@/store/user'
 
 const userStore = useUserStore()
 
+const canViewProduction = computed(() =>
+  userStore.userInfo?.role === 'LineOperator' || userStore.hasPermission('MOBILE_KANBAN_VIEW')
+)
+
 const tabbarItems = computed(() => {
+  if (userStore.userInfo?.role === 'LineOperator') {
+    return [
+      { title: '生产', to: '/production', icon: 'cluster-o' },
+      { title: '我的', to: '/profile', icon: 'user-o' },
+    ]
+  }
+
   if (userStore.userInfo?.role === 'Prod') {
     return [
       { title: '查询', to: '/query', icon: 'search' },
@@ -31,11 +42,15 @@ const tabbarItems = computed(() => {
     ]
   }
 
-  return [
+  const items = [
     { title: '入库', to: '/query', icon: 'scan' },
     { title: '看板', to: '/dashboard', icon: 'chart-trending-o' },
-    { title: '我的', to: '/profile', icon: 'user-o' },
   ]
+  if (canViewProduction.value) {
+    items.push({ title: '生产', to: '/production', icon: 'cluster-o' })
+  }
+  items.push({ title: '我的', to: '/profile', icon: 'user-o' })
+  return items
 })
 </script>
 
