@@ -8,18 +8,24 @@
     </div>
 
     <div v-if="rushStore.rushOrders.length > 0">
+      <el-input
+        v-model="rushSearchKeyword"
+        class="rush-search"
+        clearable
+        placeholder="搜索客户名 / 代理商 / 合同号"
+      />
       <div class="rush-count">
-        待处理急单 ({{ rushStore.rushOrders.length }})
+        待处理急单 ({{ filteredRushOrders.length }} / {{ rushStore.rushOrders.length }})
       </div>
       <VueDraggable
-        v-model="rushStore.rushOrders"
+        v-model="draggableRushOrders"
         :group="{ name: 'rush-orders', pull: 'clone', put: false, revertClone: true }"
         item-key="id"
         :sort="false"
         draggable=".rush-card"
         :clone="cloneRushOrder"
       >
-        <div v-for="element in rushStore.rushOrders" :key="element.id" class="rush-card" :data-rush-id="element.id">
+        <div v-for="element in filteredRushOrders" :key="element.id" class="rush-card" :data-rush-id="element.id">
           <div class="rush-card-main">
             <strong>{{ element.contract_no }}</strong>
             <span :style="{ color: modelColors[element.model_type] || '#333' }">{{ element.model_type }}</span>
@@ -34,6 +40,9 @@
           </div>
         </div>
       </VueDraggable>
+      <div v-if="filteredRushOrders.length === 0" class="rush-empty rush-empty-compact">
+        未找到匹配的急单
+      </div>
     </div>
 
     <div v-else class="rush-empty">
@@ -43,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage } from 'element-plus'
 import { useRushStore } from '../../stores/useSandboxRushStore'
@@ -56,6 +65,28 @@ const emit = defineEmits<{
   (e: 'auto-inserted'): void
 }>()
 const modelColors = MODEL_COLORS
+const rushSearchKeyword = ref('')
+
+const filteredRushOrders = computed(() => {
+  const keyword = rushSearchKeyword.value.trim().toLowerCase()
+  if (!keyword) return rushStore.rushOrders
+
+  return rushStore.rushOrders.filter((order: any) => {
+    const searchText = [
+      order?.customer,
+      order?.dealer_name,
+      order?.contract_no
+    ].map((value) => String(value || '').toLowerCase()).join(' ')
+    return searchText.includes(keyword)
+  })
+})
+
+const draggableRushOrders = computed({
+  get: () => filteredRushOrders.value,
+  set: () => {
+    // The rush queue is clone-only here; filtering must not rewrite store order.
+  }
+})
 
 async function loadRushOrders() {
   try {
@@ -168,6 +199,9 @@ onMounted(loadRushOrders)
   color: #666;
   margin-bottom: 6px;
 }
+.rush-search {
+  margin-bottom: 8px;
+}
 .rush-card {
   padding: 8px 10px;
   margin-bottom: 8px;
@@ -199,5 +233,8 @@ onMounted(loadRushOrders)
   text-align: center;
   padding: 24px 8px;
   font-size: 13px;
+}
+.rush-empty-compact {
+  padding: 12px 8px 8px;
 }
 </style>

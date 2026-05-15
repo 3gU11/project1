@@ -42,7 +42,7 @@ func (h *MetaHandler) ModelTypes(c *gin.Context) {
 		if name == "" {
 			continue
 		}
-		family := strings.ToUpper(strings.TrimSpace(row.ModelFamily))
+		family := canonicalCategory(strings.TrimSpace(row.ModelFamily))
 		if family == "" {
 			family = engine.NormalizeModelType(name)
 		}

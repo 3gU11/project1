@@ -387,6 +387,23 @@ def init_mysql_tables():
                 "ALTER TABLE model_dictionary "
                 "ADD COLUMN `model_family` VARCHAR(32) NULL AFTER `model_name`"
             ))
+        for old_family, new_family in {
+            "小机G": "中小型G",
+            "小机XS": "中小型XS",
+            "小机/XS": "中小型XS",
+            "小机AUTO": "中小型AUTO",
+            "大机XS": "中大型XS",
+            "大机AUTO": "中大型AUTO",
+            "SPECIAL": "特殊",
+        }.items():
+            conn.execute(
+                text(
+                    "UPDATE model_dictionary "
+                    "SET `model_family`=:new_family "
+                    "WHERE TRIM(COALESCE(`model_family`, ''))=:old_family"
+                ),
+                {"old_family": old_family, "new_family": new_family},
+            )
 
         try:
             if not _column_exists("sales_orders", "包装选项"):

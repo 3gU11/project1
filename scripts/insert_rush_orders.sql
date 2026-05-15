@@ -32,4 +32,4 @@ JOIN (
     UNION ALL SELECT 11 UNION ALL SELECT 12 UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15
 ) n ON n.n <= CAST(f.`排产数量` AS UNSIGNED)
 WHERE f.`要求交期` LIKE '2026-05%'
-  AND f.`状态` = '待规划';
+  AND f.`状态` IN ('待规划', '未下单');

@@ -1,0 +1,3 @@
+./normalizer.go
+./predictor.go
+./predictor_test.go

@@ -1,8 +1,9 @@
 <template>
   <div
     class="unit-card"
-    :class="[typeClass, progressClass, { locked: unit.is_locked, empty: isEmpty }]"
+    :class="[typeClass, progressClass, { locked: unit.is_locked, empty: isEmpty, selected }]"
     :data-unit-id="unit.unit_id"
+    @click="$emit('select', unit)"
     @dblclick="$emit('edit', unit)"
     @contextmenu.prevent="$emit('contextmenu', { event: $event, unit })"
   >
@@ -11,7 +12,7 @@
       <div class="primary-info">
         <div class="model-detail">{{ displayModelDetail }}</div>
         <div v-if="showCrossLane" class="cross-lane-badge">跨列生产</div>
-        <div class="contract-no">{{ unit.contract_no || '-' }}</div>
+        <div class="contract-no">{{ stockPlaceholder ? '备货占位' : (unit.contract_no || '-') }}</div>
         <div class="due-date">{{ formatDate(displayDueDate) }}</div>
         <div v-if="displayDealerName" class="dealer">{{ displayDealerName }}</div>
         <template v-if="showSerialNo">
@@ -33,14 +34,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { normalizeModelType, formatDate } from '../../utils/sandboxModelType'
+import { normalizeSandboxCategory } from '../../utils/sandboxCategory'
 
 const props = defineProps({
   unit: { type: Object, required: true },
   disableProgressColor: { type: Boolean, default: false },
-  showCrossLane: { type: Boolean, default: false }
+  stockPlaceholder: { type: Boolean, default: false },
+  showCrossLane: { type: Boolean, default: false },
+  selected: { type: Boolean, default: false }
 })
 
-defineEmits(['edit', 'contextmenu'])
+defineEmits(['edit', 'contextmenu', 'select'])
 
 // T7: format model detail — hide bare family names (G/XS/AUTO)
 function formatLevel2Model(model: string) {
@@ -91,7 +95,12 @@ const displayRemark = computed(() => {
 })
 
 const typeClass = computed(() => {
-  if (props.unit.model_family === '特殊') return 'type-SPECIAL'
+  const familyCategory = normalizeSandboxCategory(String(props.unit.model_family || '').trim())
+  if (familyCategory === '特殊') return 'type-SPECIAL'
+  if (familyCategory.endsWith('AUTO')) return 'type-AUTO'
+  if (familyCategory.endsWith('XS')) return 'type-XS'
+  if (familyCategory.endsWith('G')) return 'type-G'
+  if (props.unit.model_family === '鐗规畩') return 'type-SPECIAL'
   
   const mt = normalizeModelType(props.unit.model_type)
   if (mt === 'SPECIAL') return 'type-SPECIAL'

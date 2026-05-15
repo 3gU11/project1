@@ -1,17 +1,12 @@
 package handler
 
 import (
-	"strings"
-
 	"smart-scheduling/server/internal/model"
 )
 
 func sanitizeUnitRemarkForResponse(u *model.Unit) {
 	if u == nil {
 		return
-	}
-	if u.ContractNo == nil || strings.TrimSpace(*u.ContractNo) == "" {
-		u.OrderRemark = nil
 	}
 }
 

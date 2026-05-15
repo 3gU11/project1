@@ -81,6 +81,11 @@ INSERT INTO units (
     model_type,
     status,
     serial_no,
+    contract_no,
+    customer,
+    dealer_name,
+    order_remark,
+    due_date,
     created_at,
     updated_at
 )
@@ -91,15 +96,41 @@ fg_matched AS (
     SELECT
         fg.`流水号`  AS serial_no,
         fg.`机型`    AS model_name,
+        COALESCE(
+            NULLIF(TRIM(fg.`合同号`), ''), 
+            fp.`合同号`,
+            REGEXP_SUBSTR(fg.`合同备注`, 'HT[0-9]{10,}'),
+            REGEXP_SUBSTR(fg.`订单备注`, 'HT[0-9]{10,}'),
+            REGEXP_SUBSTR(so.`备注`, 'HT[0-9]{10,}')
+        ) AS contract_no,
+        COALESCE(NULLIF(TRIM(fg.`客户`), ''), so.`客户名`, fp.`客户名`) AS customer,
+        COALESCE(NULLIF(TRIM(fg.`代理商`), ''), so.`代理商`, fp.`代理商`) AS dealer_name,
+        COALESCE(NULLIF(TRIM(fg.`合同备注`), ''), NULLIF(TRIM(fg.`订单备注`), '')) AS order_remark,
+        COALESCE(DATE(so.`发货时间`), 
+                 STR_TO_DATE(NULLIF(TRIM(fp.`要求交期`), ''), '%Y-%m-%d'),
+                 DATE(fp.`要求交期`)
+        ) AS due_date,
         b.batch_id
     FROM finished_goods_data fg
     INNER JOIN batches b
             ON CONVERT(b.batch_code USING utf8mb4) COLLATE utf8mb4_general_ci
              = CONVERT(fg.`批次号`  USING utf8mb4) COLLATE utf8mb4_general_ci
            AND b.status IN ('Predicted', 'Confirmed', 'In_Production')
-    WHERE fg.`状态` IN ('待入库', '库存中', '待发货')
-      AND (fg.`占用订单号` IS NULL OR fg.`占用订单号` = '')
-      AND fg.`批次号` IS NOT NULL
+    LEFT JOIN sales_orders so ON (so.`订单号` = fg.`占用订单号` AND NULLIF(TRIM(fg.`占用订单号`), '') IS NOT NULL)
+    LEFT JOIN factory_plan fp ON (
+        (fp.`订单号` = fg.`占用订单号` AND NULLIF(TRIM(fg.`占用订单号`), '') IS NOT NULL)
+        OR 
+        (fp.`合同号` = fg.`合同号` AND NULLIF(TRIM(fg.`合同号`), '') IS NOT NULL AND fp.`机型` = fg.`机型`)
+    )
+    WHERE fg.`状态` IN ('待入库', '库存中', '待发货', '已出库')
+
+
+
+
+
+
+
+            AND fg.`批次号` IS NOT NULL
       AND TRIM(fg.`批次号`) <> ''
       AND CONVERT(fg.`批次号` USING utf8mb4) COLLATE utf8mb4_general_ci IN (
           '05-08', '05-07', '05-06', '05-05附加', '05-02', '05-05', '05-04',
@@ -129,6 +160,11 @@ alloc AS (
     SELECT
         fm.serial_no,
         fm.model_name,
+        fm.contract_no,
+        fm.customer,
+        fm.dealer_name,
+        fm.order_remark,
+        fm.due_date,
         fm.batch_id,
         COALESCE(bu.max_slot, 0) + ROW_NUMBER() OVER (
             PARTITION BY fm.batch_id ORDER BY fm.serial_no
@@ -145,13 +181,23 @@ SELECT
     model_name  AS model_type,
     'Predicted' AS status,
     serial_no,
+    contract_no,
+    customer,
+    dealer_name,
+    order_remark,
+    due_date,
     NOW()       AS created_at,
     NOW()       AS updated_at
 FROM alloc
 
 ON DUPLICATE KEY UPDATE
-    serial_no  = VALUES(serial_no),
-    updated_at = NOW();
+    serial_no   = VALUES(serial_no),
+    contract_no = COALESCE(NULLIF(VALUES(contract_no), ''), units.contract_no),
+    customer    = COALESCE(NULLIF(VALUES(customer), ''), units.customer),
+    dealer_name = COALESCE(NULLIF(VALUES(dealer_name), ''), units.dealer_name),
+    order_remark = COALESCE(NULLIF(VALUES(order_remark), ''), units.order_remark),
+    due_date    = COALESCE(VALUES(due_date), units.due_date),
+    updated_at  = NOW();
 
 
 -- ── Step 4：验证插入结果 ──────────────────────────────────────

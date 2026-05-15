@@ -26,6 +26,11 @@ type FactoryPlanStatusUpdateStats struct {
 	Rows  int `json:"rows"`
 }
 
+type StockModelTarget struct {
+	ModelType string `json:"model_type"`
+	Count     int    `json:"count"`
+}
+
 func NewBatchSvc(db *gorm.DB, br *repo.BatchRepo, ur *repo.UnitRepo, cr *repo.ConfigRepo, hub *ws.Hub) *BatchSvc {
 	return &BatchSvc{db: db, batchRepo: br, unitRepo: ur, cfgRepo: cr, wsHub: hub}
 }
@@ -109,6 +114,131 @@ func (s *BatchSvc) BatchConfirm(batchIDs []string, actor string) error {
 			return fmt.Errorf("batch %s: %w", id, err)
 		}
 	}
+	return nil
+}
+
+func (s *BatchSvc) SyncStockModels(batchID string, targets []StockModelTarget, actor string) error {
+	tx := s.db.Begin()
+	defer tx.Rollback()
+
+	b, err := s.batchRepo.LockBatchForUpdate(tx, batchID)
+	if err != nil {
+		return fmt.Errorf("batch not found: %w", err)
+	}
+	if b.Status != model.StatusPredicted {
+		return fmt.Errorf("batch status is %s, expected Predicted", b.Status)
+	}
+	if isSpecialBatchModel(b.ModelType) {
+		return fmt.Errorf("special batch stock cannot be edited")
+	}
+
+	units, err := s.unitRepo.ListByBatchIDsForUpdate(tx, []string{batchID})
+	if err != nil {
+		return err
+	}
+
+	targetByModel := make(map[string]int)
+	for _, item := range targets {
+		modelType := strings.TrimSpace(item.ModelType)
+		if modelType == "" {
+			return fmt.Errorf("model_type is required")
+		}
+		if item.Count < 0 {
+			return fmt.Errorf("stock count for %s must be non-negative", modelType)
+		}
+		targetByModel[modelType] += item.Count
+	}
+
+	orderedCount := 0
+	currentStockByModel := make(map[string][]model.Unit)
+	for _, u := range units {
+		contractNo := ""
+		if u.ContractNo != nil {
+			contractNo = strings.TrimSpace(*u.ContractNo)
+		}
+		if contractNo != "" {
+			orderedCount++
+			continue
+		}
+		mt := strings.TrimSpace(u.ModelType)
+		if mt == "" {
+			continue
+		}
+		currentStockByModel[mt] = append(currentStockByModel[mt], u)
+	}
+
+	targetStockTotal := 0
+	for _, count := range targetByModel {
+		targetStockTotal += count
+	}
+	if orderedCount+targetStockTotal > b.Capacity {
+		return fmt.Errorf("ordered %d + stock %d exceeds batch capacity %d", orderedCount, targetStockTotal, b.Capacity)
+	}
+
+	for modelType := range currentStockByModel {
+		if _, ok := targetByModel[modelType]; !ok {
+			targetByModel[modelType] = 0
+		}
+	}
+
+	now := time.Now()
+	maxSlot, err := s.unitRepo.GetMaxSlotInBatch(tx, batchID)
+	if err != nil {
+		return err
+	}
+	created := 0
+	deleted := 0
+	for modelType, targetCount := range targetByModel {
+		current := currentStockByModel[modelType]
+		if targetCount > len(current) {
+			for i := len(current); i < targetCount; i++ {
+				maxSlot++
+				created++
+				unit := model.Unit{
+					UnitID:    fmt.Sprintf("%s-STK-%d-%03d", batchID, now.UnixNano(), created),
+					BatchID:   batchID,
+					SlotIndex: maxSlot,
+					ModelType: modelType,
+					Status:    "Pending",
+					CreatedAt: now,
+					UpdatedAt: now,
+				}
+				if err := tx.Create(&unit).Error; err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if targetCount < len(current) {
+			toDelete := len(current) - targetCount
+			for i := 0; i < len(current)-1; i++ {
+				for j := i + 1; j < len(current); j++ {
+					if current[i].SlotIndex < current[j].SlotIndex {
+						current[i], current[j] = current[j], current[i]
+					}
+				}
+			}
+			for i := 0; i < toDelete; i++ {
+				if err := tx.Delete(&model.Unit{}, "unit_id = ? AND batch_id = ? AND (contract_no IS NULL OR TRIM(contract_no) = '')", current[i].UnitID, batchID).Error; err != nil {
+					return err
+				}
+				deleted++
+			}
+		}
+	}
+
+	if err := s.unitRepo.CompactSlots(tx, batchID); err != nil {
+		return err
+	}
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+
+	s.log(actor, "sync_stock_models", "batch", batchID, map[string]string{
+		"created": fmt.Sprintf("%d", created),
+		"deleted": fmt.Sprintf("%d", deleted),
+	})
+	s.wsHub.Broadcast("batch:updated", map[string]interface{}{"batch_id": batchID})
 	return nil
 }
 
@@ -283,6 +413,67 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 	s.log(actor, "manual_complete", "production_line", lineID, map[string]string{"batch_ids": joinedBatchIDs})
 	s.wsHub.Broadcast("line:completed", map[string]string{"line_id": lineID, "batch_ids": joinedBatchIDs})
 	return nil
+}
+
+func (s *BatchSvc) LockLineUnits(lineID string, unitIDs []string, orderRemark string, actor string) (int, error) {
+	uniqueIDs := make([]string, 0, len(unitIDs))
+	seen := make(map[string]bool, len(unitIDs))
+	for _, id := range unitIDs {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		return 0, fmt.Errorf("unit_ids is required")
+	}
+
+	tx := s.db.Begin()
+	defer tx.Rollback()
+
+	var line model.ProductionLine
+	if err := tx.Where("line_id = ?", lineID).First(&line).Error; err != nil {
+		return 0, fmt.Errorf("line not found: %w", err)
+	}
+
+	units, err := s.unitRepo.LockByIDs(tx, uniqueIDs)
+	if err != nil {
+		return 0, err
+	}
+	if len(units) != len(uniqueIDs) {
+		return 0, fmt.Errorf("some units were not found")
+	}
+	for _, unit := range units {
+		if unit.ProductionLineID == nil || *unit.ProductionLineID != lineID {
+			return 0, fmt.Errorf("unit %s does not belong to line %s", unit.UnitID, lineID)
+		}
+		if unit.Status != model.StatusInProduction {
+			return 0, fmt.Errorf("unit %s is not in production", unit.UnitID)
+		}
+	}
+
+	if err := tx.Model(&model.Unit{}).Where("unit_id IN ?", uniqueIDs).Updates(map[string]interface{}{
+		"order_remark": orderRemark,
+		"is_locked":    true,
+		"locked_by":    actor,
+		"locked_at":    gorm.Expr("NOW()"),
+		"updated_at":   gorm.Expr("NOW()"),
+	}).Error; err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return 0, err
+	}
+
+	s.log(actor, "lock_line_units", "production_line", lineID, map[string]string{
+		"unit_ids": strings.Join(uniqueIDs, ","),
+		"count":    fmt.Sprintf("%d", len(uniqueIDs)),
+	})
+	s.wsHub.Broadcast("line:updated", map[string]interface{}{"line_id": lineID, "count": len(uniqueIDs)})
+	return len(uniqueIDs), nil
 }
 
 func (s *BatchSvc) log(actor string, action string, targetType string, targetID string, detail map[string]string) {

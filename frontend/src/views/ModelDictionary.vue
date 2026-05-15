@@ -50,11 +50,11 @@
       <el-table-column label="大类" width="150">
         <template #default="scope">
           <el-select v-model="scope.row.model_family" clearable placeholder="选择类别">
-            <el-option label="大机AUTO" value="大机AUTO" />
-            <el-option label="小机AUTO" value="小机AUTO" />
-            <el-option label="大机XS" value="大机XS" />
-            <el-option label="小机XS" value="小机XS" />
-            <el-option label="小机G" value="小机G" />
+            <el-option label="中大型AUTO" value="中大型AUTO" />
+            <el-option label="中小型AUTO" value="中小型AUTO" />
+            <el-option label="中大型XS" value="中大型XS" />
+            <el-option label="中小型XS" value="中小型XS" />
+            <el-option label="中小型G" value="中小型G" />
             <el-option label="特殊" value="特殊" />
           </el-select>
         </template>
@@ -92,7 +92,16 @@ const localRows = ref<ModelDictionaryRow[]>([])
 const baselineRows = ref<ModelDictionaryRow[]>([])
 const draggingKey = ref('')
 const dragOverKey = ref('')
-const allowedFamilies = new Set(['大机AUTO', '小机AUTO', '大机XS', '小机XS', '小机G', '特殊'])
+const familyAliases: Record<string, string> = {
+  小机G: '中小型G',
+  小机XS: '中小型XS',
+  '小机/XS': '中小型XS',
+  小机AUTO: '中小型AUTO',
+  大机XS: '中大型XS',
+  大机AUTO: '中大型AUTO',
+  SPECIAL: '特殊'
+}
+const allowedFamilies = new Set(['中大型AUTO', '中小型AUTO', '中大型XS', '中小型XS', '中小型G', '特殊'])
 
 const createTempId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -222,7 +231,7 @@ const save = async () => {
   }
   for (const row of localRows.value) {
     let family = String(row.model_family || '').trim()
-    if (family === '小机/XS') family = '小机XS'
+    family = familyAliases[family] || family
     if (family && !allowedFamilies.has(family)) {
       ElMessage.warning(`机型 ${row.model_name} 的类别不合法`)
       return

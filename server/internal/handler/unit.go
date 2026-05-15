@@ -29,8 +29,9 @@ type UnitHandler struct {
 }
 
 type capacityRatioCfg struct {
-	Level2 map[string]map[string]int `json:"level2"`
-	Level3 map[string]map[string]int `json:"level3"`
+	Level2Global map[string]int            `json:"level2_global"`
+	Level2       map[string]map[string]int `json:"level2"`
+	Level3       map[string]map[string]int `json:"level3"`
 }
 
 func NewUnitHandler(db *gorm.DB, r *repo.UnitRepo, br *repo.BatchRepo, rs *service.RushSvc) *UnitHandler {
@@ -411,8 +412,8 @@ func (h *UnitHandler) MoveToSpecial(c *gin.Context) {
 		return
 	}
 	sourceCategory := fillCategoryForBatch(engine.NormalizeModelType(sourceBatch.ModelType), sourceBatch.Capacity)
-	if sourceCategory != "大机XS" && sourceCategory != "大机AUTO" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "只有大机卡片可以转移到特殊批次"})
+	if sourceCategory != "中大型XS" && sourceCategory != "中大型AUTO" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "只有中大型卡片可以转移到特殊批次"})
 		return
 	}
 
@@ -820,7 +821,15 @@ func (h *UnitHandler) fillBatchToCapacity(tx *gorm.DB, b *model.Batch) error {
 	}
 
 	ratio := loadCapacityRatioCfg(h.db)
-	models := chooseFillModelsForBatch(engine.NormalizeModelType(b.ModelType), b.Capacity, missing, ratio)
+	models := h.chooseInventoryAwareFillModels(tx, b, missing, ratio, nil)
+	if len(models) < missing {
+		models = chooseFillModelsForBatch(engine.NormalizeModelType(b.ModelType), b.Capacity, missing, ratio)
+	}
+	if len(models) < missing {
+		for len(models) < missing {
+			models = append(models, defaultFillModelForBatch(engine.NormalizeModelType(b.ModelType), b.Capacity))
+		}
+	}
 	now := time.Now()
 	startSlot := int(count) + 1
 
@@ -1105,6 +1114,22 @@ func (h *UnitHandler) findNextPredictedBatchWithSpace(tx *gorm.DB, targetBatchID
 func (h *UnitHandler) rebalanceBatchesUnboundUnitsByRatio(tx *gorm.DB, family string, batchIDs ...string) error {
 	ratio := loadCapacityRatioCfg(h.db)
 	seen := map[string]bool{}
+	exclude := map[string]bool{}
+	for _, batchID := range batchIDs {
+		bid := strings.TrimSpace(batchID)
+		if bid != "" {
+			exclude[bid] = true
+		}
+	}
+	baseline, err := h.inventoryAndPredictedStockCounts(tx, exclude)
+	if err != nil {
+		return err
+	}
+	allocator := engine.NewStockRatioAllocator(engine.RatioConfig{
+		Level2Global: ratio.Level2Global,
+		Level2:       ratio.Level2,
+		Level3:       ratio.Level3,
+	}, baseline)
 	for _, batchID := range batchIDs {
 		bid := strings.TrimSpace(batchID)
 		if bid == "" || seen[bid] {
@@ -1115,14 +1140,14 @@ func (h *UnitHandler) rebalanceBatchesUnboundUnitsByRatio(tx *gorm.DB, family st
 		if err != nil {
 			return err
 		}
-		if err := h.rebalanceSingleBatchUnboundUnitsByRatio(tx, batch, family, ratio); err != nil {
+		if err := h.rebalanceSingleBatchUnboundUnitsByRatio(tx, batch, family, ratio, allocator); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (h *UnitHandler) rebalanceSingleBatchUnboundUnitsByRatio(tx *gorm.DB, batch *model.Batch, family string, ratio capacityRatioCfg) error {
+func (h *UnitHandler) rebalanceSingleBatchUnboundUnitsByRatio(tx *gorm.DB, batch *model.Batch, family string, ratio capacityRatioCfg, allocator *engine.StockRatioAllocator) error {
 	units, err := h.repo.ListByBatchIDsForUpdate(tx, []string{batch.BatchID})
 	if err != nil {
 		return err
@@ -1148,7 +1173,14 @@ func (h *UnitHandler) rebalanceSingleBatchUnboundUnitsByRatio(tx *gorm.DB, batch
 		return unbound[i].UnitID < unbound[j].UnitID
 	})
 
-	models := chooseFillModelsForBatch(family, batch.Capacity, len(unbound), ratio)
+	category := fillCategoryForBatch(family, batch.Capacity)
+	models := []string(nil)
+	if allocator != nil && category != "" {
+		models = allocator.TakeModelsForCategory(category, len(unbound))
+	}
+	if len(models) < len(unbound) {
+		models = chooseFillModelsForBatch(family, batch.Capacity, len(unbound), ratio)
+	}
 	if len(models) < len(unbound) {
 		for len(models) < len(unbound) {
 			models = append(models, defaultFillModelForBatch(family, batch.Capacity))
@@ -1170,6 +1202,59 @@ func (h *UnitHandler) rebalanceSingleBatchUnboundUnitsByRatio(tx *gorm.DB, batch
 		}
 	}
 	return nil
+}
+
+func (h *UnitHandler) chooseInventoryAwareFillModels(tx *gorm.DB, b *model.Batch, slots int, ratio capacityRatioCfg, exclude map[string]bool) []string {
+	if slots <= 0 || b == nil {
+		return nil
+	}
+	baseline, err := h.inventoryAndPredictedStockCounts(tx, exclude)
+	if err != nil {
+		return nil
+	}
+	allocator := engine.NewStockRatioAllocator(engine.RatioConfig{
+		Level2Global: ratio.Level2Global,
+		Level2:       ratio.Level2,
+		Level3:       ratio.Level3,
+	}, baseline)
+	category := fillCategoryForBatch(engine.NormalizeModelType(b.ModelType), b.Capacity)
+	if category == "" {
+		return nil
+	}
+	return allocator.TakeModelsForCategory(category, slots)
+}
+
+func (h *UnitHandler) inventoryAndPredictedStockCounts(tx *gorm.DB, excludeBatchIDs map[string]bool) (map[string]int, error) {
+	counts, err := engine.LoadStockBaselineModelCounts(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]struct {
+		BatchID   string `gorm:"column:batch_id"`
+		ModelType string `gorm:"column:model_type"`
+		Count     int    `gorm:"column:count"`
+	}, 0, 128)
+	q := tx.Table("units u").
+		Select("u.batch_id AS batch_id, TRIM(u.model_type) AS model_type, COUNT(*) AS count").
+		Joins("JOIN batches b ON b.batch_id = u.batch_id").
+		Where("b.status = ?", model.StatusPredicted).
+		Where("(u.contract_no IS NULL OR TRIM(u.contract_no) = '')").
+		Group("u.batch_id, TRIM(u.model_type)")
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if excludeBatchIDs != nil && excludeBatchIDs[strings.TrimSpace(row.BatchID)] {
+			continue
+		}
+		modelName := strings.TrimSpace(row.ModelType)
+		if modelName == "" || row.Count <= 0 {
+			continue
+		}
+		counts[modelName] += row.Count
+	}
+	return counts, nil
 }
 
 func (h *UnitHandler) loadModelSortOrderMap(tx *gorm.DB) (map[string]int, error) {
@@ -1469,6 +1554,7 @@ func supplementLevel3MapFromModelDict(db *gorm.DB, level3 map[string]map[string]
 	}
 
 	dictModelsByCat := map[string][]string{}
+	dictCatByModel := map[string]string{}
 	for _, row := range rows {
 		modelName := strings.TrimSpace(row.ModelName)
 		if modelName == "" || modelName == "G" || modelName == "XS" || modelName == "AUTO" {
@@ -1482,8 +1568,11 @@ func supplementLevel3MapFromModelDict(db *gorm.DB, level3 map[string]map[string]
 		if mf != "" {
 			cat = normalizeCategoryFromFamily(mf, modelName)
 		}
+		dictCatByModel[normalizeModelKey(modelName)] = cat
 		dictModelsByCat[cat] = append(dictModelsByCat[cat], modelName)
 	}
+
+	rehomeLevel3ModelsByDictionary(level3, dictCatByModel)
 
 	for cat, dictModels := range dictModelsByCat {
 		if _, exists := level3[cat]; !exists || len(level3[cat]) == 0 {
@@ -1518,12 +1607,38 @@ func supplementLevel3MapFromModelDict(db *gorm.DB, level3 map[string]map[string]
 	}
 }
 
-func normalizeCategoryFromFamily(family string, modelName string) string {
-	f := strings.TrimSpace(family)
-	if f == "小机/XS" {
-		f = "小机XS"
+func rehomeLevel3ModelsByDictionary(level3 map[string]map[string]int, dictCatByModel map[string]string) {
+	if len(level3) == 0 || len(dictCatByModel) == 0 {
+		return
 	}
-	if f == "小机G" || f == "小机XS" || f == "大机XS" || f == "小机AUTO" || f == "大机AUTO" || f == "特殊" || f == "SPECIAL" {
+	next := map[string]map[string]int{}
+	for category, ratios := range level3 {
+		cat := canonicalCategory(category)
+		if next[cat] == nil {
+			next[cat] = map[string]int{}
+		}
+		for modelName, ratio := range ratios {
+			targetCat := dictCatByModel[normalizeModelKey(modelName)]
+			if targetCat == "" {
+				targetCat = cat
+			}
+			if next[targetCat] == nil {
+				next[targetCat] = map[string]int{}
+			}
+			next[targetCat][modelName] += ratio
+		}
+	}
+	for category := range level3 {
+		delete(level3, category)
+	}
+	for category, ratios := range next {
+		level3[category] = ratios
+	}
+}
+
+func normalizeCategoryFromFamily(family string, modelName string) string {
+	f := canonicalCategory(strings.TrimSpace(family))
+	if f == "中小型G" || f == "中小型XS" || f == "中大型XS" || f == "中小型AUTO" || f == "中大型AUTO" || f == "特殊" || f == "SPECIAL" {
 		if f == "SPECIAL" {
 			return "特殊"
 		}
@@ -1534,13 +1649,14 @@ func normalizeCategoryFromFamily(family string, modelName string) string {
 
 func loadCapacityRatioCfg(db *gorm.DB) capacityRatioCfg {
 	fallback := capacityRatioCfg{
+		Level2Global: map[string]int{"涓皬鍨婫": 24, "涓皬鍨媂S": 38, "涓ぇ鍨媂S": 38, "涓皬鍨婣UTO": 0, "涓ぇ鍨婣UTO": 0, "鐗规畩": 0},
 		Level2: map[string]map[string]int{
-			"G":    {"小机G": 92, "特殊": 8},
-			"XS":   {"小机XS": 75, "大机XS": 25},
-			"AUTO": {"小机AUTO": 75, "大机AUTO": 25},
+			"G":    {"中小型G": 92, "特殊": 8},
+			"XS":   {"中小型XS": 75, "中大型XS": 25},
+			"AUTO": {"中小型AUTO": 75, "中大型AUTO": 25},
 		},
 		Level3: map[string]map[string]int{
-			"小机G": {"FR-400G": 60, "FH-300C": 40},
+			"中小型G": {"FR-400G": 60, "FH-300C": 40},
 		},
 	}
 	cfg := fallback
@@ -1548,9 +1664,31 @@ func loadCapacityRatioCfg(db *gorm.DB) capacityRatioCfg {
 	if cfg.Level2 == nil {
 		cfg.Level2 = fallback.Level2
 	}
+	cfg.Level2Global = normalizeIntRatioKeys(cfg.Level2Global)
+	if cfg.Level2Global == nil {
+		cfg.Level2Global = fallback.Level2Global
+	}
+	cfg.Level2 = normalizeUnitLevel2RatioKeys(cfg.Level2)
+	cfg.Level3 = normalizeLevel3RatioKeys(cfg.Level3)
 	supplementLevel3FromModelDict(db, &cfg)
 	cfg.Level2 = buildEffectiveLevel2ForUnit(cfg.Level2, cfg.Level3)
 	return cfg
+}
+
+func normalizeUnitLevel2RatioKeys(in map[string]map[string]int) map[string]map[string]int {
+	if in == nil {
+		return nil
+	}
+	out := map[string]map[string]int{}
+	for family, ratios := range in {
+		if out[family] == nil {
+			out[family] = map[string]int{}
+		}
+		for k, v := range ratios {
+			out[family][canonicalCategory(k)] += v
+		}
+	}
+	return out
 }
 
 func buildEffectiveLevel2ForUnit(level2 map[string]map[string]int, level3 map[string]map[string]int) map[string]map[string]int {
@@ -1611,6 +1749,89 @@ func chooseFillModelsForBatch(family string, capacity int, slots int, ratio capa
 	return chooseFillModels(family, slots, ratio.Level2)
 }
 
+func chooseFillModelsForBatchWithOrderedUnits(family string, capacity int, slots int, ratio capacityRatioCfg, units []model.Unit) []string {
+	models := chooseFillModelsForBatch(family, capacity, slots, ratio)
+	if slots <= 0 || len(models) == 0 {
+		return models
+	}
+	category := fillCategoryForBatch(family, capacity)
+	ratios := ratio.Level3[category]
+	if len(ratios) == 0 {
+		return models
+	}
+
+	counts := map[string]int{}
+	for _, modelName := range models {
+		counts[modelName]++
+	}
+
+	type candidate struct {
+		model string
+		ratio int
+	}
+	seen := map[string]bool{}
+	candidates := make([]candidate, 0)
+	for _, u := range units {
+		if u.ContractNo == nil || strings.TrimSpace(*u.ContractNo) == "" {
+			continue
+		}
+		modelName := strings.TrimSpace(u.ModelType)
+		if modelName == "" || seen[normalizeModelKey(modelName)] {
+			continue
+		}
+		r := 0
+		for key, value := range ratios {
+			if normalizeModelKey(key) == normalizeModelKey(modelName) {
+				r = value
+				modelName = concreteModelByFamilyAndSize(family, key)
+				break
+			}
+		}
+		if r <= 0 {
+			continue
+		}
+		seen[normalizeModelKey(modelName)] = true
+		candidates = append(candidates, candidate{model: modelName, ratio: r})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].ratio != candidates[j].ratio {
+			return candidates[i].ratio > candidates[j].ratio
+		}
+		return candidates[i].model < candidates[j].model
+	})
+
+	for _, cand := range candidates {
+		if counts[cand.model] > 0 {
+			continue
+		}
+		donor := ""
+		donorCount := 1
+		for modelName, count := range counts {
+			if normalizeModelKey(modelName) == normalizeModelKey(cand.model) {
+				continue
+			}
+			if count > donorCount {
+				donor = modelName
+				donorCount = count
+			}
+		}
+		if donor == "" {
+			continue
+		}
+		counts[donor]--
+		counts[cand.model]++
+	}
+
+	out := make([]string, 0, slots)
+	for modelName, count := range counts {
+		for i := 0; i < count; i++ {
+			out = append(out, modelName)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func chooseFillModelsFromRatios(family string, slots int, ratios map[string]int) []string {
 	if slots <= 0 || len(ratios) == 0 {
 		return nil
@@ -1633,17 +1854,17 @@ func chooseFillModelsFromRatios(family string, slots int, ratios map[string]int)
 func fillCategoryForBatch(family string, capacity int) string {
 	switch strings.ToUpper(strings.TrimSpace(family)) {
 	case "G":
-		return "小机G"
+		return "中小型G"
 	case "XS":
 		if capacity == 16 {
-			return "大机XS"
+			return "中大型XS"
 		}
-		return "小机XS"
+		return "中小型XS"
 	case "AUTO":
 		if capacity == 16 {
-			return "大机AUTO"
+			return "中大型AUTO"
 		}
-		return "小机AUTO"
+		return "中小型AUTO"
 	default:
 		return ""
 	}
@@ -1652,7 +1873,7 @@ func fillCategoryForBatch(family string, capacity int) string {
 func defaultFillModelForBatch(family string, capacity int) string {
 	category := fillCategoryForBatch(family, capacity)
 	switch category {
-	case "大机XS", "大机AUTO":
+	case "中大型XS", "中大型AUTO":
 		return concreteModelByFamilyAndSize(family, "600")
 	default:
 		return concreteModelByFamilyAndSize(family, "400")
@@ -1741,7 +1962,13 @@ func concreteModelByFamilyAndSize(family string, sizeKey string) string {
 	if strings.Contains(trimmed, "大机") {
 		s = "600"
 	}
+	if strings.Contains(trimmed, "中大型") {
+		s = "600"
+	}
 	if strings.Contains(trimmed, "小机") {
+		s = "400"
+	}
+	if strings.Contains(trimmed, "中小型") {
 		s = "400"
 	}
 	if strings.Contains(trimmed, "特殊") {

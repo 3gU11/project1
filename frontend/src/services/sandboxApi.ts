@@ -31,6 +31,9 @@ export const insertEmptySlot = (id: string, beforeSlotIndex: number, sizeKey?: s
     ...(sizeKey ? { size_key: sizeKey } : {})
   })
 
+export const updateBatchStockModels = (id: string, stocks: Array<{ model_type: string; count: number }>) =>
+  apiPatch(`${P}/batches/${id}/stock-models`, { stocks })
+
 // Units
 export const getUnit = (id: string) =>
   apiGet(`${P}/units/${id}`)
@@ -78,8 +81,12 @@ export const markSpot = (id: string) =>
   apiPost(`${P}/units/${id}/mark-spot`)
 
 // Forecast
-export const recompute = () =>
-  apiPost(`${P}/forecast/recompute`, undefined, { timeout: 130000 })
+export const recompute = (targetSlotNo?: number) =>
+  apiPost(
+    `${P}/forecast/recompute`,
+    targetSlotNo && targetSlotNo > 0 ? { target_slot_no: targetSlotNo } : undefined,
+    { timeout: 130000 }
+  )
 
 export const getForecastAchievement = () =>
   apiGet(`${P}/forecast/achievement`)
@@ -103,6 +110,12 @@ export const assignLine = (id: string, batchId: string) =>
 
 export const manualComplete = (id: string) =>
   apiPost(`${P}/production-lines/${id}/manual-complete`)
+
+export const lockLineUnits = (lineId: string, unitIds: string[], orderRemark: string) =>
+  apiPost(`${P}/production-lines/${lineId}/lock-units`, {
+    unit_ids: unitIds,
+    order_remark: orderRemark,
+  })
 
 // Revoke confirmed batch (delete from plan_import + revert status)
 export const revokeBatch = (batchId: string) =>

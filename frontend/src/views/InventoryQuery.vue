@@ -105,11 +105,36 @@
             class="model-summary-table"
             height="620"
           >
-            <el-table-column prop="机型" label="机型" />
-            <el-table-column prop="库存中" label="库存中" width="100" />
-            <el-table-column prop="待入库" label="待入库" width="100" />
-            <el-table-column prop="已绑定" label="已绑定" width="100" />
-            <el-table-column prop="全部" label="全部" width="100" />
+            <el-table-column prop="机型" label="机型" min-width="160" />
+            <el-table-column label="库存中" width="90" align="center">
+              <template #default="{ row }">
+                <span v-if="row.库存中 > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.库存中 }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="待入库" width="90" align="center">
+              <template #default="{ row }">
+                <span v-if="row.待入库 > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.待入库 }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="已绑定" width="90" align="center">
+              <template #default="{ row }">
+                <span v-if="row.已绑定 > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.已绑定 }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="加高" width="80" align="center">
+              <template #default="{ row }">
+                <span v-if="row.加高 > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.加高 }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="全部" width="90" align="center">
+              <template #default="{ row }">
+                <span style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.全部 }}</span>
+              </template>
+            </el-table-column>
           </el-table>
           <div v-else class="model-detail-virtual-table">
             <div class="model-detail-header">
@@ -600,7 +625,7 @@ onActivated(() => {
   justify-content: flex-start;
 }
 .model-summary-table {
-  max-width: 520px;
+  max-width: 680px;
 }
 .model-detail-virtual-table {
   width: 100%;

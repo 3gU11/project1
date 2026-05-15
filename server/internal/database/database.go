@@ -49,6 +49,9 @@ func ensureSchema(db *gorm.DB) error {
 	if err := addColumnIfMissing(db, "model_dictionary", "model_size", "ALTER TABLE model_dictionary ADD COLUMN model_size INT NULL AFTER model_family"); err != nil {
 		return err
 	}
+	if err := migrateModelFamilies(db); err != nil {
+		return err
+	}
 	if err := ensureFH300CModel(db); err != nil {
 		return err
 	}
@@ -153,7 +156,7 @@ WHERE TABLE_SCHEMA = DATABASE()
 func ensureFH300CModel(db *gorm.DB) error {
 	if err := db.Exec(`
 INSERT INTO model_dictionary (model_name, model_family, sort_order, enabled, remark)
-SELECT 'FH-300C', '小机G', next_order, 1, '老板计划小机G机型'
+SELECT 'FH-300C', '中小型G', next_order, 1, '老板计划中小型G机型'
 FROM (SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM model_dictionary) AS order_seed
 WHERE NOT EXISTS (
   SELECT 1 FROM (SELECT model_name FROM model_dictionary WHERE UPPER(TRIM(model_name)) = 'FH-300C' LIMIT 1) AS existing_model
@@ -162,8 +165,30 @@ WHERE NOT EXISTS (
 	}
 	return db.Exec(`
 UPDATE model_dictionary
-SET model_name = 'FH-300C', model_family = '小机G', enabled = 1
+SET model_name = 'FH-300C', model_family = '中小型G', enabled = 1
 WHERE UPPER(TRIM(model_name)) = 'FH-300C'`).Error
+}
+
+func migrateModelFamilies(db *gorm.DB) error {
+	replacements := map[string]string{
+		"小机G":     "中小型G",
+		"小机XS":    "中小型XS",
+		"小机/XS":   "中小型XS",
+		"小机AUTO":  "中小型AUTO",
+		"大机XS":    "中大型XS",
+		"大机AUTO":  "中大型AUTO",
+		"SPECIAL": "特殊",
+	}
+	for oldFamily, newFamily := range replacements {
+		if err := db.Exec(
+			"UPDATE model_dictionary SET model_family = ? WHERE TRIM(COALESCE(model_family, '')) = ?",
+			newFamily,
+			oldFamily,
+		).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func OpenRedis(cfg config.Config) *redis.Client {

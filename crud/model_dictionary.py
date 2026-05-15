@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Iterable
 
@@ -7,7 +7,16 @@ from sqlalchemy.exc import OperationalError
 
 from database import get_engine
 
-MODEL_CATEGORIES = {"大机AUTO", "小机AUTO", "大机XS", "小机XS", "小机G", "特殊"}
+MODEL_CATEGORIES = {"中大型AUTO", "中小型AUTO", "中大型XS", "中小型XS", "中小型G", "特殊"}
+LEGACY_FAMILY_MAP = {
+    "小机G": "中小型G",
+    "小机XS": "中小型XS",
+    "小机/XS": "中小型XS",
+    "小机AUTO": "中小型AUTO",
+    "大机XS": "中大型XS",
+    "大机AUTO": "中大型AUTO",
+    "SPECIAL": "特殊",
+}
 
 
 def _clean_name(name: object) -> str:
@@ -16,8 +25,7 @@ def _clean_name(name: object) -> str:
 
 def _normalize_family(value: object) -> str:
     family = str(value or "").strip()
-    if family == "小机/XS":
-        family = "小机XS"
+    family = LEGACY_FAMILY_MAP.get(family, family)
     if not family:
         return ""
     if family not in MODEL_CATEGORIES:
@@ -44,6 +52,15 @@ def ensure_model_dictionary_table() -> None:
         has_family = conn.execute(text("SHOW COLUMNS FROM model_dictionary LIKE 'model_family'")).fetchone()
         if not has_family:
             conn.execute(text("ALTER TABLE model_dictionary ADD COLUMN `model_family` VARCHAR(32) NULL AFTER `model_name`"))
+        for old_family, new_family in LEGACY_FAMILY_MAP.items():
+            conn.execute(
+                text(
+                    "UPDATE model_dictionary "
+                    "SET `model_family`=:new_family "
+                    "WHERE TRIM(COALESCE(`model_family`, ''))=:old_family"
+                ),
+                {"old_family": old_family, "new_family": new_family},
+            )
         next_order = int(conn.execute(text("SELECT COALESCE(MAX(`sort_order`), -1) + 1 FROM model_dictionary")).scalar() or 0)
         exists = conn.execute(
             text("SELECT `id` FROM model_dictionary WHERE UPPER(TRIM(`model_name`)) = 'FH-300C' LIMIT 1")
@@ -52,7 +69,7 @@ def ensure_model_dictionary_table() -> None:
             conn.execute(
                 text(
                     "UPDATE model_dictionary "
-                    "SET `model_name`='FH-300C', `model_family`='小机G', `enabled`=1 "
+                    "SET `model_name`='FH-300C', `model_family`='中小型G', `enabled`=1 "
                     "WHERE UPPER(TRIM(`model_name`)) = 'FH-300C'"
                 )
             )
@@ -60,7 +77,7 @@ def ensure_model_dictionary_table() -> None:
             conn.execute(
                 text(
                     "INSERT INTO model_dictionary (`model_name`, `model_family`, `sort_order`, `enabled`, `remark`) "
-                    "VALUES ('FH-300C', '小机G', :sort_order, 1, '老板计划小机G机型')"
+                    "VALUES ('FH-300C', '中小型G', :sort_order, 1, '老板计划中小型G机型')"
                 ),
                 {"sort_order": next_order},
             )
@@ -77,7 +94,12 @@ def get_model_dictionary() -> list[dict]:
                     "ORDER BY `sort_order` ASC, `id` ASC"
                 )
             ).mappings().all()
-        return [dict(r) for r in rows]
+        normalized = []
+        for r in rows:
+            item = dict(r)
+            item["model_family"] = _normalize_family(item.get("model_family")) or None
+            normalized.append(item)
+        return normalized
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"读取机型字典失败: {e}") from e
 

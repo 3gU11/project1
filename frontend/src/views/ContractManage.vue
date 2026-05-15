@@ -14,198 +14,284 @@
       <div class="batch-slide-inner">
         <div class="batch-panel">
           <div class="batch-grid">
-        <div>
-          <div class="ops-label">系统自动生成合同号</div>
-          <div class="auto-id">{{ batchForm.contractId }}</div>
-          <div class="tip">格式: HT + 日期 + 随机4位</div>
-        </div>
-        <div>
-          <div class="ops-label">期望交付日期</div>
-          <el-date-picker v-model="batchForm.deadline" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-        </div>
-        <div>
-          <div class="ops-label">客户名称</div>
-          <el-input v-model="batchForm.customer" />
-        </div>
-        <div>
-          <div class="ops-label">代理商名称</div>
-          <el-input v-model="batchForm.agent" />
-        </div>
-        <div>
-          <div class="ops-label">急单</div>
-          <el-switch
-            v-model="batchForm.isRush"
-            active-text="是"
-            inactive-text="否"
-          />
-        </div>
-      </div>
+            <div>
+              <div class="ops-label">系统自动生成合同号</div>
+              <div class="auto-id">{{ batchForm.contractId }}</div>
+              <div class="tip">格式: HT + 日期 + 随机4位</div>
+            </div>
+            <div>
+              <div class="ops-label">期望交付日期</div>
+              <el-date-picker v-model="batchForm.deadline" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+            </div>
+            <div>
+              <div class="ops-label">客户名称</div>
+              <el-input v-model="batchForm.customer" />
+            </div>
+            <div>
+              <div class="ops-label">代理商名称</div>
+              <el-input v-model="batchForm.agent" />
+            </div>
+            <div>
+              <div class="ops-label">急单</div>
+              <el-switch v-model="batchForm.isRush" active-text="是" inactive-text="否" />
+            </div>
+          </div>
 
-      <el-divider />
-      <div class="ops-label">📎 附加合同文件 (可选)</div>
-      <el-upload
-        :auto-upload="false"
-        :show-file-list="true"
-        multiple
-        :on-change="onBatchFileChange"
-        :on-remove="onBatchFileRemove"
-      >
-        <el-button>选择文件</el-button>
-      </el-upload>
+          <el-divider />
+          <div class="ops-label">📎 附加合同文件 (可选)</div>
+          <el-upload
+            :auto-upload="false"
+            :show-file-list="true"
+            multiple
+            :on-change="onBatchFileChange"
+            :on-remove="onBatchFileRemove"
+          >
+            <el-button>选择文件</el-button>
+          </el-upload>
 
-      <el-divider />
-      <div class="tip">请在下方清单中添加设备机型。支持同一机型添加多条记录（例如：标准版与加高版分开录入）。</div>
-      <el-table :data="batchItems" border stripe class="form-table">
-        <el-table-column label="#" width="60">
-          <template #default="scope">{{ scope.$index + 1 }}</template>
-        </el-table-column>
-        <el-table-column label="机型">
-          <template #default="scope">
-            <el-select v-model="scope.row.model" filterable placeholder="请选择机型" style="width: 100%">
-              <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="数量" width="100">
-          <template #default="scope">
-            <el-input-number v-model="scope.row.qty" :min="1" :controls="false" placeholder="数量" style="width: 100%" />
-          </template>
-        </el-table-column>
-        <el-table-column label="加高?" width="90">
-          <template #default="scope">
-            <el-checkbox v-model="scope.row.high" />
-          </template>
-        </el-table-column>
-        <el-table-column label="单行备注">
-          <template #default="scope">
-            <el-input v-model="scope.row.rowNote" />
-          </template>
-        </el-table-column>
-      </el-table>
-      <div class="batch-row-actions">
-        <el-button link type="primary" @click="addBatchItem">+ 添加机型行</el-button>
-      </div>
+          <el-divider />
+          <div class="tip">请在下方清单中添加设备机型。支持同一机型添加多条记录（例如：标准版与加高版分开录入）。</div>
+          <el-table :data="batchItems" border stripe class="form-table">
+            <el-table-column label="#" width="60">
+              <template #default="scope">{{ scope.$index + 1 }}</template>
+            </el-table-column>
+            <el-table-column label="机型">
+              <template #default="scope">
+                <el-select v-model="scope.row.model" filterable placeholder="请选择机型" style="width: 100%">
+                  <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="数量" width="100">
+              <template #default="scope">
+                <el-input-number v-model="scope.row.qty" :min="1" :controls="false" placeholder="数量" style="width: 100%" />
+              </template>
+            </el-table-column>
+            <el-table-column label="加高?" width="90">
+              <template #default="scope">
+                <el-checkbox v-model="scope.row.high" />
+              </template>
+            </el-table-column>
+            <el-table-column label="单行备注">
+              <template #default="scope">
+                <el-input v-model="scope.row.rowNote" />
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="batch-row-actions">
+            <el-button link type="primary" @click="addBatchItem">+ 添加机型行</el-button>
+          </div>
 
-      <div class="ops-label">合同总备注</div>
-      <el-input v-model="batchForm.contractNote" placeholder="可选，应用于所有条目" />
+          <div class="ops-label">合同总备注</div>
+          <el-input v-model="batchForm.contractNote" placeholder="可选，应用于所有条目" />
 
-      <div class="batch-save">
-        <el-button type="danger" :loading="batchSaving" @click="submitBatchContracts">💾 保存所有合同条目</el-button>
-      </div>
+          <div class="batch-save">
+            <el-button type="danger" :loading="batchSaving" @click="submitBatchContracts">💾 保存所有合同条目</el-button>
+          </div>
         </div>
       </div>
     </div>
 
-    <el-table
-      :data="pagedRows"
-      border
-      stripe
-      size="small"
-      height="430"
-      @current-change="onCurrentRowChange"
-      highlight-current-row
+    <section class="contract-workspace">
+      <div class="tabs-row">
+        <button
+          v-for="tab in statusTabs"
+          :key="tab"
+          type="button"
+          class="status-tab"
+          :class="{ active: activeTab === tab }"
+          @click="activeTab = tab"
+        >
+          <span>{{ tab }}</span>
+          <strong>{{ tabCounts[tab] }}</strong>
+        </button>
+      </div>
+
+      <div class="workspace-grid">
+        <aside class="contract-list-panel">
+          <div class="list-tools">
+            <el-input
+              v-model="contractSearchKeyword"
+              clearable
+              placeholder="搜索合同号 / 客户 / 代理商"
+              @clear="contractSearchKeyword = ''"
+            />
+          </div>
+
+          <div v-loading="loading" class="month-list">
+            <el-empty v-if="groupedContracts.length === 0" description="当前状态暂无合同" :image-size="96" />
+            <el-collapse v-else v-model="openMonths">
+              <el-collapse-item v-for="group in groupedContracts" :key="group.month" :name="group.month">
+                <template #title>
+                  <div class="month-title">
+                    <span>{{ group.month }}</span>
+                    <em>{{ group.contracts.length }} 单</em>
+                  </div>
+                </template>
+                <button
+                  v-for="contract in group.contracts"
+                  :key="contract.id"
+                  type="button"
+                  class="contract-card"
+                  :class="{ active: selectedContractId === contract.id }"
+                  @click="selectContract(contract.id)"
+                >
+                  <div class="contract-card-head">
+                    <strong>{{ contract.id }}</strong>
+                    <el-tag size="small" :type="statusTagType(contract.status)">{{ contract.status }}</el-tag>
+                  </div>
+                  <div class="contract-customer">{{ contract.customer || '未填写客户' }}</div>
+                  <div class="contract-meta">
+                    <span>{{ contract.modelSummary }}</span>
+                    <span>{{ contract.dueDate || '未定交期' }}</span>
+                  </div>
+                </button>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </aside>
+
+        <main ref="detailPanelRef" class="contract-detail-panel">
+          <el-empty v-if="!selectedContract" description="请选择左侧合同" :image-size="112" />
+          <template v-else>
+            <div class="detail-head">
+              <div>
+                <div class="detail-kicker">{{ activeTab }}</div>
+                <h2>{{ selectedContract.id }}</h2>
+              </div>
+              <el-tag size="large" :type="statusTagType(selectedContract.status)">{{ selectedContract.status }}</el-tag>
+            </div>
+
+            <div class="info-grid">
+              <div>
+                <span>客户名</span>
+                <strong>{{ selectedContract.customer || '-' }}</strong>
+              </div>
+              <div>
+                <span>代理商</span>
+                <strong>{{ selectedContract.agent || '-' }}</strong>
+              </div>
+              <div>
+                <span>要求交期</span>
+                <strong>{{ selectedContract.dueDate || '-' }}</strong>
+              </div>
+              <div>
+                <span>合计数量</span>
+                <strong>{{ selectedContract.totalQty }}</strong>
+              </div>
+              <div v-if="showOrderNo">
+                <span>订单号</span>
+                <strong>{{ selectedContract.orderNo || '-' }}</strong>
+              </div>
+              <div>
+                <span>机型摘要</span>
+                <strong>{{ selectedContract.modelSummary }}</strong>
+              </div>
+            </div>
+
+            <div class="detail-section">
+              <div class="section-title">机型明细</div>
+              <el-table :data="selectedContract.rows" border stripe size="small">
+                <el-table-column prop="机型" label="机型" min-width="180" />
+                <el-table-column prop="排产数量" label="数量" width="90" />
+                <el-table-column prop="要求交期" label="交期" width="120" />
+                <el-table-column prop="状态" label="状态" width="110" />
+                <el-table-column prop="备注" label="备注" min-width="180" show-overflow-tooltip />
+              </el-table>
+            </div>
+
+            <div class="detail-section">
+              <div class="section-title">附件</div>
+              <div class="attachment-header">
+                <span class="attachment-title">合同附件</span>
+                <el-button link type="primary" :loading="attachmentLoading" @click="fetchAttachments(selectedContract.id)">
+                  刷新
+                </el-button>
+              </div>
+
+              <div v-if="attachmentLoading" class="attachment-loading">
+                <el-icon class="is-loading"><Loading /></el-icon> 加载中...
+              </div>
+              <div v-else-if="attachmentFiles.length === 0" class="attachment-empty">该合同暂无附件</div>
+              <div v-else class="attachment-list">
+                <div v-for="file in attachmentFiles" :key="file.file_name" class="attachment-item">
+                  <div class="attachment-info">
+                    <el-icon><Document /></el-icon>
+                    <span class="attachment-name">{{ file.file_name }}</span>
+                    <span class="attachment-meta">{{ file.uploader }} · {{ file.upload_time }}</span>
+                  </div>
+                  <div class="attachment-actions">
+                    <el-button type="success" link :loading="previewingFile === file.file_name" @click="previewAttachment(selectedContract.id, file.file_name)">
+                      预览
+                    </el-button>
+                    <el-button type="primary" link :loading="downloadingFile === file.file_name" @click="downloadAttachment(selectedContract.id, file.file_name)">
+                      下载
+                    </el-button>
+                    <el-button type="danger" link @click="deleteAttachment(selectedContract.id, file.file_name)">
+                      删除
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="attachment-upload-row">
+                <el-upload :auto-upload="false" :show-file-list="false" :on-change="onExistingContractFileChange">
+                  <el-button size="small">➕ 追加附件</el-button>
+                </el-upload>
+              </div>
+            </div>
+
+            <div class="detail-section actions-section">
+              <div>
+                <div class="section-title">可用操作</div>
+                <div class="ops-hint">取消后会清理预测沙盒占用、排产队列和急单队列，并触发重算。</div>
+              </div>
+              <el-button
+                v-if="canCancelSelected"
+                type="danger"
+                :loading="executing"
+                @click="cancelSelectedContract"
+              >
+                取消合同
+              </el-button>
+              <el-tag v-else type="info">当前状态无可用操作</el-tag>
+            </div>
+          </template>
+        </main>
+      </div>
+    </section>
+
+    <el-dialog
+      v-model="previewDialogVisible"
+      :title="previewTitle"
+      width="82vw"
+      class="attachment-preview-dialog"
+      destroy-on-close
     >
-      <el-table-column prop="合同号" label="合同号" min-width="160" />
-      <el-table-column prop="客户名" label="客户名" min-width="260" />
-      <el-table-column prop="代理商" label="代理商" width="90" />
-      <el-table-column prop="机型" label="机型" min-width="160" />
-      <el-table-column prop="排产数量" label="排产数量" width="90" />
-      <el-table-column prop="要求交期" label="要求交期" width="100" />
-      <el-table-column prop="状态" label="状态" width="90" />
-      <el-table-column prop="备注" label="备注" min-width="120" />
-    </el-table>
-
-    <div v-if="displayRows.length > pageSize" class="table-pagination">
-      <el-pagination
-        background
-        layout="total, prev, pager, next"
-        :total="displayRows.length"
-        :page-size="pageSize"
-        :current-page="tablePage"
-        @current-change="onPageChange"
+      <div v-if="previewLoading" class="preview-loading">
+        <el-icon class="is-loading"><Loading /></el-icon> 正在加载预览...
+      </div>
+      <iframe
+        v-else-if="previewType === 'pdf' && previewUrl"
+        class="preview-frame"
+        :src="previewUrl"
+        title="PDF 预览"
       />
-    </div>
-
-    <div class="ops-panel">
-      <div class="ops-left">
-        <div class="ops-label">选择合同号进行操作</div>
-        <el-input
-          v-model="selectedContractId"
-          clearable
-          placeholder="手动输入合同号，可按合同号/客户名/代理商筛选上方列表"
-          @input="filterContracts"
-          @clear="clearContractFilter"
-        />
-        <div v-if="contractSearchKeyword" class="ops-hint">
-          当前筛选 {{ displayRows.length }} 条
-        </div>
-        <div v-else class="ops-hint">
-          点击上方表格行可自动填入合同号
-        </div>
-      </div>
-
-      <div class="ops-right">
-        <el-radio-group v-model="operationType">
-          <el-radio value="ordered">标记已下单</el-radio>
-          <el-radio value="cancelled">取消计划</el-radio>
-          <el-radio value="done">标记已完工</el-radio>
-          <el-radio value="linked">关联现有订单(核销)</el-radio>
-        </el-radio-group>
-        <el-button type="primary" :loading="executing" @click="executeOperation">执行</el-button>
-      </div>
-    </div>
-
-    <!-- 订单号输入框 - 只在关联订单时显示 -->
-    <div v-if="operationType === 'linked'" class="link-order-panel">
-      <div class="ops-label">输入已存在的订单号</div>
-      <el-input v-model="linkOrderId" placeholder="例如: SO-2026..." style="width: 300px" />
-    </div>
-
-    <!-- 合同附件面板 -->
-    <div v-if="selectedContractId" class="attachment-panel">
-      <div class="attachment-header">
-        <span class="attachment-title">📎 合同附件 — {{ selectedContractId }}</span>
-        <el-button link type="primary" :loading="attachmentLoading" @click="fetchAttachments(selectedContractId)">
-          🔄 刷新
+      <iframe
+        v-else-if="previewType === 'html'"
+        class="preview-frame"
+        :srcdoc="previewHtml"
+        sandbox=""
+        title="文档预览"
+      />
+      <div v-else class="preview-empty">
+        <div class="preview-empty-title">暂不支持直接在线渲染</div>
+        <div class="preview-empty-text">{{ previewMessage || '该文件类型暂不支持在线预览。' }}</div>
+        <el-button v-if="selectedContract" type="primary" @click="downloadAttachment(selectedContract.id, previewTitle)">
+          下载查看
         </el-button>
       </div>
-
-      <div v-if="attachmentLoading" class="attachment-loading">
-        <el-icon class="is-loading"><Loading /></el-icon> 加载中...
-      </div>
-
-      <div v-else-if="attachmentFiles.length === 0" class="attachment-empty">
-        该合同暂无附件
-      </div>
-
-      <div v-else class="attachment-list">
-        <div v-for="file in attachmentFiles" :key="file.file_name" class="attachment-item">
-          <div class="attachment-info">
-            <el-icon><Document /></el-icon>
-            <span class="attachment-name">{{ file.file_name }}</span>
-            <span class="attachment-meta">{{ file.uploader }} · {{ file.upload_time }}</span>
-          </div>
-          <div class="attachment-actions">
-            <el-button type="primary" link :loading="downloadingFile === file.file_name" @click="downloadAttachment(selectedContractId, file.file_name)">
-              下载
-            </el-button>
-            <el-button type="danger" link @click="deleteAttachment(selectedContractId, file.file_name)">
-              删除
-            </el-button>
-          </div>
-        </div>
-      </div>
-
-      <div class="attachment-upload-row">
-        <el-upload
-          :auto-upload="false"
-          :show-file-list="false"
-          :on-change="onExistingContractFileChange"
-        >
-          <el-button size="small">➕ 追加附件</el-button>
-        </el-upload>
-      </div>
-    </div>
+    </el-dialog>
 
     <el-dialog
       v-model="saveModeDialogVisible"
@@ -228,12 +314,11 @@
         <el-button type="primary" @click="chooseSaveMode('sandbox')">进入沙盘</el-button>
       </template>
     </el-dialog>
-
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Document } from '@element-plus/icons-vue'
 import { apiGet, apiGetAll, apiPost, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
@@ -244,27 +329,40 @@ import { hasText, isPositiveInteger } from '../utils/formRules'
 import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
 
-type OperationType = 'ordered' | 'cancelled' | 'done' | 'linked'
+type StatusTab = '待规划' | '已规划' | '已完成'
 type MessageResponse = {
   message?: string
   rush_created?: number
   rush_auto_inserted?: number
   save_mode?: 'sandbox' | 'spot'
 }
+type ContractSummary = {
+  id: string
+  customer: string
+  agent: string
+  dueDate: string
+  status: string
+  orderNo: string
+  rows: any[]
+  totalQty: number
+  modelSummary: string
+}
+
+const statusTabs: StatusTab[] = ['待规划', '已规划', '已完成']
+const completedStatuses = new Set(['已转订单', '已下单', '已完工'])
+const cancellableStatuses = new Set(['待规划', '已规划'])
 
 const loading = ref(false)
 const executing = ref(false)
 const batchSaving = ref(false)
 const batchPanelOpen = ref(false)
 const allRows = ref<any[]>([])
-const allRowsSorted = ref<any[]>([])
+const activeTab = ref<StatusTab>('待规划')
 const selectedContractId = ref('')
 const contractSearchKeyword = ref('')
-const operationType = ref<OperationType>('ordered')
 const batchPickedFiles = ref<File[]>([])
-const linkOrderId = ref('')
-const tablePage = ref(1)
-const pageSize = 120
+const openMonths = ref<string[]>([])
+const detailPanelRef = ref<HTMLElement | null>(null)
 const { submitWithLock } = useFormSubmit()
 const contractsStore = useContractsStore()
 const batchForm = ref({
@@ -307,74 +405,131 @@ const resetBatchForm = () => {
   batchPickedFiles.value = []
 }
 
-const sortContractRows = (rows: any[]) => {
-  return [...rows].sort((a: any, b: any) => String(a['合同号'] || '').localeCompare(String(b['合同号'] || '')))
+const normalizeStatus = (status: unknown) => {
+  const text = String(status || '').trim()
+  return text === '未下单' || !text ? '待规划' : text
 }
 
-const rebuildViewCaches = (rows: any[]) => {
-  allRowsSorted.value = sortContractRows(rows)
+const rowTab = (row: any): StatusTab | null => {
+  const status = normalizeStatus(row['状态'])
+  if (status === '待规划' || status === '已规划') return status
+  if (completedStatuses.has(status)) return '已完成'
+  return null
 }
 
-const filteredRows = computed(() => {
+const contractMonth = (dueDate: string) => {
+  const text = String(dueDate || '').trim()
+  const match = text.match(/^(\d{4}-\d{2})/)
+  return match ? match[1] : '未定交期'
+}
+
+const buildContractSummaries = (rows: any[]) => {
+  const map = new Map<string, any[]>()
+  for (const row of rows) {
+    const id = String(row['合同号'] || '').trim()
+    if (!id) continue
+    const list = map.get(id) || []
+    list.push(row)
+    map.set(id, list)
+  }
+  return Array.from(map.entries()).map(([id, rowsForContract]) => {
+    const first = rowsForContract[0] || {}
+    const modelCounts = new Map<string, number>()
+    let totalQty = 0
+    for (const row of rowsForContract) {
+      const model = String(row['机型'] || '').trim() || '未填写机型'
+      const qty = Number(row['排产数量'] || 0)
+      totalQty += qty
+      modelCounts.set(model, (modelCounts.get(model) || 0) + qty)
+    }
+    const modelSummary = Array.from(modelCounts.entries()).map(([model, qty]) => `${model}×${qty}`).join('，')
+    return {
+      id,
+      customer: String(first['客户名'] || '').trim(),
+      agent: String(first['代理商'] || '').trim(),
+      dueDate: String(first['要求交期'] || '').slice(0, 10),
+      status: normalizeStatus(first['状态']),
+      orderNo: String(first['订单号'] || '').trim(),
+      rows: rowsForContract,
+      totalQty,
+      modelSummary: modelSummary || '无机型明细',
+    } as ContractSummary
+  }).sort((a, b) => {
+    const dueCompare = String(a.dueDate || '').localeCompare(String(b.dueDate || ''))
+    return dueCompare || a.id.localeCompare(b.id)
+  })
+}
+
+const contractCards = computed(() => {
   const keyword = contractSearchKeyword.value.trim().toLowerCase()
-  if (!keyword) return allRowsSorted.value
-  return allRowsSorted.value.filter((row: any) => {
-    const haystack = [
-      row['合同号'],
-      row['客户名'],
-      row['代理商'],
-    ].map((v) => String(v || '').toLowerCase())
-    return haystack.some((text) => text.includes(keyword))
+  const tabRows = allRows.value.filter((row) => rowTab(row) === activeTab.value)
+  const summaries = buildContractSummaries(tabRows)
+  if (!keyword) return summaries
+  return summaries.filter((contract) => {
+    return [contract.id, contract.customer, contract.agent, contract.modelSummary]
+      .map((value) => value.toLowerCase())
+      .some((value) => value.includes(keyword))
   })
 })
 
-const displayRows = computed(() => {
-  return filteredRows.value
-})
-
-const pagedRows = computed(() => {
-  const start = (tablePage.value - 1) * pageSize
-  return displayRows.value.slice(start, start + pageSize)
-})
-
-const selectableContractIds = computed(() => {
-  const set = new Set<string>()
-  for (const row of filteredRows.value) {
-    const id = String(row['合同号'] || '')
-    if (id) set.add(id)
+const groupedContracts = computed(() => {
+  const groups = new Map<string, ContractSummary[]>()
+  for (const contract of contractCards.value) {
+    const month = contractMonth(contract.dueDate)
+    groups.set(month, [...(groups.get(month) || []), contract])
   }
-  return Array.from(set)
+  return Array.from(groups.entries()).map(([month, contracts]) => ({ month, contracts }))
 })
 
-const filterContracts = (value: string | number) => {
-  contractSearchKeyword.value = String(value || '')
-  tablePage.value = 1
+const tabCounts = computed<Record<StatusTab, number>>(() => {
+  const counts: Record<StatusTab, number> = { 待规划: 0, 已规划: 0, 已完成: 0 }
+  const seenByTab: Record<StatusTab, Set<string>> = {
+    待规划: new Set(),
+    已规划: new Set(),
+    已完成: new Set(),
+  }
+  for (const row of allRows.value) {
+    const tab = rowTab(row)
+    const id = String(row['合同号'] || '').trim()
+    if (tab && id) seenByTab[tab].add(id)
+  }
+  for (const tab of statusTabs) counts[tab] = seenByTab[tab].size
+  return counts
+})
+
+const selectedContract = computed(() => contractCards.value.find((contract) => contract.id === selectedContractId.value) || null)
+const canCancelSelected = computed(() => Boolean(selectedContract.value && cancellableStatuses.has(selectedContract.value.status)))
+const showOrderNo = computed(() => activeTab.value === '已完成')
+
+const syncSelection = () => {
+  const first = contractCards.value[0]
+  if (!first) {
+    selectedContractId.value = ''
+    openMonths.value = []
+    return
+  }
+  if (!selectedContract.value) selectedContractId.value = first.id
+  openMonths.value = []
 }
 
-const clearContractFilter = () => {
-  contractSearchKeyword.value = ''
-  tablePage.value = 1
+const selectContract = async (id: string) => {
+  selectedContractId.value = id
+  await nextTick()
+  detailPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-const onPageChange = (page: number) => {
-  tablePage.value = page
+const statusTagType = (status: string) => {
+  if (status === '待规划') return 'warning'
+  if (status === '已规划') return 'primary'
+  if (completedStatuses.has(status)) return 'success'
+  return 'info'
 }
 
-const statusByOperation: Record<OperationType, string> = {
-  ordered: '已下单',
-  cancelled: '已取消',
-  done: '已完工',
-  linked: '已转订单',
-}
-
-const fetchContracts = async () => {
+const fetchContracts = async (force = false) => {
   loading.value = true
   try {
-    allRows.value = await contractsStore.fetchPlanningContracts()
-    rebuildViewCaches(allRows.value)
-    if (!selectedContractId.value && selectableContractIds.value.length > 0) {
-      selectedContractId.value = selectableContractIds.value[0]
-    }
+    allRows.value = await contractsStore.fetchPlanningContracts(force)
+    syncSelection()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取合同数据失败')
   } finally {
@@ -382,43 +537,22 @@ const fetchContracts = async () => {
   }
 }
 
-const onCurrentRowChange = (row: any) => {
-  if (!row) return
-  const id = String(row['合同号'] || '')
-  if (id) selectedContractId.value = id
-}
-
-const executeOperation = async () => {
-  if (!selectedContractId.value) {
-    ElMessage.warning('请先选择合同号')
+const cancelSelectedContract = async () => {
+  const contract = selectedContract.value
+  if (!contract) return
+  try {
+    await ElMessageBox.confirm(`确认取消合同「${contract.id}」？取消后将同步清理预测沙盒并重算。`, '取消合同', {
+      confirmButtonText: '确认取消',
+      cancelButtonText: '返回',
+      type: 'warning',
+    })
+  } catch {
     return
   }
-
-  if (operationType.value === 'linked') {
-    // 关联订单操作
-    const orderId = linkOrderId.value.trim()
-    if (!orderId) {
-      ElMessage.warning('请输入要关联的订单号')
-      return
-    }
-    await submitWithLock(executing, async () => {
-      const res = await apiPost<MessageResponse>(
-        `/planning/contract/${encodeURIComponent(selectedContractId.value)}/link-order`,
-        { order_id: orderId }
-      )
-      ElMessage.success(res.message || '关联成功')
-      linkOrderId.value = ''
-      await fetchContracts()
-    }, { errorMessage: '关联订单失败' })
-  } else {
-    // 其他状态更新操作
-    await submitWithLock(executing, async () => {
-      await apiPost(`/planning/contract/${encodeURIComponent(selectedContractId.value)}/status`, {
-        status: statusByOperation[operationType.value],
-      })
-      await fetchContracts()
-    }, { successMessage: '操作成功', errorMessage: '操作失败' })
-  }
+  await submitWithLock(executing, async () => {
+    await apiPost(`/planning/contract/${encodeURIComponent(contract.id)}/status`, { status: '已取消' })
+    await fetchContracts(true)
+  }, { successMessage: '合同已取消，预测沙盒已同步重算', errorMessage: '取消合同失败' })
 }
 
 const addBatchItem = () => {
@@ -449,9 +583,7 @@ const getInStockCountByModel = async () => {
   return map
 }
 
-const evaluateSpotModeAvailability = async (
-  rows: Array<{ model: string; qty: number }>
-) => {
+const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: number }>) => {
   const requiredByModel = new Map<string, number>()
   for (const row of rows) {
     const model = String(row.model || '').trim()
@@ -567,29 +699,38 @@ const submitBatchContracts = async () => {
       autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
       pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
     ].filter(Boolean).join('，')
-    const modeText = saveMode === 'spot' ? '已按“使用现货”处理（合同状态=已规划）' : '已按“进入沙盘”处理'
+    const modeText = saveMode === 'spot' ? '已按“使用现货”处理（合同状态=已规划）' : '已按“进入沙盘”处理（合同状态=待规划）'
     ElMessage.success(`${res.message || '批量录入成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    activeTab.value = saveMode === 'spot' ? '已规划' : '待规划'
+    selectedContractId.value = cid
     batchPanelOpen.value = false
     resetBatchForm()
     batchFormDraft.clearDraft()
     batchItemsDraft.clearDraft()
-    await fetchContracts()
+    await fetchContracts(true)
   }, { errorMessage: '批量录入失败' })
 }
 
 const batchFormDraft = useRefFormDraft('contracts:batch-form', batchForm)
 const batchItemsDraft = useRefFormDraft('contracts:batch-items', batchItems)
 
-// === 合同附件管理 ===
 const attachmentFiles = ref<any[]>([])
 const attachmentLoading = ref(false)
 const downloadingFile = ref('')
+const previewingFile = ref('')
+const previewDialogVisible = ref(false)
+const previewLoading = ref(false)
+const previewTitle = ref('')
+const previewType = ref<'pdf' | 'html' | 'unsupported'>('unsupported')
+const previewUrl = ref('')
+const previewHtml = ref('')
+const previewMessage = ref('')
 
 const fetchAttachments = async (contractId: string) => {
   if (!contractId) return
   attachmentLoading.value = true
   try {
-    const res = await apiGet(`/planning/contract/${encodeURIComponent(contractId)}/files`)
+    const res: any = await apiGet(`/planning/contract/${encodeURIComponent(contractId)}/files`)
     attachmentFiles.value = res.data || []
   } catch (e) {
     attachmentFiles.value = []
@@ -614,6 +755,54 @@ const downloadAttachment = async (contractId: string, fileName: string) => {
   }
 }
 
+const buildPreviewHtml = (bodyHtml: string) => `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { margin: 0; padding: 24px 32px; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.7; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    td, th { border: 1px solid #d8dee8; padding: 6px 8px; vertical-align: top; }
+    img { max-width: 100%; height: auto; }
+    p { margin: 0 0 10px; }
+  </style>
+</head>
+<body>${bodyHtml || '<p>文档无可预览内容</p>'}</body>
+</html>`
+
+const previewAttachment = async (contractId: string, fileName: string) => {
+  previewingFile.value = fileName
+  previewLoading.value = true
+  previewDialogVisible.value = true
+  previewTitle.value = fileName
+  previewType.value = 'unsupported'
+  previewUrl.value = ''
+  previewHtml.value = ''
+  previewMessage.value = ''
+  try {
+    const res: any = await apiGet(`/planning/contract/${encodeURIComponent(contractId)}/files/${encodeURIComponent(fileName)}/preview`, {
+      timeout: 120000,
+    })
+    const ext = String(res.ext || '').toLowerCase()
+    if (res.type === 'url' && ext === '.pdf') {
+      previewType.value = 'pdf'
+      previewUrl.value = String(res.url || '')
+    } else if (res.type === 'html') {
+      previewType.value = 'html'
+      previewHtml.value = buildPreviewHtml(String(res.html || ''))
+    } else {
+      previewType.value = 'unsupported'
+      previewMessage.value = String(res.message || (ext === '.doc' ? 'DOC 为旧版 Word 格式，请下载后用 Word/WPS 查看。' : '该文件类型暂不支持在线预览。'))
+    }
+  } catch (e) {
+    previewType.value = 'unsupported'
+    previewMessage.value = getApiErrorMessage(e) || '预览加载失败，请下载后查看。'
+  } finally {
+    previewLoading.value = false
+    previewingFile.value = ''
+  }
+}
+
 const deleteAttachment = async (contractId: string, fileName: string) => {
   try {
     await ElMessageBox.confirm(`确认删除文件「${fileName}」？此操作不可恢复。`, '删除附件', {
@@ -635,23 +824,27 @@ const deleteAttachment = async (contractId: string, fileName: string) => {
 
 const onExistingContractFileChange = async (uploadFile: any) => {
   const raw = uploadFile.raw as File | undefined
-  if (!raw || !selectedContractId.value) return
+  const contract = selectedContract.value
+  if (!raw || !contract) return
   const fd = new FormData()
   fd.append('file', raw)
   try {
     await apiPost(
-      `/planning/contract/${encodeURIComponent(selectedContractId.value)}/files`,
+      `/planning/contract/${encodeURIComponent(contract.id)}/files`,
       fd,
-      { params: { customer_name: '', uploader_name: 'Web' }, headers: { 'Content-Type': 'multipart/form-data' } }
+      { params: { customer_name: contract.customer, uploader_name: 'Web' }, headers: { 'Content-Type': 'multipart/form-data' } }
     )
     ElMessage.success('附件上传成功')
-    await fetchAttachments(selectedContractId.value)
+    await fetchAttachments(contract.id)
   } catch (e) {
     ElMessage.error(getApiErrorMessage(e) || '上传附件失败')
   }
 }
 
-// 选择合同号时自动加载附件列表
+watch([activeTab, contractSearchKeyword], () => {
+  syncSelection()
+})
+
 watch(selectedContractId, (newId) => {
   if (newId) {
     fetchAttachments(newId)
@@ -662,27 +855,13 @@ watch(selectedContractId, (newId) => {
 
 onMounted(() => {
   resetBatchForm()
-  fetchContracts()
+  fetchContracts(true)
 })
 </script>
 
 <style scoped>
 .contract-page {
   padding-right: 6px;
-}
-.head-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.back-btn {
-  padding: 4px 12px;
-}
-.title {
-  margin: 0;
-  font-size: 40px;
-  color: var(--color-gray-800);
-  font-weight: 800;
 }
 .notice {
   margin-top: 12px;
@@ -726,7 +905,7 @@ onMounted(() => {
 }
 .batch-panel {
   border: 1px solid var(--color-gray-200);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: var(--space-2);
 }
 .batch-grid {
@@ -737,79 +916,26 @@ onMounted(() => {
 .auto-id {
   border: 1px solid var(--color-gray-200);
   background: var(--color-gray-50);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--color-gray-800);
 }
-.batch-row-actions {
-  margin-top: 6px;
-}
-.batch-save {
+.batch-row-actions,
+.batch-save,
+.attachment-upload-row {
   margin-top: var(--space-2);
-}
-:deep(.el-table) {
-  margin-top: var(--space-2);
-}
-.ops-panel {
-  margin-top: var(--space-2);
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-.table-pagination {
-  margin-top: var(--space-2);
-  display: flex;
-  justify-content: flex-end;
-}
-.ops-left {
-  flex: 1;
-}
-.ops-left :deep(.el-input) {
-  width: 520px;
-  max-width: 100%;
-}
-.ops-hint {
-  margin-top: 4px;
-  color: var(--color-gray-500);
-  font-size: var(--font-size-sm);
 }
 .ops-label {
   font-size: var(--font-size-sm);
   color: var(--color-gray-900);
   margin-bottom: 4px;
 }
-.ops-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  white-space: nowrap;
-}
-.ops-right :deep(.el-radio-group) {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-}
+.ops-hint,
 .tip {
   color: var(--color-gray-500);
   font-size: var(--font-size-sm);
-  margin-bottom: 6px;
-}
-.link-order-panel {
-  margin-top: var(--space-2);
-  padding: var(--space-2);
-  border: 1px solid var(--color-gray-200);
-  border-radius: var(--radius-md);
-  background: var(--color-gray-50);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.link-order-panel .ops-label {
-  margin-bottom: 0;
-  white-space: nowrap;
 }
 .form-table :deep(.el-table__cell) {
   padding: 10px 8px !important;
@@ -817,32 +943,215 @@ onMounted(() => {
 .form-table :deep(.cell) {
   padding: 0 4px !important;
 }
-.save-mode-body {
-  display: grid;
-  gap: 8px;
+.contract-workspace {
+  margin-top: var(--space-3);
 }
-.save-mode-sub {
-  color: var(--color-gray-600);
-  font-size: var(--font-size-sm);
+.tabs-row {
+  display: flex;
+  gap: 10px;
+  border-bottom: 1px solid var(--color-gray-200);
 }
-.save-mode-hint {
-  color: var(--color-danger);
-  font-size: var(--font-size-sm);
-}
-
-/* 合同附件面板 */
-.attachment-panel {
-  margin-top: var(--space-2);
+.status-tab {
+  min-width: 132px;
   border: 1px solid var(--color-gray-200);
-  border-radius: var(--radius-lg);
-  padding: var(--space-3);
+  border-bottom: none;
   background: var(--color-gray-50);
-}
-.attachment-header {
+  color: var(--color-gray-700);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: 10px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-2);
+  gap: 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.status-tab.active {
+  background: #fff;
+  color: var(--color-primary-700);
+  border-color: var(--color-primary-300);
+}
+.status-tab strong {
+  font-size: 12px;
+  background: var(--color-gray-200);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.status-tab.active strong {
+  background: var(--color-primary-100);
+}
+.workspace-grid {
+  min-height: 620px;
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+.contract-list-panel,
+.contract-detail-panel {
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+.contract-list-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.list-tools {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-gray-100);
+}
+.month-list {
+  padding: var(--space-2);
+  overflow: auto;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 160px);
+}
+.month-list :deep(.el-collapse) {
+  border-top: none;
+  border-bottom: none;
+}
+.month-list :deep(.el-collapse-item) {
+  margin-bottom: 8px;
+  overflow: hidden;
+  border: 1px solid #d7e7ff;
+  border-left: 4px solid #2f80ed;
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 56, 105, 0.08);
+}
+.month-list :deep(.el-collapse-item__header) {
+  height: 46px;
+  padding: 0 12px;
+  border-bottom: none;
+  background: #eef6ff;
+  color: #0f3767;
+}
+.month-list :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+  background: #fbfdff;
+}
+.month-list :deep(.el-collapse-item__content) {
+  padding: 8px;
+}
+.month-title {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+}
+.month-title em {
+  color: #315f96;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+}
+.contract-card {
+  width: 100%;
+  border: 1px solid #cfdbea;
+  border-left: 4px solid #8fb5e8;
+  background: #ffffff;
+  border-radius: var(--radius-md);
+  padding: 10px;
+  margin-bottom: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+.contract-card:hover {
+  border-color: #4d96f0;
+  background: #f6faff;
+  box-shadow: 0 4px 14px rgba(31, 103, 191, 0.16);
+}
+.contract-card.active {
+  border-color: #0d78df;
+  border-left-color: #008be8;
+  background: #eef7ff;
+  box-shadow: 0 0 0 2px rgba(0, 139, 232, 0.14), 0 8px 22px rgba(0, 99, 179, 0.18);
+  transform: translateX(2px);
+}
+.contract-card-head,
+.contract-meta,
+.attachment-header,
+.attachment-item,
+.actions-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.contract-card-head strong {
+  color: var(--color-gray-900);
+}
+.contract-customer {
+  margin-top: 6px;
+  color: var(--color-gray-700);
+  font-weight: 600;
+}
+.contract-meta {
+  margin-top: 6px;
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
+}
+.contract-meta span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contract-detail-panel {
+  padding: var(--space-3);
+  min-width: 0;
+}
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.detail-kicker {
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.detail-head h2 {
+  margin: 2px 0 0;
+  color: var(--color-gray-900);
+  font-size: 26px;
+}
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: var(--space-3);
+}
+.info-grid div {
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  min-width: 0;
+}
+.info-grid span {
+  display: block;
+  color: var(--color-gray-500);
+  font-size: 12px;
+}
+.info-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-gray-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-section {
+  margin-top: var(--space-3);
+}
+.section-title {
+  color: var(--color-gray-900);
+  font-weight: 800;
+  margin-bottom: 8px;
 }
 .attachment-title {
   font-size: var(--font-size-base);
@@ -868,17 +1177,10 @@ onMounted(() => {
   gap: 6px;
 }
 .attachment-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: 8px 12px;
-  background: white;
+  background: var(--color-gray-50);
   border: 1px solid var(--border-color-light);
   border-radius: var(--radius-md);
-  transition: box-shadow 0.2s;
-}
-.attachment-item:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .attachment-info {
   display: flex;
@@ -903,7 +1205,71 @@ onMounted(() => {
   gap: 4px;
   flex-shrink: 0;
 }
-.attachment-upload-row {
-  margin-top: var(--space-2);
+.preview-loading {
+  min-height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-gray-500);
+}
+.preview-frame {
+  width: 100%;
+  height: min(72vh, 760px);
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+.preview-empty {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--color-gray-600);
+  text-align: center;
+}
+.preview-empty-title {
+  color: var(--color-gray-900);
+  font-size: var(--font-size-lg);
+  font-weight: 800;
+}
+.preview-empty-text {
+  max-width: 520px;
+  line-height: 1.6;
+}
+.attachment-preview-dialog :deep(.el-dialog__body) {
+  padding-top: 8px;
+}
+.actions-section {
+  border-top: 1px solid var(--color-gray-200);
+  padding-top: var(--space-3);
+}
+.save-mode-body {
+  display: grid;
+  gap: 8px;
+}
+.save-mode-sub {
+  color: var(--color-gray-600);
+  font-size: var(--font-size-sm);
+}
+.save-mode-hint {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 960px) {
+  .batch-grid,
+  .workspace-grid,
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+  .tabs-row {
+    overflow-x: auto;
+  }
+  .status-tab {
+    flex: 1 0 120px;
+  }
 }
 </style>

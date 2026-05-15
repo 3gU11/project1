@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="ratio-editor-layout">
     <div class="ratio-editor-left">
       <button class="ratio-collapse-toggle" type="button" @click="expanded = !expanded">
@@ -65,9 +65,23 @@
               empty-text="暂无库存数据"
             >
               <el-table-column prop="name" label="机型" min-width="150" show-overflow-tooltip />
-              <el-table-column prop="current_qty" label="数量" width="72" align="right" />
-              <el-table-column label="占比" width="86" align="right">
-                <template #default="{ row }">{{ formatPct(row.current_pct) }}</template>
+              <el-table-column label="数量" width="72" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
+                  <span v-else style="color: #dcdfe6;">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="加高" width="72" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
+                  <span v-else style="color: #dcdfe6;">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="占比" width="86" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
+                  <span v-else style="color: #dcdfe6;">-</span>
+                </template>
               </el-table-column>
             </el-table>
           </div>
@@ -89,18 +103,18 @@ const majorFamilies: MajorFamily[] = ['G', 'XS', 'AUTO', 'SPECIAL']
 const SPECIAL = '特殊'
 
 const CAT_TO_MAJOR: Record<string, MajorFamily> = {
-  小机G: 'G',
-  小机XS: 'XS',
-  大机XS: 'XS',
-  小机AUTO: 'AUTO',
-  大机AUTO: 'AUTO',
+  中小型G: 'G',
+  中小型XS: 'XS',
+  中大型XS: 'XS',
+  中小型AUTO: 'AUTO',
+  中大型AUTO: 'AUTO',
   特殊: 'SPECIAL'
 }
 
 const groupsByFamily = ref<Record<MajorFamily, Array<{ category: string; models: string[] }>>>({
-  G: [{ category: '小机G', models: ['FR-400G', 'FR-500G', 'FR-600G', 'FH-300C'] }],
-  XS: [{ category: '小机XS', models: ['FR-400XS(PRO)', 'FR-500XS(PRO)'] }, { category: '大机XS', models: ['FR-600XS(PRO)'] }],
-  AUTO: [{ category: '小机AUTO', models: ['FR-400AUTO', 'FR-500AUTO'] }, { category: '大机AUTO', models: ['FR-600AUTO'] }],
+  G: [{ category: '中小型G', models: ['FR-400G', 'FR-500G', 'FR-600G', 'FH-300C'] }],
+  XS: [{ category: '中小型XS', models: ['FR-400XS(PRO)', 'FR-500XS(PRO)'] }, { category: '中大型XS', models: ['FR-600XS(PRO)'] }],
+  AUTO: [{ category: '中小型AUTO', models: ['FR-400AUTO', 'FR-500AUTO'] }, { category: '中大型AUTO', models: ['FR-600AUTO'] }],
   SPECIAL: [{ category: SPECIAL, models: [SPECIAL] }]
 })
 
@@ -109,11 +123,11 @@ const form = reactive({
   level3: {} as Record<string, Record<string, number>>
 })
 const globalLevel2 = reactive<Record<string, number>>({
-  小机G: 24,
-  小机XS: 38,
-  大机XS: 38,
-  小机AUTO: 0,
-  大机AUTO: 0,
+  中小型G: 24,
+  中小型XS: 38,
+  中大型XS: 38,
+  中小型AUTO: 0,
+  中大型AUTO: 0,
   特殊: 0
 })
 
@@ -128,7 +142,7 @@ const specialModelSet = ref<Set<string>>(new Set())
 const inventoryStore = useInventoryStore()
 
 const sumLevel1NoSpecial = computed(
-  () => Number(globalLevel2['小机G'] || 0) + Number(globalLevel2['小机XS'] || 0) + Number(globalLevel2['大机XS'] || 0) + Number(globalLevel2['小机AUTO'] || 0) + Number(globalLevel2['大机AUTO'] || 0)
+  () => Number(globalLevel2['中小型G'] || 0) + Number(globalLevel2['中小型XS'] || 0) + Number(globalLevel2['中大型XS'] || 0) + Number(globalLevel2['中小型AUTO'] || 0) + Number(globalLevel2['中大型AUTO'] || 0)
 )
 const firstLayerGroups = computed(() => {
   const out: Array<{ family: MajorFamily; category: string; models: string[] }> = []
@@ -228,11 +242,11 @@ function buildBackendPayload() {
     level3: Record<string, Record<string, number>>
   }
   payload.level2_global = {
-    小机G: Number(globalLevel2['小机G'] || 0),
-    小机XS: Number(globalLevel2['小机XS'] || 0),
-    大机XS: Number(globalLevel2['大机XS'] || 0),
-    小机AUTO: Number(globalLevel2['小机AUTO'] || 0),
-    大机AUTO: Number(globalLevel2['大机AUTO'] || 0),
+    中小型G: Number(globalLevel2['中小型G'] || 0),
+    中小型XS: Number(globalLevel2['中小型XS'] || 0),
+    中大型XS: Number(globalLevel2['中大型XS'] || 0),
+    中小型AUTO: Number(globalLevel2['中小型AUTO'] || 0),
+    中大型AUTO: Number(globalLevel2['中大型AUTO'] || 0),
     特殊: 0
   }
   for (const family of ['G', 'XS', 'AUTO'] as MajorFamily[]) {
@@ -255,17 +269,26 @@ function buildBackendPayload() {
 }
 
 function normalizeCategory(v: string) {
-  return v === '小机/XS' ? '小机XS' : v
+  const aliases: Record<string, string> = {
+    小机G: '中小型G',
+    小机XS: '中小型XS',
+    '小机/XS': '中小型XS',
+    小机AUTO: '中小型AUTO',
+    大机XS: '中大型XS',
+    大机AUTO: '中大型AUTO',
+    SPECIAL: SPECIAL
+  }
+  return aliases[v] || v
 }
 
 function categoryOfModel(modelType: string, modelFamily?: string) {
   const mf = normalizeCategory(String(modelFamily || '').trim())
   if (mf) return mf
   const mt = String(modelType || '').toUpperCase()
-  if (mt === 'FH-300C') return '小机G'
-  if (mt.includes('AUTO')) return mt.includes('600') ? '大机AUTO' : '小机AUTO'
-  if (mt.includes('XS')) return mt.includes('600') ? '大机XS' : '小机XS'
-  if (mt.endsWith('G')) return '小机G'
+  if (mt === 'FH-300C') return '中小型G'
+  if (mt.includes('AUTO')) return mt.includes('7055') || mt.includes('8055') || mt.includes('8060') ? '中大型AUTO' : '中小型AUTO'
+  if (mt.includes('XS')) return mt.includes('7055') || mt.includes('8055') || mt.includes('8060') ? '中大型XS' : '中小型XS'
+  if (mt.endsWith('G')) return '中小型G'
   if (mt === SPECIAL || mt.includes('特殊')) return SPECIAL
   return SPECIAL
 }
@@ -298,35 +321,36 @@ async function loadModelTypes() {
     return out
   }
   const next: Record<MajorFamily, Array<{ category: string; models: string[] }>> = { G: [], XS: [], AUTO: [], SPECIAL: [] }
-  for (const cat of ['小机G', '小机XS', '大机XS', '小机AUTO', '大机AUTO', SPECIAL]) {
+  for (const cat of ['中小型G', '中小型XS', '中大型XS', '中小型AUTO', '中大型AUTO', SPECIAL]) {
     const major = CAT_TO_MAJOR[cat]
     if (!major) continue
     const models = uniqueInOrder(byCat[cat] || [])
     if (models.length) next[major].push({ category: cat, models })
   }
-  const smallG = next.G.find((g) => g.category === '小机G')
+  const smallG = next.G.find((g) => g.category === '中小型G')
   if (smallG) {
     smallG.models = uniqueInOrder([...smallG.models, 'FH-300C'])
   } else {
-    next.G.unshift({ category: '小机G', models: ['FR-400G', 'FH-300C'] })
+    next.G.unshift({ category: '中小型G', models: ['FR-400G', 'FH-300C'] })
   }
-  if (!next.XS.length) next.XS = [{ category: '小机XS', models: ['FR-400XS(PRO)'] }, { category: '大机XS', models: ['FR-600XS(PRO)'] }]
-  if (!next.AUTO.length) next.AUTO = [{ category: '小机AUTO', models: ['FR-400AUTO'] }, { category: '大机AUTO', models: ['FR-600AUTO'] }]
+  if (!next.XS.length) next.XS = [{ category: '中小型XS', models: ['FR-400XS(PRO)'] }, { category: '中大型XS', models: ['FR-600XS(PRO)'] }]
+  if (!next.AUTO.length) next.AUTO = [{ category: '中小型AUTO', models: ['FR-400AUTO'] }, { category: '中大型AUTO', models: ['FR-600AUTO'] }]
   if (!next.SPECIAL.length) next.SPECIAL = [{ category: SPECIAL, models: [SPECIAL] }]
   groupsByFamily.value = next
   ensureShape()
 }
 
 function loadFromRatio(ratio: any) {
-  form.level2 = { G: {}, XS: {}, AUTO: {}, SPECIAL: {}, ...(ratio?.level2 || {}) }
+  const normalizedRatio = normalizeRatioPayload(ratio || {})
+  form.level2 = { G: {}, XS: {}, AUTO: {}, SPECIAL: {}, ...(normalizedRatio?.level2 || {}) }
   if (!form.level2.SPECIAL || typeof form.level2.SPECIAL !== 'object') form.level2.SPECIAL = {}
   if (form.level2.SPECIAL[SPECIAL] === undefined) form.level2.SPECIAL[SPECIAL] = 0
-  form.level3 = { ...(ratio?.level3 || {}) }
+  form.level3 = { ...(normalizedRatio?.level3 || {}) }
   ensureShape()
 
   for (const f of majorFamilies) {
     for (const g of groupsByFamily.value[f] || []) {
-      if (ratio?.level3?.[g.category]) {
+      if (normalizedRatio?.level3?.[g.category]) {
         const keys = g.models || []
         form.level3[g.category] = apportionToTarget(keys, form.level3[g.category] || {}, 100)
         continue
@@ -342,29 +366,60 @@ function loadFromRatio(ratio: any) {
     }
   }
 
-  const l2g = ratio?.level2_global || {}
+  const l2g = normalizedRatio?.level2_global || {}
   if (Object.keys(l2g).length > 0) {
-    globalLevel2['小机G'] = Number(l2g['小机G'] || 0)
-    globalLevel2['小机XS'] = Number(l2g['小机XS'] || 0)
-    globalLevel2['大机XS'] = Number(l2g['大机XS'] || 0)
-    globalLevel2['小机AUTO'] = Number(l2g['小机AUTO'] || 0)
-    globalLevel2['大机AUTO'] = Number(l2g['大机AUTO'] || 0)
+    globalLevel2['中小型G'] = Number(l2g['中小型G'] || 0)
+    globalLevel2['中小型XS'] = Number(l2g['中小型XS'] || 0)
+    globalLevel2['中大型XS'] = Number(l2g['中大型XS'] || 0)
+    globalLevel2['中小型AUTO'] = Number(l2g['中小型AUTO'] || 0)
+    globalLevel2['中大型AUTO'] = Number(l2g['中大型AUTO'] || 0)
   } else {
-    const l1 = ratio?.level1 || {}
+    const l1 = normalizedRatio?.level1 || {}
     const gTotal = Number(l1.G || 24)
     const xsTotal = Number(l1.XS || 76)
     const autoTotal = Number(l1.AUTO || 0)
     const xsLocal = form.level2.XS || {}
     const autoLocal = form.level2.AUTO || {}
-    globalLevel2['小机G'] = Math.max(0, Math.round(gTotal))
-    globalLevel2['小机XS'] = Math.max(0, Math.round(xsTotal * (Number(xsLocal['小机XS'] || 0) / 100)))
-    globalLevel2['大机XS'] = Math.max(0, Math.round(xsTotal * (Number(xsLocal['大机XS'] || 0) / 100)))
-    globalLevel2['小机AUTO'] = Math.max(0, Math.round(autoTotal * (Number(autoLocal['小机AUTO'] || 0) / 100)))
-    globalLevel2['大机AUTO'] = Math.max(0, Math.round(autoTotal * (Number(autoLocal['大机AUTO'] || 0) / 100)))
+    globalLevel2['中小型G'] = Math.max(0, Math.round(gTotal))
+    globalLevel2['中小型XS'] = Math.max(0, Math.round(xsTotal * (Number(xsLocal['中小型XS'] || 0) / 100)))
+    globalLevel2['中大型XS'] = Math.max(0, Math.round(xsTotal * (Number(xsLocal['中大型XS'] || 0) / 100)))
+    globalLevel2['中小型AUTO'] = Math.max(0, Math.round(autoTotal * (Number(autoLocal['中小型AUTO'] || 0) / 100)))
+    globalLevel2['中大型AUTO'] = Math.max(0, Math.round(autoTotal * (Number(autoLocal['中大型AUTO'] || 0) / 100)))
   }
-  const fixed = apportionToTarget(['小机G', '小机XS', '大机XS', '小机AUTO', '大机AUTO'], globalLevel2, 100)
+  const fixed = apportionToTarget(['中小型G', '中小型XS', '中大型XS', '中小型AUTO', '中大型AUTO'], globalLevel2, 100)
   for (const k of Object.keys(fixed)) globalLevel2[k] = fixed[k]
   globalLevel2[SPECIAL] = 0
+}
+
+function normalizeRatioPayload(ratio: any) {
+  const out = JSON.parse(JSON.stringify(ratio || {}))
+  const normalizeFlat = (source: Record<string, any> = {}) => {
+    const next: Record<string, number> = {}
+    for (const [key, value] of Object.entries(source || {})) {
+      const cat = normalizeCategory(key)
+      next[cat] = Number(next[cat] || 0) + Number(value || 0)
+    }
+    return next
+  }
+  const normalizeLevel2 = (source: Record<string, Record<string, any>> = {}) => {
+    const next: Record<string, Record<string, number>> = {}
+    for (const [family, values] of Object.entries(source || {})) {
+      next[family] = normalizeFlat(values || {})
+    }
+    return next
+  }
+  const normalizeLevel3 = (source: Record<string, Record<string, any>> = {}) => {
+    const next: Record<string, Record<string, number>> = {}
+    for (const [category, values] of Object.entries(source || {})) {
+      const cat = normalizeCategory(category)
+      next[cat] = { ...(next[cat] || {}), ...(values || {}) }
+    }
+    return next
+  }
+  out.level2_global = normalizeFlat(out.level2_global || {})
+  out.level2 = normalizeLevel2(out.level2 || {})
+  out.level3 = normalizeLevel3(out.level3 || {})
+  return out
 }
 
 function validate() {
@@ -386,13 +441,7 @@ function isSpecialInventoryModel(name: string) {
   const raw = String(name || '').trim()
   const upper = raw.toUpperCase()
   return specialModelSet.value.has(upper) ||
-    raw.includes('特殊') ||
-    raw.includes('鐗规畩') ||
-    upper === 'SPECIAL' ||
-    upper === 'FT' ||
-    upper.startsWith('FR-1080') ||
-    (upper.startsWith('FH-') && upper !== 'FH-300C') ||
-    upper.startsWith('FL-')
+    upper === 'SPECIAL'
 }
 
 async function loadInventoryRatios() {
@@ -403,7 +452,8 @@ async function loadInventoryRatios() {
     const filteredRows = ratioRows
       .map((row) => ({
         name: row.model,
-        current_qty: row.count
+        current_qty: row.count,
+        high_qty: row.highCount
       }))
       .filter((row) => row.name && row.current_qty > 0 && !isSpecialInventoryModel(row.name))
     const total = filteredRows.reduce((sum, row) => sum + row.current_qty, 0)

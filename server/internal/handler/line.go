@@ -45,10 +45,10 @@ func (h *LineHandler) List(c *gin.Context) {
 
 			var units []model.Unit
 			q := h.db.Table("units u").
-				Select("u.*, b.batch_code AS batch_code, b.model_type AS batch_model_type, b.status AS batch_status, md.model_family AS model_family, fg.状态 AS fg_status").
+				Select("u.*, b.batch_code AS batch_code, b.model_type AS batch_model_type, b.status AS batch_status, COALESCE(b.expected_inbound_date, fg.`预计入库时间`) AS batch_expected_inbound_date, fg.`预计入库时间` AS fg_expected_inbound_date, md.model_family AS model_family, fg.状态 AS fg_status").
 				Joins("JOIN batches b ON b.batch_id = u.batch_id").
 				Joins("LEFT JOIN model_dictionary md ON md.model_name = u.model_type COLLATE utf8mb4_general_ci").
-				Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = u.serial_no COLLATE utf8mb4_general_ci").
+				Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = COALESCE(u.serial_no, u.forecast_serial_no) COLLATE utf8mb4_general_ci").
 				Where("u.production_line_id = ? AND u.status = ?", lines[i].ProductionLineID, model.StatusInProduction).
 				Order("COALESCE(b.batch_code, ''), b.batch_no ASC, u.slot_index ASC")
 			if len(batches) == 0 && lines[i].CurrentBatchID != nil {
@@ -102,4 +102,30 @@ func (h *LineHandler) ManualComplete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *LineHandler) LockUnits(c *gin.Context) {
+	var req struct {
+		UnitIDs     []string `json:"unit_ids" binding:"required"`
+		OrderRemark string   `json:"order_remark"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.UnitIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unit_ids is required"})
+		return
+	}
+
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
+	count, err := h.svc.LockLineUnits(c.Param("id"), req.UnitIDs, req.OrderRemark, actor)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "count": count})
 }

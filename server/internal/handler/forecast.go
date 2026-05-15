@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -24,7 +25,14 @@ func NewForecastHandler(db *gorm.DB, svc *service.RecomputeSvc) *ForecastHandler
 }
 
 func (h *ForecastHandler) Recompute(c *gin.Context) {
-	result, err := h.svc.Recompute()
+	var req struct {
+		TargetSlotNo int `json:"target_slot_no"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	result, err := h.svc.Recompute(req.TargetSlotNo)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "recompute already in progress" {
@@ -73,17 +81,19 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 
 	cfgRepo := repo.NewConfigRepo(h.db)
 	fallback := ratioCfg{
-		Level2Global: map[string]int{"小机G": 24, "小机XS": 38, "大机XS": 38, "小机AUTO": 0, "大机AUTO": 0, "特殊": 0},
+		Level2Global: map[string]int{"中小型G": 24, "中小型XS": 38, "中大型XS": 38, "中小型AUTO": 0, "中大型AUTO": 0, "特殊": 0},
 		Level3: map[string]map[string]int{
-			"小机G":    {"FR-400G": 60, "FH-300C": 40},
-			"小机XS":   {"FR-400XS(PRO)": 100},
-			"大机XS":   {"FR-7055XS(PRO)": 100},
-			"小机AUTO": {"FR-400AUTO": 100},
-			"大机AUTO": {"FR-7055AUTO": 100},
+			"中小型G":    {"FR-400G": 60, "FH-300C": 40},
+			"中小型XS":   {"FR-400XS(PRO)": 100},
+			"中大型XS":   {"FR-7055XS(PRO)": 100},
+			"中小型AUTO": {"FR-400AUTO": 100},
+			"中大型AUTO": {"FR-7055AUTO": 100},
 		},
 	}
 	cfg := fallback
 	_ = cfgRepo.GetJSON("capacity_ratio", fallback, &cfg)
+	cfg.Level2Global = normalizeIntRatioKeys(cfg.Level2Global)
+	cfg.Level3 = normalizeLevel3RatioKeys(cfg.Level3)
 	if cfg.Level2Global == nil {
 		cfg.Level2Global = fallback.Level2Global
 	}
@@ -91,10 +101,11 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 		cfg.Level3 = fallback.Level3
 	}
 	supplementLevel3MapFromModelDict(h.db, cfg.Level3)
+	familyMap := h.loadModelFamilyMap()
 
 	modelCurrentQty := map[string]int{}
 	categoryCurrentQty := map[string]int{
-		"小机G": 0, "小机XS": 0, "大机XS": 0, "小机AUTO": 0, "大机AUTO": 0,
+		"中小型G": 0, "中小型XS": 0, "中大型XS": 0, "中小型AUTO": 0, "中大型AUTO": 0,
 	}
 	totalBaseQty := 0
 	for _, row := range rows {
@@ -102,7 +113,7 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 		if modelName == "" {
 			continue
 		}
-		cat := modelCategoryOf(modelName)
+		cat := modelCategoryOf(modelName, familyMap[strings.ToUpper(modelName)])
 		if cat == "" || cat == "特殊" {
 			continue
 		}
@@ -111,13 +122,13 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 		totalBaseQty += row.Count
 	}
 
-	categories := []string{"小机G", "小机XS", "大机XS", "小机AUTO", "大机AUTO"}
+	categories := []string{"中小型G", "中小型XS", "中大型XS", "中小型AUTO", "中大型AUTO"}
 	categoryTargetQty := allocateByRatio(categories, map[string]int{
-		"小机G":    cfg.Level2Global["小机G"],
-		"小机XS":   cfg.Level2Global["小机XS"],
-		"大机XS":   cfg.Level2Global["大机XS"],
-		"小机AUTO": cfg.Level2Global["小机AUTO"],
-		"大机AUTO": cfg.Level2Global["大机AUTO"],
+		"中小型G":    cfg.Level2Global["中小型G"],
+		"中小型XS":   cfg.Level2Global["中小型XS"],
+		"中大型XS":   cfg.Level2Global["中大型XS"],
+		"中小型AUTO": cfg.Level2Global["中小型AUTO"],
+		"中大型AUTO": cfg.Level2Global["中大型AUTO"],
 	}, totalBaseQty)
 
 	modelTargetQty := map[string]int{}
@@ -127,7 +138,7 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 			modelKeys = append(modelKeys, strings.TrimSpace(m))
 		}
 		for m := range modelCurrentQty {
-			if modelCategoryOf(m) == cat {
+			if modelCategoryOf(m, familyMap[strings.ToUpper(m)]) == cat {
 				modelKeys = append(modelKeys, m)
 			}
 		}
@@ -176,33 +187,111 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 	}, nil
 }
 
-func modelCategoryOf(model string) string {
+func (h *ForecastHandler) loadModelFamilyMap() map[string]string {
+	var rows []struct {
+		ModelName   string `gorm:"column:model_name"`
+		ModelFamily string `gorm:"column:model_family"`
+	}
+	_ = h.db.Table("model_dictionary").
+		Select("model_name, model_family").
+		Where("enabled = 1").
+		Scan(&rows).Error
+	out := map[string]string{}
+	for _, row := range rows {
+		name := strings.ToUpper(strings.TrimSpace(row.ModelName))
+		if name != "" {
+			out[name] = strings.TrimSpace(row.ModelFamily)
+		}
+	}
+	return out
+}
+
+func modelCategoryOf(model string, modelFamily ...string) string {
+	if len(modelFamily) > 0 {
+		if cat := canonicalCategory(modelFamily[0]); cat != "" {
+			switch cat {
+			case "中小型G", "中小型XS", "中大型XS", "中小型AUTO", "中大型AUTO", "特殊":
+				return cat
+			}
+		}
+	}
 	v := strings.ToUpper(strings.TrimSpace(model))
 	if v == "" {
 		return ""
 	}
 	if v == "FH-300C" {
-		return "小机G"
+		return "中小型G"
 	}
 	if strings.Contains(v, "特殊") {
 		return "特殊"
 	}
 	if strings.Contains(v, "AUTO") {
-		if strings.Contains(v, "8055") || strings.Contains(v, "7055") {
-			return "大机AUTO"
+		if strings.Contains(v, "8055") || strings.Contains(v, "7055") || strings.Contains(v, "8060") {
+			return "中大型AUTO"
 		}
-		return "小机AUTO"
+		return "中小型AUTO"
 	}
 	if strings.Contains(v, "XS") {
-		if strings.Contains(v, "8055") || strings.Contains(v, "7055") {
-			return "大机XS"
+		if strings.Contains(v, "8055") || strings.Contains(v, "7055") || strings.Contains(v, "8060") {
+			return "中大型XS"
 		}
-		return "小机XS"
+		return "中小型XS"
 	}
 	if engine.NormalizeModelType(v) == "G" {
-		return "小机G"
+		return "中小型G"
 	}
 	return ""
+}
+
+func canonicalCategory(value string) string {
+	v := strings.TrimSpace(value)
+	switch v {
+	case "小机G":
+		return "中小型G"
+	case "小机XS", "小机/XS":
+		return "中小型XS"
+	case "小机AUTO":
+		return "中小型AUTO"
+	case "大机XS":
+		return "中大型XS"
+	case "大机AUTO":
+		return "中大型AUTO"
+	case "SPECIAL":
+		return "特殊"
+	default:
+		if strings.EqualFold(v, "SPECIAL") {
+			return "特殊"
+		}
+		return v
+	}
+}
+
+func normalizeIntRatioKeys(in map[string]int) map[string]int {
+	if in == nil {
+		return nil
+	}
+	out := map[string]int{}
+	for k, v := range in {
+		out[canonicalCategory(k)] += v
+	}
+	return out
+}
+
+func normalizeLevel3RatioKeys(in map[string]map[string]int) map[string]map[string]int {
+	if in == nil {
+		return nil
+	}
+	out := map[string]map[string]int{}
+	for category, ratios := range in {
+		cat := canonicalCategory(category)
+		if out[cat] == nil {
+			out[cat] = map[string]int{}
+		}
+		for modelName, v := range ratios {
+			out[cat][modelName] += v
+		}
+	}
+	return out
 }
 
 func uniqueSorted(in []string) []string {

@@ -127,6 +127,25 @@ func (h *BatchHandler) BatchConfirm(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+func (h *BatchHandler) SyncStockModels(c *gin.Context) {
+	var req struct {
+		Stocks []service.StockModelTarget `json:"stocks" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
+	if err := h.svc.SyncStockModels(c.Param("id"), req.Stocks, actor); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 func (h *BatchHandler) AssignToLine(c *gin.Context) {
 	var req struct {
 		BatchID string `json:"batch_id" binding:"required"`

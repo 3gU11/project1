@@ -1,4 +1,4 @@
-﻿"""
+"""
 FastAPI proxy for Go intelligent scheduling sandbox service.
 
 All requests to /api/v1/sandbox/* are forwarded to the Go service
@@ -154,25 +154,45 @@ def _model_category(model_type: str, family_map: dict) -> str:
     v = model_type.strip().upper()
     if not v:
         return ""
-    if "特殊" in v:
+    family = _normalize_model_family(family_map.get(v, ""))
+    if family:
+        return family
+    if "特殊" in model_type:
         return "特殊"
     family = family_map.get(v, "")
     if family in ("SPECIAL", "特殊"):
         return "特殊"
     if "AUTO" in v or family == "AUTO":
-        if "8055" in v or "7055" in v:
-            return "大机AUTO"
-        return "小机AUTO"
+        if "8055" in v or "7055" in v or "8060" in v:
+            return "中大型AUTO"
+        return "中小型AUTO"
     if "XS" in v or family == "XS":
-        if "8055" in v or "7055" in v:
-            return "大机XS"
-        return "小机XS"
+        if "8055" in v or "7055" in v or "8060" in v:
+            return "中大型XS"
+        return "中小型XS"
     if v == "FH-300C":
-        return "小机G"
+        return "中小型G"
     if family == "G":
-        return "小机G"
+        return "中小型G"
     if v.endswith("G") and "G" not in v[:-1]:
-        return "小机G"
+        return "中小型G"
+    return ""
+
+
+def _normalize_model_family(value: object) -> str:
+    family = str(value or "").strip()
+    aliases = {
+        "小机G": "中小型G",
+        "小机XS": "中小型XS",
+        "小机/XS": "中小型XS",
+        "小机AUTO": "中小型AUTO",
+        "大机XS": "中大型XS",
+        "大机AUTO": "中大型AUTO",
+        "SPECIAL": "特殊",
+    }
+    family = aliases.get(family, family)
+    if family in {"中小型G", "中小型XS", "中大型XS", "中小型AUTO", "中大型AUTO", "特殊"}:
+        return family
     return ""
 
 
@@ -586,7 +606,7 @@ async def import_batch_to_finished_goods(request: Request, batch_id: str):
     })
 
 
-@router.api_route("/batches{path:path}", methods=["GET", "POST"])
+@router.api_route("/batches{path:path}", methods=["GET", "POST", "PATCH"])
 async def proxy_batches(request: Request, path: str):
     return await _forward(request, f"/api/batches{path}")
 
@@ -675,7 +695,7 @@ async def proxy_model_types(request: Request):
                 model_name = str(r[0]).strip()
                 if not model_name:
                     continue
-                family = str(r[1] or "").strip().upper()
+                family = _normalize_model_family(r[1])
                 model_types.append(
                     {
                         "model_type": model_name,

@@ -14,7 +14,7 @@ V7STD1.0 是一个专为制造企业设计的成品库存管理系统，围绕 *
 |------|--------|
 | **前端** | Vue 3 + TypeScript + Element Plus + Pinia + Vite |
 | **业务后端** | FastAPI + Python 3.10+ |
-| **沙盘后端** | Go 1.21+（独立服务，负责预测排产/全量重算） |
+| **沙盘后端** | Go 1.21+（独立服务，负责预测排产/全量重算/WebSocket 同步） |
 | **数据库** | MySQL 8.0（SQLAlchemy 原生 SQL + pandas） |
 | **文档解析** | PaddleOCR + pdfplumber + mammoth |
 | **部署** | Uvicorn + Go binary + `launcher.exe` 一键启动 |
@@ -46,8 +46,10 @@ V7STD1.0 是一个专为制造企业设计的成品库存管理系统，围绕 *
 | 🚛 发货复核 | 确认发货、发货撤回 | Prod |
 | 🔧 机台档案 | 机台文件上传、预览、下载 | Prod |
 | 🗺️ 库位大屏 | 可视化库位占用情况 | 全角色 |
-| 🔍 库存查询 | 多条件筛选、状态统计（含「已绑定」机台独立计数） | 全角色 |
+| 🔍 库存查询 | 多条件筛选、状态统计（含「已绑定」机台独立计数、加高机型统计） | 全角色 |
 | 🔍 汇总追溯 | 批次追溯、交易链路查询 | Boss, Sales |
+| 📊 操作日志 | 系统操作审计、数据变更记录 | Admin, Boss |
+| 📖 机型字典 | 标准机型定义、族系归类管理 | Admin, Boss |
 
 ## 角色权限体系
 
@@ -104,7 +106,7 @@ npm install
 npm run dev
 ```
 
-前端开发服务器将运行在 `http://localhost:5173`
+前端开发服务器将运行在 `http://localhost:3000`
 
 ### 4. 生产部署
 
@@ -145,7 +147,9 @@ V7STD/
 │   │   ├── views/         # 页面组件 (17个功能页面)
 │   │   ├── router/        # 路由配置
 │   │   ├── store/         # Pinia 状态管理
-│   │   └── api/           # API 请求封装
+│   ├── services/      # 业务逻辑服务 (Sandbox API/WS)
+│   ├── utils/         # 通用工具 (Request 封装, 过滤器)
+│   └── assets/        # 样式与静态资源
 │   └── package.json
 └── data/                  # 数据文件存储
     └── contracts/         # 合同附件
@@ -170,6 +174,7 @@ V7STD/
 | `POST /api/v1/planning/orders` | 创建订单 |
 | `POST /api/v1/planning/orders/{id}/allocate` | 订单配货 |
 | `POST /api/v1/inventory/shipping/confirm` | 发货确认 |
+
 
 ## 默认账号
 
@@ -228,8 +233,8 @@ MIT License
 
 ## Boss Plan (FastAPI + Go)
 
-- Default backend path is `Frontend -> FastAPI (/api/v1/sandbox) -> Go (/api/*)`.
-- `run_fullstack.bat` now builds Go first, then starts Go/FastAPI/frontend, and waits for Go health (`/api/health`) before continuing.
+- `run_fullstack.bat` now builds Go binary (`server/smart-scheduling-server-go.exe`) first, then starts Go (port 3001), FastAPI (port 8000), and Frontend (port 3000).
+- It waits for Go health (`/api/health`) and FastAPI health (`/health`) before declaring success.
 - Key available sandbox APIs:
   - `POST /api/v1/sandbox/units/repair-family-mismatches`
   - `POST /api/v1/sandbox/forecast/recompute`
@@ -241,6 +246,17 @@ MIT License
   - `Admin`/`Boss` remain compatible through role permissions.
 - The sandbox automatically synchronizes (triggers background recompute) when new contracts are imported, ensuring real-time visibility without manual refreshes.
 - Mobile note: `frontend-mobile` remains lightweight warehouse-facing; Boss Plan sandbox is not included by default.
+
+### 沙盘与数据完整性优化（2026-05-14）
+
+| 类别 | 改动摘要 |
+|------|----------|
+| **急单插入修复** | 修复手动急单插入 400 错误；逻辑优化为使用目标槽位的实际机型进行产线链式查找，解决急单机型不匹配导致找不到插入点的问题 |
+| **数据标准化** | 执行生产中批次（In_Production）机型标准化清理，将原始机型名（如 FR-400XS）统一为族系代码（G/XS/AUTO/SPECIAL），确保调度引擎逻辑一致 |
+| **同步脚本增强** | `sync_batch_app.py` 增加 `_normalize_model_family` 自动转换逻辑，所有从 ERP 同步的批次在入库前自动完成族系代码归类 |
+| **产线看板增强** | `ProductionKanban.vue` 批次号与预计入库时间增大加粗显示，强化视觉反差；预计入库时间改为高对比度 Badge 样式 |
+| **加高机型统计** | 「预测沙盘」目标比例表与「库存查询」机型统计表均新增「加高」列；支持非零数值高亮显示，辅助生产计划快速识别特殊配置机型 |
+| **列表布局优化** | 拓宽库存查询机型统计表宽度，增加机型列最小宽度（160px），防止长机型名称换行错位 |
 
 ### 沙盘近期重要改动（2026-05-07 / 2026-05-09）
 

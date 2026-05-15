@@ -53,33 +53,35 @@ type ForecastBatchSlot struct {
 func (ForecastBatchSlot) TableName() string { return "forecast_batch_slots" }
 
 type Unit struct {
-	UnitID           string     `gorm:"column:unit_id;primaryKey" json:"unit_id"`
-	SerialNo         *string    `gorm:"column:serial_no" json:"serial_no"`
-	ForecastSerialNo *string    `gorm:"column:forecast_serial_no" json:"forecast_serial_no"`
-	BatchID          string     `gorm:"column:batch_id" json:"batch_id"`
-	SlotIndex        int        `gorm:"column:slot_index" json:"slot_index"`
-	ModelType        string     `gorm:"column:model_type" json:"model_type"`
-	ProductionLineID *string    `gorm:"column:production_line_id" json:"production_line_id"`
-	Status           string     `gorm:"column:status" json:"status"`
-	ContractNo       *string    `gorm:"column:contract_no" json:"contract_no"`
-	Customer         *string    `gorm:"column:customer" json:"customer"`
-	DealerID         *string    `gorm:"column:dealer_id" json:"dealer_id"`
-	DealerName       *string    `gorm:"column:dealer_name" json:"dealer_name"`
-	DueDate          *time.Time `gorm:"column:due_date" json:"due_date"`
-	SalesID          *string    `gorm:"column:sales_id" json:"sales_id"`
-	OrderRemark      *string    `gorm:"column:order_remark" json:"order_remark"`
-	PromisedDueDate  *time.Time `gorm:"-" json:"promised_due_date"`
-	IsLocked         bool       `gorm:"column:is_locked" json:"is_locked"`
-	LockedBy         *string    `gorm:"column:locked_by" json:"locked_by"`
-	LockedAt         *time.Time `gorm:"column:locked_at" json:"locked_at"`
-	IsContractPinned bool       `gorm:"column:is_contract_pinned" json:"is_contract_pinned"`
-	CreatedAt        time.Time  `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt        time.Time  `gorm:"column:updated_at" json:"updated_at"`
-	BatchCode        *string    `gorm:"->;column:batch_code" json:"batch_code,omitempty"`
-	BatchModelType   *string    `gorm:"->;column:batch_model_type" json:"batch_model_type,omitempty"`
-	BatchStatus      *string    `gorm:"->;column:batch_status" json:"batch_status,omitempty"`
-	ModelFamily      *string    `gorm:"->;column:model_family" json:"model_family,omitempty"`
-	FgStatus         *string    `gorm:"->;column:fg_status" json:"fg_status,omitempty"`
+	UnitID                   string     `gorm:"column:unit_id;primaryKey" json:"unit_id"`
+	SerialNo                 *string    `gorm:"column:serial_no" json:"serial_no"`
+	ForecastSerialNo         *string    `gorm:"column:forecast_serial_no" json:"forecast_serial_no"`
+	BatchID                  string     `gorm:"column:batch_id" json:"batch_id"`
+	SlotIndex                int        `gorm:"column:slot_index" json:"slot_index"`
+	ModelType                string     `gorm:"column:model_type" json:"model_type"`
+	ProductionLineID         *string    `gorm:"column:production_line_id" json:"production_line_id"`
+	Status                   string     `gorm:"column:status" json:"status"`
+	ContractNo               *string    `gorm:"column:contract_no" json:"contract_no"`
+	Customer                 *string    `gorm:"column:customer" json:"customer"`
+	DealerID                 *string    `gorm:"column:dealer_id" json:"dealer_id"`
+	DealerName               *string    `gorm:"column:dealer_name" json:"dealer_name"`
+	DueDate                  *time.Time `gorm:"column:due_date" json:"due_date"`
+	SalesID                  *string    `gorm:"column:sales_id" json:"sales_id"`
+	OrderRemark              *string    `gorm:"column:order_remark" json:"order_remark"`
+	PromisedDueDate          *time.Time `gorm:"-" json:"promised_due_date"`
+	IsLocked                 bool       `gorm:"column:is_locked" json:"is_locked"`
+	LockedBy                 *string    `gorm:"column:locked_by" json:"locked_by"`
+	LockedAt                 *time.Time `gorm:"column:locked_at" json:"locked_at"`
+	IsContractPinned         bool       `gorm:"column:is_contract_pinned" json:"is_contract_pinned"`
+	CreatedAt                time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt                time.Time  `gorm:"column:updated_at" json:"updated_at"`
+	BatchCode                *string    `gorm:"->;column:batch_code" json:"batch_code,omitempty"`
+	BatchModelType           *string    `gorm:"->;column:batch_model_type" json:"batch_model_type,omitempty"`
+	BatchStatus              *string    `gorm:"->;column:batch_status" json:"batch_status,omitempty"`
+	BatchExpectedInboundDate *time.Time `gorm:"->;column:batch_expected_inbound_date" json:"batch_expected_inbound_date,omitempty"`
+	FgExpectedInboundDate    *time.Time `gorm:"->;column:fg_expected_inbound_date" json:"fg_expected_inbound_date,omitempty"`
+	ModelFamily              *string    `gorm:"->;column:model_family" json:"model_family,omitempty"`
+	FgStatus                 *string    `gorm:"->;column:fg_status" json:"fg_status,omitempty"`
 }
 
 func (Unit) TableName() string { return "units" }

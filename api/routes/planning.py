@@ -1138,15 +1138,17 @@ def update_contract_status(
                 
         get_factory_plan.cache_clear()
         get_factory_plan_v2.cache_clear()
+        if new_status == "已取消":
+            _trigger_sandbox_recompute_sync(current_user)
         append_audit_log(
             module="合同管理",
             action_type="更新状态",
             biz_type="合同",
-            content=f"合同 {contract_id} 状态更新为：{new_status}" + ("（已同步清空沙盘所有状态批次卡片及排产队列）" if new_status == "已取消" else ""),
+            content=f"合同 {contract_id} 状态更新为：{new_status}" + ("（已同步清空沙盘所有状态批次卡片及排产队列，并触发预测沙盒重算）" if new_status == "已取消" else ""),
             user_id=current_user.get("username"),
             username=current_operator,
         )
-        return {"message": f"合同状态已更新为 {new_status}" + ("，对应沙盘卡片及队列已同步清理" if new_status == "已取消" else "")}
+        return {"message": f"合同状态已更新为 {new_status}" + ("，对应沙盘卡片及队列已同步清理，预测沙盒已同步重算" if new_status == "已取消" else "")}
     except HTTPException:
         raise
     except Exception as e:
@@ -1513,7 +1515,14 @@ def preview_contract_file_api(contract_id: str, file_name: str):
                 "ext": ext,
             }
 
-        return {"type": "", "ext": ext}
+        if ext == ".doc":
+            return {
+                "type": "legacy-doc",
+                "ext": ext,
+                "message": "DOC 为旧版 Word 二进制格式，当前仅支持下载后用 Word/WPS 查看；DOCX 可在线预览。",
+            }
+
+        return {"type": "", "ext": ext, "message": "该文件类型暂不支持在线预览"}
     except HTTPException:
         raise
     except Exception as e:

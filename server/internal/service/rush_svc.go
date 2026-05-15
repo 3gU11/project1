@@ -312,9 +312,16 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 	var chain []model.Unit
 	start := -1
 	if !isHigh {
-		chain, err = s.loadProductionModelChain(tx, family, targetModel)
+		// Build the chain using the TARGET unit's own model_type so we can locate it.
+		// (The rush order's model_type may differ within the same family, e.g. FR-400XS vs FR-500XS.)
+		// The carry's ModelType (rush order model) will still be written into the target slot.
+		chainModel := strings.TrimSpace(target.ModelType)
+		if chainModel == "" {
+			chainModel = targetModel
+		}
+		chain, err = s.loadProductionModelChain(tx, family, chainModel)
 		if err != nil && err.Error() != "target model is empty" {
-			// ignore
+			// ignore non-fatal errors
 		}
 		for i := range chain {
 			if chain[i].UnitID == req.TargetUnitID {
@@ -564,9 +571,19 @@ func (s *RushSvc) resolveBatchFamily(tx *gorm.DB, modelType string) (string, err
 		return "", err
 	}
 
-	family := strings.ToUpper(strings.TrimSpace(row.ModelFamily))
-	if family == "SPECIAL" || strings.Contains(row.ModelFamily, "特殊") {
+	familyRaw := strings.TrimSpace(row.ModelFamily)
+	family := strings.ToUpper(familyRaw)
+	if family == "SPECIAL" || familyRaw == "特殊" {
 		return "SPECIAL", nil
+	}
+	if strings.Contains(familyRaw, "G") {
+		return "G", nil
+	}
+	if strings.Contains(familyRaw, "XS") {
+		return "XS", nil
+	}
+	if strings.Contains(familyRaw, "AUTO") {
+		return "AUTO", nil
 	}
 	if family == "G" || family == "XS" || family == "AUTO" {
 		return family, nil

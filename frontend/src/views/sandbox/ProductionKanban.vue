@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="kanban-layout">
     <div class="kanban-left">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -14,13 +14,25 @@
               {{ line.status === 'Idle' ? '空闲' : '忙碌' }}
             </span>
             <span v-if="line.model_type" style="font-size:12px;color:#888;">{{ line.model_type }}</span>
-            <span v-if="lineBatchLabels(line)" style="font-size:12px;color:#999;">{{ lineBatchLabels(line) }}</span>
+            <span v-if="lineBatchLabels(line)" style="font-size:15px;color:#222;font-weight:bold;margin-left:8px;">{{ lineBatchLabels(line) }}</span>
+            <span v-if="lineExpectedInboundLabels(line)" class="line-inbound-date">
+              {{ lineExpectedInboundLabels(line) }}
+            </span>
             <span style="flex:1;"></span>
             <el-button
               v-if="line.status === 'Busy'"
               size="small" type="warning" @click="handleManualComplete(line.production_line_id)"
             >
               手动完工
+            </el-button>
+            <el-button
+              v-if="line.status === 'Busy'"
+              size="small"
+              type="danger"
+              :disabled="selectedCount(line) === 0"
+              @click="showLockDialog(line)"
+            >
+              锁定{{ selectedCount(line) ? `(${selectedCount(line)})` : '' }}
             </el-button>
           </div>
           <VueDraggable
@@ -35,7 +47,13 @@
             class="line-units"
           >
             <template v-for="u in line.units" :key="u.unit_id">
-              <UnitCard :unit="u" @edit="openEditDrawer" @contextmenu="onContextMenu" />
+              <UnitCard
+                :unit="{ ...u, model_family: u.model_family || modelFamilyMap[String(u.model_type || '').toUpperCase()] || '' }"
+                :selected="isUnitSelected(line.production_line_id, u.unit_id)"
+                @select="() => toggleUnitSelection(line.production_line_id, u)"
+                @edit="openEditDrawer"
+                @contextmenu="onContextMenu"
+              />
             </template>
           </VueDraggable>
           <div v-else style="color:#bbb;font-size:12px;padding:8px;">
@@ -52,11 +70,11 @@
         <h3 style="font-size:14px;margin-bottom:8px;">
           待排产队列
           <el-select v-model="queueFilter" size="small" style="width:100px;margin-left:8px;" clearable placeholder="全部">
-            <el-option label="小机G" value="小机G" />
-            <el-option label="小机XS" value="小机XS" />
-            <el-option label="大机XS" value="大机XS" />
-            <el-option label="小机AUTO" value="小机AUTO" />
-            <el-option label="大机AUTO" value="大机AUTO" />
+            <el-option label="中小型G" value="中小型G" />
+            <el-option label="中小型XS" value="中小型XS" />
+            <el-option label="中大型XS" value="中大型XS" />
+            <el-option label="中小型AUTO" value="中小型AUTO" />
+            <el-option label="中大型AUTO" value="中大型AUTO" />
             <el-option label="特殊" value="特殊" />
           </el-select>
         </h3>
@@ -131,6 +149,22 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="lockVisible" title="批量锁定" width="420px">
+      <div style="font-size:13px;margin-bottom:10px;">
+        将锁定已选 {{ lockSelectedCount }} 张卡片，并覆盖这些卡片的备注。
+      </div>
+      <el-input
+        v-model="lockRemark"
+        type="textarea"
+        :rows="4"
+        placeholder="请输入备注"
+      />
+      <template #footer>
+        <el-button @click="lockVisible = false">取消</el-button>
+        <el-button type="danger" @click="doLockUnits" :disabled="lockSelectedCount === 0" :loading="locking">确认锁定</el-button>
+      </template>
+    </el-dialog>
+
     <el-drawer v-model="editVisible" title="信息强改" size="400px">
       <el-form v-if="editingUnit" label-width="80px" size="small">
         <el-form-item label="合同号"><el-input v-model="editForm.contract_no" /></el-form-item>
@@ -182,6 +216,11 @@ const editVisible = ref(false)
 const editingUnit = ref<any>(null)
 const saving = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; unit: any }>({ visible: false, x: 0, y: 0, unit: null })
+const selectedByLine = ref<Record<string, string[]>>({})
+const lockVisible = ref(false)
+const lockingLine = ref<any>(null)
+const lockRemark = ref('')
+const locking = ref(false)
 const dragging = ref(false)
 const pendingRefresh = ref(false)
 const modelFamilyMap = ref<Record<string, string>>({})
@@ -200,6 +239,8 @@ const inProductionBatches = computed(() =>
 )
 
 const assignableLines = computed(() => assignableLinesForBatch(assigningBatch.value))
+
+const lockSelectedCount = computed(() => selectedCount(lockingLine.value))
 
 function isSpecialBatch(batch: any) {
   return String(batch?.model_type || '').trim().toUpperCase() === 'SPECIAL'
@@ -220,6 +261,21 @@ function lineBatchLabels(line: any) {
   const codes = lineBatchCodes(line)
   if (!codes.length) return ''
   return `批次: ${codes.join(', ')}`
+}
+
+function lineExpectedInboundLabels(line: any) {
+  const batches = Array.isArray(line?.batches) ? line.batches : []
+  const units = Array.isArray(line?.units) ? line.units : []
+  const dates = Array.from(new Set(
+    [
+      ...batches.map((b: any) => b?.expected_inbound_date),
+      ...units.map((u: any) => u?.batch_expected_inbound_date || u?.fg_expected_inbound_date)
+    ]
+      .map((value: any) => fmtDate(value))
+      .filter((date: string) => date && date !== '-')
+  ))
+  if (!dates.length) return ''
+  return `预计入库: ${dates.join(', ')}`
 }
 
 function assignableLinesForBatch(batch: any) {
@@ -284,7 +340,7 @@ function displayBatchCategory(batch: any) {
     count[c] = Number(count[c] || 0) + 1
   }
   const priority: Record<string, number> = {
-    特殊: 6, 大机AUTO: 5, 小机AUTO: 4, 大机XS: 3, 小机XS: 2, 小机G: 1
+    特殊: 6, 中大型AUTO: 5, 中小型AUTO: 4, 中大型XS: 3, 中小型XS: 2, 中小型G: 1
   }
   let best = ''
   let bestN = -1
@@ -300,13 +356,17 @@ function displayBatchCategory(batch: any) {
   if (best) {
     return best
   }
-  const direct = categoryOfModel(String(batch?.model_type || ''), '')
-  if (direct) return direct
-  if (String(batch?.model_type || '').toUpperCase().includes('SPECIAL')) return '特殊'
-  const family = majorFamilyOfModel(String(batch?.model_type || ''))
-  if (family === 'G') return '小机G'
-  if (family === 'XS') return '小机XS'
-  if (family === 'AUTO') return '小机AUTO'
+  const batchModelType = String(batch?.model_type || '')
+  const batchToken = batchModelType.trim().toUpperCase()
+  if (!['G', 'XS', 'AUTO', 'SPECIAL'].includes(batchToken)) {
+    const direct = categoryOfModel(batchModelType, '')
+    if (direct) return direct
+  }
+  if (batchToken.includes('SPECIAL')) return '特殊'
+  const family = majorFamilyOfModel(batchModelType)
+  if (family === 'G') return '中小型G'
+  if (family === 'XS') return Number(batch?.capacity || 0) === 16 ? '中大型XS' : '中小型XS'
+  if (family === 'AUTO') return Number(batch?.capacity || 0) === 16 ? '中大型AUTO' : '中小型AUTO'
   if (family === 'SPECIAL') return '特殊'
   return String(batch?.model_type || '-')
 }
@@ -401,6 +461,64 @@ async function doAssign() {
     ElMessage.error(e.message)
   } finally {
     assigning2.value = false
+  }
+}
+
+function selectedLineUnitIds(line: any) {
+  if (!line) return []
+  const lineId = String(line.production_line_id || '')
+  const selected = new Set(selectedByLine.value[lineId] || [])
+  return (Array.isArray(line.units) ? line.units : [])
+    .map((u: any) => String(u?.unit_id || ''))
+    .filter((id: string) => id && selected.has(id))
+}
+
+function selectedCount(line: any) {
+  return selectedLineUnitIds(line).length
+}
+
+function isUnitSelected(lineId: string, unitId: string) {
+  return (selectedByLine.value[lineId] || []).includes(unitId)
+}
+
+function toggleUnitSelection(lineId: string, unit: any) {
+  const unitId = String(unit?.unit_id || '')
+  if (!lineId || !unitId) return
+  const current = selectedByLine.value[lineId] || []
+  const next = current.includes(unitId)
+    ? current.filter((id: string) => id !== unitId)
+    : [...current, unitId]
+  selectedByLine.value = { ...selectedByLine.value, [lineId]: next }
+}
+
+function clearLineSelection(lineId: string) {
+  selectedByLine.value = { ...selectedByLine.value, [lineId]: [] }
+}
+
+function showLockDialog(line: any) {
+  if (selectedCount(line) === 0) return
+  lockingLine.value = line
+  lockRemark.value = ''
+  lockVisible.value = true
+}
+
+async function doLockUnits() {
+  const line = lockingLine.value
+  if (!line) return
+  const lineId = String(line.production_line_id || '')
+  const unitIds = selectedLineUnitIds(line)
+  if (!lineId || unitIds.length === 0) return
+  locking.value = true
+  try {
+    await sandboxApi.lockLineUnits(lineId, unitIds, lockRemark.value)
+    ElMessage.success(`已锁定 ${unitIds.length} 张卡片`)
+    clearLineSelection(lineId)
+    lockVisible.value = false
+    await forceRefreshAll()
+  } catch (e: any) {
+    ElMessage.error(e.message)
+  } finally {
+    locking.value = false
   }
 }
 
@@ -593,4 +711,14 @@ onUnmounted(() => {
   font-size: 13px;
 }
 .ctx-item:hover { background: #f5f5f5; }
+.line-inbound-date {
+  color: #d4380d;
+  background-color: #fff2e8;
+  border: 1px solid #ffbb96;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 15px;
+  font-weight: bold;
+  margin-left: 8px;
+}
 </style>

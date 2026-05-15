@@ -41,6 +41,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		api.POST("/batches/:id/revoke", bh.Revoke)
 		api.POST("/batches/batch-confirm", bh.BatchConfirm)
 		api.POST("/batches/:id/insert-empty-slot", bh.InsertEmptySlot)
+		api.PATCH("/batches/:id/stock-models", bh.SyncStockModels)
 
 		// Production Queue - 查询 production_queue 表中溢出的待处理订单
 		api.GET("/production-queue", qh.List)
@@ -71,5 +72,6 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		api.GET("/production-lines", lh.List)
 		api.POST("/production-lines/:id/assign", lh.Assign)
 		api.POST("/production-lines/:id/manual-complete", lh.ManualComplete)
+		api.POST("/production-lines/:id/lock-units", lh.LockUnits)
 	}
 }
