@@ -813,6 +813,146 @@ def create_sales_order_api(
         raise HTTPException(status_code=500, detail=f"创建订单失败: {e}")
 
 
+def _clear_sandbox_units_by_order(order_id: str) -> None:
+    """
+    【缺口2补全】订单删除时，清空沙盘 units 表中该订单关联卡片的合同字段。
+    通过 sales_id = order_id 匹配（_sync_order_to_units_and_import 在创建订单时写入）。
+    只清空 Predicted 状态的批次中的卡片，已下达/生产中的卡片不动。
+    失败不抛异常（fire-and-forget），避免阻塞主流程。
+    """
+    try:
+        with get_engine().begin() as conn:
+            conn.execute(
+                text("""
+                    UPDATE units u
+                    JOIN batches b ON b.batch_id = u.batch_id
+                    SET u.contract_no = NULL,
+                        u.customer    = NULL,
+                        u.dealer_name = NULL,
+                        u.dealer_id   = NULL,
+                        u.due_date    = NULL,
+                        u.sales_id    = NULL,
+                        u.order_remark = NULL,
+                        u.is_locked   = 0,
+                        u.locked_by   = NULL,
+                        u.locked_at   = NULL,
+                        u.updated_at  = NOW()
+                    WHERE u.sales_id = :order_id
+                      AND b.status = 'Predicted'
+                """),
+                {"order_id": order_id}
+            )
+    except Exception as e:
+        print(f"Warning: _clear_sandbox_units_by_order failed for order {order_id}: {e}")
+
+
+def _sync_contract_fields_to_units(
+    contract_id: str,
+    customer: str = "",
+    dealer_name: str = "",
+    due_date: str = "",
+    order_remark: str = "",
+) -> None:
+    """
+    【缺口3补全】合同编辑后局部更新沙盘 units 表中的卡片字段。
+    通过 contract_no = contract_id 匹配，只更新 Predicted 批次中的卡片。
+    失败不抛异常（fire-and-forget），避免阻塞主流程。
+    """
+    try:
+        due_date_val = None
+        if due_date:
+            try:
+                due_date_val = pd.to_datetime(due_date, errors="coerce")
+                if pd.isna(due_date_val):
+                    due_date_val = None
+                else:
+                    due_date_val = due_date_val.strftime("%Y-%m-%d")
+            except Exception:
+                due_date_val = None
+
+        with get_engine().begin() as conn:
+            conn.execute(
+                text("""
+                    UPDATE units u
+                    JOIN batches b ON b.batch_id = u.batch_id
+                    SET u.customer     = :customer,
+                        u.dealer_name  = :dealer_name,
+                        u.due_date     = :due_date,
+                        u.order_remark = CASE
+                            WHEN :order_remark != '' THEN :order_remark
+                            ELSE u.order_remark
+                        END,
+                        u.updated_at   = NOW()
+                    WHERE u.contract_no = :contract_id
+                      AND b.status = 'Predicted'
+                """),
+                {
+                    "customer": customer or None,
+                    "dealer_name": dealer_name or None,
+                    "due_date": due_date_val,
+                    "order_remark": order_remark,
+                    "contract_id": contract_id,
+                }
+            )
+    except Exception as e:
+        print(f"Warning: _sync_contract_fields_to_units failed for contract {contract_id}: {e}")
+
+
+
+class UnitSyncPayload(BaseModel):
+    contract_no: str
+    old_model: str
+    new_model: str
+    order_remark: str
+
+
+# 内部专用路由，不带常规用户鉴权，内部校验 GO_INTERNAL_TOKEN
+internal_router = APIRouter()
+
+
+@internal_router.patch("/unit-sync")
+def internal_sync_unit_api(payload: UnitSyncPayload, request: Request):
+    """
+    【缺口1补全】看板反向同步到主系统：当看板卡片修改备注或机型时，回写 factory_plan。
+    """
+    # 改进的内部令牌校验
+    config_token = (GO_INTERNAL_TOKEN or "").strip()
+    provided_token = (request.headers.get("X-Internal-Token") or "").strip()
+    
+    # 只有当配置了 Token 时才强制校验，防止本地开发环境无法运行
+    if config_token and provided_token != config_token:
+        raise HTTPException(status_code=403, detail="Unauthorized internal request")
+
+    try:
+        with get_engine().begin() as conn:
+            # 更新 factory_plan 表
+            # 注意：factory_plan 可能有多个相同合同+机型的行（如果拆分了），我们全部更新
+            conn.execute(
+                text("""
+                    UPDATE factory_plan 
+                    SET `机型` = :new_model, `备注` = :remark
+                    WHERE `合同号` = :contract_no AND `机型` = :old_model
+                """),
+                {
+                    "new_model": payload.new_model,
+                    "remark": payload.order_remark,
+                    "contract_no": payload.contract_no,
+                    "old_model": payload.old_model,
+                }
+            )
+        
+        # 清理缓存，确保主系统刷新后能看到最新数据
+        if hasattr(get_factory_plan, "cache_clear"):
+            get_factory_plan.cache_clear()
+        if hasattr(get_factory_plan_v2, "cache_clear"):
+            get_factory_plan_v2.cache_clear()
+            
+        return {"status": "success"}
+    except Exception as e:
+        print(f"Internal Sync Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.put("/orders/{order_id}")
 def update_sales_order_api(
     order_id: str,
@@ -847,6 +987,11 @@ def update_sales_order_api(
             user_id=current_user.get("username"),
             username=current_operator,
         )
+
+        # 【缺口2补全】订单被软删除时，清空沙盘中该订单关联卡片的合同字段，防止幽灵卡片
+        if updates.get("status") == "deleted":
+            _clear_sandbox_units_by_order(str(order_id))
+
         return {"message": "订单更新成功"}
     except HTTPException:
         raise
@@ -866,7 +1011,10 @@ def hard_delete_sales_order_api(
         mask = df_orders["订单号"].astype(str) == str(order_id)
         if not mask.any():
             raise HTTPException(status_code=404, detail="订单不存在")
-        
+
+        # 【缺口2补全】彻底删除前先清空沙盘关联卡片，防止幽灵卡片
+        _clear_sandbox_units_by_order(str(order_id))
+
         df_orders = df_orders[~mask].copy()
         save_orders(df_orders)
         
@@ -1373,6 +1521,17 @@ def edit_contract(
 
         df_plan = pd.concat([df_plan, pd.DataFrame(new_rows)], ignore_index=True)
         save_factory_plan(df_plan)
+
+        # 【缺口3补全】合同编辑后，局部同步沙盘中对应卡片的字段（交期/客户/代理商/备注）
+        # 只更新 Predicted 批次中的卡片，不触碰已下达/生产中的卡片
+        _sync_contract_fields_to_units(
+            contract_id=str(contract_id),
+            customer=str(payload.客户名 or ""),
+            dealer_name=str(payload.代理商 or ""),
+            due_date=str(payload.要求交期 or ""),
+            order_remark=str(new_rows[0].get("备注", "")) if new_rows else "",
+        )
+
         append_audit_log(
             module="合同管理",
             action_type="编辑",

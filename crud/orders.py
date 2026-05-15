@@ -263,10 +263,11 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
         if hasattr(crud.inventory.get_data, "cache_clear"):
             crud.inventory.get_data.cache_clear()
 
-    # 同步客户/代理商信息到沙盘 units 表
+    # 同步客户/代理商信息到沙盘 units 表，并绑定实物流水号（serial_no）
     if selected_sns:
         try:
             with get_engine().begin() as conn:
+                # 批量更新 customer/dealer_name（已有逻辑保留）
                 conn.execute(
                     text("""
                         UPDATE units
@@ -276,6 +277,17 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                     """).bindparams(bindparam("sns", expanding=True)),
                     {"customer": customer, "agent": agent, "sns": list(selected_sns)}
                 )
+                # 【缺口5补全】逐台将 forecast_serial_no → serial_no，让看板卡片显示实物流水号
+                for sn in selected_sns:
+                    conn.execute(
+                        text("""
+                            UPDATE units
+                            SET serial_no = :sn
+                            WHERE forecast_serial_no = :sn
+                              AND (serial_no IS NULL OR TRIM(serial_no) = '')
+                        """),
+                        {"sn": sn}
+                    )
         except Exception as e:
             print(f"Warning: Failed to sync units table on allocate_inventory: {e}")
 

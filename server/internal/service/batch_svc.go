@@ -415,6 +415,7 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 	return nil
 }
 
+
 func (s *BatchSvc) LockLineUnits(lineID string, unitIDs []string, orderRemark string, actor string) (int, error) {
 	uniqueIDs := make([]string, 0, len(unitIDs))
 	seen := make(map[string]bool, len(unitIDs))

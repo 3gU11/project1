@@ -22,10 +22,12 @@ import (
 )
 
 type UnitHandler struct {
-	db        *gorm.DB
-	repo      *repo.UnitRepo
-	batchRepo *repo.BatchRepo
-	rushSvc   *service.RushSvc
+	db            *gorm.DB
+	repo          *repo.UnitRepo
+	batchRepo     *repo.BatchRepo
+	rushSvc       *service.RushSvc
+	pythonURL     string
+	internalToken string
 }
 
 type capacityRatioCfg struct {
@@ -34,8 +36,15 @@ type capacityRatioCfg struct {
 	Level3       map[string]map[string]int `json:"level3"`
 }
 
-func NewUnitHandler(db *gorm.DB, r *repo.UnitRepo, br *repo.BatchRepo, rs *service.RushSvc) *UnitHandler {
-	return &UnitHandler{db: db, repo: r, batchRepo: br, rushSvc: rs}
+func NewUnitHandler(db *gorm.DB, r *repo.UnitRepo, br *repo.BatchRepo, rs *service.RushSvc, pythonURL, token string) *UnitHandler {
+	return &UnitHandler{
+		db:            db,
+		repo:          r,
+		batchRepo:     br,
+		rushSvc:       rs,
+		pythonURL:     pythonURL,
+		internalToken: token,
+	}
 }
 
 func (h *UnitHandler) GetByID(c *gin.Context) {
@@ -60,6 +69,9 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// Capture old state for sync
+	oldUnit, _ := h.repo.GetByID(c.Param("id"))
+
 	// Remove protected fields
 	delete(req, "unit_id")
 	delete(req, "batch_id")
@@ -69,7 +81,7 @@ func (h *UnitHandler) Update(c *gin.Context) {
 	delete(req, "created_at")
 	delete(req, "updated_at")
 
-	// Validate model_type update from "淇℃伅寮烘敼" with whitelist from model_dictionary.
+	// Validate model_type update from "信息强改" with whitelist from model_dictionary.
 	if rawMT, exists := req["model_type"]; exists {
 		mt, ok := rawMT.(string)
 		if !ok {
@@ -116,9 +128,64 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		return
 	}
 
-	unit, _ := h.repo.GetByID(c.Param("id"))
-	sanitizeUnitRemarkForResponse(unit)
-	c.JSON(http.StatusOK, gin.H{"unit": unit})
+	newUnit, _ := h.repo.GetByID(c.Param("id"))
+
+	// 【缺口1补全】反向同步：如果修改了机型或备注，且属于某个合同，则写回 Python
+	if oldUnit != nil && newUnit != nil && newUnit.ContractNo != nil && *newUnit.ContractNo != "" {
+		newModel := newUnit.ModelType
+		newRemark := ""
+		if newUnit.OrderRemark != nil {
+			newRemark = *newUnit.OrderRemark
+		}
+
+		oldModel := oldUnit.ModelType
+		oldRemark := ""
+		if oldUnit.OrderRemark != nil {
+			oldRemark = *oldUnit.OrderRemark
+		}
+
+		// 只有在关键字段变动时才发起同步
+		if newModel != oldModel || newRemark != oldRemark {
+			go h.SyncToPython(*newUnit.ContractNo, oldModel, newModel, newRemark)
+		}
+	}
+
+	sanitizeUnitRemarkForResponse(newUnit)
+	c.JSON(http.StatusOK, gin.H{"unit": newUnit})
+}
+
+func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark string) {
+	// 简单的 HTTP Client 调用 Python 内部接口
+	url := fmt.Sprintf("%s/internal/planning/unit-sync", h.pythonURL)
+	payload := map[string]string{
+		"contract_no":  contractNo,
+		"old_model":    oldModel,
+		"new_model":    newModel,
+		"order_remark": remark,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("PATCH", url, strings.NewReader(string(body)))
+	if err != nil {
+		fmt.Printf("SyncToPython: failed to create request: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if h.internalToken != "" {
+		req.Header.Set("X-Internal-Token", h.internalToken)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("SyncToPython: request failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("SyncToPython: status non-200: %d\n", resp.StatusCode)
+	}
 }
 
 func (h *UnitHandler) isEnabledModelType(modelType string) (bool, error) {
