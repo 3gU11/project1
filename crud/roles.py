@@ -43,6 +43,7 @@ PERMISSION_CATALOG = [
     {"code": "MODEL_DICTIONARY", "label": "机型字典", "group": "系统管理"},
     {"code": "USER_MANAGE", "label": "用户管理", "group": "系统管理"},
     {"code": "SALES_CREATE", "label": "销售下单", "group": "销售"},
+    {"code": "DEALER_ORDER_REVIEW", "label": "经销商订单审核", "group": "销售"},
     {"code": "SALES_ALLOC", "label": "订单配货", "group": "销售"},
     {"code": "SHIP_CONFIRM", "label": "发货复核", "group": "生产/仓储"},
     {"code": "ARCHIVE", "label": "机台档案", "group": "生产/仓储"},
