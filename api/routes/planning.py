@@ -851,6 +851,7 @@ def _sync_contract_fields_to_units(
     customer: str = "",
     dealer_name: str = "",
     due_date: str = "",
+    model_type: str = "",
     order_remark: str = "",
 ) -> None:
     """
@@ -879,17 +880,18 @@ def _sync_contract_fields_to_units(
                         u.dealer_name  = :dealer_name,
                         u.due_date     = :due_date,
                         u.order_remark = CASE
-                            WHEN :order_remark != '' THEN :order_remark
+                            WHEN :order_remark != '' AND (:model_type = '' OR TRIM(COALESCE(u.model_type, '')) = :model_type) THEN :order_remark
                             ELSE u.order_remark
                         END,
                         u.updated_at   = NOW()
                     WHERE u.contract_no = :contract_id
-                      AND b.status = 'Predicted'
+                      AND b.status IN ('Predicted', 'Confirmed', 'In_Production')
                 """),
                 {
                     "customer": customer or None,
                     "dealer_name": dealer_name or None,
                     "due_date": due_date_val,
+                    "model_type": model_type,
                     "order_remark": order_remark,
                     "contract_id": contract_id,
                 }
@@ -904,6 +906,8 @@ class UnitSyncPayload(BaseModel):
     old_model: str
     new_model: str
     order_remark: str
+    customer: str = ""
+    dealer_name: str = ""
 
 
 # 内部专用路由，不带常规用户鉴权，内部校验 GO_INTERNAL_TOKEN
@@ -925,20 +929,42 @@ def internal_sync_unit_api(payload: UnitSyncPayload, request: Request):
 
     try:
         with get_engine().begin() as conn:
+            columns = {
+                str(row[0]).strip()
+                for row in conn.execute(text("SHOW COLUMNS FROM factory_plan")).fetchall()
+            }
+            customer_col = "客户名" if "客户名" in columns else ("客户名称" if "客户名称" in columns else None)
+            dealer_col = "代理商" if "代理商" in columns else None
+
+            set_parts = ["`机型` = :new_model", "`备注` = :remark"]
+            if customer_col:
+                set_parts.append(f"`{customer_col}` = :customer")
+            if dealer_col:
+                set_parts.append(f"`{dealer_col}` = :dealer_name")
+            set_sql = ",\n                        ".join(set_parts)
+
             # 更新 factory_plan 表
             # 注意：factory_plan 可能有多个相同合同+机型的行（如果拆分了），我们全部更新
+            model_to_match = str(payload.old_model or "").strip() or str(payload.new_model or "").strip()
             conn.execute(
-                text("""
+                text(f"""
                     UPDATE factory_plan 
-                    SET `机型` = :new_model, `备注` = :remark
-                    WHERE `合同号` = :contract_no AND `机型` = :old_model
+                    SET {set_sql}
+                    WHERE `合同号` = :contract_no
+                      AND `机型` = :model_to_match
                 """),
                 {
                     "new_model": payload.new_model,
                     "remark": payload.order_remark,
+                    "customer": payload.customer,
+                    "dealer_name": payload.dealer_name,
                     "contract_no": payload.contract_no,
-                    "old_model": payload.old_model,
+                    "model_to_match": model_to_match,
                 }
+            )
+            print(
+                f"[unit-sync] contract={payload.contract_no} model={model_to_match} "
+                f"customer_col={customer_col or '-'} dealer_col={dealer_col or '-'}"
             )
         
         # 清理缓存，确保主系统刷新后能看到最新数据
@@ -1529,6 +1555,7 @@ def edit_contract(
             customer=str(payload.客户名 or ""),
             dealer_name=str(payload.代理商 or ""),
             due_date=str(payload.要求交期 or ""),
+            model_type=str(new_rows[0].get("机型", "")) if new_rows else "",
             order_remark=str(new_rows[0].get("备注", "")) if new_rows else "",
         )
 

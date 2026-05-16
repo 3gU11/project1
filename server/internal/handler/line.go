@@ -45,10 +45,11 @@ func (h *LineHandler) List(c *gin.Context) {
 
 			var units []model.Unit
 			q := h.db.Table("units u").
-				Select("u.*, b.batch_code AS batch_code, b.model_type AS batch_model_type, b.status AS batch_status, COALESCE(b.expected_inbound_date, fg.`预计入库时间`) AS batch_expected_inbound_date, fg.`预计入库时间` AS fg_expected_inbound_date, md.model_family AS model_family, fg.状态 AS fg_status").
+				Select("u.*, b.batch_code AS batch_code, b.model_type AS batch_model_type, b.status AS batch_status, COALESCE(fgb.batch_inbound_date, b.expected_inbound_date, fg.`预计入库时间`) AS batch_expected_inbound_date, fg.`预计入库时间` AS fg_expected_inbound_date, md.model_family AS model_family, fg.`状态` AS fg_status").
 				Joins("JOIN batches b ON b.batch_id = u.batch_id").
 				Joins("LEFT JOIN model_dictionary md ON md.model_name = u.model_type COLLATE utf8mb4_general_ci").
-				Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = COALESCE(u.serial_no, u.forecast_serial_no) COLLATE utf8mb4_general_ci").
+				Joins("LEFT JOIN (SELECT `批次号` AS batch_code, MIN(`预计入库时间`) AS batch_inbound_date FROM finished_goods_data WHERE TRIM(COALESCE(`批次号`, '')) <> '' GROUP BY `批次号`) fgb ON TRIM(COALESCE(fgb.batch_code, '')) COLLATE utf8mb4_general_ci = TRIM(COALESCE(b.batch_code, '')) COLLATE utf8mb4_general_ci").
+				Joins("LEFT JOIN finished_goods_data fg ON fg.`流水号` = COALESCE(u.serial_no, u.forecast_serial_no) COLLATE utf8mb4_general_ci").
 				Where("u.production_line_id = ? AND u.status = ?", lines[i].ProductionLineID, model.StatusInProduction).
 				Order("COALESCE(b.batch_code, ''), b.batch_no ASC, u.slot_index ASC")
 			if len(batches) == 0 && lines[i].CurrentBatchID != nil {

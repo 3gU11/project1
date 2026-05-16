@@ -30,6 +30,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 	api.POST("/auth/login", ah.Login)
 	api.GET("/auth/me", middleware.AuthMiddleware(db), ah.Me)
 	api.GET("/model-types", middleware.AdminOnly(db), mh.ModelTypes)
+	api.POST("/units/:id/notify-update", uh.NotifyUpdate)
 
 	api.Use(middleware.AdminOnly(db))
 	{

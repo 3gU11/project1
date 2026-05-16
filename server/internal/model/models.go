@@ -82,6 +82,12 @@ type Unit struct {
 	FgExpectedInboundDate    *time.Time `gorm:"->;column:fg_expected_inbound_date" json:"fg_expected_inbound_date,omitempty"`
 	ModelFamily              *string    `gorm:"->;column:model_family" json:"model_family,omitempty"`
 	FgStatus                 *string    `gorm:"->;column:fg_status" json:"fg_status,omitempty"`
+	FgRemark                 *string    `gorm:"->;column:fg_remark" json:"fg_remark,omitempty"`
+	FgModel                  *string    `gorm:"->;column:fg_model" json:"fg_model,omitempty"`
+	FgCustomer               *string    `gorm:"->;column:fg_customer" json:"fg_customer,omitempty"`
+	FgDealer                 *string    `gorm:"->;column:fg_dealer" json:"fg_dealer,omitempty"`
+	FgContractNo             *string    `gorm:"->;column:fg_contract_no" json:"fg_contract_no,omitempty"`
+	FgSalesID                *string    `gorm:"->;column:fg_sales_id" json:"fg_sales_id,omitempty"`
 }
 
 func (Unit) TableName() string { return "units" }

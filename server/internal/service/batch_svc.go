@@ -398,11 +398,19 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 	}
 
 	// Sync all units in active batches to Completed, clear production_line_id.
-	if err := tx.Model(&model.Unit{}).Where("batch_id IN ?", batchIDs).Updates(map[string]interface{}{
+	var unitIDs []string
+	if err := tx.Model(&model.Unit{}).Where("batch_id IN ?", batchIDs).Pluck("unit_id", &unitIDs).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&model.Unit{}).Where("unit_id IN ?", unitIDs).Updates(map[string]interface{}{
 		"status":             model.StatusCompleted,
 		"production_line_id": nil,
 	}).Error; err != nil {
 		return err
+	}
+
+	if err := SyncFinishedGoodsByUnitIDs(tx, unitIDs); err != nil {
+		return fmt.Errorf("sync finished_goods: %w", err)
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -463,6 +471,10 @@ func (s *BatchSvc) LockLineUnits(lineID string, unitIDs []string, orderRemark st
 		"updated_at":   gorm.Expr("NOW()"),
 	}).Error; err != nil {
 		return 0, err
+	}
+
+	if err := SyncFinishedGoodsByUnitIDs(tx, uniqueIDs); err != nil {
+		return 0, fmt.Errorf("sync finished_goods: %w", err)
 	}
 
 	if err := tx.Commit().Error; err != nil {

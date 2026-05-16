@@ -19,6 +19,7 @@ import (
 	"smart-scheduling/server/internal/model"
 	"smart-scheduling/server/internal/repo"
 	"smart-scheduling/server/internal/service"
+	"smart-scheduling/server/internal/ws"
 )
 
 type UnitHandler struct {
@@ -28,6 +29,7 @@ type UnitHandler struct {
 	rushSvc       *service.RushSvc
 	pythonURL     string
 	internalToken string
+	hub           *ws.Hub
 }
 
 type capacityRatioCfg struct {
@@ -36,7 +38,7 @@ type capacityRatioCfg struct {
 	Level3       map[string]map[string]int `json:"level3"`
 }
 
-func NewUnitHandler(db *gorm.DB, r *repo.UnitRepo, br *repo.BatchRepo, rs *service.RushSvc, pythonURL, token string) *UnitHandler {
+func NewUnitHandler(db *gorm.DB, r *repo.UnitRepo, br *repo.BatchRepo, rs *service.RushSvc, pythonURL, token string, hub *ws.Hub) *UnitHandler {
 	return &UnitHandler{
 		db:            db,
 		repo:          r,
@@ -44,6 +46,7 @@ func NewUnitHandler(db *gorm.DB, r *repo.UnitRepo, br *repo.BatchRepo, rs *servi
 		rushSvc:       rs,
 		pythonURL:     pythonURL,
 		internalToken: token,
+		hub:           hub,
 	}
 }
 
@@ -80,6 +83,21 @@ func (h *UnitHandler) Update(c *gin.Context) {
 	delete(req, "status")
 	delete(req, "created_at")
 	delete(req, "updated_at")
+	if _, exists := req["contract_no"]; exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "contract_no is read-only"})
+		return
+	}
+	allowedFields := map[string]struct{}{
+		"customer":     {},
+		"dealer_name":  {},
+		"order_remark": {},
+		"model_type":   {},
+	}
+	for key := range req {
+		if _, ok := allowedFields[key]; !ok {
+			delete(req, key)
+		}
+	}
 
 	// Validate model_type update from "信息强改" with whitelist from model_dictionary.
 	if rawMT, exists := req["model_type"]; exists {
@@ -123,6 +141,11 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		return
 	}
 
+	if err := service.SyncFinishedGoodsByUnitIDs(tx, []string{c.Param("id")}); err != nil {
+		// Log error but continue as primary update succeeded
+		fmt.Printf("Update: sync finished_goods failed: %v\n", err)
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -145,8 +168,25 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		}
 
 		// 只有在关键字段变动时才发起同步
-		if newModel != oldModel || newRemark != oldRemark {
-			go h.SyncToPython(*newUnit.ContractNo, oldModel, newModel, newRemark)
+		oldCustomer := ""
+		if oldUnit.Customer != nil {
+			oldCustomer = *oldUnit.Customer
+		}
+		oldDealerName := ""
+		if oldUnit.DealerName != nil {
+			oldDealerName = *oldUnit.DealerName
+		}
+		newCustomer := ""
+		if newUnit.Customer != nil {
+			newCustomer = *newUnit.Customer
+		}
+		newDealerName := ""
+		if newUnit.DealerName != nil {
+			newDealerName = *newUnit.DealerName
+		}
+
+		if newModel != oldModel || newRemark != oldRemark || newCustomer != oldCustomer || newDealerName != oldDealerName {
+			go h.SyncToPython(*newUnit.ContractNo, oldModel, newModel, newRemark, newCustomer, newDealerName)
 		}
 	}
 
@@ -154,7 +194,7 @@ func (h *UnitHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"unit": newUnit})
 }
 
-func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark string) {
+func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark, customer, dealerName string) {
 	// 简单的 HTTP Client 调用 Python 内部接口
 	url := fmt.Sprintf("%s/internal/planning/unit-sync", h.pythonURL)
 	payload := map[string]string{
@@ -162,6 +202,8 @@ func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark string
 		"old_model":    oldModel,
 		"new_model":    newModel,
 		"order_remark": remark,
+		"customer":     customer,
+		"dealer_name":  dealerName,
 	}
 	body, _ := json.Marshal(payload)
 
@@ -335,8 +377,20 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 	sourceMT := engine.NormalizeModelType(unit.ModelType)
 	targetMT := engine.NormalizeModelType(targetBatch.ModelType)
 	if sourceMT != targetMT {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "model type mismatch: cannot move between different model types"})
-		return
+		allowMismatch := false
+		if !isSameBatch && sourceBatch.Status == model.StatusPredicted && targetBatch.Status == model.StatusPredicted {
+			preferredSlot := slotFromRequest(requestedSlot, 1)
+			ejectUnit, pickErr := h.pickEjectableUnboundUnit(tx, req.TargetBatchID, preferredSlot)
+			if pickErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": pickErr.Error()})
+				return
+			}
+			allowMismatch = ejectUnit != nil
+		}
+		if !allowMismatch {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "model type mismatch: cannot move between different model types"})
+			return
+		}
 	}
 
 	var newSlot int
@@ -1099,20 +1153,33 @@ func (h *UnitHandler) cascadeOverflowBySlot(tx *gorm.DB, targetBatchID string, f
 		overflowUnit := units[overflowIdx]
 		addTouched(batch.BatchID)
 
-		if i+1 >= len(batches) {
-			if err := h.enqueueOverflowUnit(tx, &overflowUnit, family); err != nil {
+		nextIdx := -1
+		for j := i + 1; j < len(batches); j++ {
+			if batches[j].Capacity == batch.Capacity {
+				nextIdx = j
+				break
+			}
+		}
+
+		if nextIdx < 0 {
+			newBatch, err := h.createOverflowExtensionBatch(tx, &batch)
+			if err != nil {
 				return touched, err
 			}
-			if err := tx.Where("unit_id = ?", overflowUnit.UnitID).Delete(&model.Unit{}).Error; err != nil {
+			if err := h.repo.MoveToBatch(tx, overflowUnit.UnitID, newBatch.BatchID, 1); err != nil {
 				return touched, err
 			}
 			if err := h.repo.CompactSlots(tx, batch.BatchID); err != nil {
 				return touched, err
 			}
+			if err := h.fillBatchToCapacity(tx, newBatch); err != nil {
+				return touched, err
+			}
+			addTouched(newBatch.BatchID)
 			return touched, nil
 		}
 
-		nextBatchID := batches[i+1].BatchID
+		nextBatchID := batches[nextIdx].BatchID
 		// If next batch has unbound placeholders, replace one directly and stop chain.
 		nextEjectUnit, err := h.pickEjectableUnboundUnit(tx, nextBatchID, 0)
 		if err != nil {
@@ -1144,9 +1211,59 @@ func (h *UnitHandler) cascadeOverflowBySlot(tx *gorm.DB, targetBatchID string, f
 		}
 		addTouched(nextBatchID)
 		protectID = overflowUnit.UnitID
+		i = nextIdx - 1
 	}
 
 	return touched, nil
+}
+
+func (h *UnitHandler) createOverflowExtensionBatch(tx *gorm.DB, ref *model.Batch) (*model.Batch, error) {
+	if ref == nil {
+		return nil, fmt.Errorf("reference batch is nil")
+	}
+	var maxBatchNo int
+	if err := tx.Model(&model.Batch{}).
+		Where("status = ? AND model_type = ?", model.StatusPredicted, ref.ModelType).
+		Select("COALESCE(MAX(batch_no), 0)").
+		Scan(&maxBatchNo).Error; err != nil {
+		return nil, err
+	}
+	nextNo := maxBatchNo + 1
+	now := time.Now()
+	newBatchID := fmt.Sprintf("BATCH-%s-%s-%03d-%06d",
+		now.Format("200601"),
+		strings.ToUpper(strings.TrimSpace(ref.ModelType)),
+		nextNo,
+		rand.Intn(1000000),
+	)
+	newBatch := &model.Batch{
+		BatchID:      newBatchID,
+		BatchNo:      nextNo,
+		ModelType:    ref.ModelType,
+		Capacity:     ref.Capacity,
+		Status:       model.StatusPredicted,
+		DueDateStart: ref.DueDateStart,
+		DueDateEnd:   ref.DueDateEnd,
+		Source:       "overflow_extend",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := tx.Create(newBatch).Error; err != nil {
+		return nil, err
+	}
+	slot := model.ForecastBatchSlot{
+		SlotNo:    nextNo,
+		ModelType: ref.ModelType,
+		Capacity:  ref.Capacity,
+		BatchID:   &newBatch.BatchID,
+		Source:    "overflow_extend",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := tx.Create(&slot).Error; err != nil {
+		return nil, err
+	}
+	return newBatch, nil
 }
 
 func (h *UnitHandler) findNextPredictedBatchWithSpace(tx *gorm.DB, targetBatchID string, family string) (string, bool, error) {
@@ -1525,10 +1642,11 @@ func (h *UnitHandler) enforceFamilyGapDays(tx *gorm.DB, family string) ([]string
 
 			nextIdx := findNextSameCapacityIdx(i)
 			if nextIdx < 0 {
-				if err := h.enqueueOverflowUnit(tx, candidate, family); err != nil {
+				newBatch, err := h.createOverflowExtensionBatch(tx, &batches[i])
+				if err != nil {
 					return touched, err
 				}
-				if err := tx.Where("unit_id = ?", candidate.UnitID).Delete(&model.Unit{}).Error; err != nil {
+				if err := h.repo.MoveToBatch(tx, candidate.UnitID, newBatch.BatchID, 1); err != nil {
 					return touched, err
 				}
 				if err := h.repo.CompactSlots(tx, batchID); err != nil {
@@ -1537,6 +1655,10 @@ func (h *UnitHandler) enforceFamilyGapDays(tx *gorm.DB, family string) ([]string
 				if err := h.fillBatchToCapacity(tx, &batches[i]); err != nil {
 					return touched, err
 				}
+				if err := h.fillBatchToCapacity(tx, newBatch); err != nil {
+					return touched, err
+				}
+				addTouched(newBatch.BatchID)
 				continue
 			}
 
@@ -2447,4 +2569,75 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+func (h *UnitHandler) NotifyUpdate(c *gin.Context) {
+	unitID := c.Param("id")
+	sn := strings.TrimSpace(c.Query("sn"))
+
+	if unitID == "" || (unitID == "lookup" && sn == "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unit id or sn required"})
+		return
+	}
+	// Pull latest FG info and persist it into every matching sandbox unit.
+	var updatedUnits []model.Unit
+	query := h.db.Table("units").
+		Select(`
+			units.*, 
+			fg.状态 AS fg_status,
+			fg.合同备注 AS fg_remark,
+			fg.机型 AS fg_model,
+			fg.合同号 AS fg_contract_no,
+			fg.客户 AS fg_customer,
+			fg.代理商 AS fg_dealer,
+			fg.占用订单号 AS fg_sales_id
+		`).
+		Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = COALESCE(units.serial_no, units.forecast_serial_no) COLLATE utf8mb4_general_ci").
+		Where("1 = 1")
+	if unitID == "lookup" {
+		query = query.Where("TRIM(COALESCE(units.serial_no, '')) = ? OR TRIM(COALESCE(units.forecast_serial_no, '')) = ?", sn, sn)
+	} else {
+		query = query.Where("units.unit_id = ?", unitID)
+	}
+	if err := query.Find(&updatedUnits).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load unit update: " + err.Error()})
+		return
+	}
+	if len(updatedUnits) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "updated_units": 0, "message": "sn not found in sandbox, no broadcast"})
+		return
+	}
+
+	updatedCount := 0
+	for _, updatedUnit := range updatedUnits {
+		persistUpdates := map[string]interface{}{}
+		if updatedUnit.FgContractNo != nil {
+			persistUpdates["contract_no"] = strings.TrimSpace(*updatedUnit.FgContractNo)
+		}
+		if updatedUnit.FgCustomer != nil {
+			persistUpdates["customer"] = strings.TrimSpace(*updatedUnit.FgCustomer)
+		}
+		if updatedUnit.FgDealer != nil {
+			persistUpdates["dealer_name"] = strings.TrimSpace(*updatedUnit.FgDealer)
+		}
+		if updatedUnit.FgRemark != nil {
+			persistUpdates["order_remark"] = strings.TrimSpace(*updatedUnit.FgRemark)
+		}
+		if updatedUnit.FgSalesID != nil {
+			persistUpdates["sales_id"] = strings.TrimSpace(*updatedUnit.FgSalesID)
+		}
+		if updatedUnit.FgModel != nil && strings.TrimSpace(*updatedUnit.FgModel) != "" {
+			persistUpdates["model_type"] = strings.TrimSpace(*updatedUnit.FgModel)
+		}
+
+		if len(persistUpdates) > 0 {
+			if err := h.db.Model(&model.Unit{}).Where("unit_id = ?", updatedUnit.UnitID).Updates(persistUpdates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist unit update: " + err.Error()})
+				return
+			}
+			updatedCount++
+		}
+		h.hub.Broadcast("unit:updated", gin.H{"unit_id": updatedUnit.UnitID})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "updated_units": updatedCount})
 }

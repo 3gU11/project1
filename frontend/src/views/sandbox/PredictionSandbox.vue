@@ -34,7 +34,7 @@
         type="warning"
         @click="batchConfirm"
       >
-        审核选中批次 ({{ selectedBatches.length }})
+        审核选中列
       </el-button>
       <el-button
         v-if="canRevoke"
@@ -297,7 +297,6 @@ const selectedRecomputeTarget = computed(() => {
   return batch
 })
 const recomputeButtonText = computed(() => {
-  if (selectedBatches.value.length > 1) return '只能选择 1 列重算'
   return selectedRecomputeTarget.value ? '按选中列重算' : '全量重算'
 })
 const editVisible = ref(false)
@@ -748,6 +747,11 @@ function isUnitFamilyMismatch(unit: any, batch: any) {
   return uf !== bf
 }
 
+function hasUnboundPlaceholder(batch: any) {
+  const units = Array.isArray(batch?.units) ? batch.units : []
+  return units.some((u: any) => isStockUnit(u) && !isSpecialPlaceholder(u))
+}
+
 function familyMismatchCount(batch: any) {
   const units = Array.isArray(batch?.units) ? batch.units : []
   return units.filter((u: any) => isUnitFamilyMismatch(u, batch)).length
@@ -860,9 +864,7 @@ function displayBatchCode(batch: any) {
 }
 
 function toggleSelect(batchId: string) {
-  const idx = selectedBatches.value.indexOf(batchId)
-  if (idx >= 0) selectedBatches.value.splice(idx, 1)
-  else selectedBatches.value.push(batchId)
+  selectedBatches.value = selectedBatches.value[0] === batchId ? [] : [batchId]
 }
 
 async function onSeriesFilterChange() {
@@ -934,10 +936,6 @@ async function loadModelTypes() {
 
 async function handleRecompute() {
   let targetSlotNo: number | undefined
-  if (selectedBatches.value.length > 1) {
-    ElMessage.warning('全量重算只能选择 1 个预测批次作为目标列')
-    return
-  }
   if (selectedBatches.value.length === 1) {
     const selectedId = selectedBatches.value[0]
     const selectedBatch = batchStore.batches.find((b: any) => b.batch_id === selectedId)
@@ -973,7 +971,7 @@ async function handleRecompute() {
 
 async function batchConfirm() {
   if (selectedBatches.value.length !== 1) {
-    ElMessage.warning('批量审核前请只勾选 1 个待审批次')
+    ElMessage.warning('审核前请勾选 1 个待审批次')
     return
   }
   const selectedId = selectedBatches.value[0]
@@ -982,12 +980,13 @@ async function batchConfirm() {
 
   // Suggest next batch_code based on last used one (query DB, not page data)
   let hintText = ''
-  let placeholder = '例如 04-12'
+  let placeholder = '例如 04-12 或 04-12附加'
   try {
     const res: any = await sandboxApi.getLastBatchCode()
     const lastCode: string = res?.last_batch_code || ''
-    if (lastCode && /^\d{2}-\d{2}$/.test(lastCode)) {
-      const [m, s] = lastCode.split('-')
+    const lastCodeMatch = lastCode.match(/^(\d{2})-(\d{2})/)
+    if (lastCodeMatch) {
+      const [, m, s] = lastCodeMatch
       const nextSeq = String(Number(s) + 1).padStart(2, '0')
       hintText = `\n上一批次: ${lastCode}，建议下一批次: ${m}-${nextSeq}`
       placeholder = `上一批次 ${lastCode}`
@@ -998,14 +997,14 @@ async function batchConfirm() {
 
   try {
     const input = await ElMessageBox.prompt(
-      `请输入批次号（MM-SS）确认审核${hintText}`,
+      `请输入批次号（MM-SS，可追加中文/字母/数字）确认审核${hintText}`,
       '审核确认',
       {
         inputPlaceholder: placeholder,
         confirmButtonText: '下一步',
         cancelButtonText: '取消',
-        inputPattern: /^\d{2}-\d{2}$/,
-        inputErrorMessage: '格式必须为 MM-SS'
+        inputPattern: /^\d{2}-\d{2}[\u4e00-\u9fa5A-Za-z0-9_-]{0,20}$/,
+        inputErrorMessage: '格式必须以 MM-SS 开头，可追加 20 字以内中文/字母/数字'
       })
     
     const batchCode = input.value
@@ -1116,9 +1115,12 @@ async function onUnitMoved(evt: any, targetBatch: any) {
     return
   }
   if (isUnitFamilyMismatch(unit, targetBatch)) {
-    ElMessage.warning('仅允许同系列机型在同系列批次内移动')
-    await forceRefresh()
-    return
+    const canContractFirstOccupy = sourceBatchId && sourceBatchId !== targetBatch.batch_id && hasUnboundPlaceholder(targetBatch)
+    if (!canContractFirstOccupy) {
+      ElMessage.warning('仅允许同系列机型在同系列批次内移动')
+      await forceRefresh()
+      return
+    }
   }
   const sourceBatch = batchStore.batches.find((b: any) => b.batch_id === sourceBatchId)
   if (sourceBatch && laneKeyOfBatch(sourceBatch) !== laneKeyOfBatch(targetBatch) && !canMoveAcrossLanes(sourceBatch, targetBatch, unit)) {
@@ -1607,4 +1609,5 @@ onUnmounted(() => {
   border-style: dashed;
   opacity: 0.72;
 }
+
 </style>

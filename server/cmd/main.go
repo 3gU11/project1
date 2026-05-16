@@ -46,7 +46,7 @@ func main() {
 	recomputeSvc := service.NewRecomputeSvc(lockMgr, predictor, hub)
 
 	bh := handler.NewBatchHandler(db, batchRepo, unitRepo, batchSvc)
-	uh := handler.NewUnitHandler(db, unitRepo, batchRepo, rushSvc, cfg.PythonURL, cfg.InternalToken)
+	uh := handler.NewUnitHandler(db, unitRepo, batchRepo, rushSvc, cfg.PythonURL, cfg.InternalToken, hub)
 	fh := handler.NewForecastHandler(db, recomputeSvc)
 	lh := handler.NewLineHandler(db, batchSvc)
 	ch := handler.NewCapacityHandler(configRepo)

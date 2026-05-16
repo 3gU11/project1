@@ -4,6 +4,7 @@ from datetime import datetime
 import asyncio
 import logging
 import os
+import requests
 import pandas as pd
 import re
 import tempfile
@@ -14,7 +15,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from config import MACHINE_ARCHIVE_ABS_DIR
+from config import MACHINE_ARCHIVE_ABS_DIR, GO_SANDBOX_URL
 from core.file_manager import audit_log
 from crud.audit_logs import append_audit_log
 from crud.inventory import (
@@ -48,6 +49,33 @@ def _assert_model_enabled(model_name: str) -> None:
         raise HTTPException(status_code=422, detail="机型不能为空")
     if not is_model_enabled(model):
         raise HTTPException(status_code=422, detail=f"机型不在字典中或未启用: {model}")
+def _sync_machine_edit_to_units(serial_nos: list[str]) -> int:
+    sns = [str(x).strip() for x in serial_nos if str(x).strip()]
+    if not sns:
+        return 0
+    updated = 0
+    with get_engine().begin() as conn:
+        for sn in sns:
+            result = conn.execute(
+                text(
+                    """
+                    UPDATE units u
+                    JOIN finished_goods_data fg ON TRIM(fg.`流水号`) = :sn
+                    SET
+                        u.order_remark = COALESCE(fg.`合同备注`, ''),
+                        u.model_type = CASE
+                            WHEN COALESCE(TRIM(fg.`机型`), '') <> '' THEN fg.`机型`
+                            ELSE u.model_type
+                        END,
+                        u.updated_at = NOW()
+                    WHERE TRIM(COALESCE(u.serial_no, '')) = :sn
+                       OR TRIM(COALESCE(u.forecast_serial_no, '')) = :sn
+                    """
+                ),
+                {"sn": sn},
+            )
+            updated += int(result.rowcount or 0)
+    return updated
 
 
 class LayoutPayload(BaseModel):
@@ -218,6 +246,10 @@ def machine_inline_update(
             
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         save_data(df)
+        try:
+            _sync_machine_edit_to_units([sn])
+        except Exception as e:
+            logging.error(f"Failed to sync machine edit to units for SN {sn}: {e}")
         
         if changes:
             append_audit_log(
@@ -228,6 +260,12 @@ def machine_inline_update(
                 biz_type="机台",
                 content=f"修改机台 {sn}；变更内容：{', '.join(changes)}"
             )
+            
+        # Notify Go Sandbox for real-time UI refresh
+        try:
+            requests.post(f"{GO_SANDBOX_URL}/api/units/lookup/notify-update?sn={sn}", timeout=2)
+        except Exception as e:
+            logging.error(f"Failed to notify Go sandbox for SN {sn}: {e}")
             
         return {"message": "更新成功"}
     except HTTPException:
@@ -271,6 +309,14 @@ def machine_batch_update(
             
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         save_data(df)
+        try:
+            _sync_machine_edit_to_units(sns)
+        except Exception as e:
+            logging.error(f"Failed to sync machine batch edit to units: {e}")
+        # Notify Go Sandbox
+        for _sn in sns:
+            try: requests.post(f"{GO_SANDBOX_URL}/api/units/lookup/notify-update?sn={_sn}", timeout=1)
+            except: pass
         
         if changes:
             append_audit_log(

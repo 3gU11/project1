@@ -56,38 +56,84 @@
               <strong>库存机型分布</strong>
               <span>库存中 + 待入库，共 {{ inventoryTotal }} 台</span>
             </div>
-            <el-table
-              :data="inventoryRatioRows"
-              size="small"
-              height="300"
-              stripe
-              v-loading="inventoryLoading"
-              empty-text="暂无库存数据"
-            >
-              <el-table-column prop="name" label="机型" min-width="150" show-overflow-tooltip />
-              <el-table-column label="数量" width="72" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
-                  <span v-else style="color: #dcdfe6;">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="加高" width="72" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
-                  <span v-else style="color: #dcdfe6;">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="占比" width="86" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
-                  <span v-else style="color: #dcdfe6;">-</span>
-                </template>
-              </el-table-column>
-            </el-table>
+            <div class="inventory-table-shell">
+              <el-table
+                :data="inventoryRatioRows"
+                size="small"
+                height="300"
+                stripe
+                v-loading="inventoryLoading"
+                empty-text="暂无库存数据"
+              >
+                <el-table-column prop="name" label="机型" min-width="150" show-overflow-tooltip />
+                <el-table-column label="数量" width="72" align="center">
+                  <template #default="{ row }">
+                    <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
+                    <span v-else style="color: #dcdfe6;">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="加高" width="72" align="center">
+                  <template #default="{ row }">
+                    <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
+                    <span v-else style="color: #dcdfe6;">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="占比" width="86" align="center">
+                  <template #default="{ row }">
+                    <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
+                    <span v-else style="color: #dcdfe6;">-</span>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <button class="inventory-zoom-overlay" type="button" @click="inventoryPanelOpen = true">
+                <span class="inventory-zoom-icon"></span>
+                <span>放大查看</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </div>
+
+    <transition name="inventory-panel-pop">
+      <div v-if="inventoryPanelOpen" class="inventory-zoom-backdrop" @click.self="inventoryPanelOpen = false">
+        <div class="inventory-ratio-panel inventory-expanded-panel">
+          <div class="inventory-ratio-header">
+            <strong>库存机型分布</strong>
+            <span>库存中 + 待入库，共 {{ inventoryTotal }} 台</span>
+            <button class="inventory-close-button" type="button" @click="inventoryPanelOpen = false">关闭</button>
+          </div>
+          <el-table
+            :data="inventoryRatioRows"
+            size="small"
+            height="calc(100vh - 190px)"
+            stripe
+            v-loading="inventoryLoading"
+            empty-text="暂无库存数据"
+          >
+            <el-table-column prop="name" label="机型" min-width="220" show-overflow-tooltip />
+            <el-table-column label="数量" width="120" align="center">
+              <template #default="{ row }">
+                <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="加高" width="120" align="center">
+              <template #default="{ row }">
+                <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="占比" width="140" align="center">
+              <template #default="{ row }">
+                <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -135,6 +181,7 @@ const saving = ref(false)
 const msg = ref('')
 const msgColor = ref('#67c23a')
 const expanded = ref(true)
+const inventoryPanelOpen = ref(false)
 const inventoryLoading = ref(false)
 const inventoryTotal = ref(0)
 const inventoryRatioRows = ref<Array<{ name: string; current_qty: number; current_pct: number }>>([])
@@ -557,9 +604,130 @@ onMounted(async () => {
 .ratio-item { display: flex; align-items: center; gap: 4px; }
 .sum-text { font-size: 12px; color: #888; }
 .message { margin-left: 8px; font-size: 13px; }
+.inventory-table-shell {
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.inventory-zoom-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: none;
+  background: rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(3px);
+  color: #0f172a;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.inventory-table-shell:hover .inventory-zoom-overlay {
+  opacity: 1;
+}
+.inventory-zoom-icon {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border: 4px solid #2563eb;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.24);
+}
+.inventory-zoom-icon::after {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 4px;
+  right: -16px;
+  bottom: 4px;
+  border-radius: 999px;
+  background: #2563eb;
+  transform: rotate(45deg);
+  transform-origin: center;
+}
+.inventory-zoom-overlay span:last-child {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+}
+.inventory-zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 82px 36px 28px;
+  background: transparent;
+  pointer-events: auto;
+}
+.inventory-expanded-panel {
+  width: min(920px, calc(100vw - 72px));
+  max-height: calc(100vh - 110px);
+  overflow: hidden;
+  padding: 14px;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.22);
+  transform-origin: top right;
+  pointer-events: auto;
+}
+.inventory-close-button {
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #fff;
+  color: #606266;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.inventory-close-button:hover {
+  color: #2563eb;
+  border-color: #93c5fd;
+}
+
+.inventory-panel-pop-enter-active,
+.inventory-panel-pop-leave-active {
+  transition:
+    opacity 0.24s ease,
+    transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1),
+    clip-path 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.inventory-panel-pop-enter-from,
+.inventory-panel-pop-leave-to {
+  opacity: 0;
+  transform: translate(26px, -20px) scale(0.72);
+  clip-path: polygon(100% 0, 100% 0, 100% 0, 100% 0);
+}
+
+.inventory-panel-pop-enter-to,
+.inventory-panel-pop-leave-from {
+  opacity: 1;
+  transform: translate(0, 0) scale(1);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+}
+
 @media (max-width: 1200px) {
   .ratio-content-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .inventory-zoom-backdrop {
+    padding: 72px 12px 18px;
+  }
+
+  .inventory-expanded-panel {
+    width: 100%;
+    max-height: calc(100vh - 90px);
   }
 }
 </style>

@@ -172,6 +172,7 @@
         </el-table-column>
         <el-table-column prop="batchLabel" label="批次号" min-width="160" />
         <el-table-column prop="modelType" label="机型" min-width="180" />
+        <el-table-column prop="expectedInbound" label="预计入库时间" min-width="180" />
         <el-table-column prop="ordered" label="已订数量" width="130" align="right">
           <template #default="{ row }">
             <span class="stat-number ordered">{{ row.ordered }}</span>
@@ -220,7 +221,7 @@
 
     <el-drawer v-model="editVisible" title="信息强改" size="400px">
       <el-form v-if="editingUnit" label-width="80px" size="small">
-        <el-form-item label="合同号"><el-input v-model="editForm.contract_no" /></el-form-item>
+        <el-form-item label="合同号"><el-input v-model="editForm.contract_no" disabled /></el-form-item>
         <el-form-item label="客户"><el-input v-model="editForm.customer" /></el-form-item>
         <el-form-item label="经销商"><el-input v-model="editForm.dealer_name" /></el-form-item>
         <el-form-item label="机型"><el-input v-model="editForm.model_type" disabled /></el-form-item>
@@ -290,21 +291,34 @@ type KanbanStatRow = {
   batchLabel: string
   batchOrder: number
   modelType: string
+  expectedInbound: string
   ordered: number
   stock: number
   total: number
 }
 
-function addUnitToStats(group: Map<string, { ordered: number; stock: number }>, unit: any) {
+function unitExpectedInbound(unit: any, fallback: string) {
+  const date = fmtDate(unit?.batch_expected_inbound_date || unit?.fg_expected_inbound_date)
+  if (date && date !== '-') return date
+  return fallback
+}
+
+function addUnitToStats(
+  group: Map<string, { modelType: string; expectedInbound: string; ordered: number; stock: number }>,
+  unit: any,
+  fallbackInbound: string
+) {
   const modelType = String(unit?.model_type || '').trim()
   if (!modelType) return
-  const current = group.get(modelType) || { ordered: 0, stock: 0 }
+  const expectedInbound = unitExpectedInbound(unit, fallbackInbound)
+  const key = `${modelType}__${expectedInbound}`
+  const current = group.get(key) || { modelType, expectedInbound, ordered: 0, stock: 0 }
   if (String(unit?.contract_no || '').trim()) {
     current.ordered += 1
   } else {
     current.stock += 1
   }
-  group.set(modelType, current)
+  group.set(key, current)
 }
 
 function buildStatRows(
@@ -312,21 +326,24 @@ function buildStatRows(
   lineId: string,
   batchKey: string,
   batchLabel: string,
+  batch: any,
   units: any[],
   groupOrder: number,
   batchOrder: number
 ): KanbanStatRow[] {
-  const group = new Map<string, { ordered: number; stock: number }>()
-  for (const unit of units) addUnitToStats(group, unit)
-  return Array.from(group.entries())
-    .map(([modelType, counts]) => ({
+  const fallbackInbound = batchExpectedInboundLabel(batch, units)
+  const group = new Map<string, { modelType: string; expectedInbound: string; ordered: number; stock: number }>()
+  for (const unit of units) addUnitToStats(group, unit, fallbackInbound)
+  return Array.from(group.values())
+    .map((counts) => ({
       groupName,
       lineId,
       groupOrder,
       batchKey,
       batchLabel,
       batchOrder,
-      modelType,
+      modelType: counts.modelType,
+      expectedInbound: counts.expectedInbound,
       ordered: counts.ordered,
       stock: counts.stock,
       total: counts.ordered + counts.stock
@@ -336,6 +353,18 @@ function buildStatRows(
 
 function batchIdentity(batch: any, fallback: string) {
   return String(batch?.batch_id || batch?.id || fallback).trim()
+}
+
+function batchExpectedInboundLabel(batch: any, units: any[]) {
+  const dates = Array.from(new Set(
+    [
+      batch?.expected_inbound_date,
+      ...units.map((u: any) => u?.batch_expected_inbound_date || u?.fg_expected_inbound_date)
+    ]
+      .map((value: any) => fmtDate(value))
+      .filter((date: string) => date && date !== '-')
+  ))
+  return dates.join(', ')
 }
 
 const queueBatches = computed(() => {
@@ -350,9 +379,14 @@ const kanbanStatsRows = computed<KanbanStatRow[]>(() => {
     const units = Array.isArray(line?.units) ? line.units : []
     const batches = Array.isArray(line?.batches) ? line.batches : []
     const batchById = new Map<string, any>()
+    const batchByCode = new Map<string, any>()
     batches.forEach((batch: any, batchIndex: number) => {
       const id = batchIdentity(batch, `line-${index}-batch-${batchIndex}`)
       if (id) batchById.set(id, batch)
+      const batchNo = String(batch?.batch_no || '').trim()
+      if (batchNo) batchByCode.set(batchNo, batch)
+      const code = String(displayBatchCode(batch) || '').trim()
+      if (code) batchByCode.set(code, batch)
     })
 
     if (!batchById.size && batches.length === 1) {
@@ -369,13 +403,14 @@ const kanbanStatsRows = computed<KanbanStatRow[]>(() => {
     })
 
     Array.from(unitsByBatch.entries()).forEach(([batchId, batchUnits], batchIndex) => {
-      const batch = batchById.get(batchId)
+      const batch = batchById.get(batchId) || batchByCode.get(batchId)
       const batchLabel = batch ? displayBatchCode(batch) : (batchId === 'unknown' ? '-' : batchId)
       rows.push(...buildStatRows(
         String(line?.line_name || line?.production_line_id || '未命名产线'),
         String(line?.production_line_id || ''),
         batchId,
         batchLabel,
+        batch,
         batchUnits,
         index,
         batchIndex
@@ -391,6 +426,7 @@ const kanbanStatsRows = computed<KanbanStatRow[]>(() => {
       '',
       batchId,
       displayBatchCode(batch),
+      batch,
       units,
       Number.MAX_SAFE_INTEGER,
       index
@@ -420,6 +456,14 @@ function statsSpanMethod({ rowIndex, columnIndex }: { rowIndex: number; columnIn
   if (columnIndex === 1) {
     const rowspan = statsRowspan(rowIndex, (row, current) =>
       row.groupName === current.groupName && row.batchKey === current.batchKey
+    )
+    return { rowspan, colspan: rowspan ? 1 : 0 }
+  }
+  if (columnIndex === 3) {
+    const rowspan = statsRowspan(rowIndex, (row, current) =>
+      row.groupName === current.groupName &&
+      row.batchKey === current.batchKey &&
+      row.expectedInbound === current.expectedInbound
     )
     return { rowspan, colspan: rowspan ? 1 : 0 }
   }
@@ -839,7 +883,7 @@ async function saveEdit() {
   if (!editingUnit.value) return
   saving.value = true
   try {
-    const { model_type, ...editableFields } = editForm.value
+    const { model_type, contract_no, ...editableFields } = editForm.value
     await sandboxApi.updateUnit(editingUnit.value.unit_id, editableFields)
     ElMessage.success('已保存并锁定')
     editVisible.value = false

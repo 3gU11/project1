@@ -315,25 +315,51 @@ async def sync_batch_preview(request: Request, batch_id: str):
 
 @router.api_route("/batches/last-batch-code", methods=["GET"])
 async def last_batch_code(request: Request):
-    """Return the last used batch_code (MM-SS) for hint in confirm dialog.
-    Looks up finished_goods_data: find the record with the highest 流水号,
-    then return its 批次号 as the reference for the next batch.
-    """
+    """Return the latest business batch_code for confirm dialog hints."""
     user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
     _ensure_permission(user_ctx, "GET", "/api/batches/last-batch-code")
 
     engine = get_engine()
     with engine.connect() as conn:
+        # The confirmation prompt should follow the real finished-goods stream.
+        # Sandbox/import rows are only fallbacks because they can contain old forecast history.
         row = conn.execute(
             text(
-                "SELECT `批次号` FROM finished_goods_data "
-                "WHERE `批次号` IS NOT NULL AND `批次号` != '' "
-                "ORDER BY `流水号` DESC LIMIT 1"
+                "SELECT TRIM(CONVERT(`批次号` USING utf8mb4)) COLLATE utf8mb4_unicode_ci AS code "
+                "FROM finished_goods_data "
+                "WHERE `批次号` IS NOT NULL "
+                "AND TRIM(`批次号`) <> '' "
+                "AND TRIM(CONVERT(`批次号` USING utf8mb4)) COLLATE utf8mb4_unicode_ci REGEXP '^[0-9]{2}-[0-9]{2}' "
+                "ORDER BY `更新时间` DESC, `流水号` DESC "
+                "LIMIT 1"
             ),
         ).fetchone()
+        if not row:
+            row = conn.execute(
+                text(
+                    "SELECT TRIM(CONVERT(batch_code USING utf8mb4)) COLLATE utf8mb4_unicode_ci AS code "
+                    "FROM batches "
+                    "WHERE batch_code IS NOT NULL "
+                    "AND TRIM(batch_code) <> '' "
+                    "AND TRIM(CONVERT(batch_code USING utf8mb4)) COLLATE utf8mb4_unicode_ci REGEXP '^[0-9]{2}-[0-9]{2}' "
+                    "ORDER BY updated_at DESC, created_at DESC "
+                    "LIMIT 1"
+                ),
+            ).fetchone()
+        if not row:
+            row = conn.execute(
+                text(
+                    "SELECT TRIM(CONVERT(`批次号` USING utf8mb4)) COLLATE utf8mb4_unicode_ci AS code "
+                    "FROM plan_import "
+                    "WHERE `批次号` IS NOT NULL "
+                    "AND TRIM(`批次号`) <> '' "
+                    "AND TRIM(CONVERT(`批次号` USING utf8mb4)) COLLATE utf8mb4_unicode_ci REGEXP '^[0-9]{2}-[0-9]{2}' "
+                    "ORDER BY `预计入库时间` DESC, `流水号` DESC "
+                    "LIMIT 1"
+                ),
+            ).fetchone()
         last_code = str(row[0]).strip() if row and row[0] else ""
         return JSONResponse(content={"last_batch_code": last_code})
-
 
 @router.api_route("/batches/{batch_id}/revoke", methods=["POST"])
 async def revoke_batch(request: Request, batch_id: str):

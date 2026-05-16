@@ -2,6 +2,7 @@ package repo
 
 import (
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -27,22 +28,81 @@ func (r *UnitRepo) CreateBatchInTx(tx *gorm.DB, units []model.Unit) error {
 func (r *UnitRepo) GetByBatch(batchID string) ([]model.Unit, error) {
 	var units []model.Unit
 	err := r.db.Table("units").
-		Select("units.*, md.model_family AS model_family, fg.状态 AS fg_status").
+		Select(`
+			units.*, 
+			md.model_family AS model_family, 
+			fg.状态 AS fg_status,
+			fg.合同备注 AS fg_remark,
+			fg.机型 AS fg_model,
+			fg.合同号 AS fg_contract_no,
+			fg.客户 AS fg_customer,
+			fg.代理商 AS fg_dealer,
+			fg.占用订单号 AS fg_sales_id
+		`).
 		Joins("LEFT JOIN model_dictionary md ON md.model_name = units.model_type COLLATE utf8mb4_general_ci").
-		Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = units.serial_no COLLATE utf8mb4_general_ci").
+		Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = COALESCE(units.serial_no, units.forecast_serial_no) COLLATE utf8mb4_general_ci").
 		Where("units.batch_id = ?", batchID).
 		Order("units.slot_index ASC").
 		Find(&units).Error
+	if err == nil {
+		for i := range units {
+			r.mergeFgInfo(&units[i])
+		}
+	}
 	return units, err
 }
 
 func (r *UnitRepo) GetByID(unitID string) (*model.Unit, error) {
 	var u model.Unit
-	err := r.db.First(&u, "unit_id = ?", unitID).Error
+	err := r.db.Table("units").
+		Select(`
+			units.*,
+			fg.状态 AS fg_status,
+			fg.合同备注 AS fg_remark,
+			fg.机型 AS fg_model,
+			fg.合同号 AS fg_contract_no,
+			fg.客户 AS fg_customer,
+			fg.代理商 AS fg_dealer,
+			fg.占用订单号 AS fg_sales_id
+		`).
+		Joins("LEFT JOIN finished_goods_data fg ON fg.流水号 = COALESCE(units.serial_no, units.forecast_serial_no) COLLATE utf8mb4_general_ci").
+		Where("units.unit_id = ?", unitID).
+		First(&u).Error
 	if err != nil {
 		return nil, err
 	}
+	r.mergeFgInfo(&u)
 	return &u, nil
+}
+
+func (r *UnitRepo) mergeFgInfo(u *model.Unit) {
+	// Support both bound serial_no and predicted forecast_serial_no
+	hasSN := u.SerialNo != nil && *u.SerialNo != ""
+	hasForecast := u.ForecastSerialNo != nil && *u.ForecastSerialNo != ""
+	
+	if !hasSN && !hasForecast {
+		return
+	}
+	// IF it's linked to an SN/ForecastSN, the Main System (FG) is the source of truth.
+	// We override even if FG info is empty, because the user expects the Kanban to match the Main System.
+	if u.FgRemark != nil {
+		u.OrderRemark = u.FgRemark
+	}
+	if u.FgModel != nil && strings.TrimSpace(*u.FgModel) != "" {
+		u.ModelType = *u.FgModel
+	}
+	if u.FgContractNo != nil {
+		u.ContractNo = u.FgContractNo
+	}
+	if u.FgCustomer != nil {
+		u.Customer = u.FgCustomer
+	}
+	if u.FgDealer != nil {
+		u.DealerName = u.FgDealer
+	}
+	if u.FgSalesID != nil {
+		u.SalesID = u.FgSalesID
+	}
 }
 
 func (r *UnitRepo) LockForUpdate(tx *gorm.DB, unitID string) (*model.Unit, error) {
