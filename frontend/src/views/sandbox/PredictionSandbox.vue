@@ -197,7 +197,7 @@
     <el-drawer v-model="editVisible" title="信息强改" size="400px">
       <el-form v-if="editingUnit" label-width="80px" size="small">
         <el-form-item label="合同号">
-          <el-input v-model="editForm.contract_no" />
+          <el-input v-model="editForm.contract_no" disabled />
         </el-form-item>
         <el-form-item label="客户">
           <el-input v-model="editForm.customer" />
@@ -1174,7 +1174,8 @@ async function saveEdit() {
       ElMessage.warning('机型与批次系列不匹配，请选择同系列机型')
       return
     }
-    await sandboxApi.updateUnit(editingUnit.value.unit_id, editForm.value)
+    const { contract_no: _, ...data } = editForm.value as any
+    await sandboxApi.updateUnit(editingUnit.value.unit_id, data)
     ElMessage.success('已保存并锁定')
     editVisible.value = false
     refresh()

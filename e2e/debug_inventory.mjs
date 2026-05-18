@@ -5,7 +5,7 @@ import { chromium } from 'playwright-core';
   const page = await browser.newPage();
   
   await page.goto('http://localhost:3000');
-  await page.fill('input[placeholder="请输入账号"]', 'boss');
+  await page.fill('input[placeholder="请输入账号"]', 'admin');
   await page.fill('input[placeholder="请输入密码"]', '888');
   await page.click('button:has-text("登录")');
   await page.waitForSelector('text=当前用户：');

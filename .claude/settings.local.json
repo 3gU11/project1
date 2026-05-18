@@ -3,7 +3,18 @@
     "allow": [
       "Bash(go build *)",
       "Bash(grep -v \"// \\\\|//\\\\\"\")",
-      "Bash(mysql *)"
+      "Bash(mysql *)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/sandbox/units/transfer-swap -H \"Content-Type: application/json\" -H \"Authorization: Bearer test\" -d \"{\\\\\"urgent_unit_id\\\\\":\\\\\"test\\\\\",\\\\\"target_unit_id\\\\\":\\\\\"test2\\\\\"}\")",
+      "Bash(curl *)",
+      "Bash(/c/Users/zc123/AppData/Local/Programs/Python/Python313/python -c ' *)",
+      "Bash(rm -rf api/__pycache__ api/routes/__pycache__)",
+      "Bash(.venv/Scripts/python run_api.py)",
+      "Bash(netstat -ano)",
+      "Bash(awk '{print $5}')",
+      "Bash(read pid *)",
+      "Bash(cmd //c 'taskkill /F /PID __TRACKED_VAR__')",
+      "Bash(echo \"PID=$!\")",
+      "Bash(.venv/Scripts/python *)"
     ]
   }
 }

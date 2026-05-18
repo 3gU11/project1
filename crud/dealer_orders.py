@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import OrderedDict
 from math import ceil
 from typing import Any
@@ -373,7 +374,68 @@ def approve_dealer_order(order_no: str, reviewer: str, note: str = "") -> dict:
             ),
             {"order_no": order_no, "reviewer": reviewer, "note": note},
         )
+        # Sync batch_no to factory_plan
+        for item in items:
+            batch_no = str(item.get("batch_no") or "").strip()
+            if not batch_no or batch_no == "FINISHED-STOCK":
+                continue
+            _merge_batch_to_factory_plan(
+                conn,
+                model=str(item.get("model") or "").strip(),
+                batch_no=batch_no,
+                quantity=int(item.get("quantity") or 0),
+                customer_name=str(item.get("customer_name") or "").strip(),
+                dealer_name=str(item.get("dealer_name") or "").strip(),
+                due_date=str(item.get("delivery_date") or "").strip(),
+            )
     return preview_dealer_order(order_no)
+
+
+def _merge_batch_to_factory_plan(conn, model: str, batch_no: str, quantity: int, customer_name: str, dealer_name: str, due_date: str):
+    """将经销商订单的批次信息合并到 factory_plan 的 指定批次/来源 JSON 字段"""
+    if not model or not batch_no or quantity <= 0:
+        return
+
+    # Find existing factory_plan row by model + customer_name
+    rows = conn.execute(
+        text("SELECT id, `指定批次/来源` FROM factory_plan WHERE `机型` = :model AND `客户名` = :customer LIMIT 1"),
+        {"model": model, "customer": customer_name},
+    ).fetchall()
+
+    if rows:
+        row_id = rows[0][0]
+        existing = rows[0][1]
+        if isinstance(existing, str):
+            try:
+                existing = json.loads(existing)
+            except (json.JSONDecodeError, TypeError):
+                existing = {}
+        alloc = existing if isinstance(existing, dict) else {}
+        # Merge: alloc[model][batch_no] += quantity
+        model_alloc = alloc.get(model, {})
+        if not isinstance(model_alloc, dict):
+            model_alloc = {}
+        model_alloc[batch_no] = model_alloc.get(batch_no, 0) + quantity
+        alloc[model] = model_alloc
+        conn.execute(
+            text("UPDATE factory_plan SET `指定批次/来源` = :alloc WHERE id = :id"),
+            {"alloc": json.dumps(alloc, ensure_ascii=False), "id": row_id},
+        )
+    else:
+        alloc = {model: {batch_no: quantity}}
+        conn.execute(
+            text(
+                "INSERT INTO factory_plan (`指定批次/来源`, `机型`, `客户名`, `代理商`, `要求交期`, `状态`, `合同号`) "
+                "VALUES (:alloc, :model, :customer, :dealer, :due, '待规划', '')"
+            ),
+            {
+                "alloc": json.dumps(alloc, ensure_ascii=False),
+                "model": model,
+                "customer": customer_name,
+                "dealer": dealer_name,
+                "due": due_date,
+            },
+        )
 
 
 def reject_dealer_order(order_no: str, reviewer: str, reason: str = "") -> dict:

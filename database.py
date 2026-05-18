@@ -287,6 +287,60 @@ def init_mysql_tables():
             INDEX `idx_rush_order_queue_contract` (`contract_no`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
+        """
+        CREATE TABLE IF NOT EXISTS dealer_orders (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+          order_no VARCHAR(64) NOT NULL,
+          line_no INT NOT NULL DEFAULT 1,
+          dealer_id VARCHAR(128) NOT NULL,
+          dealer_name VARCHAR(255) NOT NULL,
+          dealer_phone VARCHAR(64) DEFAULT '',
+          customer_name VARCHAR(255) NOT NULL,
+          contact_name VARCHAR(128) NOT NULL,
+          contact_phone VARCHAR(64) NOT NULL,
+          model VARCHAR(255) NOT NULL,
+          batch_no VARCHAR(255) DEFAULT '',
+          eta VARCHAR(64) DEFAULT '',
+          inventory_type VARCHAR(32) DEFAULT '',
+          quantity INT NOT NULL DEFAULT 1,
+          approved_qty INT NOT NULL DEFAULT 0,
+          allocated_qty INT NOT NULL DEFAULT 0,
+          delivery_date VARCHAR(64) DEFAULT '',
+          remark TEXT,
+          status VARCHAR(32) NOT NULL DEFAULT 'pending',
+          reviewed_at DATETIME NULL,
+          reviewed_by VARCHAR(128) DEFAULT '',
+          contract_no VARCHAR(128) DEFAULT '',
+          v7_order_no VARCHAR(128) DEFAULT '',
+          review_note TEXT,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_dealer_order_line (order_no, line_no),
+          INDEX idx_dealer_order_no (order_no),
+          INDEX idx_dealer_id (dealer_id),
+          INDEX idx_status (status),
+          INDEX idx_batch_model_status (batch_no, model, status),
+          INDEX idx_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wechat_batch_summary (
+          summary_id CHAR(32) NOT NULL,
+          batch_no VARCHAR(100) NOT NULL,
+          expected_inbound_time DATETIME NULL,
+          model VARCHAR(100) NOT NULL,
+          quantity INT NOT NULL DEFAULT 0,
+          批次号 VARCHAR(100) NOT NULL,
+          预计入库时间 DATETIME NULL,
+          机型 VARCHAR(100) NOT NULL,
+          数量 INT NOT NULL DEFAULT 0,
+          更新时间 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (summary_id),
+          INDEX idx_wbs_batch (批次号),
+          INDEX idx_wbs_inbound (预计入库时间),
+          INDEX idx_wbs_model (机型)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
     ]
     with engine.begin() as conn:
         def _index_exists(table_name, index_name):
@@ -737,7 +791,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 
 def _ensure_schema_version_table(conn):
@@ -1131,6 +1185,63 @@ def init_mysql_tables_v2():
                 "AND COALESCE(TRIM(`订单号`), '') <> ''"
             ))
             _record_schema_version(conn, 8, "normalize planned contracts linked to orders")
+
+        if current_version < 9:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS dealer_orders (
+                  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  order_no VARCHAR(64) NOT NULL,
+                  line_no INT NOT NULL DEFAULT 1,
+                  dealer_id VARCHAR(128) NOT NULL,
+                  dealer_name VARCHAR(255) NOT NULL,
+                  dealer_phone VARCHAR(64) DEFAULT '',
+                  customer_name VARCHAR(255) NOT NULL,
+                  contact_name VARCHAR(128) NOT NULL,
+                  contact_phone VARCHAR(64) NOT NULL,
+                  model VARCHAR(255) NOT NULL,
+                  batch_no VARCHAR(255) DEFAULT '',
+                  eta VARCHAR(64) DEFAULT '',
+                  inventory_type VARCHAR(32) DEFAULT '',
+                  quantity INT NOT NULL DEFAULT 1,
+                  approved_qty INT NOT NULL DEFAULT 0,
+                  allocated_qty INT NOT NULL DEFAULT 0,
+                  delivery_date VARCHAR(64) DEFAULT '',
+                  remark TEXT,
+                  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                  reviewed_at DATETIME NULL,
+                  reviewed_by VARCHAR(128) DEFAULT '',
+                  contract_no VARCHAR(128) DEFAULT '',
+                  v7_order_no VARCHAR(128) DEFAULT '',
+                  review_note TEXT,
+                  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uq_dealer_order_line (order_no, line_no),
+                  INDEX idx_dealer_order_no (order_no),
+                  INDEX idx_dealer_id (dealer_id),
+                  INDEX idx_status (status),
+                  INDEX idx_batch_model_status (batch_no, model, status),
+                  INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS wechat_batch_summary (
+                  summary_id CHAR(32) NOT NULL,
+                  batch_no VARCHAR(100) NOT NULL,
+                  expected_inbound_time DATETIME NULL,
+                  model VARCHAR(100) NOT NULL,
+                  quantity INT NOT NULL DEFAULT 0,
+                  批次号 VARCHAR(100) NOT NULL,
+                  预计入库时间 DATETIME NULL,
+                  机型 VARCHAR(100) NOT NULL,
+                  数量 INT NOT NULL DEFAULT 0,
+                  更新时间 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (summary_id),
+                  INDEX idx_wbs_batch (批次号),
+                  INDEX idx_wbs_inbound (预计入库时间),
+                  INDEX idx_wbs_model (机型)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            _record_schema_version(conn, 9, "add dealer_orders and wechat_batch_summary tables")
 
         return {
             "initialized": True,

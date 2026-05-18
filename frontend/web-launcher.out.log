@@ -3,23 +3,10 @@
 > vite --host 0.0.0.0 --port 3000 --strictPort
 
 
-  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1014[22m[2m[0m ms[22m
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1130[22m[2m[0m ms[22m
 
   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3000[22m/[39m
   [32m➜[39m  [1mNetwork[22m: [36mhttp://172.21.8.43:[1m3000[22m/[39m
 [2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
-[2m09:30:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue[22m
-[2m09:30:23[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue[22m
-[2m09:30:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue?vue&type=style&index=0&scoped=c1a3b615&lang.css[22m
-[2m09:32:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue, /src/views/sandbox/PredictionSandbox.vue?vue&type=style&index=0&scoped=c1a3b615&lang.css[22m
-[2m09:32:48[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue[22m
-[2m09:33:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue?vue&type=style&index=0&scoped=e36fa8f8&lang.css[22m
-[2m09:34:25[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue, /src/components/sandbox/CapacityRatioEditor.vue?vue&type=style&index=0&scoped=e36fa8f8&lang.css[22m
-[2m09:35:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue?vue&type=style&index=0&scoped=e36fa8f8&lang.css[22m
-[2m09:38:58[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue[22m
-[2m09:39:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue[22m
-[2m09:40:03[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue?vue&type=style&index=0&scoped=e36fa8f8&lang.css[22m
-[2m09:42:49[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue?vue&type=style&index=0&scoped=e36fa8f8&lang.css[22m
-[2m09:44:27[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/CapacityRatioEditor.vue?vue&type=style&index=0&scoped=e36fa8f8&lang.css[22m
-[2m09:51:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue[22m
-[2m09:56:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue[22m
+[2m18:59:48[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue, /src/views/sandbox/PredictionSandbox.vue?vue&type=style&index=0&scoped=c1a3b615&lang.css[22m
+[2m19:00:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue[22m

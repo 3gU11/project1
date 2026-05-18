@@ -8,6 +8,11 @@
         </div>
       </div>
 
+      <div v-if="transferStore.selectingTargetFor" class="selecting-banner">
+        <span>请点击产线中的机台作为调货目标</span>
+        <el-button size="small" @click="transferStore.cancelTargetSelection()">取消</el-button>
+      </div>
+
       <div>
         <div v-for="line in lineStore.lines" :key="line.production_line_id" class="production-line" :data-line-id="line.production_line_id">
           <div class="line-header">
@@ -66,70 +71,54 @@
     </div>
 
     <div class="kanban-right">
-      <RushOrderEntry @auto-inserted="() => refreshAll({ silent: true })" />
-
-      <div style="margin-top:16px;">
-        <h3 style="font-size:14px;margin-bottom:8px;">
-          待排产队列
-          <el-select v-model="queueFilter" size="small" style="width:100px;margin-left:8px;" clearable placeholder="全部">
-            <el-option label="中小型G" value="中小型G" />
-            <el-option label="中小型XS" value="中小型XS" />
-            <el-option label="中大型XS" value="中大型XS" />
-            <el-option label="中小型AUTO" value="中小型AUTO" />
-            <el-option label="中大型AUTO" value="中大型AUTO" />
-            <el-option label="特殊" value="特殊" />
-          </el-select>
-        </h3>
-        <div>
-          <div v-for="batch in queueBatches" :key="batch.batch_id" style="margin-bottom:12px;">
-            <div style="font-size:12px;padding:6px 10px;background:#fafafa;border-radius:6px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                <span>
-                  <strong>[{{ displayBatchCategory(batch) }}] {{ displayBatchCode(batch) }}</strong>
-                  ({{ batch.units?.length || 0 }}/{{ batch.capacity }})
-                </span>
-                <el-button
-                  size="small" type="primary"
-                  @click="showAssignDialog(batch)"
-                  :disabled="assignableLinesForBatch(batch).length === 0"
-                >
-                  整批分配
-                </el-button>
-              </div>
-              <div style="font-size:11px;color:#999;">
-                {{ fmtDate(batch.due_date_start) }} ~ {{ fmtDate(batch.due_date_end) }}
-              </div>
-            </div>
-          </div>
-          <div v-if="queueBatches.length === 0 && !batchStore.loading" style="color:#ccc;text-align:center;padding:20px;font-size:13px;">
-            暂无待排产批次
-          </div>
-        </div>
+      <div class="sidebar-panel" style="flex: 3">
+        <RushOrderEntry @auto-inserted="() => refreshAll({ silent: true })" />
       </div>
 
-      <!-- 生产中批次列表 -->
-      <div style="margin-top:16px;">
-        <h3 style="font-size:14px;margin-bottom:8px;color:#1890ff;">
-          生产中批次 ({{ inProductionBatches.length }})
-        </h3>
-        <div>
-          <div v-for="batch in inProductionBatches" :key="batch.batch_id" style="margin-bottom:8px;">
-            <div style="font-size:12px;padding:6px 10px;background:#e6f7ff;border-radius:6px;border-left:3px solid #1890ff;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                <span>
-                  <strong>[{{ displayBatchCategory(batch) }}] {{ displayBatchCode(batch) }}</strong>
-                  ({{ batch.units?.length || 0 }}/{{ batch.capacity }})
-                </span>
-              </div>
-              <div style="font-size:11px;color:#999;">
-                {{ fmtDate(batch.due_date_start) }} ~ {{ fmtDate(batch.due_date_end) }}
+      <div class="sidebar-panel" style="flex: 2">
+        <TransferSwapPanel />
+      </div>
+
+      <div class="sidebar-panel" style="flex: 1">
+        <div class="queue-section">
+          <h3 class="queue-title">
+            待排产队列
+            <el-select v-model="queueFilter" size="small" style="width:100px;margin-left:8px;" clearable placeholder="全部">
+              <el-option label="中小型G" value="中小型G" />
+              <el-option label="中小型XS" value="中小型XS" />
+              <el-option label="中大型XS" value="中大型XS" />
+              <el-option label="中小型AUTO" value="中小型AUTO" />
+              <el-option label="中大型AUTO" value="中大型AUTO" />
+              <el-option label="特殊" value="特殊" />
+            </el-select>
+          </h3>
+          <div class="queue-scroll">
+            <div v-for="batch in queueBatches" :key="batch.batch_id" class="queue-batch-item">
+              <div class="queue-batch-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                  <span class="queue-batch-label">
+                    <strong>[{{ displayBatchCategory(batch) }}] {{ displayBatchCode(batch) }}</strong>
+                    ({{ batch.units?.length || 0 }}/{{ batch.capacity }})
+                  </span>
+                  <el-button
+                    size="small" type="primary"
+                    @click="showAssignDialog(batch)"
+                    :disabled="assignableLinesForBatch(batch).length === 0"
+                  >
+                    整批分配
+                  </el-button>
+                </div>
+                <div style="font-size:11px;color:#999;">
+                  {{ fmtDate(batch.due_date_start) }} ~ {{ fmtDate(batch.due_date_end) }}
+                </div>
               </div>
             </div>
-          </div>
-          <div v-if="inProductionBatches.length === 0" style="color:#ccc;text-align:center;padding:12px;font-size:13px;">
-            暂无生产中批次
+            <div v-if="queueBatches.length === 0 && !batchStore.loading" class="queue-empty">
+              暂无待排产批次
+            </div>
           </div>
         </div>
+
       </div>
     </div>
   </div>
@@ -239,6 +228,7 @@
     >
       <div class="ctx-item" @click="handleUnlock" v-if="contextMenu.unit?.is_locked">解锁</div>
       <div class="ctx-item" @click="handleMarkSpot">标记现货</div>
+      <div class="ctx-item ctx-item-primary" @click="handleTransferUrgent">急合同调货</div>
       <div class="ctx-item" @click="contextMenu.visible = false">取消</div>
     </div>
 </template>
@@ -251,15 +241,18 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useBatchStore } from '../../stores/useSandboxBatchStore'
 import { useLineStore } from '../../stores/useSandboxLineStore'
 import { useRushStore } from '../../stores/useSandboxRushStore'
+import { useTransferStore } from '../../stores/useSandboxTransferStore'
 import * as sandboxApi from '../../services/sandboxApi'
 import UnitCard from '../../components/sandbox/UnitCard.vue'
 import RushOrderEntry from '../../components/sandbox/RushOrderEntry.vue'
+import TransferSwapPanel from '../../components/sandbox/TransferSwapPanel.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
 import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
 
 const batchStore = useBatchStore()
 const lineStore = useLineStore()
 const rushStore = useRushStore()
+const transferStore = useTransferStore()
 
 const queueFilter = ref('')
 const statsPanelOpen = ref(false)
@@ -478,10 +471,6 @@ function statsRowClassName({ row, rowIndex }: { row: KanbanStatRow; rowIndex: nu
   else classes.push('stats-queue-row')
   return classes.join(' ')
 }
-
-const inProductionBatches = computed(() =>
-  batchStore.batches.filter((b: any) => b.status === 'In_Production')
-)
 
 const assignableLines = computed(() => assignableLinesForBatch(assigningBatch.value))
 
@@ -734,6 +723,12 @@ function isUnitSelected(lineId: string, unitId: string) {
 function toggleUnitSelection(lineId: string, unit: any) {
   const unitId = String(unit?.unit_id || '')
   if (!lineId || !unitId) return
+
+  if (transferStore.selectingTargetFor) {
+    handleTransferTargetSelected(unit)
+    return
+  }
+
   const current = selectedByLine.value[lineId] || []
   const next = current.includes(unitId)
     ? current.filter((id: string) => id !== unitId)
@@ -805,6 +800,25 @@ function getDroppedData(evt: any) {
 
 function isRushOrder(order: any) {
   return !!order && !!order.contract_no && (order.id !== undefined || order.__drag_type === 'rush-order')
+}
+
+async function handleTransferTargetSelected(targetUnit: any) {
+  const pairId = transferStore.selectingTargetFor
+  if (!pairId) return
+
+  if (targetUnit.is_locked) {
+    ElMessage.error('目标机台已锁定，无法调货')
+    return
+  }
+
+  try {
+    await transferStore.executeSwapWithTarget(pairId, targetUnit)
+    ElMessage.success('调货完成')
+    await forceRefreshAll()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '调货失败')
+    await forceRefreshAll()
+  }
 }
 
 function cleanupDroppedClone(line: any) {
@@ -927,6 +941,19 @@ async function handleMarkSpot() {
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error(e.message)
   }
+  contextMenu.value.visible = false
+}
+
+function handleTransferUrgent() {
+  const unit = contextMenu.value.unit
+  if (!unit) return
+  if (!unit.contract_no) {
+    ElMessage.warning('该单元无合同号，无法作为急合同调出')
+    contextMenu.value.visible = false
+    return
+  }
+  transferStore.addPair(unit, null)
+  ElMessage.success('已加入调货队列，拖拽到目标机台完成调货')
   contextMenu.value.visible = false
 }
 
@@ -1068,6 +1095,54 @@ onUnmounted(() => {
   font-size: 13px;
 }
 .ctx-item:hover { background: #f5f5f5; }
+.ctx-item-primary {
+  color: #e6a23c;
+  font-weight: 600;
+}
+.ctx-item-primary:hover { background: #fef9f0; }
+
+.queue-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.queue-section.in-production-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #ebeef5;
+}
+.queue-title {
+  font-size: 14px;
+  margin: 0 0 8px 0;
+  flex-shrink: 0;
+}
+.queue-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.queue-batch-item {
+  margin-bottom: 8px;
+}
+.queue-batch-card {
+  font-size: 12px;
+  padding: 6px 10px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+.queue-batch-card.in-production-card {
+  background: #e6f7ff;
+  border-left: 3px solid #1890ff;
+}
+.queue-batch-label {
+  font-size: 12px;
+}
+.queue-empty {
+  color: #ccc;
+  text-align: center;
+  padding: 12px;
+  font-size: 13px;
+}
 .line-inbound-date {
   color: #d4380d;
   background-color: #fff2e8;
@@ -1077,6 +1152,25 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: bold;
   margin-left: 8px;
+}
+
+.selecting-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  margin-bottom: 12px;
+  background: #fff7e6;
+  border: 2px solid #e6a23c;
+  border-radius: 8px;
+  color: #ad6800;
+  font-size: 14px;
+  font-weight: 600;
+  animation: pulse-border 1.2s ease-in-out infinite;
+}
+@keyframes pulse-border {
+  0%, 100% { border-color: #e6a23c; }
+  50% { border-color: #ffc53d; }
 }
 
 @media (max-width: 1280px) {

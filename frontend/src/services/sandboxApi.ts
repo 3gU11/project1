@@ -65,6 +65,15 @@ export const swapContent = (data: Record<string, any>) =>
 export const rushInsert = (data: Record<string, any>) =>
   apiPost(`${P}/units/rush-insert`, data)
 
+export const transferSwapUnits = (data: { urgent_unit_id: string; target_unit_id: string; reason?: string }) =>
+  apiPost(`${P}/units/transfer-swap`, data)
+
+export const findSwapAlternatives = (urgentUnitId: string) =>
+  apiPost(`${P}/units/transfer-swap/find-alternatives`, { urgent_unit_id: urgentUnitId })
+
+export const returnUnitToSandbox = (unitId: string, targetBatchId: string) =>
+  apiPost(`${P}/units/${unitId}/return-to-sandbox`, { target_batch_id: targetBatchId })
+
 export const getRushOrders = (params?: Record<string, any>) =>
   apiGet(`${P}/rush-orders`, { params })
 

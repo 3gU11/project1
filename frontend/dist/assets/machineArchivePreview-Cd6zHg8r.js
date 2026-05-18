@@ -1,1 +1,0 @@
-import{r}from"./request-C6FM_qQb.js";const s=async(n,t,o="thumbnail")=>{const e=await r.get(`/inventory/machine-archive/${encodeURIComponent(n)}/files/${encodeURIComponent(t)}/${o}`,{responseType:"blob"}),a=e.data instanceof Blob?e.data:new Blob([e.data]);return URL.createObjectURL(a)};export{s as g};

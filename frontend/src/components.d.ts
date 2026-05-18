@@ -59,6 +59,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     RushOrderEntry: typeof import('./components/sandbox/RushOrderEntry.vue')['default']
+    TransferSwapPanel: typeof import('./components/sandbox/TransferSwapPanel.vue')['default']
     UnitCard: typeof import('./components/sandbox/UnitCard.vue')['default']
     VirtualScrollList: typeof import('./components/VirtualScrollList.vue')['default']
   }

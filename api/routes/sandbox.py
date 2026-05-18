@@ -7,6 +7,8 @@ running on 127.0.0.1:3001, with V7 user identity headers injected.
 import os
 import logging
 import re
+import json
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 import asyncio
@@ -37,6 +39,12 @@ router = APIRouter(prefix="", dependencies=[Depends(get_current_user_token)])
 
 class RushOrderStatusPayload(BaseModel):
     status: str
+
+
+class TransferSwapPayload(BaseModel):
+    urgent_unit_id: str
+    target_unit_id: str
+    reason: str = ""
 
 
 def _build_go_headers(user_ctx: dict) -> dict:
@@ -221,6 +229,468 @@ def _normalize_model_family(value: object) -> str:
     if family in {"中小型G", "中小型XS", "中大型XS", "中小型AUTO", "中大型AUTO", "特殊"}:
         return family
     return ""
+
+
+def _major_family(model_type: str) -> str:
+    token = str(model_type or "").strip().upper()
+    if not token:
+        return ""
+    if "SPECIAL" in token:
+        return "SPECIAL"
+    if "AUTO" in token:
+        return "AUTO"
+    if "XS" in token:
+        return "XS"
+    return "G"
+
+
+def _to_date(v: object) -> Optional[date]:
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _find_slot_for_displaced(conn, displaced: dict, exclude_ids: set, due_buffer_days: int = 0):
+    """Search for a suitable slot for the displaced contract (must be exact same model).
+    Returns (unit_id, dict) or (None, None).
+    """
+    displaced_due = _to_date(displaced.get("due_date"))
+    if not displaced_due:
+        return None, None
+    displaced_model = str(displaced.get("model_type") or "").strip()
+    if not displaced_model:
+        return None, None
+
+    # 1) same production line empty slots (same model, same batch timeline)
+    displaced_line = displaced.get("production_line_id")
+    if displaced_line:
+        rows = conn.execute(
+            text("""
+                SELECT u.unit_id, u.model_type, u.slot_index,
+                       COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                WHERE u.production_line_id = :line
+                  AND TRIM(UPPER(u.model_type)) = TRIM(UPPER(:model))
+                  AND (u.contract_no IS NULL OR u.contract_no = '')
+                  AND u.is_locked = 0
+                  AND u.unit_id NOT IN :ex
+                ORDER BY u.slot_index ASC
+            """),
+            {"line": displaced_line, "model": displaced_model, "ex": tuple(exclude_ids) if exclude_ids else ("",)},
+        ).mappings().all()
+        for r in rows:
+            inbound = _to_date(r.get("slot_expected_inbound"))
+            if inbound and inbound > (displaced_due - timedelta(days=due_buffer_days)):
+                continue
+            return r["unit_id"], dict(r)
+
+    # 2) other production line empty slots (same model)
+    rows = conn.execute(
+        text("""
+            SELECT u.unit_id, u.model_type, u.slot_index, u.production_line_id,
+                   COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound,
+                   pl.line_name
+            FROM units u
+            JOIN batches b ON b.batch_id = u.batch_id
+            LEFT JOIN production_lines pl ON pl.line_id = u.production_line_id
+            WHERE u.production_line_id IS NOT NULL
+              AND TRIM(UPPER(u.model_type)) = TRIM(UPPER(:model))
+              AND (u.contract_no IS NULL OR u.contract_no = '')
+              AND u.is_locked = 0
+              AND u.unit_id NOT IN :ex
+            ORDER BY u.slot_index ASC
+        """),
+        {"model": displaced_model, "ex": tuple(exclude_ids) if exclude_ids else ("",)},
+    ).mappings().all()
+    for r in rows:
+        inbound = _to_date(r.get("slot_expected_inbound"))
+        if inbound and inbound > (displaced_due - timedelta(days=due_buffer_days)):
+            continue
+        return r["unit_id"], dict(r)
+
+    # 3) confirmed batch empty slots (same model)
+    rows = conn.execute(
+        text("""
+            SELECT u.unit_id, u.model_type, u.slot_index, u.batch_id, b.batch_code,
+                   COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+            FROM units u
+            JOIN batches b ON b.batch_id = u.batch_id
+            WHERE b.status = 'Confirmed'
+              AND TRIM(UPPER(u.model_type)) = TRIM(UPPER(:model))
+              AND (u.contract_no IS NULL OR u.contract_no = '')
+              AND u.is_locked = 0
+              AND u.unit_id NOT IN :ex
+            ORDER BY b.batch_no ASC, u.slot_index ASC
+        """),
+        {"model": displaced_model, "ex": tuple(exclude_ids) if exclude_ids else ("",)},
+    ).mappings().all()
+    for r in rows:
+        inbound = _to_date(r.get("slot_expected_inbound"))
+        if inbound and inbound > (displaced_due - timedelta(days=due_buffer_days)):
+            continue
+        return r["unit_id"], dict(r)
+
+    # 4) predicted batch empty slots (same model)
+    rows = conn.execute(
+        text("""
+            SELECT u.unit_id, u.model_type, u.slot_index, u.batch_id, b.batch_code,
+                   COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+            FROM units u
+            JOIN batches b ON b.batch_id = u.batch_id
+            WHERE b.status = 'Predicted'
+              AND TRIM(UPPER(u.model_type)) = TRIM(UPPER(:model))
+              AND (u.contract_no IS NULL OR u.contract_no = '')
+              AND u.is_locked = 0
+              AND u.unit_id NOT IN :ex
+            ORDER BY b.batch_no ASC, u.slot_index ASC
+        """),
+        {"model": displaced_model, "ex": tuple(exclude_ids) if exclude_ids else ("",)},
+    ).mappings().all()
+    for r in rows:
+        inbound = _to_date(r.get("slot_expected_inbound"))
+        if inbound and inbound > (displaced_due - timedelta(days=due_buffer_days)):
+            continue
+        return r["unit_id"], dict(r)
+
+    return None, None
+
+
+@router.api_route("/units/transfer-swap", methods=["POST"])
+async def transfer_swap_units(request: Request):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", "/api/units/transfer-swap")
+
+    body = await request.json()
+    urgent_id = str(body.get("urgent_unit_id", "") or "").strip()
+    target_id = str(body.get("target_unit_id", "") or "").strip()
+    reason = str(body.get("reason", "") or "").strip()
+    if not urgent_id or not target_id:
+        raise HTTPException(status_code=422, detail="unit id required")
+    if urgent_id == target_id:
+        raise HTTPException(status_code=422, detail="urgent and target cannot be same unit")
+
+    due_buffer_days = 0
+    actor = str(user_ctx.get("username") or "system")
+
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT
+                    u.unit_id, u.model_type, u.contract_no, u.customer, u.dealer_name,
+                    u.due_date, u.sales_id, u.order_remark, u.is_locked,
+                    u.production_line_id,
+                    COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                WHERE u.unit_id IN (:u1, :u2)
+                FOR UPDATE
+                """
+            ),
+            {"u1": urgent_id, "u2": target_id},
+        ).mappings().all()
+        if len(rows) != 2:
+            raise HTTPException(status_code=404, detail="unit not found")
+
+        row_map = {str(r["unit_id"]): r for r in rows}
+        urgent = row_map.get(urgent_id)
+        target = row_map.get(target_id)
+        if urgent is None or target is None:
+            raise HTTPException(status_code=404, detail="unit not found")
+
+        urgent_contract = str(urgent.get("contract_no") or "").strip()
+        target_contract = str(target.get("contract_no") or "").strip()
+        if not urgent_contract:
+            raise HTTPException(status_code=400, detail="urgent unit must have contract")
+        if bool(urgent.get("is_locked")) or bool(target.get("is_locked")):
+            raise HTTPException(status_code=400, detail="unit is locked")
+
+        if str(urgent.get("model_type") or "").strip().upper() != str(target.get("model_type") or "").strip().upper():
+            raise HTTPException(status_code=400, detail="model type mismatch, cannot swap different models")
+
+        urgent_due = _to_date(urgent.get("due_date"))
+        displaced_due = _to_date(target.get("due_date")) if target_contract else None
+        urgent_slot_expected = _to_date(urgent.get("slot_expected_inbound"))
+        target_slot_expected = _to_date(target.get("slot_expected_inbound"))
+        same_timeline = (urgent_slot_expected and target_slot_expected and urgent_slot_expected == target_slot_expected)
+
+        # 校验1：急单自身交期 vs 目标产线预计入库时间
+        # 目标产线预计入库时间必须早于急单交期，否则急单会延期交付
+        if urgent_due and target_slot_expected and not same_timeline:
+            if target_slot_expected > urgent_due:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"急单交期({urgent_due.strftime('%Y-%m-%d')})早于目标产线预计入库({target_slot_expected.strftime('%Y-%m-%d')})，调货将导致延期",
+                )
+
+        # 校验2：被置换合同交期 vs 急单原产线预计入库时间
+        # 挤占后原产线预计入库时间必须早于被置换合同交期
+        auto_placed_to = None  # track where displaced contract was auto-placed
+        if displaced_due and urgent_slot_expected and not same_timeline:
+            if urgent_slot_expected > (displaced_due - timedelta(days=due_buffer_days)):
+                # Auto-find alternative slot for displaced contract (same model only)
+                alt_id, alt_info = _find_slot_for_displaced(
+                    conn, dict(target), {urgent_id, target_id}, due_buffer_days
+                )
+                if alt_id:
+                    # Lock the alternative unit inside this transaction
+                    conn.execute(
+                        text("SELECT unit_id FROM units WHERE unit_id = :uid FOR UPDATE"),
+                        {"uid": alt_id},
+                    )
+                    auto_placed_to = alt_id
+
+        swap_fields = ["contract_no", "customer", "dealer_name", "due_date", "sales_id", "order_remark", "model_type"]
+        urgent_vals = {k: urgent.get(k) for k in swap_fields}
+        target_vals = {k: target.get(k) for k in swap_fields}
+
+        if auto_placed_to:
+            # 3-way: urgent→target, target→alt, clear urgent
+            # Write target's contract to alternative slot
+            conn.execute(
+                text("""
+                    UPDATE units
+                    SET contract_no=:contract_no, customer=:customer, dealer_name=:dealer_name, due_date=:due_date,
+                        sales_id=:sales_id, order_remark=:order_remark, model_type=:model_type,
+                        is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
+                    WHERE unit_id=:unit_id
+                """),
+                {"unit_id": alt_id, **target_vals},
+            )
+            # Write urgent to target
+            conn.execute(
+                text("""
+                    UPDATE units
+                    SET contract_no=:contract_no, customer=:customer, dealer_name=:dealer_name, due_date=:due_date,
+                        sales_id=:sales_id, order_remark=:order_remark, model_type=:model_type,
+                        is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
+                    WHERE unit_id=:unit_id
+                """),
+                {"unit_id": target_id, **urgent_vals},
+            )
+            # Clear urgent original slot
+            conn.execute(
+                text("""
+                    UPDATE units
+                    SET contract_no=NULL, customer=NULL, dealer_id=NULL, dealer_name=NULL,
+                        due_date=NULL, sales_id=NULL, order_remark=NULL,
+                        is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
+                    WHERE unit_id=:unit_id
+                """),
+                {"unit_id": urgent_id},
+            )
+        else:
+            # Standard 2-way swap: urgent↔target
+            conn.execute(
+                text("""
+                    UPDATE units
+                    SET contract_no=:contract_no, customer=:customer, dealer_name=:dealer_name, due_date=:due_date,
+                        sales_id=:sales_id, order_remark=:order_remark, model_type=:model_type,
+                        is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
+                    WHERE unit_id=:unit_id
+                """),
+                {"unit_id": urgent_id, **target_vals},
+            )
+            conn.execute(
+                text("""
+                    UPDATE units
+                    SET contract_no=:contract_no, customer=:customer, dealer_name=:dealer_name, due_date=:due_date,
+                        sales_id=:sales_id, order_remark=:order_remark, model_type=:model_type,
+                        is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
+                    WHERE unit_id=:unit_id
+                """),
+                {"unit_id": target_id, **urgent_vals},
+            )
+
+        detail = json.dumps(
+            {
+                "mode": "transfer_swap",
+                "urgent_unit_id": urgent_id,
+                "target_unit_id": target_id,
+                "urgent_contract_before": urgent_contract,
+                "target_contract_before": target_contract,
+                "buffer_days": due_buffer_days,
+                "reason": reason,
+                "auto_placed_to": auto_placed_to,
+            },
+            ensure_ascii=False,
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+                VALUES (:actor, 'transfer_swap', 'unit', :target_id, :detail, NOW())
+                """
+            ),
+            {"actor": actor, "target_id": target_id, "detail": detail},
+        )
+
+    return JSONResponse(content={"success": True, "buffer_days": due_buffer_days, "auto_placed_to": auto_placed_to})
+
+
+@router.api_route("/units/transfer-swap/find-alternatives", methods=["POST"])
+async def find_swap_alternatives(request: Request):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", "/api/units/transfer-swap/find-alternatives")
+
+    body = await request.json()
+    urgent_id = str(body.get("urgent_unit_id", "") or "").strip()
+    if not urgent_id:
+        raise HTTPException(status_code=422, detail="urgent_unit_id required")
+
+    due_buffer_days = 0
+
+    with get_engine().connect() as conn:
+        urgent_row = conn.execute(
+            text("""
+                SELECT u.unit_id, u.model_type, u.contract_no, u.due_date, u.production_line_id,
+                       COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                WHERE u.unit_id = :uid
+            """),
+            {"uid": urgent_id},
+        ).mappings().fetchone()
+
+        if not urgent_row:
+            raise HTTPException(status_code=404, detail="urgent unit not found")
+
+        urgent_family = _major_family(str(urgent_row.get("model_type") or ""))
+        urgent_due = _to_date(urgent_row.get("due_date"))
+        urgent_slot_inbound = _to_date(urgent_row.get("slot_expected_inbound"))
+
+        # ---- 1. production line alternatives ----
+        line_rows = conn.execute(
+            text("""
+                SELECT u.unit_id, u.model_type, u.contract_no, u.customer, u.dealer_name, u.due_date,
+                       u.production_line_id, pl.line_name,
+                       COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                JOIN production_lines pl ON pl.line_id = u.production_line_id
+                WHERE u.production_line_id IS NOT NULL
+                  AND u.unit_id != :uid
+                  AND u.is_locked = 0
+            """),
+            {"uid": urgent_id},
+        ).mappings().all()
+
+        line_targets = []
+        for r in line_rows:
+            if _major_family(str(r.get("model_type") or "")) != urgent_family:
+                continue
+            candidate_due = _to_date(r.get("due_date"))
+            candidate_inbound = _to_date(r.get("slot_expected_inbound"))
+            candidate_contract = str(r.get("contract_no") or "").strip()
+
+            if not candidate_contract:
+                line_targets.append({
+                    "unit_id": r["unit_id"],
+                    "line_name": str(r.get("line_name") or ""),
+                    "model_type": str(r.get("model_type") or ""),
+                    "contract_no": "",
+                    "customer": "",
+                    "buffer_days": None,
+                    "is_empty": True,
+                })
+                continue
+
+            if urgent_slot_inbound and candidate_due:
+                if urgent_slot_inbound > (candidate_due - timedelta(days=due_buffer_days)):
+                    continue
+            if candidate_inbound and urgent_due:
+                if candidate_inbound > (urgent_due - timedelta(days=due_buffer_days)):
+                    continue
+
+            buffer = None
+            if candidate_inbound and urgent_due:
+                buffer = (urgent_due - candidate_inbound).days
+            line_targets.append({
+                "unit_id": r["unit_id"],
+                "line_name": str(r.get("line_name") or ""),
+                "model_type": str(r.get("model_type") or ""),
+                "contract_no": candidate_contract,
+                "customer": str(r.get("customer") or ""),
+                "buffer_days": buffer,
+                "is_empty": False,
+            })
+
+        # ---- 2. confirmed batch empty slots ----
+        confirmed_raw = conn.execute(
+            text("""
+                SELECT u.unit_id, u.model_type, u.slot_index, u.batch_id, b.batch_code,
+                       COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                WHERE b.status = 'Confirmed'
+                  AND (u.contract_no IS NULL OR u.contract_no = '')
+                  AND u.is_locked = 0
+            """)
+        ).mappings().all()
+
+        confirmed_slots = []
+        for r in confirmed_raw:
+            if _major_family(str(r.get("model_type") or "")) != urgent_family:
+                continue
+            slot_inbound = _to_date(r.get("slot_expected_inbound"))
+            if slot_inbound and urgent_due:
+                if slot_inbound > (urgent_due - timedelta(days=due_buffer_days)):
+                    continue
+            confirmed_slots.append({
+                "batch_id": r["batch_id"],
+                "batch_code": str(r.get("batch_code") or ""),
+                "unit_id": r["unit_id"],
+                "slot_index": r.get("slot_index"),
+                "model_type": str(r.get("model_type") or ""),
+                "expected_inbound": str(r.get("slot_expected_inbound") or ""),
+            })
+
+        # ---- 3. predicted batch empty slots ----
+        predicted_raw = conn.execute(
+            text("""
+                SELECT u.unit_id, u.model_type, u.slot_index, u.batch_id, b.batch_code,
+                       COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                WHERE b.status = 'Predicted'
+                  AND (u.contract_no IS NULL OR u.contract_no = '')
+                  AND u.is_locked = 0
+            """)
+        ).mappings().all()
+
+        predicted_slots = []
+        for r in predicted_raw:
+            if _major_family(str(r.get("model_type") or "")) != urgent_family:
+                continue
+            slot_inbound = _to_date(r.get("slot_expected_inbound"))
+            if slot_inbound and urgent_due:
+                if slot_inbound > (urgent_due - timedelta(days=due_buffer_days)):
+                    continue
+            predicted_slots.append({
+                "batch_id": r["batch_id"],
+                "batch_code": str(r.get("batch_code") or ""),
+                "unit_id": r["unit_id"],
+                "slot_index": r.get("slot_index"),
+                "model_type": str(r.get("model_type") or ""),
+                "expected_inbound": str(r.get("slot_expected_inbound") or ""),
+            })
+
+    return JSONResponse(content={
+        "production_line_targets": line_targets,
+        "confirmed_slots": confirmed_slots,
+        "predicted_slots": predicted_slots,
+    })
 
 
 @router.api_route("/batches/{batch_id}/sync-preview", methods=["GET"])
@@ -789,8 +1259,109 @@ async def proxy_units_move_to_special(request: Request, unit_id: str):
     return await _forward(request, f"/api/units/{unit_id}/move-to-special")
 
 
+@router.api_route("/units/{unit_id}/return-to-sandbox", methods=["POST"])
+async def return_unit_to_sandbox(request: Request, unit_id: str):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", f"/api/units/{unit_id}/return-to-sandbox")
+
+    body = await request.json()
+    target_batch_id = str(body.get("target_batch_id", "") or "").strip()
+    if not target_batch_id:
+        raise HTTPException(status_code=422, detail="target_batch_id required")
+
+    actor = str(user_ctx.get("username") or "system")
+
+    with get_engine().begin() as conn:
+        unit_row = conn.execute(
+            text("""
+                SELECT u.unit_id, u.production_line_id, u.batch_id, u.contract_no, u.is_locked,
+                       b.status AS batch_status
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                WHERE u.unit_id = :uid
+                FOR UPDATE
+            """),
+            {"uid": unit_id},
+        ).mappings().fetchone()
+
+        if not unit_row:
+            raise HTTPException(status_code=404, detail="unit not found")
+        if not unit_row.get("production_line_id"):
+            raise HTTPException(status_code=400, detail="unit is not on a production line")
+
+        target_batch = conn.execute(
+            text("""
+                SELECT batch_id, status, model_type FROM batches WHERE batch_id = :bid FOR UPDATE
+            """),
+            {"bid": target_batch_id},
+        ).mappings().fetchone()
+
+        if not target_batch:
+            raise HTTPException(status_code=404, detail="target batch not found")
+        if target_batch["status"] not in ("Confirmed", "Predicted"):
+            raise HTTPException(status_code=400, detail="target batch must be Confirmed or Predicted")
+
+        old_line = unit_row["production_line_id"]
+        old_batch = unit_row["batch_id"]
+
+        # find next available slot_index in target batch (unique constraint uq_units_batch_slot)
+        max_slot = conn.execute(
+            text("SELECT COALESCE(MAX(slot_index), 0) FROM units WHERE batch_id = :bid"),
+            {"bid": target_batch_id},
+        ).fetchone()[0]
+        next_slot = int(max_slot) + 1
+
+        conn.execute(
+            text("""
+                UPDATE units
+                SET batch_id = :bid, slot_index = :slot, production_line_id = NULL, is_locked = 0,
+                    locked_by = NULL, locked_at = NULL, status = 'Pending', updated_at = NOW()
+                WHERE unit_id = :uid
+            """),
+            {"bid": target_batch_id, "slot": next_slot, "uid": unit_id},
+        )
+
+        remaining = conn.execute(
+            text("""
+                SELECT COUNT(*) AS cnt FROM units
+                WHERE production_line_id = :lid AND status != 'Completed'
+            """),
+            {"lid": old_line},
+        ).fetchone()[0]
+
+        if remaining == 0:
+            conn.execute(
+                text("""
+                    UPDATE production_lines SET status = 'Idle', current_batch_id = NULL,
+                        updated_at = NOW()
+                    WHERE production_line_id = :lid
+                """),
+                {"lid": old_line},
+            )
+
+        detail = json.dumps({
+            "mode": "return_to_sandbox",
+            "unit_id": unit_id,
+            "from_production_line_id": old_line,
+            "from_batch_id": old_batch,
+            "target_batch_id": target_batch_id,
+        }, ensure_ascii=False)
+
+        conn.execute(
+            text("""
+                INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+                VALUES (:actor, 'return_to_sandbox', 'unit', :target_id, :detail, NOW())
+            """),
+            {"actor": actor, "target_id": unit_id, "detail": detail},
+        )
+
+    return JSONResponse(content={"success": True})
+
+
 @router.api_route("/units/{unit_id:path}", methods=["GET", "PATCH", "POST"])
 async def proxy_units(request: Request, unit_id: str):
+    if request.method == "POST" and unit_id == "transfer-swap":
+        return await transfer_swap_units(request)
     return await _forward(request, f"/api/units/{unit_id}")
 
 
