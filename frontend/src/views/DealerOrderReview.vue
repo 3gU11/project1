@@ -19,7 +19,8 @@
         <el-option label="全部状态" value="" />
         <el-option label="待审核" value="pending" />
         <el-option label="已通过" value="approved" />
-        <el-option label="已分配" value="allocated" />
+        <el-option label="部分配货" value="partial_allocated" />
+        <el-option label="已配货" value="allocated" />
         <el-option label="已驳回" value="rejected" />
         <el-option label="已取消" value="cancelled" />
       </el-select>
@@ -40,25 +41,26 @@
       <el-table-column prop="order_no" label="订单号" min-width="170" show-overflow-tooltip />
       <el-table-column prop="dealer_name" label="经销商" min-width="150" show-overflow-tooltip />
       <el-table-column prop="contact_name" label="联系人" width="110" show-overflow-tooltip />
-      <el-table-column prop="model" label="机型" min-width="150" show-overflow-tooltip />
-      <el-table-column prop="batch_no" label="批次/来源" width="130" show-overflow-tooltip>
+      <el-table-column prop="model" label="机型明细" min-width="190" show-overflow-tooltip />
+      <el-table-column prop="batch_no" label="批次/来源" width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ displayBatch(row.batch_no) }}</template>
       </el-table-column>
-      <el-table-column prop="quantity" label="数量" width="80" align="right" />
+      <el-table-column prop="line_count" label="行数" width="70" align="right" />
+      <el-table-column prop="quantity" label="总数量" width="90" align="right" />
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="statusMeta(row.status).type">{{ statusMeta(row.status).text }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="可审核" width="120" align="right">
+      <el-table-column label="最小可审" width="120" align="right">
         <template #default="{ row }">
-          <span :class="{ danger: Number(row.available_qty || 0) < Number(row.quantity || 0) }">
+          <span :class="{ danger: hasInsufficientItem(row) }">
             {{ row.available_qty ?? '-' }}
           </span>
         </template>
       </el-table-column>
       <el-table-column prop="reviewed_by" label="审核人" width="110" show-overflow-tooltip />
-      <el-table-column label="操作" width="260" fixed="right">
+      <el-table-column label="操作" width="270" fixed="right">
         <template #default="{ row }">
           <el-button size="small" :disabled="row.status !== 'pending'" @click.stop="approveOrder(row)">通过</el-button>
           <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
@@ -79,26 +81,47 @@
       />
     </div>
 
-    <el-drawer v-model="drawerOpen" title="订单审核详情" size="460px">
+    <el-drawer v-model="drawerOpen" title="订单审核详情" size="720px">
       <el-empty v-if="!selectedOrder" description="请选择订单" />
       <template v-else>
         <div class="detail-grid">
           <span>订单号</span><strong>{{ selectedOrder.order_no }}</strong>
           <span>经销商</span><strong>{{ selectedOrder.dealer_name || '-' }}</strong>
+          <span>客户</span><strong>{{ selectedOrder.customer_name || '-' }}</strong>
           <span>联系人</span><strong>{{ selectedOrder.contact_name || '-' }}</strong>
           <span>电话</span><strong>{{ selectedOrder.contact_phone || '-' }}</strong>
-          <span>机型</span><strong>{{ selectedOrder.model }}</strong>
-          <span>批次/来源</span><strong>{{ displayBatch(selectedOrder.batch_no) }}</strong>
-          <span>订购数量</span><strong>{{ selectedOrder.quantity }}</strong>
           <span>当前状态</span><strong>{{ statusMeta(selectedOrder.status).text }}</strong>
-          <span>已批准</span><strong>{{ selectedOrder.approved_qty ?? 0 }}</strong>
-          <span>已分配</span><strong>{{ selectedOrder.allocated_qty ?? 0 }}</strong>
+          <span>总数量</span><strong>{{ selectedOrder.quantity }}</strong>
+          <span>已配货</span><strong>{{ selectedOrder.allocated_qty ?? 0 }}</strong>
         </div>
+
+        <el-divider />
+        <el-table :data="detailItems" border size="small">
+          <el-table-column prop="line_no" label="行号" width="70" align="right" />
+          <el-table-column prop="model" label="机型" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="batch_no" label="批次/来源" min-width="130" show-overflow-tooltip>
+            <template #default="{ row }">{{ displayBatch(row.batch_no) }}</template>
+          </el-table-column>
+          <el-table-column prop="quantity" label="数量" width="80" align="right" />
+          <el-table-column prop="allocated_qty" label="已配" width="80" align="right" />
+          <el-table-column label="可用" width="90" align="right">
+            <template #default="{ row }">
+              <span :class="{ danger: Number(row.available_qty || 0) < Number(row.quantity || 0) - Number(row.allocated_qty || 0) }">
+                {{ row.available_qty ?? '-' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="statusMeta(row.status).type">{{ statusMeta(row.status).text }}</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
 
         <el-divider />
         <div class="availability">
           <div>
-            <span>summary 总量</span>
+            <span>库存总量</span>
             <strong>{{ preview?.summary_qty ?? selectedOrder.summary_qty ?? '-' }}</strong>
           </div>
           <div>
@@ -106,8 +129,8 @@
             <strong>{{ preview?.occupied_qty ?? selectedOrder.occupied_qty ?? '-' }}</strong>
           </div>
           <div>
-            <span>可审核</span>
-            <strong :class="{ danger: Number(preview?.available_qty ?? selectedOrder.available_qty ?? 0) < Number(selectedOrder.quantity || 0) }">
+            <span>最小可审</span>
+            <strong :class="{ danger: hasInsufficientItem(selectedOrder) }">
               {{ preview?.available_qty ?? selectedOrder.available_qty ?? '-' }}
             </strong>
           </div>
@@ -138,8 +161,11 @@ import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
 type DealerOrder = {
   id: number
   order_no: string
+  line_no?: number
+  line_count?: number
   dealer_openid?: string
   dealer_name?: string
+  customer_name?: string
   contact_name?: string
   contact_phone?: string
   model: string
@@ -157,6 +183,7 @@ type DealerOrder = {
   summary_qty?: number
   occupied_qty?: number
   available_qty?: number
+  items?: DealerOrder[]
 }
 
 type OrderListResponse = {
@@ -166,6 +193,7 @@ type OrderListResponse = {
 
 type PreviewResponse = {
   order: DealerOrder
+  items: DealerOrder[]
   summary_qty: number
   occupied_qty: number
   available_qty: number
@@ -186,12 +214,14 @@ const filters = reactive({
 })
 
 const selectedOrder = computed(() => orders.value.find((row) => row.order_no === selectedOrderNo.value) || null)
+const detailItems = computed(() => preview.value?.items || selectedOrder.value?.items || (selectedOrder.value ? [selectedOrder.value] : []))
 
 const statusMeta = (status: string) => {
   const map: Record<string, { text: string; type: 'primary' | 'success' | 'warning' | 'danger' | 'info' }> = {
     pending: { text: '待审核', type: 'warning' },
     approved: { text: '已通过', type: 'primary' },
-    allocated: { text: '已分配', type: 'success' },
+    partial_allocated: { text: '部分配货', type: 'success' },
+    allocated: { text: '已配货', type: 'success' },
     rejected: { text: '已驳回', type: 'danger' },
     cancelled: { text: '已取消', type: 'info' },
   }
@@ -204,8 +234,13 @@ const displayBatch = (batchNo?: string) => {
   return batchNo
 }
 
+const hasInsufficientItem = (row: DealerOrder) => {
+  const items = row.items?.length ? row.items : [row]
+  return items.some((item) => Number(item.available_qty || 0) < Number(item.quantity || 0) - Number(item.allocated_qty || 0))
+}
+
 const canReject = (row: DealerOrder) => ['pending', 'approved'].includes(row.status)
-const canAllocate = (row: DealerOrder) => ['pending', 'approved'].includes(row.status)
+const canAllocate = (row: DealerOrder) => ['pending', 'approved', 'partial_allocated'].includes(row.status)
 
 const loadOrders = async () => {
   loading.value = true
@@ -252,7 +287,7 @@ const approveOrder = async (row: DealerOrder) => {
   try {
     const note = await ElMessageBox.prompt('审核备注（可选）', '通过订单', {
       inputType: 'textarea',
-      inputValue: row.review_note || '',
+      inputValue: row.remark || '',
       confirmButtonText: '通过',
       cancelButtonText: '取消',
     })

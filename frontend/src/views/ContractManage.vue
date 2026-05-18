@@ -8,6 +8,9 @@
       <button type="button" class="new-row-toggle" @click="batchPanelOpen = !batchPanelOpen">
         {{ batchPanelOpen ? '▾' : '▸' }} ➕ 录入新合同 (批量)
       </button>
+      <el-button type="primary" plain :loading="dealerOrderLoading" @click="openDealerOrderImport">
+        从经销商订单带入
+      </el-button>
     </div>
 
     <div class="batch-slide" :class="{ open: batchPanelOpen }">
@@ -314,6 +317,42 @@
         <el-button type="primary" @click="chooseSaveMode('sandbox')">进入沙盘</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="dealerOrderDialogVisible" title="从经销商订单带入合同信息" width="860px">
+      <div class="dealer-import-toolbar">
+        <el-input
+          v-model="dealerOrderKeyword"
+          clearable
+          placeholder="搜索订单号 / 客户 / 联系人 / 机型"
+          @keyup.enter="loadDealerOrders"
+          @clear="loadDealerOrders"
+        />
+        <el-tag type="success" size="large">仅已通过审核</el-tag>
+        <el-button :loading="dealerOrderLoading" @click="loadDealerOrders">查询</el-button>
+      </div>
+      <el-table
+        v-loading="dealerOrderLoading"
+        :data="dealerOrders"
+        border
+        stripe
+        size="small"
+        height="420"
+        @row-dblclick="prefillFromDealerOrder"
+      >
+        <el-table-column prop="order_no" label="订单号" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="customer_name" label="客户名称" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="contact_name" label="代理商/联系人" width="130" show-overflow-tooltip />
+        <el-table-column prop="model" label="机型明细" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="quantity" label="数量" width="80" align="right" />
+        <el-table-column prop="status" label="状态" width="100" />
+        <el-table-column label="操作" width="110" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" :disabled="row.status !== 'approved'" @click="prefillFromDealerOrder(row)">带入</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="dealer-import-tip">仅已通过审核的经销商订单可带入。带入后只会预填“录入新合同”表单，不会直接生成合同；请检查后再保存。</div>
+    </el-dialog>
   </div>
 </template>
 
@@ -347,6 +386,29 @@ type ContractSummary = {
   totalQty: number
   modelSummary: string
 }
+type DealerOrderLine = {
+  model?: string
+  quantity?: number
+  batch_no?: string
+  eta?: string
+  inventory_type?: string
+}
+type DealerOrder = {
+  order_no: string
+  customer_name?: string
+  contact_name?: string
+  delivery_date?: string
+  model?: string
+  quantity?: number
+  status?: string
+  remark?: string
+  review_note?: string
+  items?: DealerOrderLine[]
+}
+type DealerOrderListResponse = {
+  data: DealerOrder[]
+  total: number
+}
 
 const statusTabs: StatusTab[] = ['待规划', '已规划', '已完成']
 const completedStatuses = new Set(['已转订单', '已下单', '已完工'])
@@ -361,6 +423,10 @@ const activeTab = ref<StatusTab>('待规划')
 const selectedContractId = ref('')
 const contractSearchKeyword = ref('')
 const batchPickedFiles = ref<File[]>([])
+const dealerOrderDialogVisible = ref(false)
+const dealerOrderLoading = ref(false)
+const dealerOrderKeyword = ref('')
+const dealerOrders = ref<DealerOrder[]>([])
 const openMonths = ref<string[]>([])
 const detailPanelRef = ref<HTMLElement | null>(null)
 const { submitWithLock } = useFormSubmit()
@@ -403,6 +469,65 @@ const resetBatchForm = () => {
   }
   batchItems.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
   batchPickedFiles.value = []
+}
+
+const loadDealerOrders = async () => {
+  dealerOrderLoading.value = true
+  try {
+    const res = await apiGet<DealerOrderListResponse>('/dealer-orders/', {
+      params: {
+        status: 'approved',
+        keyword: dealerOrderKeyword.value || undefined,
+        page: 1,
+        page_size: 100,
+      },
+    })
+    dealerOrders.value = res.data || []
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '读取经销商订单失败')
+  } finally {
+    dealerOrderLoading.value = false
+  }
+}
+
+const openDealerOrderImport = async () => {
+  dealerOrderDialogVisible.value = true
+  if (dealerOrders.value.length === 0) await loadDealerOrders()
+}
+
+const normalizeDealerOrderItems = (order: DealerOrder) => {
+  const source = order.items?.length ? order.items : [{ model: order.model, quantity: order.quantity }]
+  return source
+    .map((item) => {
+      const model = String(item.model || '').trim()
+      const qty = Math.max(1, Number(item.quantity || 1))
+      const high = model.includes('加高')
+      const rowNote = ''
+      return { model, qty, high, rowNote }
+    })
+    .filter((item) => item.model)
+}
+
+const prefillFromDealerOrder = (order: DealerOrder) => {
+  if (order.status !== 'approved') {
+    ElMessage.warning('只有已通过审核的经销商订单可以带入合同')
+    return
+  }
+  const rows = normalizeDealerOrderItems(order)
+  if (rows.length === 0) {
+    ElMessage.warning('该经销商订单没有可带入的机型明细')
+    return
+  }
+  batchForm.value.contractId = genContractId()
+  batchForm.value.deadline = String(order.delivery_date || '').slice(0, 10) || todayYmd()
+  batchForm.value.customer = String(order.customer_name || '').trim()
+  batchForm.value.agent = String(order.contact_name || '').trim()
+  batchForm.value.contractNote = String(order.review_note || '').trim()
+  batchForm.value.isRush = false
+  batchItems.value = rows
+  batchPanelOpen.value = true
+  dealerOrderDialogVisible.value = false
+  ElMessage.success('已带入合同录入表单，请确认后再保存')
 }
 
 const normalizeStatus = (status: unknown) => {
@@ -1256,6 +1381,20 @@ onMounted(() => {
 }
 .save-mode-hint {
   color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+.dealer-import-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.dealer-import-toolbar .el-input {
+  flex: 1;
+}
+.dealer-import-tip {
+  margin-top: 10px;
+  color: var(--color-gray-500);
   font-size: var(--font-size-sm);
 }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from math import ceil
 from typing import Any
 
@@ -13,55 +14,70 @@ ACTIVE_HOLD_STATUSES = ("pending", "approved")
 
 def ensure_dealer_order_tables() -> None:
     with get_engine().begin() as conn:
-        conn.execute(text(
-            """
-            CREATE TABLE IF NOT EXISTS dealer_orders (
-              id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-              order_no VARCHAR(64) NOT NULL UNIQUE,
-              dealer_id VARCHAR(128) NOT NULL,
-              dealer_name VARCHAR(255) NOT NULL,
-              dealer_phone VARCHAR(64) DEFAULT '',
-              customer_name VARCHAR(255) NOT NULL,
-              contact_name VARCHAR(128) NOT NULL,
-              contact_phone VARCHAR(64) NOT NULL,
-              model VARCHAR(255) NOT NULL,
-              batch_no VARCHAR(255) DEFAULT '',
-              eta VARCHAR(64) DEFAULT '',
-              inventory_type VARCHAR(32) DEFAULT '',
-              quantity INT NOT NULL DEFAULT 1,
-              approved_qty INT NOT NULL DEFAULT 0,
-              allocated_qty INT NOT NULL DEFAULT 0,
-              delivery_date VARCHAR(64) DEFAULT '',
-              remark TEXT,
-              status VARCHAR(32) NOT NULL DEFAULT 'pending',
-              reviewed_at DATETIME NULL,
-              reviewed_by VARCHAR(128) DEFAULT '',
-              v7_order_no VARCHAR(128) DEFAULT '',
-              review_note TEXT,
-              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-              INDEX idx_dealer_id (dealer_id),
-              INDEX idx_status (status),
-              INDEX idx_batch_model_status (batch_no, model, status),
-              INDEX idx_created_at (created_at)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """
-        ))
-        columns = {
-            row[0]
-            for row in conn.execute(text("SHOW COLUMNS FROM dealer_orders")).fetchall()
-        }
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS dealer_orders (
+                  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  order_no VARCHAR(64) NOT NULL,
+                  line_no INT NOT NULL DEFAULT 1,
+                  dealer_id VARCHAR(128) NOT NULL,
+                  dealer_name VARCHAR(255) NOT NULL,
+                  dealer_phone VARCHAR(64) DEFAULT '',
+                  customer_name VARCHAR(255) NOT NULL,
+                  contact_name VARCHAR(128) NOT NULL,
+                  contact_phone VARCHAR(64) NOT NULL,
+                  model VARCHAR(255) NOT NULL,
+                  batch_no VARCHAR(255) DEFAULT '',
+                  eta VARCHAR(64) DEFAULT '',
+                  inventory_type VARCHAR(32) DEFAULT '',
+                  quantity INT NOT NULL DEFAULT 1,
+                  approved_qty INT NOT NULL DEFAULT 0,
+                  allocated_qty INT NOT NULL DEFAULT 0,
+                  delivery_date VARCHAR(64) DEFAULT '',
+                  remark TEXT,
+                  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                  reviewed_at DATETIME NULL,
+                  reviewed_by VARCHAR(128) DEFAULT '',
+                  contract_no VARCHAR(128) DEFAULT '',
+                  v7_order_no VARCHAR(128) DEFAULT '',
+                  review_note TEXT,
+                  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  UNIQUE KEY uq_dealer_order_line (order_no, line_no),
+                  INDEX idx_dealer_order_no (order_no),
+                  INDEX idx_dealer_id (dealer_id),
+                  INDEX idx_status (status),
+                  INDEX idx_batch_model_status (batch_no, model, status),
+                  INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        )
+        columns = {row[0] for row in conn.execute(text("SHOW COLUMNS FROM dealer_orders")).fetchall()}
         additions = [
+            ("line_no", "ALTER TABLE dealer_orders ADD COLUMN line_no INT NOT NULL DEFAULT 1 AFTER order_no"),
             ("approved_qty", "ALTER TABLE dealer_orders ADD COLUMN approved_qty INT NOT NULL DEFAULT 0 AFTER quantity"),
             ("allocated_qty", "ALTER TABLE dealer_orders ADD COLUMN allocated_qty INT NOT NULL DEFAULT 0 AFTER approved_qty"),
             ("reviewed_at", "ALTER TABLE dealer_orders ADD COLUMN reviewed_at DATETIME NULL AFTER status"),
             ("reviewed_by", "ALTER TABLE dealer_orders ADD COLUMN reviewed_by VARCHAR(128) DEFAULT '' AFTER reviewed_at"),
-            ("v7_order_no", "ALTER TABLE dealer_orders ADD COLUMN v7_order_no VARCHAR(128) DEFAULT '' AFTER reviewed_by"),
+            ("contract_no", "ALTER TABLE dealer_orders ADD COLUMN contract_no VARCHAR(128) DEFAULT '' AFTER reviewed_by"),
+            ("v7_order_no", "ALTER TABLE dealer_orders ADD COLUMN v7_order_no VARCHAR(128) DEFAULT '' AFTER contract_no"),
             ("review_note", "ALTER TABLE dealer_orders ADD COLUMN review_note TEXT AFTER v7_order_no"),
         ]
         for column, sql in additions:
             if column not in columns:
                 conn.execute(text(sql))
+
+        indexes = {row[2] for row in conn.execute(text("SHOW INDEX FROM dealer_orders")).fetchall()}
+        for index_name in ("order_no", "uq_order_no"):
+            if index_name in indexes:
+                conn.execute(text(f"ALTER TABLE dealer_orders DROP INDEX {index_name}"))
+        indexes = {row[2] for row in conn.execute(text("SHOW INDEX FROM dealer_orders")).fetchall()}
+        if "idx_dealer_order_no" not in indexes:
+            conn.execute(text("ALTER TABLE dealer_orders ADD INDEX idx_dealer_order_no (order_no)"))
+        if "uq_dealer_order_line" not in indexes:
+            conn.execute(text("ALTER TABLE dealer_orders ADD UNIQUE KEY uq_dealer_order_line (order_no, line_no)"))
 
 
 def _summary_batch_no(batch_no: object, inventory_type: object = "") -> str:
@@ -88,6 +104,75 @@ def _row_to_dict(row: Any) -> dict:
     return data
 
 
+def _status_rank(status: str) -> int:
+    return {
+        "pending": 0,
+        "approved": 1,
+        "partial_allocated": 2,
+        "allocated": 3,
+        "rejected": 4,
+        "cancelled": 5,
+        "completed": 6,
+    }.get(status or "", 9)
+
+
+def _aggregate_status(items: list[dict]) -> str:
+    statuses = [str(item.get("status") or "") for item in items]
+    if statuses and all(status == "allocated" for status in statuses):
+        return "allocated"
+    if any(status == "allocated" or int(item.get("allocated_qty") or 0) > 0 for status, item in zip(statuses, items)):
+        return "partial_allocated"
+    if statuses and all(status == "rejected" for status in statuses):
+        return "rejected"
+    if statuses and all(status == "cancelled" for status in statuses):
+        return "cancelled"
+    if any(status == "approved" for status in statuses):
+        return "approved"
+    return statuses[0] if statuses else "pending"
+
+
+def _summarize_models(items: list[dict]) -> str:
+    parts = []
+    for item in items:
+        model = str(item.get("model") or "-")
+        qty = int(item.get("quantity") or 0)
+        parts.append(f"{model}x{qty}")
+    return " / ".join(parts)
+
+
+def _summarize_batches(items: list[dict]) -> str:
+    batches: list[str] = []
+    for item in items:
+        batch = str(item.get("batch_no") or "").strip() or "-"
+        if batch not in batches:
+            batches.append(batch)
+    return " / ".join(batches)
+
+
+def _group_orders(rows: list[dict]) -> list[dict]:
+    grouped: OrderedDict[str, list[dict]] = OrderedDict()
+    for row in rows:
+        grouped.setdefault(str(row.get("order_no") or ""), []).append(row)
+
+    orders = []
+    for order_no, items in grouped.items():
+        base = dict(items[0])
+        base["order_no"] = order_no
+        base["items"] = items
+        base["line_count"] = len(items)
+        base["model"] = _summarize_models(items)
+        base["batch_no"] = _summarize_batches(items)
+        base["quantity"] = sum(int(item.get("quantity") or 0) for item in items)
+        base["approved_qty"] = sum(int(item.get("approved_qty") or 0) for item in items)
+        base["allocated_qty"] = sum(int(item.get("allocated_qty") or 0) for item in items)
+        base["summary_qty"] = sum(int(item.get("summary_qty") or 0) for item in items)
+        base["occupied_qty"] = sum(int(item.get("occupied_qty") or 0) for item in items)
+        base["available_qty"] = min((int(item.get("available_qty") or 0) for item in items), default=0)
+        base["status"] = _aggregate_status(items)
+        orders.append(base)
+    return orders
+
+
 def list_dealer_orders(
     status: str = "",
     keyword: str = "",
@@ -104,9 +189,7 @@ def list_dealer_orders(
     page_size = min(200, max(1, int(page_size or 50)))
     where = []
     params: dict[str, Any] = {}
-    if status:
-        where.append("status = :status")
-        params["status"] = status
+    status_filter = str(status or "").strip()
     if dealer_id:
         where.append("dealer_id = :dealer_id")
         params["dealer_id"] = dealer_id
@@ -131,29 +214,25 @@ def list_dealer_orders(
         )
         params["kw"] = f"%{keyword}%"
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-    offset = (page - 1) * page_size
     with get_engine().connect() as conn:
-        total = int(conn.execute(text(f"SELECT COUNT(*) FROM dealer_orders {where_sql}"), params).scalar() or 0)
-        rows = conn.execute(
+        raw_rows = conn.execute(
             text(
                 f"""
-                SELECT id, order_no, dealer_id, dealer_name, dealer_phone, customer_name,
+                SELECT id, order_no, line_no, dealer_id, dealer_name, dealer_phone, customer_name,
                        contact_name, contact_phone, model, batch_no, eta, inventory_type,
                        quantity, approved_qty, allocated_qty, delivery_date, remark,
-                       status, reviewed_at, reviewed_by, v7_order_no, review_note,
+                       status, reviewed_at, reviewed_by, contract_no, v7_order_no, review_note,
                        created_at, updated_at
                 FROM dealer_orders
                 {where_sql}
                 ORDER BY FIELD(status, 'pending', 'approved', 'allocated', 'rejected', 'cancelled', 'completed'),
-                         created_at DESC
-                LIMIT :limit OFFSET :offset
+                         created_at DESC, order_no DESC, line_no ASC, id ASC
                 """
             ),
-            {**params, "limit": page_size, "offset": offset},
+            params,
         ).fetchall()
-    data = []
-    with get_engine().connect() as conn:
-        for row in rows:
+        rows = []
+        for row in raw_rows:
             item = _row_to_dict(row)
             availability = get_availability(conn, item)
             item.update(
@@ -163,7 +242,14 @@ def list_dealer_orders(
                     "available_qty": availability["available_for_current"],
                 }
             )
-            data.append(item)
+            rows.append(item)
+
+    grouped = _group_orders(rows)
+    if status_filter:
+        grouped = [order for order in grouped if order.get("status") == status_filter]
+    total = len(grouped)
+    offset = (page - 1) * page_size
+    data = grouped[offset : offset + page_size]
     return {
         "data": data,
         "total": total,
@@ -173,37 +259,43 @@ def list_dealer_orders(
     }
 
 
-def _get_order_for_update(conn, order_no: str) -> dict:
-    row = conn.execute(
-        text("SELECT * FROM dealer_orders WHERE order_no=:order_no FOR UPDATE"),
+def _get_order_lines_for_update(conn, order_no: str) -> list[dict]:
+    rows = conn.execute(
+        text("SELECT * FROM dealer_orders WHERE order_no=:order_no ORDER BY line_no, id FOR UPDATE"),
         {"order_no": order_no},
-    ).fetchone()
-    if not row:
+    ).fetchall()
+    if not rows:
         raise ValueError("订单不存在")
-    return _row_to_dict(row)
+    return [_row_to_dict(row) for row in rows]
 
 
 def get_availability(conn, order: dict) -> dict:
     summary_batch = _summary_batch_no(order.get("batch_no"), order.get("inventory_type"))
     hold_batch = _order_hold_batch_no(order.get("batch_no"), order.get("inventory_type"))
     model = str(order.get("model") or "").strip()
-    summary_qty = int(conn.execute(
-        text(
-            "SELECT COALESCE(SUM(quantity), 0) FROM wechat_batch_summary "
-            "WHERE batch_no=:batch_no AND model=:model"
-        ),
-        {"batch_no": summary_batch, "model": model},
-    ).scalar() or 0)
-    occupied_qty = int(conn.execute(
-        text(
-            "SELECT COALESCE(SUM(GREATEST(quantity - allocated_qty, 0)), 0) "
-            "FROM dealer_orders "
-            "WHERE batch_no=:batch_no AND model=:model "
-            "AND status IN ('pending', 'approved') "
-            "AND quantity > allocated_qty"
-        ),
-        {"batch_no": hold_batch, "model": model},
-    ).scalar() or 0)
+    summary_qty = int(
+        conn.execute(
+            text(
+                "SELECT COALESCE(SUM(quantity), 0) FROM wechat_batch_summary "
+                "WHERE batch_no=:batch_no AND model=:model"
+            ),
+            {"batch_no": summary_batch, "model": model},
+        ).scalar()
+        or 0
+    )
+    occupied_qty = int(
+        conn.execute(
+            text(
+                "SELECT COALESCE(SUM(GREATEST(quantity - allocated_qty, 0)), 0) "
+                "FROM dealer_orders "
+                "WHERE batch_no=:batch_no AND model=:model "
+                "AND status IN ('pending', 'approved') "
+                "AND quantity > allocated_qty"
+            ),
+            {"batch_no": hold_batch, "model": model},
+        ).scalar()
+        or 0
+    )
     current_unallocated = max(0, int(order.get("quantity") or 0) - int(order.get("allocated_qty") or 0))
     available_for_current = summary_qty - occupied_qty + current_unallocated
     return {
@@ -217,39 +309,62 @@ def get_availability(conn, order: dict) -> dict:
     }
 
 
+def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
+    decorated = []
+    for item in items:
+        availability = get_availability(conn, item)
+        next_item = dict(item)
+        next_item.update(
+            {
+                "summary_qty": availability["summary_qty"],
+                "occupied_qty": availability["occupied_qty"],
+                "available_qty": availability["available_for_current"],
+            }
+        )
+        decorated.append(next_item)
+    return decorated
+
+
 def preview_dealer_order(order_no: str) -> dict:
     ensure_dealer_order_tables()
     with get_engine().connect() as conn:
-        row = conn.execute(text("SELECT * FROM dealer_orders WHERE order_no=:order_no"), {"order_no": order_no}).fetchone()
-        if not row:
+        rows = conn.execute(
+            text("SELECT * FROM dealer_orders WHERE order_no=:order_no ORDER BY line_no, id"),
+            {"order_no": order_no},
+        ).fetchall()
+        if not rows:
             raise ValueError("订单不存在")
-        order = _row_to_dict(row)
-        availability = get_availability(conn, order)
+        items = _decorate_items_with_availability(conn, [_row_to_dict(row) for row in rows])
+        order = _group_orders(items)[0]
+        can_approve = all(
+            int(item.get("available_qty") or 0)
+            >= max(0, int(item.get("quantity") or 0) - int(item.get("allocated_qty") or 0))
+            for item in items
+        )
         return {
             "order": order,
-            "availability": availability,
-            "summary_qty": availability["summary_qty"],
-            "occupied_qty": availability["occupied_qty"],
-            "available_qty": availability["available_for_current"],
-            "can_approve": availability["available_for_current"] >= max(
-                0,
-                int(order.get("quantity") or 0) - int(order.get("allocated_qty") or 0),
-            ),
+            "items": items,
+            "availability": {"items": items},
+            "summary_qty": order["summary_qty"],
+            "occupied_qty": order["occupied_qty"],
+            "available_qty": order["available_qty"],
+            "can_approve": can_approve,
         }
 
 
 def approve_dealer_order(order_no: str, reviewer: str, note: str = "") -> dict:
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:
-        order = _get_order_for_update(conn, order_no)
-        if order.get("status") != "pending":
-            raise ValueError("只有待审核订单可以通过")
-        availability = get_availability(conn, order)
-        needed = max(0, int(order.get("quantity") or 0) - int(order.get("allocated_qty") or 0))
-        if availability["available_for_current"] < needed:
-            raise ValueError(
-                f"可用数量不足：需要 {needed}，当前可用 {availability['available_for_current']}"
-            )
+        items = _get_order_lines_for_update(conn, order_no)
+        if any(item.get("status") != "pending" for item in items):
+            raise ValueError("只有整张订单全部处于待审核时才可以通过")
+        for item in items:
+            availability = get_availability(conn, item)
+            needed = max(0, int(item.get("quantity") or 0) - int(item.get("allocated_qty") or 0))
+            if availability["available_for_current"] < needed:
+                raise ValueError(
+                    f"{item.get('model')} 可用数量不足：需要 {needed}，当前可用 {availability['available_for_current']}"
+                )
         conn.execute(
             text(
                 "UPDATE dealer_orders SET status='approved', approved_qty=quantity, "
@@ -264,9 +379,9 @@ def approve_dealer_order(order_no: str, reviewer: str, note: str = "") -> dict:
 def reject_dealer_order(order_no: str, reviewer: str, reason: str = "") -> dict:
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:
-        order = _get_order_for_update(conn, order_no)
-        if order.get("status") not in {"pending", "approved"}:
-            raise ValueError("当前状态不能驳回")
+        items = _get_order_lines_for_update(conn, order_no)
+        if any(item.get("status") not in {"pending", "approved"} for item in items):
+            raise ValueError("当前订单状态不能驳回")
         conn.execute(
             text(
                 "UPDATE dealer_orders SET status='rejected', reviewed_at=NOW(), "
@@ -279,28 +394,17 @@ def reject_dealer_order(order_no: str, reviewer: str, reason: str = "") -> dict:
 
 def mark_dealer_order_allocated(order_no: str, allocated_qty: int, v7_order_no: str = "", reviewer: str = "") -> dict:
     ensure_dealer_order_tables()
-    allocated_qty = max(1, int(allocated_qty or 0))
     with get_engine().begin() as conn:
-        order = _get_order_for_update(conn, order_no)
-        if order.get("status") not in {"approved", "pending"}:
-            raise ValueError("只有待审核/已通过订单可以标记配货")
-        quantity = int(order.get("quantity") or 0)
-        old_allocated = int(order.get("allocated_qty") or 0)
-        next_allocated = min(quantity, old_allocated + allocated_qty)
-        next_status = "allocated" if next_allocated >= quantity else "approved"
+        items = _get_order_lines_for_update(conn, order_no)
+        if any(item.get("status") not in {"approved", "pending"} for item in items):
+            raise ValueError("只有待审核或已通过订单可以标记配货")
         conn.execute(
             text(
-                "UPDATE dealer_orders SET allocated_qty=:allocated_qty, status=:status, "
+                "UPDATE dealer_orders SET allocated_qty=quantity, status='allocated', "
                 "v7_order_no=:v7_order_no, reviewed_at=COALESCE(reviewed_at, NOW()), "
                 "reviewed_by=CASE WHEN COALESCE(reviewed_by, '')='' THEN :reviewer ELSE reviewed_by END "
                 "WHERE order_no=:order_no"
             ),
-            {
-                "order_no": order_no,
-                "allocated_qty": next_allocated,
-                "status": next_status,
-                "v7_order_no": v7_order_no,
-                "reviewer": reviewer,
-            },
+            {"order_no": order_no, "v7_order_no": v7_order_no, "reviewer": reviewer},
         )
     return preview_dealer_order(order_no)
