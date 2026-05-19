@@ -205,6 +205,7 @@ class BatchContractCreatePayload(BaseModel):
     rows: List[BatchContractRowPayload]
     is_rush: bool = False
     save_mode: str = "sandbox"  # sandbox | spot
+    dealer_order_no: str = ""  # 来源经销商订单号，创建成功后回写contract_no
 
 
 class LinkOrderPayload(BaseModel):
@@ -1374,6 +1375,90 @@ def link_contract_to_order(
         raise HTTPException(status_code=500, detail=f"关联订单失败: {e}")
 
 
+def _process_contracts_batch(
+    add_list: List[Dict[str, Any]],
+    rush_source_rows: List[Dict[str, Any]],
+    save_mode: str,
+    is_rush: bool,
+    user_ctx: dict,
+    operator: str,
+    background_tasks=None,
+) -> dict:
+    """Core contract creation logic, reusable from multiple endpoints."""
+    if not add_list:
+        raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
+
+    df_plan = get_factory_plan()
+    now_status = "已规划" if save_mode == "spot" else "待规划"
+
+    # Filter out duplicates within this batch call
+    clean_add_list: List[Dict[str, Any]] = []
+    clean_rush_rows: List[Dict[str, Any]] = []
+    existed = 0
+    for i, item in enumerate(add_list):
+        cid = str(item["合同号"])
+        model = str(item["机型"])
+        dup_mask = (df_plan["合同号"].astype(str) == cid) & (df_plan["机型"].astype(str) == model)
+        if dup_mask.any():
+            existed += 1
+            continue
+        item["状态"] = now_status
+        clean_add_list.append(item)
+        if i < len(rush_source_rows):
+            clean_rush_rows.append(rush_source_rows[i])
+
+    if not clean_add_list:
+        raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
+
+    df_plan = pd.concat([df_plan, pd.DataFrame(clean_add_list)], ignore_index=True)
+    save_factory_plan(df_plan)
+
+    if save_mode == "sandbox" and not is_rush and background_tasks:
+        background_tasks.add_task(_trigger_sandbox_recompute_sync, user_ctx)
+
+    rush_q_rows = clean_rush_rows if (is_rush and save_mode == "sandbox") else []
+    rush_created = _insert_rush_order_queue(
+        rush_q_rows,
+        created_by=user_ctx.get("username") or operator,
+    )
+    rush_auto_inserted = _auto_insert_high_rush_orders(rush_q_rows, user_ctx, operator)
+
+    added_contract_ids = list(set([str(item["合同号"]) for item in clean_add_list]))
+    contract_ids_str = "、".join(added_contract_ids)
+
+    if save_mode == "spot" and added_contract_ids:
+        with get_engine().begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE rush_order_queue SET `status` = 'deleted', `updated_by` = :updated_by "
+                    "WHERE TRIM(COALESCE(`contract_no`, '')) COLLATE utf8mb4_general_ci IN :cids "
+                    "AND `status` = 'pending'"
+                ).bindparams(bindparam("cids", expanding=True)),
+                {
+                    "cids": added_contract_ids,
+                    "updated_by": str(user_ctx.get("username") or operator or ""),
+                },
+            )
+
+    append_audit_log(
+        module="合同管理",
+        action_type="批量录入",
+        biz_type="合同",
+        content=f"批量录入合同 {len(clean_add_list)} 条（合同号：{contract_ids_str}）；跳过重复 {existed} 条；加高急单自动入沙盘 {rush_auto_inserted} 条",
+        user_id=user_ctx.get("username"),
+        username=operator,
+    )
+    return {
+        "message": f"批量录入完成，新增 {len(clean_add_list)} 条，跳过重复 {existed} 条",
+        "inserted": len(clean_add_list),
+        "skipped": existed,
+        "rush_created": rush_created,
+        "rush_auto_inserted": rush_auto_inserted,
+        "save_mode": save_mode,
+        "contract_ids": added_contract_ids,
+    }
+
+
 @router.post("/contracts/batch-create")
 def create_contracts_batch(
     payload: BatchContractCreatePayload,
@@ -1391,11 +1476,8 @@ def create_contracts_batch(
             raise HTTPException(status_code=422, detail="请至少提供 1 条合同记录")
         _assert_models_in_dictionary([str(item.机型 or "").strip() for item in rows])
 
-        df_plan = get_factory_plan()
-        now_status = "已规划" if save_mode == "spot" else "待规划"
         add_list: List[Dict[str, Any]] = []
         rush_source_rows: List[Dict[str, Any]] = []
-        existed = 0
         for item in rows:
             cid = str(item.合同号 or "").strip()
             customer = str(item.客户名 or "").strip()
@@ -1404,17 +1486,13 @@ def create_contracts_batch(
             if not cid or not customer or not model or not due:
                 continue
             qty = int(item.排产数量)
-            dup_mask = (df_plan["合同号"].astype(str) == cid) & (df_plan["机型"].astype(str) == model)
-            if dup_mask.any():
-                existed += 1
-                continue
             add_list.append(
                 {
                     "合同号": cid,
                     "机型": model,
                     "排产数量": qty,
                     "要求交期": due,
-                    "状态": now_status,
+                    "状态": "",  # filled by _process_contracts_batch
                     "备注": str(item.备注 or "").strip(),
                     "客户名": customer,
                     "代理商": str(item.代理商 or "").strip(),
@@ -1434,61 +1512,35 @@ def create_contracts_batch(
                 }
             )
 
-        if not add_list:
-            raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
-
-        df_plan = pd.concat([df_plan, pd.DataFrame(add_list)], ignore_index=True)
-        save_factory_plan(df_plan)
-
-        # 仅“进入沙盘”模式触发沙盘重算；“使用现货”直接置为已规划，不进入沙盘排产。
-        if save_mode == "sandbox" and not payload.is_rush:
-            background_tasks.add_task(_trigger_sandbox_recompute_sync, current_user)
-
-        rush_created = _insert_rush_order_queue(
-            rush_source_rows if (payload.is_rush and save_mode == "sandbox") else [],
-            created_by=current_user.get("username") or current_operator,
-        )
-        rush_auto_inserted = _auto_insert_high_rush_orders(
-            rush_source_rows if (payload.is_rush and save_mode == "sandbox") else [],
-            current_user,
-            current_operator,
+        result = _process_contracts_batch(
+            add_list=add_list,
+            rush_source_rows=rush_source_rows,
+            save_mode=save_mode,
+            is_rush=bool(payload.is_rush),
+            user_ctx=current_user,
+            operator=current_operator,
+            background_tasks=background_tasks,
         )
 
-        # 收集新录入的所有独立合同号
-        added_contract_ids = list(set([str(item["合同号"]) for item in add_list]))
-        contract_ids_str = "、".join(added_contract_ids)
-
-        # “使用现货”模式下，急单不应出现在 rush_order_queue 中；同时清理历史遗留 pending 卡片。
-        if save_mode == "spot" and added_contract_ids:
-            with get_engine().begin() as conn:
-                conn.execute(
-                    text(
-                        "UPDATE rush_order_queue SET `status` = 'deleted', `updated_by` = :updated_by "
-                        "WHERE TRIM(COALESCE(`contract_no`, '')) COLLATE utf8mb4_general_ci IN :cids "
-                        "AND `status` = 'pending'"
-                    ).bindparams(bindparam("cids", expanding=True)),
-                    {
-                        "cids": added_contract_ids,
-                        "updated_by": str(current_user.get("username") or current_operator or ""),
-                    },
+        # 如果来自经销商订单，回写 contract_no
+        dealer_order_no = str(payload.dealer_order_no or "").strip()
+        if dealer_order_no and result.get("contract_ids"):
+            from crud.dealer_orders import mark_dealer_order_contracted
+            try:
+                contract_no_str = "、".join(result["contract_ids"])
+                mark_dealer_order_contracted(
+                    dealer_order_no,
+                    contract_no=contract_no_str,
+                    operator=current_operator,
                 )
-        
-        append_audit_log(
-            module="合同管理",
-            action_type="批量录入",
-            biz_type="合同",
-            content=f"批量录入合同 {len(add_list)} 条（合同号：{contract_ids_str}）；跳过重复 {existed} 条；加高急单自动入沙盘 {rush_auto_inserted} 条",
-            user_id=current_user.get("username"),
-            username=current_operator,
-        )
-        return {
-            "message": f"批量录入完成，新增 {len(add_list)} 条，跳过重复 {existed} 条",
-            "inserted": len(add_list),
-            "skipped": existed,
-            "rush_created": rush_created,
-            "rush_auto_inserted": rush_auto_inserted,
-            "save_mode": save_mode,
-        }
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Failed to update dealer_order %s after contract creation: %s",
+                    dealer_order_no, exc,
+                )
+
+        return result
     except HTTPException:
         raise
     except Exception as e:

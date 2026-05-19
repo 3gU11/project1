@@ -12,6 +12,8 @@ from database import get_engine
 
 ACTIVE_HOLD_STATUSES = ("pending", "approved")
 
+CONVERTIBLE_STATUSES = ("pending", "approved")
+
 
 def ensure_dealer_order_tables() -> None:
     with get_engine().begin() as conn:
@@ -109,24 +111,29 @@ def _status_rank(status: str) -> int:
     return {
         "pending": 0,
         "approved": 1,
-        "partial_allocated": 2,
-        "allocated": 3,
-        "rejected": 4,
-        "cancelled": 5,
-        "completed": 6,
+        "contracted": 2,
+        "partial_allocated": 3,
+        "allocated": 4,
+        "rejected": 5,
+        "cancelled": 6,
+        "completed": 7,
     }.get(status or "", 9)
 
 
 def _aggregate_status(items: list[dict]) -> str:
     statuses = [str(item.get("status") or "") for item in items]
+    if statuses and all(status == "completed" for status in statuses):
+        return "completed"
     if statuses and all(status == "allocated" for status in statuses):
         return "allocated"
-    if any(status == "allocated" or int(item.get("allocated_qty") or 0) > 0 for status, item in zip(statuses, items)):
+    if any(status == "allocated" or (int(item.get("allocated_qty") or 0) > 0 and status != "completed") for status, item in zip(statuses, items)):
         return "partial_allocated"
     if statuses and all(status == "rejected" for status in statuses):
         return "rejected"
     if statuses and all(status == "cancelled" for status in statuses):
         return "cancelled"
+    if any(status == "contracted" for status in statuses):
+        return "contracted"
     if any(status == "approved" for status in statuses):
         return "approved"
     return statuses[0] if statuses else "pending"
@@ -215,7 +222,7 @@ def list_dealer_orders(
         )
         params["kw"] = f"%{keyword}%"
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-    with get_engine().connect() as conn:
+    with get_engine().begin() as conn:
         raw_rows = conn.execute(
             text(
                 f"""
@@ -226,24 +233,32 @@ def list_dealer_orders(
                        created_at, updated_at
                 FROM dealer_orders
                 {where_sql}
-                ORDER BY FIELD(status, 'pending', 'approved', 'allocated', 'rejected', 'cancelled', 'completed'),
+                ORDER BY FIELD(status, 'pending', 'approved', 'contracted', 'partial_allocated', 'allocated', 'rejected', 'cancelled', 'completed'),
                          created_at DESC, order_no DESC, line_no ASC, id ASC
                 """
             ),
             params,
         ).fetchall()
-        rows = []
+        # Group raw rows by order_no for per-order sync
+        order_groups: OrderedDict[str, list[dict]] = OrderedDict()
         for row in raw_rows:
             item = _row_to_dict(row)
-            availability = get_availability(conn, item)
-            item.update(
-                {
-                    "summary_qty": availability["summary_qty"],
-                    "occupied_qty": availability["occupied_qty"],
-                    "available_qty": availability["available_for_current"],
-                }
-            )
-            rows.append(item)
+            order_groups.setdefault(str(item.get("order_no") or ""), []).append(item)
+
+        # Auto-sync allocation status for contracted orders
+        rows = []
+        for order_no_key, items in order_groups.items():
+            synced_items = _sync_allocation_status(conn, order_no_key, items)
+            for item in synced_items:
+                availability = get_availability(conn, item)
+                item.update(
+                    {
+                        "summary_qty": availability["summary_qty"],
+                        "occupied_qty": availability["occupied_qty"],
+                        "available_qty": availability["available_for_current"],
+                    }
+                )
+                rows.append(item)
 
     grouped = _group_orders(rows)
     if status_filter:
@@ -310,6 +325,147 @@ def get_availability(conn, order: dict) -> dict:
     }
 
 
+def _sync_allocation_status(conn, order_no: str, items: list[dict]) -> list[dict]:
+    """Trace contract→sales_order→inventory to auto-sync allocated_qty and per-line status.
+
+    Only operates on orders where status='contracted' and contract_no is non-empty.
+    Returns the (possibly updated) items list.
+    """
+    if not items:
+        return items
+    first = items[0]
+    status = str(first.get("status") or "")
+    if status not in ("contracted", "partial_allocated", "allocated"):
+        return items
+    contract_nos_str = str(first.get("contract_no") or "").strip()
+    if not contract_nos_str:
+        return items
+
+    # Split multiple contract IDs
+    contract_nos = [cid.strip() for cid in contract_nos_str.replace("，", "、").split("、") if cid.strip()]
+    if not contract_nos:
+        return items
+
+    # Build contract_no → set of order IDs mapping
+    placeholders_c = ",".join([f":cid_{i}" for i in range(len(contract_nos))])
+    params_c = {f"cid_{i}": cid for i, cid in enumerate(contract_nos)}
+    fp_rows = conn.execute(
+        text(
+            f"SELECT `合同号`, `机型`, `订单号` FROM factory_plan "
+            f"WHERE `合同号` IN ({placeholders_c}) AND `订单号` IS NOT NULL AND `订单号` != ''"
+        ),
+        params_c,
+    ).fetchall()
+    if not fp_rows:
+        return items
+
+    # contract_no → {model → set of order IDs}
+    contract_model_orders: dict[str, dict[str, set[str]]] = {}
+    for row in fp_rows:
+        cid = str(row[0] or "").strip()
+        model = str(row[1] or "").strip()
+        order_id = str(row[2] or "").strip()
+        if not cid or not model or not order_id:
+            continue
+        contract_model_orders.setdefault(cid, {}).setdefault(model, set()).add(order_id)
+
+    # Collect all unique order IDs and check their statuses
+    all_order_ids: set[str] = set()
+    for model_map in contract_model_orders.values():
+        for orders in model_map.values():
+            all_order_ids.update(orders)
+    if not all_order_ids:
+        return items
+
+    order_ids_list = list(all_order_ids)
+    placeholders_o = ",".join([f":oid_{i}" for i in range(len(order_ids_list))])
+    params_o = {f"oid_{i}": oid for i, oid in enumerate(order_ids_list)}
+    so_rows = conn.execute(
+        text(
+            f"SELECT `订单号`, `status` FROM sales_orders WHERE `订单号` IN ({placeholders_o})"
+        ),
+        params_o,
+    ).fetchall()
+    order_status: dict[str, str] = {}
+    for row in so_rows:
+        order_status[str(row[0] or "").strip()] = str(row[1] or "").strip()
+
+    # Count allocated/shipped machines per (order_id, model)
+    if not order_ids_list:
+        return items
+    fg_rows = conn.execute(
+        text(
+            f"SELECT `占用订单号`, `机型`, COUNT(*) as cnt FROM finished_goods_data "
+            f"WHERE `占用订单号` IN ({placeholders_o}) "
+            f"AND `机型` IS NOT NULL AND `机型` != '' "
+            f"AND `状态` IN ('待发货', '已出库') "
+            f"GROUP BY `占用订单号`, `机型`"
+        ),
+        params_o,
+    ).fetchall()
+    allocation_count: dict[tuple[str, str], int] = {}
+    for row in fg_rows:
+        oid = str(row[0] or "").strip()
+        model = str(row[1] or "").strip()
+        cnt = int(row[2] or 0)
+        allocation_count[(oid, model)] = allocation_count.get((oid, model), 0) + cnt
+
+    # Compute per-line allocated_qty
+    updated = False
+    updated_items = []
+    for item in items:
+        item_contract_no = str(item.get("contract_no") or "").strip()
+        item_cids = [c.strip() for c in item_contract_no.replace("，", "、").split("、") if c.strip()] if item_contract_no else []
+        model = str(item.get("model") or "").strip()
+        qty = int(item.get("quantity") or 0)
+
+        # Find all order IDs for this line's model across all its contracts
+        line_order_ids: set[str] = set()
+        for cid in item_cids:
+            model_map = contract_model_orders.get(cid, {})
+            line_order_ids.update(model_map.get(model, set()))
+
+        total_allocated = 0
+        all_done = True
+        for oid in line_order_ids:
+            total_allocated += allocation_count.get((oid, model), 0)
+            if order_status.get(oid, "") != "done":
+                all_done = False
+
+        new_item = dict(item)
+        new_item["allocated_qty"] = min(total_allocated, qty)
+
+        # Determine per-line status
+        if total_allocated >= qty and all_done:
+            new_item["status"] = "completed"
+        elif total_allocated >= qty:
+            new_item["status"] = "allocated"
+        elif total_allocated > 0:
+            new_item["status"] = "partial_allocated"
+        # else keep as contracted
+
+        if new_item.get("allocated_qty") != item.get("allocated_qty") or new_item.get("status") != item.get("status"):
+            updated = True
+        updated_items.append(new_item)
+
+    # Persist changes to DB
+    if updated:
+        for item in updated_items:
+            conn.execute(
+                text(
+                    "UPDATE dealer_orders SET allocated_qty=:allocated_qty, status=:status "
+                    "WHERE id=:id"
+                ),
+                {
+                    "allocated_qty": item["allocated_qty"],
+                    "status": item["status"],
+                    "id": item["id"],
+                },
+            )
+
+    return updated_items
+
+
 def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
     decorated = []
     for item in items:
@@ -328,14 +484,16 @@ def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
 
 def preview_dealer_order(order_no: str) -> dict:
     ensure_dealer_order_tables()
-    with get_engine().connect() as conn:
+    with get_engine().begin() as conn:
         rows = conn.execute(
             text("SELECT * FROM dealer_orders WHERE order_no=:order_no ORDER BY line_no, id"),
             {"order_no": order_no},
         ).fetchall()
         if not rows:
             raise ValueError("订单不存在")
-        items = _decorate_items_with_availability(conn, [_row_to_dict(row) for row in rows])
+        raw_items = [_row_to_dict(row) for row in rows]
+        synced_items = _sync_allocation_status(conn, order_no, raw_items)
+        items = _decorate_items_with_availability(conn, synced_items)
         order = _group_orders(items)[0]
         can_approve = all(
             int(item.get("available_qty") or 0)
@@ -470,3 +628,28 @@ def mark_dealer_order_allocated(order_no: str, allocated_qty: int, v7_order_no: 
             {"order_no": order_no, "v7_order_no": v7_order_no, "reviewer": reviewer},
         )
     return preview_dealer_order(order_no)
+
+
+def validate_dealer_order_convertible(order_no: str) -> list[dict]:
+    """Lock and validate a dealer order is eligible for contract conversion. Returns line items."""
+    ensure_dealer_order_tables()
+    with get_engine().begin() as conn:
+        items = _get_order_lines_for_update(conn, order_no)
+        if any(item.get("status") not in CONVERTIBLE_STATUSES for item in items):
+            raise ValueError("只有待审核或已通过的订单可以转为合同")
+        return items
+
+
+def mark_dealer_order_contracted(order_no: str, contract_no: str, operator: str = "") -> None:
+    """Update dealer order after successful contract creation."""
+    ensure_dealer_order_tables()
+    with get_engine().begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE dealer_orders SET status='contracted', contract_no=:contract_no, "
+                "reviewed_at=COALESCE(reviewed_at, NOW()), "
+                "reviewed_by=CASE WHEN COALESCE(reviewed_by, '')='' THEN :operator ELSE reviewed_by END "
+                "WHERE order_no=:order_no"
+            ),
+            {"order_no": order_no, "contract_no": contract_no, "operator": operator},
+        )

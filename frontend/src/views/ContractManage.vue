@@ -427,6 +427,7 @@ const dealerOrderDialogVisible = ref(false)
 const dealerOrderLoading = ref(false)
 const dealerOrderKeyword = ref('')
 const dealerOrders = ref<DealerOrder[]>([])
+const dealerOrderSource = ref('')
 const openMonths = ref<string[]>([])
 const detailPanelRef = ref<HTMLElement | null>(null)
 const { submitWithLock } = useFormSubmit()
@@ -469,6 +470,7 @@ const resetBatchForm = () => {
   }
   batchItems.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
   batchPickedFiles.value = []
+  dealerOrderSource.value = ''
 }
 
 const loadDealerOrders = async () => {
@@ -523,8 +525,14 @@ const prefillFromDealerOrder = (order: DealerOrder) => {
   batchForm.value.customer = String(order.customer_name || '').trim()
   batchForm.value.agent = String(order.contact_name || '').trim()
   batchForm.value.contractNote = String(order.review_note || '').trim()
-  batchForm.value.isRush = false
+  const remark = String(order.remark || '').toLowerCase()
+  const deliveryDate = String(order.delivery_date || '').trim()
+  const daysUntilDelivery = deliveryDate
+    ? (new Date(deliveryDate).getTime() - Date.now()) / 86400000
+    : Infinity
+  batchForm.value.isRush = remark.includes('急') || remark.includes('加急') || daysUntilDelivery <= 3
   batchItems.value = rows
+  dealerOrderSource.value = String(order.order_no || '').trim()
   batchPanelOpen.value = true
   dealerOrderDialogVisible.value = false
   ElMessage.success('已带入合同录入表单，请确认后再保存')
@@ -806,6 +814,7 @@ const submitBatchContracts = async () => {
       rows: payloadRows,
       is_rush: Boolean(batchForm.value.isRush),
       save_mode: saveMode,
+      dealer_order_no: dealerOrderSource.value,
     })
 
     if (batchPickedFiles.value.length > 0) {

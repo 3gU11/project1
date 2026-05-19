@@ -716,7 +716,7 @@ const createOrderFromPlanned = async () => {
     const model = String(r.model || '').trim()
     const qty = Number(r.qty || 0)
     if (!model || qty <= 0) continue
-    modelTokens.push(`\${model}x\${qty}`)
+    modelTokens.push(`${model}x${qty}`)
     totalQty += qty
   }
   const invalidModels = mergeRows.value
