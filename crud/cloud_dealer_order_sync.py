@@ -279,6 +279,14 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       WHERE NULLIF(raw.base_model, '') IS NOT NULL
                       GROUP BY raw.base_model, raw.is_high, IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '')
                     ) s
+                    ON DUPLICATE KEY UPDATE
+                      batch_no = VALUES(batch_no),
+                      expected_inbound_time = VALUES(expected_inbound_time),
+                      model = VALUES(model),
+                      quantity = VALUES(quantity),
+                      heightened = VALUES(heightened),
+                      original_batch_no = VALUES(original_batch_no),
+                      original_expected_inbound_time = VALUES(original_expected_inbound_time)
                     """
                 )
             )

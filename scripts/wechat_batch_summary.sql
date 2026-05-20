@@ -147,7 +147,15 @@ BEGIN
       ) raw
       WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
       GROUP BY raw.`source_batch_no`, raw.`source_expected_inbound_time`, raw.`base_model`, raw.`is_high`
-    ) s;
+    ) s
+    ON DUPLICATE KEY UPDATE
+      `batch_no` = VALUES(`batch_no`),
+      `expected_inbound_time` = VALUES(`expected_inbound_time`),
+      `model` = VALUES(`model`),
+      `quantity` = VALUES(`quantity`),
+      `heightened` = VALUES(`heightened`),
+      `original_batch_no` = VALUES(`original_batch_no`),
+      `original_expected_inbound_time` = VALUES(`original_expected_inbound_time`);
   END IF;
 
   IF v_model_base IS NOT NULL THEN
@@ -206,7 +214,15 @@ BEGIN
       ) raw
       WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
       GROUP BY raw.`base_model`, raw.`is_high`, IF(raw.`is_high`, COALESCE(NULLIF(raw.`source_batch_no`, ''), '库存中'), '')
-    ) s;
+    ) s
+    ON DUPLICATE KEY UPDATE
+      `batch_no` = VALUES(`batch_no`),
+      `expected_inbound_time` = VALUES(`expected_inbound_time`),
+      `model` = VALUES(`model`),
+      `quantity` = VALUES(`quantity`),
+      `heightened` = VALUES(`heightened`),
+      `original_batch_no` = VALUES(`original_batch_no`),
+      `original_expected_inbound_time` = VALUES(`original_expected_inbound_time`);
   END IF;
 END$$
 
@@ -297,7 +313,15 @@ BEGIN
     ) raw
     WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
     GROUP BY raw.`base_model`, raw.`is_high`, IF(raw.`is_high`, COALESCE(NULLIF(raw.`source_batch_no`, ''), '库存中'), '')
-  ) s;
+  ) s
+  ON DUPLICATE KEY UPDATE
+    `batch_no` = VALUES(`batch_no`),
+    `expected_inbound_time` = VALUES(`expected_inbound_time`),
+    `model` = VALUES(`model`),
+    `quantity` = VALUES(`quantity`),
+    `heightened` = VALUES(`heightened`),
+    `original_batch_no` = VALUES(`original_batch_no`),
+    `original_expected_inbound_time` = VALUES(`original_expected_inbound_time`);
 END$$
 
 CREATE TRIGGER `trg_fg_wechat_summary_ai`
