@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Q
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from config import MACHINE_ARCHIVE_ABS_DIR, GO_SANDBOX_URL
 from core.file_manager import audit_log
@@ -612,25 +612,49 @@ def confirm_shipping(
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not sns:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 台机台")
-        df = get_data()
-        hit = df[df["流水号"].astype(str).isin(sns)]
-        if hit.empty:
-            raise HTTPException(status_code=422, detail="所选机台不存在")
+        select_stmt = (
+            text("SELECT * FROM finished_goods_data WHERE `流水号` IN :sns")
+            .bindparams(bindparam("sns", expanding=True))
+        )
+        update_stmt = (
+            text(
+                "UPDATE finished_goods_data "
+                "SET `状态`='已出库', `更新时间`=:now_text "
+                "WHERE `流水号` IN :sns"
+            )
+            .bindparams(bindparam("sns", expanding=True))
+        )
+
+        now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
+        with get_engine().begin() as conn:
+            hit_rows = conn.execute(select_stmt, {"sns": sns}).mappings().all()
+            if not hit_rows:
+                raise HTTPException(status_code=422, detail="所选机台不存在")
+            conn.execute(update_stmt, {"sns": sns, "now_text": now_text})
+
+        hit = pd.DataFrame([dict(row) for row in hit_rows]).fillna("")
         impacted_order_ids = {
             str(x).strip()
             for x in hit.get("占用订单号", pd.Series(dtype=str)).tolist()
             if str(x).strip()
         }
-
-        now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
-        mask = df["流水号"].astype(str).isin(sns)
-        df.loc[mask, "状态"] = "已出库"
-        df.loc[mask, "更新时间"] = now_text
-        save_data(df)
+        shipped_rows = hit.copy()
+        shipped_rows["状态"] = "已出库"
+        shipped_rows["更新时间"] = now_text
 
         if impacted_order_ids:
             orders_df = get_orders()
             changed = False
+            shipped_counts: dict[str, int] = {}
+            shipped_count_stmt = text(
+                "SELECT COUNT(*) FROM finished_goods_data "
+                "WHERE `状态`='已出库' AND TRIM(COALESCE(`占用订单号`, '')) = :order_id"
+            )
+            with get_engine().connect() as conn:
+                for order_id in impacted_order_ids:
+                    shipped_counts[order_id] = int(
+                        conn.execute(shipped_count_stmt, {"order_id": order_id}).scalar() or 0
+                    )
             for idx, row in orders_df.iterrows():
                 order_id = str(row.get("订单号", "") or "").strip()
                 if order_id not in impacted_order_ids:
@@ -652,17 +676,14 @@ def confirm_shipping(
                         need = int(float(row.get("需求数量", 0) or 0))
                     except Exception:
                         need = 0
-                shipped = df[
-                    (df["状态"].astype(str).str.strip() == "已出库")
-                    & (df["占用订单号"].astype(str).str.strip() == order_id)
-                ].shape[0]
+                shipped = shipped_counts.get(order_id, 0)
                 if need > 0 and shipped >= need and str(row.get("status", "active") or "active") != "done":
                     orders_df.at[idx, "status"] = "done"
                     changed = True
             if changed:
                 save_orders(orders_df)
 
-        archive_shipped_data(df[df["流水号"].astype(str).isin(sns)])
+        archive_shipped_data(shipped_rows)
         append_log("正式发货", sns, operator=current_operator)
         append_audit_log(
             module="发货复核",
