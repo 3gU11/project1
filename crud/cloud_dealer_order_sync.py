@@ -192,10 +192,17 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       expected_inbound_time DATETIME NULL,
                       model VARCHAR(100) NOT NULL,
                       quantity INT NOT NULL DEFAULT 0,
+                      heightened TINYINT(1) NOT NULL DEFAULT 0,
+                      original_batch_no VARCHAR(100) DEFAULT '',
+                      original_expected_inbound_time DATETIME NULL,
+                      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                       `批次号` VARCHAR(100) NOT NULL,
                       `预计入库时间` DATETIME NULL,
                       `机型` VARCHAR(100) NOT NULL,
                       `数量` INT NOT NULL DEFAULT 0,
+                      `加高` TINYINT(1) NOT NULL DEFAULT 0,
+                      `原批次号` VARCHAR(100) DEFAULT '',
+                      `原预计入库时间` DATETIME NULL,
                       `更新时间` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                       PRIMARY KEY (summary_id),
                       INDEX idx_wbs_batch (`批次号`),
@@ -211,31 +218,42 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                     """
                     INSERT INTO wechat_batch_summary
                       (summary_id, batch_no, expected_inbound_time, model, quantity,
-                       `批次号`, `预计入库时间`, `机型`, `数量`)
+                       heightened, original_batch_no, original_expected_inbound_time,
+                       `批次号`, `预计入库时间`, `机型`, `数量`,
+                       `加高`, `原批次号`, `原预计入库时间`)
                     SELECT
                       MD5(CONCAT(
                         s.batch_no, '|',
                         COALESCE(DATE_FORMAT(s.expected_inbound_time, '%Y-%m-%d %H:%i:%s'), ''),
-                        '|', s.model
+                        '|', s.model, '|', s.heightened, '|', COALESCE(s.original_batch_no, '')
                       )) AS summary_id,
                       s.batch_no,
                       s.expected_inbound_time,
                       s.model,
                       s.quantity,
+                      s.heightened,
+                      s.original_batch_no,
+                      s.original_expected_inbound_time,
                       s.batch_no AS `批次号`,
                       s.expected_inbound_time AS `预计入库时间`,
                       s.model AS `机型`,
-                      s.quantity AS `数量`
+                      s.quantity AS `数量`,
+                      s.heightened AS `加高`,
+                      s.original_batch_no AS `原批次号`,
+                      s.original_expected_inbound_time AS `原预计入库时间`
                     FROM (
                       SELECT
-                        raw.batch_no,
-                        raw.expected_inbound_time,
-                        IF(raw.is_high, CONCAT(raw.base_model, '加高'), raw.base_model) AS model,
-                        COUNT(*) AS quantity
+                        IF(raw.is_high, '加高', raw.source_batch_no) AS batch_no,
+                        raw.source_expected_inbound_time AS expected_inbound_time,
+                        raw.base_model AS model,
+                        COUNT(*) AS quantity,
+                        IF(raw.is_high, 1, 0) AS heightened,
+                        IF(raw.is_high, raw.source_batch_no, '') AS original_batch_no,
+                        IF(raw.is_high, raw.source_expected_inbound_time, NULL) AS original_expected_inbound_time
                       FROM (
                         SELECT
-                          TRIM(`批次号`) AS batch_no,
-                          `预计入库时间` AS expected_inbound_time,
+                          TRIM(`批次号`) AS source_batch_no,
+                          `预计入库时间` AS source_expected_inbound_time,
                           TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
                           (
                             TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
@@ -250,15 +268,19 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                           AND TRIM(COALESCE(`状态`, '')) = '待入库'
                       ) raw
                       WHERE NULLIF(raw.base_model, '') IS NOT NULL
-                      GROUP BY raw.batch_no, raw.expected_inbound_time, raw.base_model, raw.is_high
+                      GROUP BY raw.source_batch_no, raw.source_expected_inbound_time, raw.base_model, raw.is_high
                       UNION ALL
                       SELECT
-                        '库存中' AS batch_no,
+                        IF(raw.is_high, '加高', '库存中') AS batch_no,
                         CAST(NULL AS DATETIME) AS expected_inbound_time,
-                        IF(raw.is_high, CONCAT(raw.base_model, '加高'), raw.base_model) AS model,
-                        COUNT(*) AS quantity
+                        raw.base_model AS model,
+                        COUNT(*) AS quantity,
+                        IF(raw.is_high, 1, 0) AS heightened,
+                        IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '') AS original_batch_no,
+                        CAST(NULL AS DATETIME) AS original_expected_inbound_time
                       FROM (
                         SELECT
+                          TRIM(COALESCE(`批次号`, '')) AS source_batch_no,
                           TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
                           (
                             TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
@@ -272,7 +294,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                           AND TRIM(COALESCE(`状态`, '')) = '库存中'
                       ) raw
                       WHERE NULLIF(raw.base_model, '') IS NOT NULL
-                      GROUP BY raw.base_model, raw.is_high
+                      GROUP BY raw.base_model, raw.is_high, IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '')
                     ) s
                     """
                 )
@@ -292,10 +314,17 @@ def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
                   expected_inbound_time,
                   model,
                   quantity,
+                  heightened,
+                  original_batch_no,
+                  original_expected_inbound_time,
+                  updated_at,
                   `批次号`,
                   `预计入库时间`,
                   `机型`,
                   `数量`,
+                  `加高`,
+                  `原批次号`,
+                  `原预计入库时间`,
                   `更新时间`
                 FROM wechat_batch_summary
                 ORDER BY batch_no, expected_inbound_time, model

@@ -27,11 +27,18 @@ END$$
 
 DELIMITER ;
 
+CALL `add_wechat_batch_summary_column_if_missing`('heightened', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `heightened` TINYINT(1) NOT NULL DEFAULT 0 AFTER `quantity`');
+CALL `add_wechat_batch_summary_column_if_missing`('original_batch_no', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `original_batch_no` VARCHAR(100) DEFAULT '''' AFTER `heightened`');
+CALL `add_wechat_batch_summary_column_if_missing`('original_expected_inbound_time', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `original_expected_inbound_time` DATETIME NULL AFTER `original_batch_no`');
+CALL `add_wechat_batch_summary_column_if_missing`('updated_at', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `original_expected_inbound_time`');
 CALL `add_wechat_batch_summary_column_if_missing`('批次号', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `批次号` VARCHAR(100) NOT NULL DEFAULT '''' AFTER `updated_at`');
 CALL `add_wechat_batch_summary_column_if_missing`('预计入库时间', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `预计入库时间` DATETIME NULL AFTER `批次号`');
 CALL `add_wechat_batch_summary_column_if_missing`('机型', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `机型` VARCHAR(100) NOT NULL DEFAULT '''' AFTER `预计入库时间`');
 CALL `add_wechat_batch_summary_column_if_missing`('数量', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `数量` INT NOT NULL DEFAULT 0 AFTER `机型`');
-CALL `add_wechat_batch_summary_column_if_missing`('更新时间', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `更新时间` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `数量`');
+CALL `add_wechat_batch_summary_column_if_missing`('加高', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `加高` TINYINT(1) NOT NULL DEFAULT 0 AFTER `数量`');
+CALL `add_wechat_batch_summary_column_if_missing`('原批次号', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `原批次号` VARCHAR(100) DEFAULT '''' AFTER `加高`');
+CALL `add_wechat_batch_summary_column_if_missing`('原预计入库时间', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `原预计入库时间` DATETIME NULL AFTER `原批次号`');
+CALL `add_wechat_batch_summary_column_if_missing`('更新时间', 'ALTER TABLE `wechat_batch_summary` ADD COLUMN `更新时间` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `原预计入库时间`');
 
 CALL `refresh_wechat_batch_summary_all`();
 
