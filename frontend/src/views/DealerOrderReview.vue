@@ -316,6 +316,8 @@ const tableRows = computed<DealerOrderTableRow[]>(() => {
     return items.map((item, index) => ({
       ...order,
       ...item,
+      remark: item.remark || order.remark || '',
+      review_note: item.review_note || order.review_note || '',
       items: order.items?.length ? order.items : [order],
       line_count: order.line_count,
       _order: order,

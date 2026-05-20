@@ -162,6 +162,15 @@ def _summarize_batches(items: list[dict]) -> str:
     return " / ".join(batches)
 
 
+def _summarize_text(items: list[dict], field: str) -> str:
+    values: list[str] = []
+    for item in items:
+        value = str(item.get(field) or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return " | ".join(values)
+
+
 def _group_orders(rows: list[dict]) -> list[dict]:
     grouped: OrderedDict[str, list[dict]] = OrderedDict()
     for row in rows:
@@ -175,6 +184,9 @@ def _group_orders(rows: list[dict]) -> list[dict]:
         base["line_count"] = len(items)
         base["model"] = _summarize_models(items)
         base["batch_no"] = _summarize_batches(items)
+        base["remark"] = _summarize_text(items, "remark")
+        base["review_note"] = _summarize_text(items, "review_note")
+        base["regional_review_note"] = _summarize_text(items, "regional_review_note")
         base["quantity"] = sum(int(item.get("quantity") or 0) for item in items)
         base["approved_qty"] = sum(int(item.get("approved_qty") or 0) for item in items)
         base["allocated_qty"] = sum(int(item.get("allocated_qty") or 0) for item in items)
