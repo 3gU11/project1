@@ -4,6 +4,7 @@
       <template #actions>
         <el-button :loading="syncing" @click="syncCloudOrders">同步云端</el-button>
         <el-button :loading="inventorySyncing" @click="syncCloudInventory">同步库存到云端</el-button>
+        <el-button :loading="completedSyncing" @click="syncCompletedCloud">同步完成状态</el-button>
         <el-button type="primary" :loading="loading" @click="loadOrders">刷新</el-button>
       </template>
     </PageHeader>
@@ -294,6 +295,7 @@ type PreviewResponse = {
 const loading = ref(false)
 const syncing = ref(false)
 const inventorySyncing = ref(false)
+const completedSyncing = ref(false)
 const orders = ref<DealerOrder[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -425,6 +427,30 @@ const syncCloudInventory = async () => {
     ElMessage.error(getApiErrorMessage(err) || '同步云端库存失败')
   } finally {
     inventorySyncing.value = false
+  }
+}
+
+const syncCompletedCloud = async () => {
+  completedSyncing.value = true
+  try {
+    const res = await apiPost<{
+      scanned?: number
+      pushed?: number
+      skipped?: number
+      failed?: Array<{ order_no?: string; error?: string }>
+    }>('/dealer-orders/sync-completed-cloud', {
+      limit: 200,
+    })
+    const failed = res.failed?.length || 0
+    if (failed > 0) {
+      ElMessage.warning(`完成状态同步：成功 ${res.pushed || 0}，跳过 ${res.skipped || 0}，失败 ${failed}`)
+    } else {
+      ElMessage.success(`完成状态同步：扫描 ${res.scanned || 0}，成功 ${res.pushed || 0}，跳过 ${res.skipped || 0}`)
+    }
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '同步完成状态失败')
+  } finally {
+    completedSyncing.value = false
   }
 }
 

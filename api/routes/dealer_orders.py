@@ -21,6 +21,7 @@ from crud.cloud_dealer_order_sync import (
     push_cloud_contract,
     push_cloud_review,
     sync_cloud_dealer_orders,
+    sync_completed_dealer_orders_to_cloud,
     sync_wechat_batch_summary_to_cloud,
 )
 
@@ -70,6 +71,10 @@ class CloudSyncPayload(BaseModel):
     status: str = Field(default="pending", max_length=32)
     page_size: int = Field(default=100, ge=1, le=200)
     max_pages: int = Field(default=20, ge=1, le=100)
+
+
+class CompletedCloudSyncPayload(BaseModel):
+    limit: int = Field(default=200, ge=1, le=1000)
 
 
 def _operator(ctx: dict) -> str:
@@ -163,6 +168,34 @@ def sync_wechat_batch_summary(
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"同步云端库存失败: {exc}")
+
+
+@router.post("/sync-completed-cloud")
+def sync_completed_cloud_orders(
+    payload: CompletedCloudSyncPayload,
+    request: Request,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    operator = _operator(ctx)
+    try:
+        result = sync_completed_dealer_orders_to_cloud(limit=payload.limit)
+        append_audit_log(
+            module="经销商订单",
+            action_type="同步完成状态",
+            biz_type="订单",
+            content=(
+                f"同步本地已完成经销商订单到云端："
+                f"scanned={result.get('scanned')}，pushed={result.get('pushed')}，"
+                f"skipped={result.get('skipped')}，failed={len(result.get('failed') or [])}"
+            ),
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"同步完成状态失败: {exc}")
 
 
 @router.get("/{order_no}/preview")

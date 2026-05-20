@@ -302,6 +302,56 @@ def sync_wechat_batch_summary_to_cloud() -> dict[str, Any]:
     }
 
 
+def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
+    ensure_dealer_order_tables()
+    limit = min(max(1, int(limit or 200)), 1000)
+    rows: list[dict[str, Any]] = []
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            text(
+                """
+                SELECT order_no, COALESCE(MAX(v7_order_no), '') AS v7_order_no
+                FROM dealer_orders
+                WHERE status='completed'
+                GROUP BY order_no
+                ORDER BY MAX(updated_at) DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        ).mappings()
+        rows = [dict(row) for row in result]
+
+    pushed = 0
+    skipped = 0
+    failed: list[dict[str, Any]] = []
+    for row in rows:
+        order_no = _clean(row.get("order_no"))
+        if not order_no:
+            skipped += 1
+            continue
+        try:
+            result = push_cloud_complete(
+                order_no,
+                operator="system",
+                v7_order_no=_clean(row.get("v7_order_no")),
+            )
+            if result.get("skipped"):
+                skipped += 1
+            else:
+                pushed += 1
+        except Exception as exc:
+            failed.append({"order_no": order_no, "error": str(exc)})
+
+    return {
+        "message": "completed dealer orders synced",
+        "scanned": len(rows),
+        "pushed": pushed,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
 def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]:
     status = _normalize_status(item.get("status") or order.get("status"))
     return {
