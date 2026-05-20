@@ -472,6 +472,58 @@ def _sync_allocation_status(conn, order_no: str, items: list[dict]) -> list[dict
     return updated_items
 
 
+def sync_dealer_order_statuses_by_sales_orders(sales_order_ids: list[str]) -> list[dict]:
+    """Refresh dealer order line statuses for orders linked to the given V7 sales orders."""
+    ensure_dealer_order_tables()
+    order_ids = [str(order_id or "").strip() for order_id in sales_order_ids if str(order_id or "").strip()]
+    if not order_ids:
+        return []
+
+    placeholders = ",".join([f":oid_{i}" for i in range(len(order_ids))])
+    params = {f"oid_{i}": oid for i, oid in enumerate(order_ids)}
+    synced: list[dict] = []
+
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT DISTINCT d.order_no
+                FROM dealer_orders d
+                JOIN factory_plan fp
+                  ON FIND_IN_SET(
+                    TRIM(fp.`合同号`) COLLATE utf8mb4_general_ci,
+                    REPLACE(REPLACE(TRIM(COALESCE(d.contract_no, '')), '，', '、'), '、', ',') COLLATE utf8mb4_general_ci
+                  ) > 0
+                WHERE fp.`订单号` IN ({placeholders})
+                  AND COALESCE(TRIM(d.contract_no), '') <> ''
+                """
+            ),
+            params,
+        ).fetchall()
+        order_nos = [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
+
+        for order_no in order_nos:
+            line_rows = conn.execute(
+                text("SELECT * FROM dealer_orders WHERE order_no=:order_no ORDER BY line_no, id"),
+                {"order_no": order_no},
+            ).fetchall()
+            items = [_row_to_dict(row) for row in line_rows]
+            if not items:
+                continue
+            updated_items = _sync_allocation_status(conn, order_no, items)
+            status = _aggregate_status(updated_items)
+            synced.append(
+                {
+                    "order_no": order_no,
+                    "status": status,
+                    "v7_order_no": "、".join(order_ids),
+                    "items": updated_items,
+                }
+            )
+
+    return synced
+
+
 def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
     decorated = []
     for item in items:

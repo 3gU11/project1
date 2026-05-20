@@ -165,6 +165,18 @@ def push_cloud_allocate(order_no: str, contract_no: str = "", operator: str = ""
     )
 
 
+def push_cloud_complete(order_no: str, operator: str = "", v7_order_no: str = "") -> dict[str, Any]:
+    return _post_cloud_order(
+        order_no=order_no,
+        path_suffix="complete",
+        payload={
+            "completedBy": _clean(operator),
+            "v7OrderNo": _clean(v7_order_no),
+        },
+        idempotency_key=f"v7-complete-{_clean(order_no)}-{_clean(v7_order_no)}",
+    )
+
+
 def refresh_local_wechat_batch_summary() -> dict[str, Any]:
     """Rebuild the local mini-program inventory read model from finished_goods_data."""
     with get_engine().begin() as conn:

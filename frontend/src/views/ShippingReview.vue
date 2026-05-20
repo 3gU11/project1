@@ -125,7 +125,7 @@ import VirtualScrollList from '../components/VirtualScrollList.vue'
 
 type Row = Record<string, any>
 type ListResponse<T = any> = { data: T[] }
-type MessageResponse = { message?: string }
+type MessageResponse = { message?: string; warning?: string; cloud_synced?: number }
 type ArchiveFile = { file_name: string; is_image?: boolean; size?: number; update_time?: string }
 type PreviewPhoto = { file_name: string; objectUrl: string; size: number; update_time: string }
 
@@ -294,7 +294,11 @@ const confirmShip = async () => {
   saving.value = true
   try {
     const res = await apiPost<MessageResponse>('/inventory/shipping/confirm', { serial_nos: selectedSerials.value })
-    ElMessage.success(res.message || '发货完成')
+    if (res.warning) {
+      ElMessage.warning(res.warning)
+    } else {
+      ElMessage.success(res.message || '发货完成')
+    }
     selectedSerials.value = []
     await loadPending()
   } catch (err: any) {

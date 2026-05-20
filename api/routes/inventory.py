@@ -18,6 +18,8 @@ from sqlalchemy import text
 from config import MACHINE_ARCHIVE_ABS_DIR, GO_SANDBOX_URL
 from core.file_manager import audit_log
 from crud.audit_logs import append_audit_log
+from crud.cloud_dealer_order_sync import push_cloud_complete
+from crud.dealer_orders import sync_dealer_order_statuses_by_sales_orders
 from crud.inventory import (
     INVENTORY_COLS,
     append_import_staging,
@@ -670,7 +672,22 @@ def confirm_shipping(
             user_id=current_user.get("username"),
             username=current_operator,
         )
-        return {"message": f"发货完成，共 {len(sns)} 台"}
+        cloud_warning = ""
+        cloud_synced = 0
+        if impacted_order_ids:
+            try:
+                dealer_orders = sync_dealer_order_statuses_by_sales_orders(list(impacted_order_ids))
+                for dealer_order in dealer_orders:
+                    if dealer_order.get("status") == "completed":
+                        push_cloud_complete(
+                            str(dealer_order.get("order_no") or ""),
+                            operator=current_operator,
+                            v7_order_no=str(dealer_order.get("v7_order_no") or ""),
+                        )
+                        cloud_synced += 1
+            except Exception as cloud_exc:
+                cloud_warning = f"本地发货已完成，但回写小程序云端失败：{cloud_exc}"
+        return {"message": f"发货完成，共 {len(sns)} 台", "warning": cloud_warning, "cloud_synced": cloud_synced}
     except HTTPException:
         raise
     except Exception as e:
