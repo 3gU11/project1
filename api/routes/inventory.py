@@ -18,7 +18,7 @@ from sqlalchemy import bindparam, text
 from config import MACHINE_ARCHIVE_ABS_DIR, GO_SANDBOX_URL
 from core.file_manager import audit_log
 from crud.audit_logs import append_audit_log
-from crud.cloud_dealer_order_sync import push_cloud_complete
+from crud.cloud_dealer_order_sync import push_cloud_completed_state
 from crud.dealer_orders import sync_dealer_order_statuses_by_sales_orders
 from crud.inventory import (
     INVENTORY_COLS,
@@ -700,8 +700,9 @@ def confirm_shipping(
                 dealer_orders = sync_dealer_order_statuses_by_sales_orders(list(impacted_order_ids))
                 for dealer_order in dealer_orders:
                     if dealer_order.get("status") == "completed":
-                        push_cloud_complete(
+                        push_cloud_completed_state(
                             str(dealer_order.get("order_no") or ""),
+                            contract_no=str(dealer_order.get("contract_no") or ""),
                             operator=current_operator,
                             v7_order_no=str(dealer_order.get("v7_order_no") or ""),
                         )

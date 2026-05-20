@@ -13,6 +13,7 @@ from database import get_engine
 
 
 SYNCABLE_STATUSES = {"pending", "approved", "contracted", "partial_allocated", "allocated", "completed", "rejected"}
+CLOUD_READ_STATUSES = ("pending", "approved", "contracted", "partial_allocated", "allocated", "completed")
 
 
 def _read_dotenv_value(key: str) -> str:
@@ -123,7 +124,18 @@ def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], 
         )
         if response.status_code == 404:
             return {"skipped": True, "reason": "cloud_order_not_found", "order_no": order_no}
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = ""
+            try:
+                body = response.json()
+                detail = str(body.get("detail") if isinstance(body, dict) else body)
+            except ValueError:
+                detail = response.text
+            if detail:
+                raise RuntimeError(f"{exc}; detail={detail}") from exc
+            raise
         return response.json()
 
 
@@ -175,6 +187,45 @@ def push_cloud_complete(order_no: str, operator: str = "", v7_order_no: str = ""
         },
         idempotency_key=f"v7-complete-{_clean(order_no)}-{_clean(v7_order_no)}",
     )
+
+
+def find_cloud_dealer_order(order_no: str) -> dict[str, Any] | None:
+    order_no = _clean(order_no)
+    if not order_no:
+        return None
+    for status in CLOUD_READ_STATUSES:
+        for order in fetch_cloud_dealer_orders(status, page_size=100, max_pages=5):
+            if _clean(order.get("order_no") or order.get("orderNo")) == order_no:
+                return order
+    return None
+
+
+def push_cloud_completed_state(order_no: str, contract_no: str = "", operator: str = "", v7_order_no: str = "") -> dict[str, Any]:
+    """Move a cloud order to completed, filling missing intermediate V7 states only at completion time."""
+    order_no = _clean(order_no)
+    contract_no = _clean(contract_no)
+    operator = _clean(operator) or "system"
+    v7_order_no = _clean(v7_order_no)
+    cloud_order = find_cloud_dealer_order(order_no)
+    if not cloud_order:
+        return {"skipped": True, "reason": "cloud_order_not_found", "order_no": order_no}
+
+    statuses = {_normalize_status(item.get("status") or cloud_order.get("status")) for item in _iter_cloud_items(cloud_order)}
+    steps: list[str] = []
+
+    if statuses == {"pending"}:
+        push_cloud_review(order_no, "approved", reviewer=operator, note="V7 completed sync")
+        statuses = {"approved"}
+        steps.append("review")
+
+    if contract_no and statuses == {"approved"}:
+        push_cloud_contract(order_no, contract_no=contract_no, operator=operator, v7_order_no=v7_order_no)
+        statuses = {"contracted"}
+        steps.append("contract")
+
+    result = push_cloud_complete(order_no, operator=operator, v7_order_no=v7_order_no)
+    result["steps"] = steps + ["complete"]
+    return result
 
 
 def refresh_local_wechat_batch_summary() -> dict[str, Any]:
@@ -348,7 +399,10 @@ def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
         result = conn.execute(
             text(
                 """
-                SELECT order_no, COALESCE(MAX(v7_order_no), '') AS v7_order_no
+                SELECT
+                  order_no,
+                  COALESCE(MAX(contract_no), '') AS contract_no,
+                  COALESCE(MAX(v7_order_no), '') AS v7_order_no
                 FROM dealer_orders
                 WHERE status='completed'
                 GROUP BY order_no
@@ -369,8 +423,9 @@ def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
             skipped += 1
             continue
         try:
-            result = push_cloud_complete(
+            result = push_cloud_completed_state(
                 order_no,
+                contract_no=_clean(row.get("contract_no")),
                 operator="system",
                 v7_order_no=_clean(row.get("v7_order_no")),
             )

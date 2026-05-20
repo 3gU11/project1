@@ -528,6 +528,15 @@ def sync_dealer_order_statuses_by_sales_orders(sales_order_ids: list[str]) -> li
                 {
                     "order_no": order_no,
                     "status": status,
+                    "contract_no": "、".join(
+                        sorted(
+                            {
+                                str(item.get("contract_no") or "").strip()
+                                for item in updated_items
+                                if str(item.get("contract_no") or "").strip()
+                            }
+                        )
+                    ),
                     "v7_order_no": "、".join(order_ids),
                     "items": updated_items,
                 }
