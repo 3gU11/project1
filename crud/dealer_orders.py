@@ -233,7 +233,7 @@ def list_dealer_orders(
     if keyword:
         where.append(
             "("
-            "order_no LIKE :kw OR dealer_name LIKE :kw OR customer_name LIKE :kw "
+            "order_no LIKE :kw OR dealer_name LIKE :kw OR regional_manager_name LIKE :kw OR customer_name LIKE :kw "
             "OR contact_phone LIKE :kw OR model LIKE :kw OR batch_no LIKE :kw"
             ")"
         )

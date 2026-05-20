@@ -45,8 +45,8 @@
     >
       <el-table-column prop="created_at" label="提交时间" width="160" />
       <el-table-column prop="order_no" label="订单号" min-width="170" show-overflow-tooltip />
-      <el-table-column prop="dealer_name" label="经销商" min-width="150" show-overflow-tooltip />
-      <el-table-column prop="contact_name" label="联系人" width="110" show-overflow-tooltip />
+      <el-table-column prop="regional_manager_name" label="经销商" min-width="150" show-overflow-tooltip />
+      <el-table-column prop="customer_name" label="客户名" width="110" show-overflow-tooltip />
       <el-table-column prop="model" label="机型明细" min-width="190" show-overflow-tooltip />
       <el-table-column prop="batch_no" label="批次/来源" width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ displayBatch(row.batch_no) }}</template>
@@ -250,6 +250,7 @@ type DealerOrder = {
   line_count?: number
   dealer_openid?: string
   dealer_name?: string
+  regional_manager_name?: string
   customer_name?: string
   contact_name?: string
   contact_phone?: string
