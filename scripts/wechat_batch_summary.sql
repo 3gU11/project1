@@ -2,6 +2,8 @@
 -- This script adds an independent summary table that follows finished_goods_data
 -- through MySQL triggers. It does not change any V7 application code.
 
+SET NAMES utf8mb4 COLLATE utf8mb4_general_ci;
+
 CREATE TABLE IF NOT EXISTS `wechat_batch_summary` (
   `summary_id` CHAR(32) NOT NULL,
   `batch_no` VARCHAR(100) NOT NULL,

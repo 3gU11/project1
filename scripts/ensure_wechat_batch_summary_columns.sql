@@ -1,3 +1,8 @@
+SET NAMES utf8mb4 COLLATE utf8mb4_general_ci;
+
+ALTER TABLE `wechat_batch_summary`
+  CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+
 DELIMITER $$
 
 DROP PROCEDURE IF EXISTS `add_wechat_batch_summary_column_if_missing`$$
