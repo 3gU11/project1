@@ -264,6 +264,7 @@ type DealerOrder = {
   status: string
   remark?: string
   review_note?: string
+  regional_review_note?: string
   reviewed_at?: string
   reviewed_by?: string
   created_at?: string
@@ -318,6 +319,7 @@ const tableRows = computed<DealerOrderTableRow[]>(() => {
       ...item,
       remark: item.remark || order.remark || '',
       review_note: item.review_note || order.review_note || '',
+      regional_review_note: item.regional_review_note || order.regional_review_note || '',
       items: order.items?.length ? order.items : [order],
       line_count: order.line_count,
       _order: order,
@@ -537,14 +539,14 @@ const openConvertDialog = (row: DealerOrder) => {
   convertForm.customer = String(row.customer_name || '').trim()
   convertForm.agent = String(row.contact_name || '').trim()
   convertForm.isRush = isRushHint(row)
-  convertForm.contractNote = String(row.review_note || '').trim()
+  convertForm.contractNote = String(row.regional_review_note || '').trim()
   convertForm.sourceOrderNo = row.order_no
   const items = row.items?.length ? row.items : [row]
   convertForm.items = items.map((item) => ({
     model: String(item.model || '').trim(),
     qty: Math.max(1, Number(item.quantity || 1)),
     high: String(item.model || '').includes('加高') || String(item.remark || '').includes('加高'),
-    rowNote: '',
+    rowNote: String(item.remark || '').trim(),
   }))
   convertCanUseSpot.value = true
   convertSpotBlockReason.value = ''
