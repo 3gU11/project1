@@ -60,6 +60,7 @@ def ensure_dealer_order_tables() -> None:
         columns = {row[0] for row in conn.execute(text("SHOW COLUMNS FROM dealer_orders")).fetchall()}
         additions = [
             ("line_no", "ALTER TABLE dealer_orders ADD COLUMN line_no INT NOT NULL DEFAULT 1 AFTER order_no"),
+            ("regional_manager_name", "ALTER TABLE dealer_orders ADD COLUMN regional_manager_name VARCHAR(128) DEFAULT '' AFTER dealer_phone"),
             ("approved_qty", "ALTER TABLE dealer_orders ADD COLUMN approved_qty INT NOT NULL DEFAULT 0 AFTER quantity"),
             ("allocated_qty", "ALTER TABLE dealer_orders ADD COLUMN allocated_qty INT NOT NULL DEFAULT 0 AFTER approved_qty"),
             ("reviewed_at", "ALTER TABLE dealer_orders ADD COLUMN reviewed_at DATETIME NULL AFTER status"),
@@ -67,6 +68,10 @@ def ensure_dealer_order_tables() -> None:
             ("contract_no", "ALTER TABLE dealer_orders ADD COLUMN contract_no VARCHAR(128) DEFAULT '' AFTER reviewed_by"),
             ("v7_order_no", "ALTER TABLE dealer_orders ADD COLUMN v7_order_no VARCHAR(128) DEFAULT '' AFTER contract_no"),
             ("review_note", "ALTER TABLE dealer_orders ADD COLUMN review_note TEXT AFTER v7_order_no"),
+            ("regional_review_status", "ALTER TABLE dealer_orders ADD COLUMN regional_review_status VARCHAR(32) DEFAULT '' AFTER status"),
+            ("regional_review_note", "ALTER TABLE dealer_orders ADD COLUMN regional_review_note TEXT AFTER regional_review_status"),
+            ("regional_reviewed_by", "ALTER TABLE dealer_orders ADD COLUMN regional_reviewed_by VARCHAR(128) DEFAULT '' AFTER regional_review_note"),
+            ("regional_reviewed_at", "ALTER TABLE dealer_orders ADD COLUMN regional_reviewed_at DATETIME NULL AFTER regional_reviewed_by"),
         ]
         for column, sql in additions:
             if column not in columns:
@@ -230,7 +235,8 @@ def list_dealer_orders(
                        contact_name, contact_phone, model, batch_no, eta, inventory_type,
                        quantity, approved_qty, allocated_qty, delivery_date, remark,
                        status, reviewed_at, reviewed_by, contract_no, v7_order_no, review_note,
-                       created_at, updated_at
+                       regional_manager_name, regional_review_status, regional_review_note,
+                       regional_reviewed_by, regional_reviewed_at, created_at, updated_at
                 FROM dealer_orders
                 {where_sql}
                 ORDER BY FIELD(status, 'pending', 'approved', 'contracted', 'partial_allocated', 'allocated', 'rejected', 'cancelled', 'completed'),

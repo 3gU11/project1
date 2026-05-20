@@ -16,6 +16,13 @@ from crud.dealer_orders import (
     reject_dealer_order,
     validate_dealer_order_convertible,
 )
+from crud.cloud_dealer_order_sync import (
+    push_cloud_allocate,
+    push_cloud_contract,
+    push_cloud_review,
+    sync_cloud_dealer_orders,
+    sync_wechat_batch_summary_to_cloud,
+)
 
 router = APIRouter(dependencies=[Depends(require_permissions("DEALER_ORDER_REVIEW"))])
 
@@ -59,8 +66,18 @@ class SeedDealerOrderPayload(BaseModel):
     dealer_id: str = Field(default="test-dealer", max_length=128)
 
 
+class CloudSyncPayload(BaseModel):
+    status: str = Field(default="pending", max_length=32)
+    page_size: int = Field(default=100, ge=1, le=200)
+    max_pages: int = Field(default=20, ge=1, le=100)
+
+
 def _operator(ctx: dict) -> str:
     return str(ctx.get("name") or ctx.get("username") or "system").strip()
+
+
+def _cloud_warning(action: str, exc: Exception) -> str:
+    return f"{action}已在本地完成，但回写云端失败：{exc}"
 
 
 @router.get("/")
@@ -91,6 +108,63 @@ def list_orders(
         raise HTTPException(status_code=500, detail=f"读取经销商订单失败: {exc}")
 
 
+@router.post("/sync-cloud")
+def sync_cloud_orders(
+    payload: CloudSyncPayload,
+    request: Request,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    operator = _operator(ctx)
+    try:
+        result = sync_cloud_dealer_orders(
+            status=payload.status,
+            page_size=payload.page_size,
+            max_pages=payload.max_pages,
+        )
+        append_audit_log(
+            module="经销商订单",
+            action_type="同步云端订单",
+            biz_type="订单",
+            content=(
+                f"同步云端经销商订单：status={result.get('status')}，"
+                f"inserted={result.get('inserted')}，updated={result.get('updated')}，skipped={result.get('skipped')}"
+            ),
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"同步云端订单失败: {exc}")
+
+
+@router.post("/sync-wechat-batch-summary")
+def sync_wechat_batch_summary(
+    request: Request,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    operator = _operator(ctx)
+    try:
+        result = sync_wechat_batch_summary_to_cloud()
+        append_audit_log(
+            module="经销商订单",
+            action_type="同步云端库存",
+            biz_type="库存",
+            content=(
+                f"同步 wechat_batch_summary 到云端："
+                f"local_rows={result.get('local_rows')}，pushed_rows={result.get('pushed_rows')}"
+            ),
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"同步云端库存失败: {exc}")
+
+
 @router.get("/{order_no}/preview")
 def preview_order(order_no: str):
     try:
@@ -114,7 +188,12 @@ def approve_order(order_no: str, payload: ReviewPayload, request: Request, ctx: 
             user_id=ctx.get("username"),
             username=operator,
         )
-        return {"message": "审核通过", **result}
+        warning = ""
+        try:
+            push_cloud_review(order_no, status="approved", reviewer=operator, note=payload.note)
+        except Exception as cloud_exc:
+            warning = _cloud_warning("审核通过", cloud_exc)
+        return {"message": "审核通过", "warning": warning, **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -134,7 +213,12 @@ def reject_order(order_no: str, payload: RejectPayload, request: Request, ctx: d
             user_id=ctx.get("username"),
             username=operator,
         )
-        return {"message": "已驳回", **result}
+        warning = ""
+        try:
+            push_cloud_review(order_no, status="rejected", reviewer=operator, note=payload.reason)
+        except Exception as cloud_exc:
+            warning = _cloud_warning("驳回", cloud_exc)
+        return {"message": "已驳回", "warning": warning, **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -159,7 +243,12 @@ def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ct
             user_id=ctx.get("username"),
             username=operator,
         )
-        return {"message": "已标记配货", **result}
+        warning = ""
+        try:
+            push_cloud_allocate(order_no, operator=operator, v7_order_no=payload.v7_order_no)
+        except Exception as cloud_exc:
+            warning = _cloud_warning("配货", cloud_exc)
+        return {"message": "已标记配货", "warning": warning, **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -217,8 +306,19 @@ def convert_to_contract(
 
         add_list: List[Dict[str, Any]] = []
         rush_source_rows: List[Dict[str, Any]] = []
-        note_parts = [str(payload.contract_note or "").strip()]
-        for ci in contract_items:
+        add_index_by_model: Dict[str, int] = {}
+
+        def source_item_for(index: int, model: str) -> Dict[str, Any]:
+            if index < len(items):
+                candidate = items[index]
+                if str(candidate.get("model") or "").strip() == model:
+                    return candidate
+            for candidate in items:
+                if str(candidate.get("model") or "").strip() == model:
+                    return candidate
+            return {}
+
+        for idx, ci in enumerate(contract_items):
             model = str(ci.get("model") or "").strip()
             qty = int(ci.get("qty") or 0)
             if not model or qty <= 0:
@@ -227,6 +327,29 @@ def convert_to_contract(
             row_note = str(ci.get("rowNote") or "").strip()
             remark_parts = [p for p in [payload.contract_note.strip() if payload.contract_note else "", "加高" if high else "", row_note] if p]
             remark = " | ".join(remark_parts)
+            source_item = source_item_for(idx, model)
+            batch_no = str(source_item.get("batch_no") or "").strip()
+            source_alloc = {batch_no: qty} if batch_no else {}
+
+            existing_idx = add_index_by_model.get(model)
+            if existing_idx is not None:
+                existing = add_list[existing_idx]
+                existing["排产数量"] = int(existing.get("排产数量") or 0) + qty
+                if remark and remark not in str(existing.get("备注") or ""):
+                    existing["备注"] = " | ".join([p for p in [str(existing.get("备注") or "").strip(), remark] if p])
+                existing_alloc = existing.get("指定批次/来源") if isinstance(existing.get("指定批次/来源"), dict) else {}
+                for batch, batch_qty in source_alloc.items():
+                    existing_alloc[batch] = int(existing_alloc.get(batch) or 0) + int(batch_qty)
+                existing["指定批次/来源"] = existing_alloc
+
+                rush_source_rows[existing_idx]["qty"] = int(rush_source_rows[existing_idx].get("qty") or 0) + qty
+                if remark and remark not in str(rush_source_rows[existing_idx].get("remark") or ""):
+                    rush_source_rows[existing_idx]["remark"] = " | ".join(
+                        [p for p in [str(rush_source_rows[existing_idx].get("remark") or "").strip(), remark] if p]
+                    )
+                continue
+
+            add_index_by_model[model] = len(add_list)
             add_list.append({
                 "合同号": contract_no,
                 "机型": model,
@@ -236,7 +359,7 @@ def convert_to_contract(
                 "备注": remark,
                 "客户名": customer,
                 "代理商": agent,
-                "指定批次/来源": {},
+                "指定批次/来源": source_alloc,
                 "订单号": "",
             })
             rush_source_rows.append({
@@ -265,6 +388,11 @@ def convert_to_contract(
         contract_ids = result.get("contract_ids", [contract_no])
         contract_no_str = "、".join(contract_ids) if contract_ids else contract_no
         mark_dealer_order_contracted(order_no, contract_no=contract_no_str, operator=operator)
+        cloud_warning = ""
+        try:
+            push_cloud_contract(order_no, contract_no=contract_no_str, operator=operator)
+        except Exception as cloud_exc:
+            cloud_warning = _cloud_warning("转合同", cloud_exc)
 
         append_audit_log(
             module="经销商订单",
@@ -277,6 +405,7 @@ def convert_to_contract(
 
         return {
             "message": f"已成功转为合同 {contract_no_str}",
+            "warning": cloud_warning,
             "contract_no": contract_no_str,
             "save_mode": save_mode,
             **{k: v for k, v in result.items() if k not in ("message", "save_mode", "contract_ids")},

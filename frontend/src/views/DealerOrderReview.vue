@@ -2,6 +2,8 @@
   <div class="dealer-review-page">
     <PageHeader title="经销商订单审核">
       <template #actions>
+        <el-button :loading="syncing" @click="syncCloudOrders">同步云端</el-button>
+        <el-button :loading="inventorySyncing" @click="syncCloudInventory">同步库存到云端</el-button>
         <el-button type="primary" :loading="loading" @click="loadOrders">刷新</el-button>
       </template>
     </PageHeader>
@@ -31,7 +33,8 @@
 
     <el-table
       v-loading="loading"
-      :data="orders"
+      :data="tableRows"
+      row-key="_row_key"
       border
       stripe
       size="small"
@@ -47,8 +50,8 @@
       <el-table-column prop="batch_no" label="批次/来源" width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ displayBatch(row.batch_no) }}</template>
       </el-table-column>
-      <el-table-column prop="line_count" label="行数" width="70" align="right" />
-      <el-table-column prop="quantity" label="总数量" width="90" align="right" />
+      <el-table-column prop="line_no" label="行号" width="70" align="right" />
+      <el-table-column prop="quantity" label="数量" width="90" align="right" />
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="statusMeta(row.status).type">{{ statusMeta(row.status).text }}</el-tag>
@@ -67,7 +70,6 @@
           <el-button size="small" :disabled="row.status !== 'pending'" @click.stop="approveOrder(row)">通过</el-button>
           <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
           <el-button size="small" type="primary" :disabled="!canConvert(row)" @click.stop="openConvertDialog(row)">转合同</el-button>
-          <el-button size="small" type="success" :disabled="!canAllocate(row)" @click.stop="markAllocated(row)">已配货</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -150,7 +152,6 @@
           <el-button :disabled="selectedOrder.status !== 'pending'" @click="approveOrder(selectedOrder)">通过审核</el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
           <el-button type="primary" :disabled="!canConvert(selectedOrder)" @click="openConvertDialog(selectedOrder)">转为合同</el-button>
-          <el-button type="success" :disabled="!canAllocate(selectedOrder)" @click="markAllocated(selectedOrder)">标记已配货</el-button>
         </div>
       </template>
     </el-drawer>
@@ -271,6 +272,11 @@ type DealerOrder = {
   items?: DealerOrder[]
 }
 
+type DealerOrderTableRow = DealerOrder & {
+  _row_key: string
+  _order: DealerOrder
+}
+
 type OrderListResponse = {
   data: DealerOrder[]
   total: number
@@ -286,6 +292,8 @@ type PreviewResponse = {
 }
 
 const loading = ref(false)
+const syncing = ref(false)
+const inventorySyncing = ref(false)
 const orders = ref<DealerOrder[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -300,6 +308,19 @@ const filters = reactive({
 
 const selectedOrder = computed(() => orders.value.find((row) => row.order_no === selectedOrderNo.value) || null)
 const detailItems = computed(() => preview.value?.items || selectedOrder.value?.items || (selectedOrder.value ? [selectedOrder.value] : []))
+const tableRows = computed<DealerOrderTableRow[]>(() => {
+  return orders.value.flatMap((order) => {
+    const items = order.items?.length ? order.items : [order]
+    return items.map((item, index) => ({
+      ...order,
+      ...item,
+      items: order.items?.length ? order.items : [order],
+      line_count: order.line_count,
+      _order: order,
+      _row_key: `${order.order_no}-${item.line_no || index + 1}`,
+    }))
+  })
+})
 
 const statusMeta = (status: string) => {
   const map: Record<string, { text: string; type: 'primary' | 'success' | 'warning' | 'danger' | 'info' }> = {
@@ -328,7 +349,6 @@ const hasInsufficientItem = (row: DealerOrder) => {
 
 const canReject = (row: DealerOrder) => ['pending', 'approved'].includes(row.status)
 const canConvert = (row: DealerOrder) => ['pending', 'approved'].includes(row.status)
-const canAllocate = (row: DealerOrder) => ['pending', 'approved', 'partial_allocated'].includes(row.status)
 
 const loadOrders = async () => {
   loading.value = true
@@ -371,6 +391,43 @@ const onSizeChange = () => {
   loadOrders()
 }
 
+const syncCloudOrders = async () => {
+  syncing.value = true
+  try {
+    const res = await apiPost<{
+      inserted?: number
+      updated?: number
+      skipped?: number
+    }>('/dealer-orders/sync-cloud', {
+      status: 'pending',
+      page_size: 100,
+      max_pages: 20,
+    })
+    ElMessage.success(`同步完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}`)
+    page.value = 1
+    await loadOrders()
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '同步云端失败')
+  } finally {
+    syncing.value = false
+  }
+}
+
+const syncCloudInventory = async () => {
+  inventorySyncing.value = true
+  try {
+    const res = await apiPost<{
+      local_rows?: number
+      pushed_rows?: number
+    }>('/dealer-orders/sync-wechat-batch-summary', {})
+    ElMessage.success(`库存同步完成：本地 ${res.local_rows || 0} 行，已推送 ${res.pushed_rows || 0} 行`)
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '同步云端库存失败')
+  } finally {
+    inventorySyncing.value = false
+  }
+}
+
 const approveOrder = async (row: DealerOrder) => {
   try {
     const note = await ElMessageBox.prompt('审核备注（可选）', '通过订单', {
@@ -398,29 +455,13 @@ const rejectOrder = async (row: DealerOrder) => {
       cancelButtonText: '取消',
       inputValidator: (value) => (String(value || '').trim() ? true : '驳回原因不能为空'),
     })
-    const res = await apiPost<{ message?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/reject`, {
+    const res = await apiPost<{ message?: string; warning?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/reject`, {
       reason: reason.value,
     })
-    ElMessage.success(res.message || '已驳回')
+    ElMessage.success(res.warning || res.message || '已驳回')
     await loadOrders()
   } catch (err: any) {
     if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '驳回失败')
-  }
-}
-
-const markAllocated = async (row: DealerOrder) => {
-  try {
-    await ElMessageBox.confirm('确认该经销商订单已经在 V7 完成配货？确认后小程序会读取到 allocated 状态。', '标记已配货', {
-      type: 'warning',
-    })
-    const res = await apiPost<{ message?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/mark-allocated`, {
-      allocated_qty: Math.max(1, Number(row.quantity || 1) - Number(row.allocated_qty || 0)),
-    })
-    ElMessage.success(res.message || '已标记配货')
-    await loadOrders()
-    if (selectedOrderNo.value) await loadPreview(selectedOrderNo.value)
-  } catch (err: any) {
-    if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '标记失败')
   }
 }
 
@@ -543,7 +584,7 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
       items: validItems,
       contract_note: convertForm.contractNote.trim(),
     }
-    const res = await apiPost<{ message?: string; contract_no?: string; rush_created?: number; rush_auto_inserted?: number; save_mode?: string }>(
+    const res = await apiPost<{ message?: string; warning?: string; contract_no?: string; rush_created?: number; rush_auto_inserted?: number; save_mode?: string }>(
       `/dealer-orders/${encodeURIComponent(convertForm.sourceOrderNo)}/convert-to-contract`,
       payload,
     )
@@ -554,7 +595,7 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
       pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
     ].filter(Boolean).join('，')
     const modeText = saveMode === 'spot' ? '已按"使用现货"处理' : '已按"进入沙盘"处理'
-    ElMessage.success(`${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
     convertDialogVisible.value = false
     await loadOrders()
     if (selectedOrderNo.value) await loadPreview(selectedOrderNo.value)
