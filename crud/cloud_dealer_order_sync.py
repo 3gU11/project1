@@ -55,21 +55,6 @@ def _clean(value: Any, default: str = "") -> str:
     return str(value).strip()
 
 
-def _split_heightened_model(model: Any, remark: Any = "") -> tuple[str, str]:
-    raw_model = _clean(model)
-    raw_remark = _clean(remark)
-    is_heightened = "加高" in raw_model
-    clean_model = (
-        raw_model.replace("（加高）", "")
-        .replace("(加高)", "")
-        .replace("加高", "")
-        .strip()
-    )
-    if is_heightened and "加高" not in raw_remark:
-        raw_remark = " | ".join(part for part in [raw_remark, "加高"] if part)
-    return clean_model, raw_remark
-
-
 def _jsonable(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d %H:%M:%S")
@@ -424,10 +409,6 @@ def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
 
 def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]:
     status = _normalize_status(item.get("status") or order.get("status"))
-    model, remark = _split_heightened_model(
-        item.get("model"),
-        item.get("remark") or order.get("remark"),
-    )
     return {
         "order_no": _clean(item.get("order_no") or order.get("order_no")),
         "line_no": max(1, _as_int(item.get("line_no"), 1)),
@@ -438,7 +419,7 @@ def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]
         "customer_name": _clean(item.get("customer_name") or order.get("customer_name")),
         "contact_name": _clean(item.get("contact_name") or order.get("contact_name")),
         "contact_phone": _clean(item.get("contact_phone") or order.get("contact_phone")),
-        "model": model,
+        "model": _clean(item.get("model")),
         "batch_no": _clean(item.get("batch_no")),
         "eta": _clean(item.get("eta") or item.get("expected_inbound_time")),
         "inventory_type": _clean(item.get("inventory_type")),
@@ -446,7 +427,7 @@ def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]
         "approved_qty": max(0, _as_int(item.get("approved_qty"), 0)),
         "allocated_qty": max(0, _as_int(item.get("allocated_qty"), 0)),
         "delivery_date": _clean(item.get("delivery_date") or order.get("delivery_date")),
-        "remark": remark,
+        "remark": _clean(item.get("remark") or order.get("remark")),
         "status": status,
         "regional_review_status": _clean(item.get("regional_review_status") or order.get("regional_review_status")),
         "regional_review_note": _clean(item.get("regional_review_note") or order.get("regional_review_note")),
