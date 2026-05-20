@@ -51,6 +51,7 @@
       <el-table-column prop="batch_no" label="批次/来源" width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ displayBatch(row.batch_no) }}</template>
       </el-table-column>
+      <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
       <el-table-column prop="line_no" label="行号" width="70" align="right" />
       <el-table-column prop="quantity" label="数量" width="90" align="right" />
       <el-table-column prop="status" label="状态" width="100">
