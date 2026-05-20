@@ -17,9 +17,6 @@ from crud.dealer_orders import (
     validate_dealer_order_convertible,
 )
 from crud.cloud_dealer_order_sync import (
-    push_cloud_allocate,
-    push_cloud_contract,
-    push_cloud_review,
     sync_cloud_dealer_orders,
     sync_completed_dealer_orders_to_cloud,
     sync_wechat_batch_summary_to_cloud,
@@ -79,10 +76,6 @@ class CompletedCloudSyncPayload(BaseModel):
 
 def _operator(ctx: dict) -> str:
     return str(ctx.get("name") or ctx.get("username") or "system").strip()
-
-
-def _cloud_warning(action: str, exc: Exception) -> str:
-    return f"{action}已在本地完成，但回写云端失败：{exc}"
 
 
 @router.get("/")
@@ -221,12 +214,7 @@ def approve_order(order_no: str, payload: ReviewPayload, request: Request, ctx: 
             user_id=ctx.get("username"),
             username=operator,
         )
-        warning = ""
-        try:
-            push_cloud_review(order_no, status="approved", reviewer=operator, note=payload.note)
-        except Exception as cloud_exc:
-            warning = _cloud_warning("审核通过", cloud_exc)
-        return {"message": "审核通过", "warning": warning, **result}
+        return {"message": "审核通过", **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -246,12 +234,7 @@ def reject_order(order_no: str, payload: RejectPayload, request: Request, ctx: d
             user_id=ctx.get("username"),
             username=operator,
         )
-        warning = ""
-        try:
-            push_cloud_review(order_no, status="rejected", reviewer=operator, note=payload.reason)
-        except Exception as cloud_exc:
-            warning = _cloud_warning("驳回", cloud_exc)
-        return {"message": "已驳回", "warning": warning, **result}
+        return {"message": "已驳回", **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -276,12 +259,7 @@ def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ct
             user_id=ctx.get("username"),
             username=operator,
         )
-        warning = ""
-        try:
-            push_cloud_allocate(order_no, operator=operator, v7_order_no=payload.v7_order_no)
-        except Exception as cloud_exc:
-            warning = _cloud_warning("配货", cloud_exc)
-        return {"message": "已标记配货", "warning": warning, **result}
+        return {"message": "已标记配货", **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -421,11 +399,6 @@ def convert_to_contract(
         contract_ids = result.get("contract_ids", [contract_no])
         contract_no_str = "、".join(contract_ids) if contract_ids else contract_no
         mark_dealer_order_contracted(order_no, contract_no=contract_no_str, operator=operator)
-        cloud_warning = ""
-        try:
-            push_cloud_contract(order_no, contract_no=contract_no_str, operator=operator)
-        except Exception as cloud_exc:
-            cloud_warning = _cloud_warning("转合同", cloud_exc)
 
         append_audit_log(
             module="经销商订单",
@@ -438,7 +411,6 @@ def convert_to_contract(
 
         return {
             "message": f"已成功转为合同 {contract_no_str}",
-            "warning": cloud_warning,
             "contract_no": contract_no_str,
             "save_mode": save_mode,
             **{k: v for k, v in result.items() if k not in ("message", "save_mode", "contract_ids")},
