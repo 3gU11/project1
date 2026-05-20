@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `wechat_batch_summary` (
   INDEX `idx_wechat_batch_summary_batch` (`批次号`),
   INDEX `idx_wechat_batch_summary_inbound` (`预计入库时间`),
   INDEX `idx_wechat_batch_summary_model` (`机型`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 DROP TRIGGER IF EXISTS `trg_fg_wechat_summary_ai`;
 DROP TRIGGER IF EXISTS `trg_fg_wechat_summary_au`;
@@ -37,22 +37,25 @@ CREATE PROCEDURE `refresh_wechat_batch_summary_group`(
 BEGIN
   DECLARE v_batch_no VARCHAR(100);
   DECLARE v_model VARCHAR(100);
-  DECLARE v_summary_id CHAR(32);
-  DECLARE v_stock_summary_id CHAR(32);
+  DECLARE v_model_base VARCHAR(100);
+  DECLARE v_model_high VARCHAR(100);
 
   SET v_batch_no = NULLIF(TRIM(COALESCE(p_batch_no, '')), '');
   SET v_model = NULLIF(TRIM(COALESCE(p_model, '')), '');
-  SET v_summary_id = MD5(CONCAT(
-    COALESCE(v_batch_no, ''),
-    '|',
-    COALESCE(DATE_FORMAT(p_expected, '%Y-%m-%d %H:%i:%s'), ''),
-    '|',
-    COALESCE(v_model, '')
-  ));
-  SET v_stock_summary_id = MD5(CONCAT('库存中', '|', '', '|', COALESCE(v_model, '')));
+  SET v_model_base = NULLIF(TRIM(REPLACE(REPLACE(COALESCE(v_model, ''), '(加高)', ''), '加高', '')), '');
+  SET v_model_high = IF(v_model_base IS NULL, NULL, CONCAT(v_model_base, '加高'));
 
   DELETE FROM `wechat_batch_summary`
-  WHERE `summary_id` IN (v_summary_id, v_stock_summary_id);
+  WHERE (
+      `batch_no` = COALESCE(v_batch_no, '')
+      AND `expected_inbound_time` <=> p_expected
+      AND `model` IN (v_model_base, v_model_high)
+    )
+    OR (
+      `batch_no` = '库存中'
+      AND `expected_inbound_time` IS NULL
+      AND `model` IN (v_model_base, v_model_high)
+    );
 
   IF v_batch_no IS NOT NULL AND v_model IS NOT NULL THEN
     INSERT INTO `wechat_batch_summary` (
@@ -67,7 +70,13 @@ BEGIN
       `数量`
     )
     SELECT
-      v_summary_id,
+      MD5(CONCAT(
+        s.`batch_no`,
+        '|',
+        COALESCE(DATE_FORMAT(s.`expected_inbound_time`, '%Y-%m-%d %H:%i:%s'), ''),
+        '|',
+        s.`model`
+      )) AS `summary_id`,
       s.`batch_no`,
       s.`expected_inbound_time`,
       s.`model`,
@@ -78,16 +87,30 @@ BEGIN
       s.`quantity` AS `数量`
     FROM (
       SELECT
-        TRIM(`批次号`) AS `batch_no`,
-        `预计入库时间` AS `expected_inbound_time`,
-        TRIM(`机型`) AS `model`,
+        raw.`batch_no`,
+        raw.`expected_inbound_time`,
+        IF(raw.`is_high`, CONCAT(raw.`base_model`, '加高'), raw.`base_model`) AS `model`,
         COUNT(*) AS `quantity`
-      FROM `finished_goods_data`
-      WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') = v_batch_no
-        AND `预计入库时间` <=> p_expected
-        AND NULLIF(TRIM(COALESCE(`机型`, '')), '') = v_model
-        AND TRIM(COALESCE(`状态`, '')) = '待入库'
-      GROUP BY TRIM(`批次号`), `预计入库时间`, TRIM(`机型`)
+      FROM (
+        SELECT
+          TRIM(`批次号`) AS `batch_no`,
+          `预计入库时间` AS `expected_inbound_time`,
+          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+          (
+            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
+            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+            OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+          ) AS `is_high`
+        FROM `finished_goods_data`
+        WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') = v_batch_no
+          AND `预计入库时间` <=> p_expected
+          AND TRIM(REPLACE(REPLACE(TRIM(COALESCE(`机型`, '')), '(加高)', ''), '加高', '')) = v_model_base
+          AND TRIM(COALESCE(`状态`, '')) = '待入库'
+      ) raw
+      WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
+      GROUP BY raw.`batch_no`, raw.`expected_inbound_time`, raw.`base_model`, raw.`is_high`
     ) s;
   END IF;
 
@@ -104,7 +127,7 @@ BEGIN
       `数量`
     )
     SELECT
-      v_stock_summary_id,
+      MD5(CONCAT('库存中', '|', '', '|', s.`model`)) AS `summary_id`,
       s.`batch_no`,
       s.`expected_inbound_time`,
       s.`model`,
@@ -117,12 +140,24 @@ BEGIN
       SELECT
         '库存中' AS `batch_no`,
         CAST(NULL AS DATETIME) AS `expected_inbound_time`,
-        TRIM(`机型`) AS `model`,
+        IF(raw.`is_high`, CONCAT(raw.`base_model`, '加高'), raw.`base_model`) AS `model`,
         COUNT(*) AS `quantity`
-      FROM `finished_goods_data`
-      WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') = v_model
-        AND TRIM(COALESCE(`状态`, '')) = '库存中'
-      GROUP BY TRIM(`机型`)
+      FROM (
+        SELECT
+          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+          (
+            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
+            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+            OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+          ) AS `is_high`
+        FROM `finished_goods_data`
+        WHERE TRIM(REPLACE(REPLACE(TRIM(COALESCE(`机型`, '')), '(加高)', ''), '加高', '')) = v_model_base
+          AND TRIM(COALESCE(`状态`, '')) = '库存中'
+      ) raw
+      WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
+      GROUP BY raw.`base_model`, raw.`is_high`
     ) s;
   END IF;
 END$$
@@ -160,25 +195,51 @@ BEGIN
     s.`quantity` AS `数量`
   FROM (
     SELECT
-      TRIM(`批次号`) AS `batch_no`,
-      `预计入库时间` AS `expected_inbound_time`,
-      TRIM(`机型`) AS `model`,
+      raw.`batch_no`,
+      raw.`expected_inbound_time`,
+      IF(raw.`is_high`, CONCAT(raw.`base_model`, '加高'), raw.`base_model`) AS `model`,
       COUNT(*) AS `quantity`
-    FROM `finished_goods_data`
-    WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
-      AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-      AND TRIM(COALESCE(`状态`, '')) = '待入库'
-    GROUP BY TRIM(`批次号`), `预计入库时间`, TRIM(`机型`)
+    FROM (
+      SELECT
+        TRIM(`批次号`) AS `batch_no`,
+        `预计入库时间` AS `expected_inbound_time`,
+        TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+        (
+          TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
+          OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+          OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+          OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+          OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+        ) AS `is_high`
+      FROM `finished_goods_data`
+      WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
+        AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+        AND TRIM(COALESCE(`状态`, '')) = '待入库'
+    ) raw
+    WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
+    GROUP BY raw.`batch_no`, raw.`expected_inbound_time`, raw.`base_model`, raw.`is_high`
     UNION ALL
     SELECT
       '库存中' AS `batch_no`,
       CAST(NULL AS DATETIME) AS `expected_inbound_time`,
-      TRIM(`机型`) AS `model`,
+      IF(raw.`is_high`, CONCAT(raw.`base_model`, '加高'), raw.`base_model`) AS `model`,
       COUNT(*) AS `quantity`
-    FROM `finished_goods_data`
-    WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-      AND TRIM(COALESCE(`状态`, '')) = '库存中'
-    GROUP BY TRIM(`机型`)
+    FROM (
+      SELECT
+        TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+        (
+          TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
+          OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+          OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+          OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+          OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+        ) AS `is_high`
+      FROM `finished_goods_data`
+      WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+        AND TRIM(COALESCE(`状态`, '')) = '库存中'
+    ) raw
+    WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
+    GROUP BY raw.`base_model`, raw.`is_high`
   ) s;
 END$$
 

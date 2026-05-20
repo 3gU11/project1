@@ -228,25 +228,51 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       s.quantity AS `数量`
                     FROM (
                       SELECT
-                        TRIM(`批次号`) AS batch_no,
-                        `预计入库时间` AS expected_inbound_time,
-                        TRIM(`机型`) AS model,
+                        raw.batch_no,
+                        raw.expected_inbound_time,
+                        IF(raw.is_high, CONCAT(raw.base_model, '加高'), raw.base_model) AS model,
                         COUNT(*) AS quantity
-                      FROM finished_goods_data
-                      WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
-                        AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                        AND TRIM(COALESCE(`状态`, '')) = '待入库'
-                      GROUP BY TRIM(`批次号`), `预计入库时间`, TRIM(`机型`)
+                      FROM (
+                        SELECT
+                          TRIM(`批次号`) AS batch_no,
+                          `预计入库时间` AS expected_inbound_time,
+                          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
+                          (
+                            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
+                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+                            OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+                          ) AS is_high
+                        FROM finished_goods_data
+                        WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
+                          AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+                          AND TRIM(COALESCE(`状态`, '')) = '待入库'
+                      ) raw
+                      WHERE NULLIF(raw.base_model, '') IS NOT NULL
+                      GROUP BY raw.batch_no, raw.expected_inbound_time, raw.base_model, raw.is_high
                       UNION ALL
                       SELECT
                         '库存中' AS batch_no,
                         CAST(NULL AS DATETIME) AS expected_inbound_time,
-                        TRIM(`机型`) AS model,
+                        IF(raw.is_high, CONCAT(raw.base_model, '加高'), raw.base_model) AS model,
                         COUNT(*) AS quantity
-                      FROM finished_goods_data
-                      WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                        AND TRIM(COALESCE(`状态`, '')) = '库存中'
-                      GROUP BY TRIM(`机型`)
+                      FROM (
+                        SELECT
+                          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
+                          (
+                            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
+                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+                            OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+                          ) AS is_high
+                        FROM finished_goods_data
+                        WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+                          AND TRIM(COALESCE(`状态`, '')) = '库存中'
+                      ) raw
+                      WHERE NULLIF(raw.base_model, '') IS NOT NULL
+                      GROUP BY raw.base_model, raw.is_high
                     ) s
                     """
                 )
