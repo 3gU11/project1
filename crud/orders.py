@@ -8,6 +8,7 @@ from sqlalchemy import text, bindparam
 from sqlalchemy.exc import OperationalError
 
 from crud.inventory import get_data, save_data
+from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 from crud.logs import append_log
 from database import get_engine
 from utils.cache import fetch_data_with_cache
@@ -262,6 +263,7 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
         import crud.inventory
         if hasattr(crud.inventory.get_data, "cache_clear"):
             crud.inventory.get_data.cache_clear()
+        enqueue_wechat_batch_summary_sync("orders_allocate_inventory")
 
     # 同步客户/代理商信息到沙盘 units 表，并绑定实物流水号（serial_no）
     if selected_sns:

@@ -27,7 +27,7 @@ def check_once(url: str, timeout: float) -> tuple[bool, str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check V7ex health endpoint")
+    parser = argparse.ArgumentParser(description="Check V8betaVer1.0 health endpoint")
     parser.add_argument("--url", default="http://127.0.0.1:8000/health")
     parser.add_argument("--retries", type=int, default=5)
     parser.add_argument("--interval", type=float, default=1.5)

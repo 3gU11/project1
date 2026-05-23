@@ -1,5 +1,5 @@
 /**
- * Sandbox API client — proxies through V7 FastAPI to Go scheduling service.
+ * Sandbox API client — proxies through V8betaVer1.0 FastAPI to Go scheduling service.
  * All paths are relative to /api/v1/sandbox/ (handled by request.ts baseURL).
  */
 import { apiGet, apiPost, apiPatch } from '../utils/request'
@@ -65,6 +65,9 @@ export const swapContent = (data: Record<string, any>) =>
 export const rushInsert = (data: Record<string, any>) =>
   apiPost(`${P}/units/rush-insert`, data)
 
+export const convertUnitToRush = (id: string) =>
+  apiPost(`${P}/units/${id}/convert-to-rush`)
+
 export const transferSwapUnits = (data: { urgent_unit_id: string; target_unit_id: string; reason?: string }) =>
   apiPost(`${P}/units/transfer-swap`, data)
 
@@ -79,6 +82,9 @@ export const getRushOrders = (params?: Record<string, any>) =>
 
 export const updateRushOrderStatus = (id: string | number, status: string) =>
   apiPatch(`${P}/rush-orders/${id}`, { status })
+
+export const returnRushOrderToSandbox = (id: string | number) =>
+  apiPost(`${P}/rush-orders/${id}/return-to-sandbox`)
 
 export const createSpecialCard = (data: Record<string, any>) =>
   apiPost(`${P}/units/special-card`, data)

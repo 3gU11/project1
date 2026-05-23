@@ -1,6 +1,10 @@
-INFO:     Started server process [25832]
+INFO:     Started server process [38524]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-ERROR:    [Errno 10048] error while attempting to bind on address ('0.0.0.0', 8000): [winerror 10048] 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422

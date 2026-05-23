@@ -24,7 +24,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/model-dictionary', name: 'ModelDictionary', label: '📚 机型字典', title: '机型字典', permission: 'MODEL_DICTIONARY', isManagement: true, component: () => import('../views/ModelDictionary.vue') },
   { path: '/users', name: 'Users', label: '👤 用户管理', title: '用户管理', permission: 'USER_MANAGE', isManagement: true, component: () => import('../views/UserManagement.vue') },
   { path: '/sales-orders', name: 'SalesOrders', label: '📌 销售下单', title: '销售下单', permission: 'SALES_CREATE', component: () => import('../views/SalesOrder.vue') },
-  { path: '/dealer-orders', name: 'DealerOrders', label: '经销商订单审核', title: '经销商订单审核', permission: 'DEALER_ORDER_REVIEW', component: () => import('../views/DealerOrderReview.vue') },
+  { path: '/dealer-orders', name: 'DealerOrders', label: '🧾 经销商订单审核', title: '经销商订单审核', permission: 'DEALER_ORDER_REVIEW', isManagement: true, component: () => import('../views/DealerOrderReview.vue') },
   { path: '/order-allocation', name: 'OrderAllocation', label: '📋 订单配货', title: '订单配货', permission: 'SALES_ALLOC', component: () => import('../views/OrderAllocation.vue') },
   { path: '/shipping-review', name: 'ShippingReview', label: '📗 发货复核', title: '发货复核', permission: 'SHIP_CONFIRM', component: () => import('../views/ShippingReview.vue') },
   { path: '/machine-archive', name: 'MachineArchive', label: '🔧 机台档案', title: '机台档案', permission: 'ARCHIVE', component: () => import('../views/MachineArchive.vue') },
@@ -189,7 +189,7 @@ router.beforeEach((to, _from, next) => {
 
 router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : '管理系统'
-  document.title = `${title} - V7ex`
+  document.title = `${title} - V8betaVer1.0`
 })
 
 export default router

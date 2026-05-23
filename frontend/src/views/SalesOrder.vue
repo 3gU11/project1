@@ -677,9 +677,9 @@ const createManualOrder = async () => {
   const totalQty = validRows.reduce((sum, r) => sum + Number(r.qty || 0), 0)
   const rowNotes = validRows
     .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' | ')}`)
-  const noteParts = [manualForm.note.trim(), ...rowNotes]
-  const finalNote = noteParts.filter(Boolean).join(' | ')
+    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
+  const noteParts = [manualForm.note.trim() ? `[总]${manualForm.note.trim()}` : '', ...rowNotes]
+  const finalNote = noteParts.filter(Boolean).join(' ')
 
   await submitWithLock(saving, async () => {
     await apiPost('/planning/orders', {
@@ -737,8 +737,8 @@ const createOrderFromPlanned = async () => {
 
   const rowNotes = mergeRows.value
     .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `[${r.sourceContract}] ${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' | ')}`)
-  const mergedNote = [mergeDraft.note.trim(), ...rowNotes].filter(Boolean).join(' | ')
+    .map((r) => `[${r.sourceContract}] ${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
+  const mergedNote = [mergeDraft.note.trim() ? `[总]${mergeDraft.note.trim()}` : '', ...rowNotes].filter(Boolean).join(' ')
 
   await submitWithLock(saving, async () => {
     await apiPost('/planning/orders', {
@@ -793,7 +793,7 @@ watch(selectedImportContractIds, () => {
     const model = rawModel.replace('(加高)', '').trim()
     
     // 从原始备注中剔除"加高"，避免重复显示
-    const cleanNote = note.split('|').map(s => s.trim()).filter(s => s && s !== '加高').join(' | ')
+    const cleanNote = note.split(/[|\[\]]/).map(s => s.trim()).filter(s => s && s !== '加高' && !['备注', '附加', '改数', '总'].includes(s)).join(' ')
     
     return {
       sourceContract: String(r['合同号'] || ''),
@@ -930,8 +930,8 @@ const saveEdit = async () => {
   const totalQty = validRows.reduce((sum, r) => sum + Number(r.qty || 0), 0)
   const lineNotes = validRows
     .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' | ')}`)
-  const finalNote = [editForm.备注.trim(), ...lineNotes].filter(Boolean).join(' | ')
+    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
+  const finalNote = [editForm.备注.trim() ? `[总]${editForm.备注.trim()}` : '', ...lineNotes].filter(Boolean).join(' ')
 
   await submitWithLock(saving, async () => {
     await apiPut(`/planning/orders/${encodeURIComponent(editingId.value)}`, {
@@ -954,7 +954,7 @@ const deleteOrder = async () => {
   if (!editingId.value) return
   await submitWithLock(saving, async () => {
     const reason = deleteReason.value.trim()
-    const deletedNote = [editForm.备注.trim(), reason ? `删除原因: ${reason}` : '删除原因: 未填写'].filter(Boolean).join(' | ')
+    const deletedNote = [editForm.备注.trim(), reason ? `[删除原因]${reason}` : '[删除原因]未填写'].filter(Boolean).join(' ')
     await apiPut(`/planning/orders/${encodeURIComponent(editingId.value)}`, {
       status: 'deleted',
       备注: deletedNote,

@@ -264,6 +264,7 @@
       style="background:#fff;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:4px 0;min-width:120px;"
     >
       <div v-if="contextMenu.unit?.is_locked" class="ctx-item" @click="handleUnlock">解锁</div>
+      <div v-if="canConvertToRush(contextMenu.unit)" class="ctx-item" @click="handleConvertToRush">转为急单</div>
       <div v-if="canMoveToSpecial(contextMenu.unit)" class="ctx-item" @click="handleMoveToSpecial">转移到特殊批次</div>
       <div class="ctx-item" @click="handleMarkSpot">标记现货</div>
       <div class="ctx-item" @click="handleInsertEmptySlot">在此前插入空位</div>
@@ -819,6 +820,14 @@ function canMoveToSpecial(unit: any) {
   return category === '中大型XS' || category === '中大型AUTO'
 }
 
+function canConvertToRush(unit: any) {
+  if (!unit || isStockUnit(unit) || isSpecialPlaceholder(unit)) return false
+  if (!String(unit?.contract_no || '').trim()) return false
+  if (!String(unit?.model_type || '').trim()) return false
+  const batch = batchOfUnit(unit)
+  return Boolean(batch && batch.status === 'Predicted')
+}
+
 function formatBatchCode(batchNo: any) {
   const n = Number(batchNo)
   if (!Number.isFinite(n) || n <= 0) return `第 ${batchNo || '-'} 批`
@@ -1258,6 +1267,24 @@ async function handleMarkSpot() {
     if (e !== 'cancel') ElMessage.error(e.message)
   }
   contextMenu.value.visible = false
+}
+
+async function handleConvertToRush() {
+  const unit = contextMenu.value.unit
+  contextMenu.value.visible = false
+  if (!unit) return
+  try {
+    await ElMessageBox.confirm(
+      `确认将合同 ${unit.contract_no || '-'} 的这张卡片转为急单？原沙盘卡片会清空为占位。`,
+      '转为急单',
+      { type: 'warning', confirmButtonText: '转为急单', cancelButtonText: '取消' }
+    )
+    await sandboxApi.convertUnitToRush(unit.unit_id)
+    ElMessage.success('已转为急单，可在生产看板急单队列中处理')
+    await refresh()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(getApiErrorMessage(e) || e.message || '转为急单失败')
+  }
 }
 
 async function handleInsertEmptySlot() {

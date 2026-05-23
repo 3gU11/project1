@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from database import get_engine
+from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 from utils.cache import fetch_data_with_cache
 from utils.local_cache import ttl_cache
 
@@ -170,6 +171,7 @@ def save_data(df):
             conn.execute(text("DELETE FROM finished_goods_data"))
             if not df.empty:
                 df[INVENTORY_COLS].to_sql('finished_goods_data', conn, if_exists='append', index=False, method='multi', chunksize=500)
+        enqueue_wechat_batch_summary_sync("finished_goods_save")
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"保存失败: {e}") from e
 
@@ -206,6 +208,7 @@ def save_data_v2(df):
                 conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
 
             if df.empty:
+                enqueue_wechat_batch_summary_sync("finished_goods_save_v2_empty")
                 return {"inserted": 0, "updated": 0}
 
             # UPSERT 语句: INSERT ... ON DUPLICATE KEY UPDATE
@@ -252,6 +255,7 @@ def save_data_v2(df):
                         # 对于某些驱动，可能无法区分，统一计为更新
                         inserted += 1
 
+        enqueue_wechat_batch_summary_sync("finished_goods_save_v2")
         return {"inserted": inserted, "updated": updated}
 
     except (OperationalError, Exception) as e:
@@ -538,6 +542,7 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False):
             {"status": f"库存中（{slot_code}）", "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
         )
         trans.commit()
+        enqueue_wechat_batch_summary_sync("finished_goods_inbound")
         get_data_v2.cache_clear()  # 清除 v2 缓存，确保下次读取到最新库存状态
         try:
             import asyncio
@@ -626,6 +631,7 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False):
             {"status": f"库存中（{slot_code}）", "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
         )
         trans.commit()
+        enqueue_wechat_batch_summary_sync("finished_goods_inbound_v2")
 
         # 清除所有缓存版本
         get_data_v2.cache_clear()

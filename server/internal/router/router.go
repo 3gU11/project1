@@ -59,6 +59,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		api.POST("/units/repair-family-mismatches", uh.RepairFamilyMismatches)
 		api.POST("/units/swap-content", uh.SwapContent)
 		api.POST("/units/rush-insert", uh.RushInsert)
+		api.POST("/units/:id/convert-to-rush", uh.ConvertToRush)
 		api.POST("/units/:id/mark-spot", uh.MarkSpot)
 
 		// Forecast

@@ -5,9 +5,14 @@ from collections import OrderedDict
 from math import ceil
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from database import get_engine
+from crud.cloud_sync_outbox import (
+    enqueue_wechat_batch_summary_sync,
+    ensure_cloud_sync_outbox_table,
+    insert_cloud_sync_event,
+)
 
 
 ACTIVE_HOLD_STATUSES = ("pending", "approved")
@@ -15,8 +20,41 @@ ACTIVE_HOLD_STATUSES = ("pending", "approved")
 CONVERTIBLE_STATUSES = ("pending", "approved")
 
 
+def _enqueue_cloud_sync(conn, event_type: str, order_no: str, payload: dict[str, Any]) -> None:
+    event_id = f"v7-{event_type}-{__import__('uuid').uuid4().hex}"
+    insert_cloud_sync_event(
+        conn,
+        event_id,
+        event_type,
+        order_no,
+        json.dumps(payload, ensure_ascii=False, default=str),
+    )
+
+
 def ensure_dealer_order_tables() -> None:
+    ensure_cloud_sync_outbox_table()
     with get_engine().begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS dealer_order_sync_events (
+                  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  event_id VARCHAR(64) NOT NULL UNIQUE,
+                  order_no VARCHAR(64) NOT NULL,
+                  event_type VARCHAR(64) NOT NULL,
+                  source VARCHAR(32) NOT NULL DEFAULT 'wechat',
+                  payload_json JSON NOT NULL,
+                  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                  attempts INT NOT NULL DEFAULT 0,
+                  last_error TEXT,
+                  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  acked_at DATETIME NULL,
+                  INDEX idx_sync_events_order (order_no),
+                  INDEX idx_sync_events_status (status, id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        )
         conn.execute(
             text(
                 """
@@ -39,6 +77,17 @@ def ensure_dealer_order_tables() -> None:
                   allocated_qty INT NOT NULL DEFAULT 0,
                   delivery_date VARCHAR(64) DEFAULT '',
                   remark TEXT,
+                  extra_remark TEXT,
+                  ERMQ INT NOT NULL DEFAULT 0,
+                  factory_pending TINYINT(1) NOT NULL DEFAULT 0,
+                  source VARCHAR(32) NOT NULL DEFAULT 'wechat',
+                  last_synced_at DATETIME NULL,
+                  sync_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                  sync_error TEXT,
+                  factory_reviewed_at DATETIME NULL,
+                  factory_reviewed_by VARCHAR(128) DEFAULT '',
+                  extra_remark_reviewed_at DATETIME NULL,
+                  extra_remark_reviewed_by VARCHAR(128) DEFAULT '',
                   status VARCHAR(32) NOT NULL DEFAULT 'pending',
                   reviewed_at DATETIME NULL,
                   reviewed_by VARCHAR(128) DEFAULT '',
@@ -68,6 +117,17 @@ def ensure_dealer_order_tables() -> None:
             ("contract_no", "ALTER TABLE dealer_orders ADD COLUMN contract_no VARCHAR(128) DEFAULT '' AFTER reviewed_by"),
             ("v7_order_no", "ALTER TABLE dealer_orders ADD COLUMN v7_order_no VARCHAR(128) DEFAULT '' AFTER contract_no"),
             ("review_note", "ALTER TABLE dealer_orders ADD COLUMN review_note TEXT AFTER v7_order_no"),
+            ("extra_remark", "ALTER TABLE dealer_orders ADD COLUMN extra_remark TEXT AFTER remark"),
+            ("ERMQ", "ALTER TABLE dealer_orders ADD COLUMN ERMQ INT NOT NULL DEFAULT 0 AFTER extra_remark"),
+            ("factory_pending", "ALTER TABLE dealer_orders ADD COLUMN factory_pending TINYINT(1) NOT NULL DEFAULT 0 AFTER ERMQ"),
+            ("source", "ALTER TABLE dealer_orders ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'wechat' AFTER factory_pending"),
+            ("last_synced_at", "ALTER TABLE dealer_orders ADD COLUMN last_synced_at DATETIME NULL AFTER source"),
+            ("sync_status", "ALTER TABLE dealer_orders ADD COLUMN sync_status VARCHAR(32) NOT NULL DEFAULT 'pending' AFTER last_synced_at"),
+            ("sync_error", "ALTER TABLE dealer_orders ADD COLUMN sync_error TEXT AFTER sync_status"),
+            ("factory_reviewed_at", "ALTER TABLE dealer_orders ADD COLUMN factory_reviewed_at DATETIME NULL AFTER sync_error"),
+            ("factory_reviewed_by", "ALTER TABLE dealer_orders ADD COLUMN factory_reviewed_by VARCHAR(128) DEFAULT '' AFTER factory_reviewed_at"),
+            ("extra_remark_reviewed_at", "ALTER TABLE dealer_orders ADD COLUMN extra_remark_reviewed_at DATETIME NULL AFTER factory_reviewed_by"),
+            ("extra_remark_reviewed_by", "ALTER TABLE dealer_orders ADD COLUMN extra_remark_reviewed_by VARCHAR(128) DEFAULT '' AFTER extra_remark_reviewed_at"),
             ("regional_review_status", "ALTER TABLE dealer_orders ADD COLUMN regional_review_status VARCHAR(32) DEFAULT '' AFTER status"),
             ("regional_review_note", "ALTER TABLE dealer_orders ADD COLUMN regional_review_note TEXT AFTER regional_review_status"),
             ("regional_reviewed_by", "ALTER TABLE dealer_orders ADD COLUMN regional_reviewed_by VARCHAR(128) DEFAULT '' AFTER regional_review_note"),
@@ -112,6 +172,292 @@ def _row_to_dict(row: Any) -> dict:
     return data
 
 
+def _delimited_match_sql(column_name: str, param_name: str) -> str:
+    return (
+        f"FIND_IN_SET(:{param_name}, "
+        f"REPLACE(REPLACE(REPLACE(REPLACE(COALESCE({column_name}, ''), '，', '、'), ',', '、'), ' ', ''), '、', ',')"
+        ") > 0"
+    )
+
+
+def get_pending_factory_review_lock(
+    *,
+    dealer_order_no: str = "",
+    contract_nos: list[str] | None = None,
+    sales_order_no: str = "",
+) -> dict | None:
+    """Return the pending dealer order that freezes this contract/order chain, if any."""
+    ensure_dealer_order_tables()
+    dealer_order_no = str(dealer_order_no or "").strip()
+    sales_order_no = str(sales_order_no or "").strip()
+    contract_values = [str(value or "").strip() for value in (contract_nos or []) if str(value or "").strip()]
+
+    with get_engine().begin() as conn:
+        if sales_order_no:
+            rows = conn.execute(
+                text(
+                    "SELECT DISTINCT `合同号` FROM factory_plan "
+                    "WHERE TRIM(COALESCE(`订单号`, '')) = :sales_order_no "
+                    "AND COALESCE(TRIM(`合同号`), '') <> ''"
+                ),
+                {"sales_order_no": sales_order_no},
+            ).fetchall()
+            contract_values.extend(str(row[0] or "").strip() for row in rows if str(row[0] or "").strip())
+
+        contract_values = list(OrderedDict.fromkeys(contract_values))
+        clauses: list[str] = []
+        params: dict[str, Any] = {}
+        if dealer_order_no:
+            clauses.append("order_no = :dealer_order_no")
+            params["dealer_order_no"] = dealer_order_no
+        if sales_order_no:
+            clauses.append(_delimited_match_sql("v7_order_no", "sales_order_no"))
+            params["sales_order_no"] = sales_order_no
+        for idx, contract_no in enumerate(contract_values):
+            key = f"contract_no_{idx}"
+            clauses.append(_delimited_match_sql("contract_no", key))
+            params[key] = contract_no
+
+        if not clauses:
+            return None
+
+        row = conn.execute(
+            text(
+                "SELECT order_no, contract_no, v7_order_no, review_note "
+                "FROM dealer_orders "
+                "WHERE factory_pending = 1 "
+                "AND status NOT IN ('complete', 'completed') "
+                f"AND ({' OR '.join(clauses)}) "
+                "ORDER BY updated_at DESC, id DESC LIMIT 1"
+            ),
+            params,
+        ).mappings().first()
+        return _row_to_dict(row) if row else None
+
+
+def assert_no_pending_factory_review_lock(
+    *,
+    dealer_order_no: str = "",
+    contract_nos: list[str] | None = None,
+    sales_order_no: str = "",
+    action: str = "操作",
+) -> None:
+    locked = get_pending_factory_review_lock(
+        dealer_order_no=dealer_order_no,
+        contract_nos=contract_nos,
+        sales_order_no=sales_order_no,
+    )
+    if locked:
+        order_no = str(locked.get("order_no") or "").strip()
+        raise ValueError(f"当前合同/订单已冻结：经销商订单 {order_no} 有新备注待复审，复审通过后才可以{action}")
+
+
+def _split_linked_values(raw_values: list[object]) -> list[str]:
+    values: list[str] = []
+    for raw in raw_values:
+        text_value = str(raw or "").strip()
+        if not text_value:
+            continue
+        for part in text_value.replace("，", "、").replace(",", "、").split("、"):
+            value = part.strip()
+            if value and value not in values:
+                values.append(value)
+    return values
+
+
+def _cancel_linked_contract_order_chain(
+    conn,
+    *,
+    order_no: str,
+    items: list[dict],
+    operator: str,
+    reason: str,
+) -> dict:
+    contract_nos = _split_linked_values([item.get("contract_no") for item in items])
+    sales_order_ids = _split_linked_values([item.get("v7_order_no") for item in items])
+
+    if contract_nos:
+        fp_order_rows = conn.execute(
+            text(
+                "SELECT DISTINCT `订单号` FROM factory_plan "
+                "WHERE TRIM(COALESCE(`合同号`, '')) IN :contract_nos "
+                "AND COALESCE(TRIM(`订单号`), '') <> ''"
+            ).bindparams(bindparam("contract_nos", expanding=True)),
+            {"contract_nos": contract_nos},
+        ).fetchall()
+        for row in fp_order_rows:
+            order_id = str(row[0] or "").strip()
+            if order_id and order_id not in sales_order_ids:
+                sales_order_ids.append(order_id)
+
+    released_serials: list[str] = []
+    if sales_order_ids:
+        fg_rows = conn.execute(
+            text(
+                "SELECT DISTINCT `流水号` FROM finished_goods_data "
+                "WHERE TRIM(COALESCE(`占用订单号`, '')) IN :order_ids "
+                "AND COALESCE(TRIM(`流水号`), '') <> '' "
+                "AND TRIM(COALESCE(`状态`, '')) <> '已出库'"
+            ).bindparams(bindparam("order_ids", expanding=True)),
+            {"order_ids": sales_order_ids},
+        ).fetchall()
+        released_serials.extend(str(row[0] or "").strip() for row in fg_rows if str(row[0] or "").strip())
+
+    if contract_nos:
+        fg_rows = conn.execute(
+            text(
+                "SELECT DISTINCT `流水号` FROM finished_goods_data "
+                "WHERE TRIM(COALESCE(`合同号`, '')) IN :contract_nos "
+                "AND COALESCE(TRIM(`流水号`), '') <> '' "
+                "AND TRIM(COALESCE(`状态`, '')) <> '已出库'"
+            ).bindparams(bindparam("contract_nos", expanding=True)),
+            {"contract_nos": contract_nos},
+        ).fetchall()
+        for row in fg_rows:
+            serial = str(row[0] or "").strip()
+            if serial and serial not in released_serials:
+                released_serials.append(serial)
+
+    if released_serials:
+        conn.execute(
+            text(
+                """
+                UPDATE finished_goods_data
+                SET `状态` = CASE
+                        WHEN COALESCE(TRIM(`Location_Code`), '') <> ''
+                        THEN CONCAT('库存中（', TRIM(`Location_Code`), '）')
+                        ELSE '待入库'
+                    END,
+                    `占用订单号` = '',
+                    `客户` = '',
+                    `代理商` = '',
+                    `合同号` = '',
+                    `更新时间` = NOW()
+                WHERE `流水号` IN :serials
+                """
+            ).bindparams(bindparam("serials", expanding=True)),
+            {"serials": released_serials},
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE units
+                SET contract_no = NULL,
+                    customer = NULL,
+                    dealer_name = NULL,
+                    sales_id = NULL,
+                    due_date = NULL,
+                    is_locked = 0
+                WHERE serial_no IN :serials OR forecast_serial_no IN :serials
+                """
+            ).bindparams(bindparam("serials", expanding=True)),
+            {"serials": released_serials},
+        )
+        try:
+            from crud.logs import append_log
+
+            append_log(f"经销商新备注复审驳回自动释放-{order_no}-退回待入库", released_serials, operator=operator)
+        except Exception:
+            pass
+
+    if contract_nos:
+        conn.execute(
+            text(
+                "UPDATE factory_plan SET `状态`='已取消' "
+                "WHERE TRIM(COALESCE(`合同号`, '')) IN :contract_nos"
+            ).bindparams(bindparam("contract_nos", expanding=True)),
+            {"contract_nos": contract_nos},
+        )
+        conn.execute(
+            text(
+                "DELETE FROM production_queue "
+                "WHERE TRIM(COALESCE(contract_no, '')) IN :contract_nos AND status = 'Waiting'"
+            ).bindparams(bindparam("contract_nos", expanding=True)),
+            {"contract_nos": contract_nos},
+        )
+        conn.execute(
+            text(
+                "UPDATE rush_order_queue SET status='deleted', updated_by=:operator "
+                "WHERE TRIM(COALESCE(contract_no, '')) IN :contract_nos AND status='pending'"
+            ).bindparams(bindparam("contract_nos", expanding=True)),
+            {"contract_nos": contract_nos, "operator": operator},
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE units
+                SET contract_no = NULL,
+                    customer = NULL,
+                    dealer_name = NULL,
+                    sales_id = NULL,
+                    due_date = NULL,
+                    order_remark = NULL,
+                    is_locked = 0
+                WHERE TRIM(COALESCE(contract_no, '')) IN :contract_nos
+                """
+            ).bindparams(bindparam("contract_nos", expanding=True)),
+            {"contract_nos": contract_nos},
+        )
+
+    if sales_order_ids:
+        conn.execute(
+            text(
+                "UPDATE sales_orders SET status='deleted', delete_reason=:reason "
+                "WHERE TRIM(COALESCE(`订单号`, '')) IN :order_ids"
+            ).bindparams(bindparam("order_ids", expanding=True)),
+            {
+                "order_ids": sales_order_ids,
+                "reason": f"经销商订单 {order_no} 新备注复审驳回：{reason}",
+            },
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE units
+                SET contract_no = NULL,
+                    customer = NULL,
+                    dealer_name = NULL,
+                    sales_id = NULL,
+                    due_date = NULL,
+                    order_remark = NULL,
+                    is_locked = 0
+                WHERE TRIM(COALESCE(sales_id, '')) IN :order_ids
+                """
+            ).bindparams(bindparam("order_ids", expanding=True)),
+            {"order_ids": sales_order_ids},
+        )
+
+    if contract_nos or sales_order_ids or released_serials:
+        try:
+            from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync as _enqueue_batch_sync
+            _enqueue_batch_sync("dealer_extra_review_rejected_cancel_chain")
+        except Exception:
+            pass  # non-critical: sync will be picked up by next batch
+        try:
+            import crud.inventory
+            import crud.orders
+            import crud.planning
+
+            if hasattr(crud.inventory.get_data, "cache_clear"):
+                crud.inventory.get_data.cache_clear()
+            if hasattr(crud.orders.get_orders, "cache_clear"):
+                crud.orders.get_orders.cache_clear()
+            if hasattr(crud.orders.get_orders_v2, "cache_clear"):
+                crud.orders.get_orders_v2.cache_clear()
+            if hasattr(crud.planning.get_factory_plan, "cache_clear"):
+                crud.planning.get_factory_plan.cache_clear()
+            if hasattr(crud.planning.get_factory_plan_v2, "cache_clear"):
+                crud.planning.get_factory_plan_v2.cache_clear()
+        except Exception:
+            pass
+
+    return {
+        "cancelled_contracts": contract_nos,
+        "cancelled_orders": sales_order_ids,
+        "released_serials": released_serials,
+    }
+
+
 def _status_rank(status: str) -> int:
     return {
         "pending": 0,
@@ -121,13 +467,33 @@ def _status_rank(status: str) -> int:
         "allocated": 4,
         "rejected": 5,
         "cancelled": 6,
+        "complete": 7,
         "completed": 7,
     }.get(status or "", 9)
 
 
+def _list_priority(order: dict) -> int:
+    status = str(order.get("status") or "")
+    if int(order.get("factory_pending") or 0) == 1 and status not in {"complete", "completed"}:
+        return -1
+    return _status_rank(status)
+
+
+def _sort_review_list(grouped: list[dict]) -> None:
+    grouped.sort(
+        key=lambda order: (
+            str(order.get("updated_at") or order.get("created_at") or ""),
+            str(order.get("created_at") or ""),
+            str(order.get("order_no") or ""),
+        ),
+        reverse=True,
+    )
+    grouped.sort(key=_list_priority)
+
+
 def _aggregate_status(items: list[dict]) -> str:
     statuses = [str(item.get("status") or "") for item in items]
-    if statuses and all(status == "completed" for status in statuses):
+    if statuses and all(status in {"complete", "completed"} for status in statuses):
         return "completed"
     if statuses and all(status == "allocated" for status in statuses):
         return "allocated"
@@ -168,7 +534,14 @@ def _summarize_text(items: list[dict], field: str) -> str:
         value = str(item.get(field) or "").strip()
         if value and value not in values:
             values.append(value)
-    return " | ".join(values)
+    return " ".join(values)
+
+
+def _has_factory_remark(items: list[dict]) -> bool:
+    return any(
+        str(item.get("factory_remark") or item.get("extra_remark") or "").strip()
+        for item in items
+    )
 
 
 def _group_orders(rows: list[dict]) -> list[dict]:
@@ -185,6 +558,10 @@ def _group_orders(rows: list[dict]) -> list[dict]:
         base["model"] = _summarize_models(items)
         base["batch_no"] = _summarize_batches(items)
         base["remark"] = _summarize_text(items, "remark")
+        base["extra_remark"] = _summarize_text(items, "extra_remark")
+        base["factory_remark"] = base["extra_remark"]
+        base["ERMQ"] = sum(int(item.get("ERMQ") or 0) for item in items)
+        base["factory_pending"] = 1 if any(int(item.get("factory_pending") or 0) for item in items) else 0
         base["review_note"] = _summarize_text(items, "review_note")
         base["regional_review_note"] = _summarize_text(items, "regional_review_note")
         base["quantity"] = sum(int(item.get("quantity") or 0) for item in items)
@@ -246,9 +623,14 @@ def list_dealer_orders(
                 SELECT id, order_no, line_no, dealer_id, dealer_name, dealer_phone, customer_name,
                        contact_name, contact_phone, model, batch_no, eta, inventory_type,
                        quantity, approved_qty, allocated_qty, delivery_date, remark,
+                       extra_remark, ERMQ, factory_pending,
                        status, reviewed_at, reviewed_by, contract_no, v7_order_no, review_note,
                        regional_manager_name, regional_review_status, regional_review_note,
-                       regional_reviewed_by, regional_reviewed_at, created_at, updated_at
+                       regional_reviewed_by, regional_reviewed_at,
+                       source, last_synced_at, sync_status, sync_error,
+                       factory_reviewed_at, factory_reviewed_by,
+                       extra_remark_reviewed_at, extra_remark_reviewed_by,
+                       created_at, updated_at
                 FROM dealer_orders
                 {where_sql}
                 ORDER BY FIELD(status, 'pending', 'approved', 'contracted', 'partial_allocated', 'allocated', 'rejected', 'cancelled', 'completed'),
@@ -279,8 +661,23 @@ def list_dealer_orders(
                 rows.append(item)
 
     grouped = _group_orders(rows)
-    if status_filter:
+    if status_filter == "todo":
+        grouped = [
+            order
+            for order in grouped
+            if (
+                int(order.get("factory_pending") or 0) == 1
+                and str(order.get("status") or "") not in {"complete", "completed"}
+            )
+            or order.get("status") == "pending"
+        ]
+        _sort_review_list(grouped)
+    elif status_filter == "factory_pending":
+        grouped = [order for order in grouped if int(order.get("factory_pending") or 0) == 1 and str(order.get("status") or "") not in {"complete", "completed"}]
+    elif status_filter:
         grouped = [order for order in grouped if order.get("status") == status_filter]
+    else:
+        _sort_review_list(grouped)
     total = len(grouped)
     offset = (page - 1) * page_size
     data = grouped[offset : offset + page_size]
@@ -350,6 +747,8 @@ def _sync_allocation_status(conn, order_no: str, items: list[dict]) -> list[dict
     Returns the (possibly updated) items list.
     """
     if not items:
+        return items
+    if any(int(item.get("factory_pending") or 0) for item in items):
         return items
     first = items[0]
     status = str(first.get("status") or "")
@@ -478,6 +877,19 @@ def _sync_allocation_status(conn, order_no: str, items: list[dict]) -> list[dict
                     "allocated_qty": item["allocated_qty"],
                     "status": item["status"],
                     "id": item["id"],
+                },
+            )
+        aggregate_status = _aggregate_status(updated_items)
+        if aggregate_status in {"partial_allocated", "allocated"}:
+            _enqueue_cloud_sync(
+                conn,
+                "dealer_order_allocated",
+                order_no,
+                {
+                    "order_no": order_no,
+                    "contract_no": str(first.get("contract_no") or "").strip(),
+                    "operator": "system",
+                    "v7_order_no": ",".join(sorted(all_order_ids)),
                 },
             )
 
@@ -611,6 +1023,12 @@ def approve_dealer_order(order_no: str, reviewer: str, note: str = "") -> dict:
             ),
             {"order_no": order_no, "reviewer": reviewer, "note": note},
         )
+        _enqueue_cloud_sync(
+            conn,
+            "dealer_order_reviewed",
+            order_no,
+            {"order_no": order_no, "status": "approved", "reviewer": reviewer, "note": note},
+        )
         # Sync batch_no to factory_plan
         for item in items:
             batch_no = str(item.get("batch_no") or "").strip()
@@ -688,6 +1106,12 @@ def reject_dealer_order(order_no: str, reviewer: str, reason: str = "") -> dict:
             ),
             {"order_no": order_no, "reviewer": reviewer, "reason": reason},
         )
+        _enqueue_cloud_sync(
+            conn,
+            "dealer_order_reviewed",
+            order_no,
+            {"order_no": order_no, "status": "rejected", "reviewer": reviewer, "note": reason},
+        )
     return preview_dealer_order(order_no)
 
 
@@ -695,6 +1119,8 @@ def mark_dealer_order_allocated(order_no: str, allocated_qty: int, v7_order_no: 
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:
         items = _get_order_lines_for_update(conn, order_no)
+        if any(int(item.get("factory_pending") or 0) for item in items):
+            raise ValueError("当前经销商订单已冻结：订单有新备注待复审，复审通过后才可以配货")
         if any(item.get("status") not in {"approved", "pending"} for item in items):
             raise ValueError("只有待审核或已通过订单可以标记配货")
         conn.execute(
@@ -706,6 +1132,18 @@ def mark_dealer_order_allocated(order_no: str, allocated_qty: int, v7_order_no: 
             ),
             {"order_no": order_no, "v7_order_no": v7_order_no, "reviewer": reviewer},
         )
+        contract_no = str(items[0].get("contract_no") or "").strip() if items else ""
+        _enqueue_cloud_sync(
+            conn,
+            "dealer_order_allocated",
+            order_no,
+            {
+                "order_no": order_no,
+                "contract_no": contract_no,
+                "operator": reviewer,
+                "v7_order_no": v7_order_no,
+            },
+        )
     return preview_dealer_order(order_no)
 
 
@@ -714,15 +1152,87 @@ def validate_dealer_order_convertible(order_no: str) -> list[dict]:
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:
         items = _get_order_lines_for_update(conn, order_no)
+        if any(int(item.get("factory_pending") or 0) for item in items):
+            raise ValueError("当前经销商订单已冻结：订单有新备注待复审，复审通过后才可以转为合同")
         if any(item.get("status") not in CONVERTIBLE_STATUSES for item in items):
             raise ValueError("只有待审核或已通过的订单可以转为合同")
         return items
+
+
+def approve_dealer_order_extra_review(order_no: str, reviewer: str, note: str = "") -> dict:
+    ensure_dealer_order_tables()
+    with get_engine().begin() as conn:
+        items = _get_order_lines_for_update(conn, order_no)
+        if not any(int(item.get("factory_pending") or 0) for item in items):
+            raise ValueError("订单没有待复审的新备注")
+        if all(str(item.get("status") or "") in {"complete", "completed"} for item in items):
+            raise ValueError("已完成订单不需要附加备注复审")
+        conn.execute(
+            text(
+                "UPDATE dealer_orders SET factory_pending=0, reviewed_at=NOW(), "
+                "reviewed_by=:reviewer, review_note=CASE WHEN :note='' THEN review_note ELSE :note END "
+                "WHERE order_no=:order_no"
+            ),
+            {"order_no": order_no, "reviewer": reviewer, "note": note},
+        )
+        _enqueue_cloud_sync(
+            conn,
+            "dealer_order_reviewed",
+            order_no,
+            {
+                "order_no": order_no,
+                "status": "approved",
+                "factory_pending": 0,
+                "reviewer": reviewer,
+                "note": note,
+            },
+        )
+    return preview_dealer_order(order_no)
+
+
+def reject_dealer_order_extra_review(order_no: str, reviewer: str, reason: str = "") -> dict:
+    ensure_dealer_order_tables()
+    cascade_result: dict = {}
+    with get_engine().begin() as conn:
+        items = _get_order_lines_for_update(conn, order_no)
+        if not any(int(item.get("factory_pending") or 0) for item in items):
+            raise ValueError("订单没有待复审的新备注")
+        if not _has_factory_remark(items):
+            raise ValueError("订单没有可驳回的新备注内容")
+        cascade_result = _cancel_linked_contract_order_chain(
+            conn,
+            order_no=order_no,
+            items=items,
+            operator=reviewer,
+            reason=reason,
+        )
+        conn.execute(
+            text(
+                "UPDATE dealer_orders SET status='rejected', factory_pending=0, reviewed_at=NOW(), "
+                "reviewed_by=:reviewer, review_note=:reason WHERE order_no=:order_no"
+            ),
+            {"order_no": order_no, "reviewer": reviewer, "reason": reason},
+        )
+        _enqueue_cloud_sync(
+            conn,
+            "dealer_order_reviewed",
+            order_no,
+            {"order_no": order_no, "status": "rejected", "factory_pending": 0, "reviewer": reviewer, "note": reason},
+        )
+    result = preview_dealer_order(order_no)
+    result["cascade_cancel"] = cascade_result
+    return result
 
 
 def mark_dealer_order_contracted(order_no: str, contract_no: str, operator: str = "") -> None:
     """Update dealer order after successful contract creation."""
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:
+        rows = conn.execute(
+            text("SELECT status FROM dealer_orders WHERE order_no=:order_no"),
+            {"order_no": order_no},
+        ).mappings().all()
+        prior_statuses = {str(row.get("status") or "").strip() for row in rows}
         conn.execute(
             text(
                 "UPDATE dealer_orders SET status='contracted', contract_no=:contract_no, "
@@ -732,3 +1242,53 @@ def mark_dealer_order_contracted(order_no: str, contract_no: str, operator: str 
             ),
             {"order_no": order_no, "contract_no": contract_no, "operator": operator},
         )
+        if "pending" in prior_statuses:
+            _enqueue_cloud_sync(
+                conn,
+                "dealer_order_reviewed",
+                order_no,
+                {"order_no": order_no, "status": "approved", "reviewer": operator, "note": "V7 contract sync pre-approval"},
+            )
+        _enqueue_cloud_sync(
+            conn,
+            "dealer_order_contracted",
+            order_no,
+            {
+                "order_no": order_no,
+                "contract_no": contract_no,
+                "operator": operator,
+                "v7_order_no": "",
+            },
+        )
+
+
+def get_dealer_orders_pending_counts() -> dict:
+    ensure_dealer_order_tables()
+    with get_engine().begin() as conn:
+        # pending count
+        pending = conn.execute(
+            text("SELECT COUNT(DISTINCT order_no) FROM dealer_orders WHERE status = 'pending'")
+        ).scalar() or 0
+
+        # factory pending count
+        factory_pending = conn.execute(
+            text(
+                "SELECT COUNT(DISTINCT order_no) FROM dealer_orders "
+                "WHERE factory_pending = 1 AND status NOT IN ('complete', 'completed')"
+            )
+        ).scalar() or 0
+
+        # total (todo) count
+        total = conn.execute(
+            text(
+                "SELECT COUNT(DISTINCT order_no) FROM dealer_orders "
+                "WHERE status = 'pending' OR (factory_pending = 1 AND status NOT IN ('complete', 'completed'))"
+            )
+        ).scalar() or 0
+
+        return {
+            "pending": pending,
+            "factory_pending": factory_pending,
+            "total": total,
+        }
+

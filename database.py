@@ -307,6 +307,17 @@ def init_mysql_tables():
           allocated_qty INT NOT NULL DEFAULT 0,
           delivery_date VARCHAR(64) DEFAULT '',
           remark TEXT,
+          extra_remark TEXT,
+          ERMQ INT NOT NULL DEFAULT 0,
+          factory_pending TINYINT(1) NOT NULL DEFAULT 0,
+          source VARCHAR(32) NOT NULL DEFAULT 'wechat',
+          last_synced_at DATETIME NULL,
+          sync_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+          sync_error TEXT,
+          factory_reviewed_at DATETIME NULL,
+          factory_reviewed_by VARCHAR(128) DEFAULT '',
+          extra_remark_reviewed_at DATETIME NULL,
+          extra_remark_reviewed_by VARCHAR(128) DEFAULT '',
           status VARCHAR(32) NOT NULL DEFAULT 'pending',
           reviewed_at DATETIME NULL,
           reviewed_by VARCHAR(128) DEFAULT '',
@@ -321,6 +332,23 @@ def init_mysql_tables():
           INDEX idx_status (status),
           INDEX idx_batch_model_status (batch_no, model, status),
           INDEX idx_created_at (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS dealer_order_sync_events (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+          event_id VARCHAR(64) NOT NULL UNIQUE,
+          order_no VARCHAR(64) NOT NULL,
+          event_type VARCHAR(64) NOT NULL,
+          source VARCHAR(32) NOT NULL DEFAULT 'wechat',
+          payload_json JSON NULL,
+          status VARCHAR(32) NOT NULL DEFAULT 'pending',
+          attempts INT NOT NULL DEFAULT 0,
+          last_error TEXT,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          acked_at DATETIME NULL,
+          INDEX idx_sync_events_order (order_no),
+          INDEX idx_sync_events_status (status, id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
@@ -435,6 +463,25 @@ def init_mysql_tables():
 
         for ddl in ddl_statements:
             conn.execute(text(ddl))
+
+        for col_name, col_def in [
+            ("extra_remark", "TEXT AFTER `remark`"),
+            ("ERMQ", "INT NOT NULL DEFAULT 0 AFTER `extra_remark`"),
+            ("factory_pending", "TINYINT(1) NOT NULL DEFAULT 0 AFTER `ERMQ`"),
+            ("source", "VARCHAR(32) NOT NULL DEFAULT 'wechat' AFTER `factory_pending`"),
+            ("last_synced_at", "DATETIME NULL AFTER `source`"),
+            ("sync_status", "VARCHAR(32) NOT NULL DEFAULT 'pending' AFTER `last_synced_at`"),
+            ("sync_error", "TEXT AFTER `sync_status`"),
+            ("factory_reviewed_at", "DATETIME NULL AFTER `sync_error`"),
+            ("factory_reviewed_by", "VARCHAR(128) DEFAULT '' AFTER `factory_reviewed_at`"),
+            ("extra_remark_reviewed_at", "DATETIME NULL AFTER `factory_reviewed_by`"),
+            ("extra_remark_reviewed_by", "VARCHAR(128) DEFAULT '' AFTER `extra_remark_reviewed_at`"),
+        ]:
+            if not _column_exists("dealer_orders", col_name):
+                try:
+                    conn.execute(text(f"ALTER TABLE dealer_orders ADD COLUMN `{col_name}` {col_def}"))
+                except Exception:
+                    pass
 
         if not _column_exists("model_dictionary", "model_family"):
             conn.execute(text(
@@ -1207,6 +1254,17 @@ def init_mysql_tables_v2():
                   allocated_qty INT NOT NULL DEFAULT 0,
                   delivery_date VARCHAR(64) DEFAULT '',
                   remark TEXT,
+                  extra_remark TEXT,
+                  ERMQ INT NOT NULL DEFAULT 0,
+                  factory_pending TINYINT(1) NOT NULL DEFAULT 0,
+                  source VARCHAR(32) NOT NULL DEFAULT 'wechat',
+                  last_synced_at DATETIME NULL,
+                  sync_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                  sync_error TEXT,
+                  factory_reviewed_at DATETIME NULL,
+                  factory_reviewed_by VARCHAR(128) DEFAULT '',
+                  extra_remark_reviewed_at DATETIME NULL,
+                  extra_remark_reviewed_by VARCHAR(128) DEFAULT '',
                   status VARCHAR(32) NOT NULL DEFAULT 'pending',
                   reviewed_at DATETIME NULL,
                   reviewed_by VARCHAR(128) DEFAULT '',
@@ -1221,6 +1279,23 @@ def init_mysql_tables_v2():
                   INDEX idx_status (status),
                   INDEX idx_batch_model_status (batch_no, model, status),
                   INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS dealer_order_sync_events (
+                  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                  event_id VARCHAR(64) NOT NULL UNIQUE,
+                  order_no VARCHAR(64) NOT NULL,
+                  event_type VARCHAR(64) NOT NULL,
+                  source VARCHAR(32) NOT NULL DEFAULT 'wechat',
+                  payload_json JSON NULL,
+                  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                  attempts INT NOT NULL DEFAULT 0,
+                  last_error TEXT,
+                  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  acked_at DATETIME NULL,
+                  INDEX idx_sync_events_order (order_no),
+                  INDEX idx_sync_events_status (status, id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """))
             conn.execute(text("""

@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"bufio"
@@ -60,7 +60,7 @@ func run() int {
 	goExe := filepath.Join(serverDir, "smart-scheduling-server-go.exe")
 
 	log("========================================")
-	log("V7 Fullstack Launcher (.exe)")
+	log("V8betaVer1.0 Fullstack Launcher (.exe)")
 	log("ROOT: %s", root)
 	log("========================================")
 
@@ -106,7 +106,7 @@ func run() int {
 	if *dryRun {
 		log("[DRY-RUN] start Go process")
 	} else {
-		if err := startScriptWindow("V7 Go Sandbox", root, []string{
+		if err := startScriptWindow("V8betaVer1.0 Go Sandbox", root, []string{
 			fmt.Sprintf("cd /d \"%s\"", serverDir),
 			fmt.Sprintf("set HTTP_ADDR=:%s", p.goPort),
 			"smart-scheduling-server-go.exe",
@@ -131,7 +131,7 @@ func run() int {
 	if *dryRun {
 		log("[DRY-RUN] start FastAPI process")
 	} else {
-		if err := startScriptWindow("V7 FastAPI", root, []string{
+		if err := startScriptWindow("V8betaVer1.0 FastAPI", root, []string{
 			fmt.Sprintf("cd /d \"%s\"", root),
 			fmt.Sprintf("set GO_SANDBOX_URL=http://127.0.0.1:%s", p.goPort),
 			fmt.Sprintf("\"%s\" -m uvicorn api.main:app --host 0.0.0.0 --port %s", *pythonPath, p.apiPort),
@@ -141,11 +141,11 @@ func run() int {
 		}
 	}
 
-	log("[4/4] Starting V7 frontend on %s...", p.webPort)
+	log("[4/4] Starting V8betaVer1.0 frontend on %s...", p.webPort)
 	if *dryRun {
 		log("[DRY-RUN] start frontend process")
 	} else {
-		if err := startScriptWindow("V7 Frontend", root, []string{
+		if err := startScriptWindow("V8betaVer1.0 Frontend", root, []string{
 			fmt.Sprintf("cd /d \"%s\"", frontendDir),
 			"set VITE_API_BASE_URL=/api/v1",
 			fmt.Sprintf("set VITE_PROXY_TARGET=http://127.0.0.1:%s", p.apiPort),
@@ -163,7 +163,7 @@ func run() int {
 		if *dryRun {
 			log("[DRY-RUN] start mobile frontend process")
 		} else {
-			if err := startScriptWindow("V7 Mobile Frontend", root, []string{
+			if err := startScriptWindow("V8betaVer1.0 Mobile Frontend", root, []string{
 				fmt.Sprintf("cd /d \"%s\"", mobileDir),
 				fmt.Sprintf("npm run dev -- --host 0.0.0.0 --port %s", p.mobilePort),
 			}); err != nil {
@@ -177,9 +177,9 @@ func run() int {
 
 	log(".")
 	log("Started. Check these windows:")
-	log("- V7 Go Sandbox")
-	log("- V7 FastAPI")
-	log("- V7 Frontend")
+	log("- V8betaVer1.0 Go Sandbox")
+	log("- V8betaVer1.0 FastAPI")
+	log("- V8betaVer1.0 Frontend")
 	log(".")
 	log("URLs:")
 	log("- Go health: http://127.0.0.1:%s/api/health", p.goPort)
@@ -296,7 +296,7 @@ func startCmdWindow(title, command, dir string) error {
 }
 
 func startScriptWindow(title, dir string, lines []string) error {
-	scriptPath := filepath.Join(os.TempDir(), "v7-launcher-"+sanitizeTitle(title)+"-"+strconv.FormatInt(time.Now().UnixNano(), 10)+".cmd")
+	scriptPath := filepath.Join(os.TempDir(), "v8betaver1-launcher-"+sanitizeTitle(title)+"-"+strconv.FormatInt(time.Now().UnixNano(), 10)+".cmd")
 	content := "@echo off\r\nchcp 65001 >nul\r\n" + strings.Join(lines, "\r\n") + "\r\n"
 	if err := os.WriteFile(scriptPath, []byte(content), 0o644); err != nil {
 		return err

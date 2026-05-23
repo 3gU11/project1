@@ -5,7 +5,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 echo ========================================
-echo V7ex Fullstack Starter - Auto IP
+echo V8betaVer1.0 Fullstack Starter - Auto IP
 echo Root: %CD%
 echo ========================================
 
@@ -33,7 +33,7 @@ for /f "tokens=2 delims=:" %%A in ('ipconfig ^| findstr /C:"IPv4"') do (
 :got_ip
 
 if not exist "%CD%\frontend" (
-  echo [错误] 找不到 frontend 目录，请确认脚本位于 V7STD 根目录。
+  echo [错误] 找不到 frontend 目录，请确认脚本位于项目根目录。
   pause
   exit /b 1
 )
@@ -78,14 +78,14 @@ echo 移动端前端端口:  %MOBILE_FRONTEND_PORT%
 echo.
 
 echo [1/3] Starting backend on http://0.0.0.0:%BACKEND_PORT% ...
-start "V7ex Backend (%BACKEND_PORT%)" cmd /k "cd /d %CD% && call %PY_CMD% -m uvicorn api.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
+start "V8betaVer1.0 Backend (%BACKEND_PORT%)" cmd /k "cd /d %CD% && call %PY_CMD% -m uvicorn api.main:app --reload --host 0.0.0.0 --port %BACKEND_PORT%"
 
 echo [2/3] Starting frontend on http://0.0.0.0:%PC_FRONTEND_PORT% ...
-start "V7ex Frontend (%PC_FRONTEND_PORT%)" cmd /k "cd /d %CD%\frontend && set VITE_API_BASE_URL=/api/v1&& set VITE_PROXY_TARGET=http://localhost:%BACKEND_PORT%&& npm run dev -- --host 0.0.0.0 --port %PC_FRONTEND_PORT%"
+start "V8betaVer1.0 Frontend (%PC_FRONTEND_PORT%)" cmd /k "cd /d %CD%\frontend && set VITE_API_BASE_URL=/api/v1&& set VITE_PROXY_TARGET=http://localhost:%BACKEND_PORT%&& npm run dev -- --host 0.0.0.0 --port %PC_FRONTEND_PORT%"
 
 if exist "%CD%\frontend-mobile" (
   echo [3/3] Starting mobile frontend on http://0.0.0.0:%MOBILE_FRONTEND_PORT% ...
-  start "V7ex Mobile Frontend (%MOBILE_FRONTEND_PORT%)" cmd /k "cd /d %CD%\frontend-mobile && npm run dev -- --host 0.0.0.0 --port %MOBILE_FRONTEND_PORT%"
+  start "V8betaVer1.0 Mobile Frontend (%MOBILE_FRONTEND_PORT%)" cmd /k "cd /d %CD%\frontend-mobile && npm run dev -- --host 0.0.0.0 --port %MOBILE_FRONTEND_PORT%"
 ) else (
   echo [3/3] frontend-mobile 不存在，跳过移动端启动。
 )

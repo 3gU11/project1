@@ -1,6 +1,6 @@
 <template>
   <div class="home-page">
-    <h1 class="page-title">🏭 成品整机管理系统 V7.0</h1>
+    <h1 class="page-title">🏭 成品整机管理系统 V8betaVer1.0</h1>
     <p class="subtitle">当前用户：{{ userName }} | 角色：{{ userRole }}</p>
 
     <section class="section">
@@ -11,6 +11,9 @@
         </button>
         <button v-if="can('/contracts')" class="btn-base top-card" @click="go('/contracts')">
           <span class="icon">📊</span> 合同管理
+        </button>
+        <button v-if="can('/dealer-orders')" class="btn-base top-card" @click="go('/dealer-orders')">
+          <span class="icon">🧾</span> 经销商订单审核
         </button>
       </div>
     </section>

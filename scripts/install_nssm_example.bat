@@ -3,7 +3,7 @@ setlocal
 
 REM Example only: adjust paths before use.
 set NSSM_EXE=C:\tools\nssm\nssm.exe
-set SERVICE_NAME=V7exBackend
+set SERVICE_NAME=V8betaVer1.0Backend
 set APP_DIR=D:\trae_projects\V7改\V7ex
 set PYTHON_EXE=C:\Python310\python.exe
 

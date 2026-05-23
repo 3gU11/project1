@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0\.."
 
 echo ========================================
-echo V7ex Backend Starter (Production Mode)
+echo V8betaVer1.0 Backend Starter (Production Mode)
 echo Root: %CD%
 echo ========================================
 

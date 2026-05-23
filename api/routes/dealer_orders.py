@@ -9,17 +9,25 @@ from api.routes.auth import require_permissions
 from crud.audit_logs import append_audit_log
 from crud.dealer_orders import (
     approve_dealer_order,
+    approve_dealer_order_extra_review,
+    get_dealer_orders_pending_counts,
     list_dealer_orders,
     mark_dealer_order_allocated,
     mark_dealer_order_contracted,
     preview_dealer_order,
     reject_dealer_order,
+    reject_dealer_order_extra_review,
     validate_dealer_order_convertible,
 )
 from crud.cloud_dealer_order_sync import (
     sync_cloud_dealer_orders,
     sync_completed_dealer_orders_to_cloud,
-    sync_wechat_batch_summary_to_cloud,
+)
+from crud.cloud_sync_outbox import (
+    enqueue_wechat_batch_summary_sync,
+    get_cloud_sync_status,
+    process_due_cloud_sync_events,
+    retry_failed_cloud_sync_events,
 )
 
 router = APIRouter(dependencies=[Depends(require_permissions("DEALER_ORDER_REVIEW"))])
@@ -65,13 +73,14 @@ class SeedDealerOrderPayload(BaseModel):
 
 
 class CloudSyncPayload(BaseModel):
-    status: str = Field(default="pending", max_length=32)
+    status: str = Field(default="all", max_length=32)
     page_size: int = Field(default=100, ge=1, le=200)
     max_pages: int = Field(default=20, ge=1, le=100)
 
 
 class CompletedCloudSyncPayload(BaseModel):
     limit: int = Field(default=200, ge=1, le=1000)
+
 
 
 def _operator(ctx: dict) -> str:
@@ -104,6 +113,14 @@ def list_orders(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"读取经销商订单失败: {exc}")
+
+
+@router.get("/pending-count")
+def get_pending_counts(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    try:
+        return get_dealer_orders_pending_counts()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"读取待审核数量失败: {exc}")
 
 
 @router.post("/sync-cloud")
@@ -144,23 +161,42 @@ def sync_wechat_batch_summary(
 ):
     operator = _operator(ctx)
     try:
-        result = sync_wechat_batch_summary_to_cloud()
+        event_id = enqueue_wechat_batch_summary_sync("manual_inventory_resync")
         append_audit_log(
             module="经销商订单",
             action_type="同步云端库存",
             biz_type="库存",
             content=(
                 f"同步 wechat_batch_summary 到云端："
-                f"local_rows={result.get('local_rows')}，pushed_rows={result.get('pushed_rows')}"
+                f"event_id={event_id}"
             ),
             user_id=ctx.get("username"),
             username=operator,
         )
-        return result
+        process_due_cloud_sync_events(limit=5)
+        return {"message": "queued", "event_id": event_id}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"同步云端库存失败: {exc}")
+
+
+@router.get("/cloud-sync-status")
+def cloud_sync_status(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    try:
+        return get_cloud_sync_status()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"cloud sync status failed: {exc}")
+
+
+@router.post("/cloud-sync-retry")
+def cloud_sync_retry(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    try:
+        queued = retry_failed_cloud_sync_events()
+        processed = process_due_cloud_sync_events(limit=20)
+        return {**queued, **processed}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"cloud sync retry failed: {exc}")
 
 
 @router.post("/sync-completed-cloud")
@@ -241,6 +277,53 @@ def reject_order(order_no: str, payload: RejectPayload, request: Request, ctx: d
         raise HTTPException(status_code=500, detail=f"驳回失败: {exc}")
 
 
+@router.post("/{order_no}/extra-review/approve")
+def approve_extra_review(order_no: str, payload: ReviewPayload, request: Request, ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    operator = _operator(ctx)
+    try:
+        result = approve_dealer_order_extra_review(order_no, reviewer=operator, note=payload.note)
+        append_audit_log(
+            module="经销商订单",
+            action_type="附加备注复审通过",
+            biz_type="订单",
+            content=f"经销商订单附加备注复审通过：{order_no}",
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        return {"message": "附加备注复审通过", **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"附加备注复审通过失败: {exc}")
+
+
+@router.post("/{order_no}/extra-review/reject")
+def reject_extra_review(order_no: str, payload: RejectPayload, request: Request, ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    operator = _operator(ctx)
+    try:
+        result = reject_dealer_order_extra_review(order_no, reviewer=operator, reason=payload.reason)
+        cascade = result.get("cascade_cancel") or {}
+        contract_count = len(cascade.get("cancelled_contracts") or [])
+        order_count = len(cascade.get("cancelled_orders") or [])
+        released_count = len(cascade.get("released_serials") or [])
+        cascade_text = f"；同步取消合同 {contract_count} 个、订单 {order_count} 个、释放配货 {released_count} 台"
+        append_audit_log(
+            module="经销商订单",
+            action_type="附加备注复审驳回",
+            biz_type="订单",
+            content=f"经销商订单附加备注复审驳回：{order_no}；原因：{payload.reason}{cascade_text}",
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        return {"message": f"附加备注复审已驳回{cascade_text}", **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"附加备注复审驳回失败: {exc}")
+
+
 @router.post("/{order_no}/mark-allocated")
 def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
     operator = _operator(ctx)
@@ -255,7 +338,7 @@ def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ct
             module="经销商订单",
             action_type="标记配货",
             biz_type="订单",
-            content=f"经销商订单标记配货：{order_no}；数量：{payload.allocated_qty}；V7订单：{payload.v7_order_no}",
+            content=f"经销商订单标记配货：{order_no}；数量：{payload.allocated_qty}；V8betaVer1.0订单：{payload.v7_order_no}",
             user_id=ctx.get("username"),
             username=operator,
         )
@@ -336,8 +419,8 @@ def convert_to_contract(
                 continue
             high = bool(ci.get("high"))
             row_note = str(ci.get("rowNote") or "").strip()
-            remark_parts = [p for p in [payload.contract_note.strip() if payload.contract_note else "", "加高" if high else "", row_note] if p]
-            remark = " | ".join(remark_parts)
+            remark_parts = [p for p in [f"[总]{payload.contract_note.strip()}" if payload.contract_note and payload.contract_note.strip() else "", "加高" if high else "", row_note] if p]
+            remark = " ".join(remark_parts)
             source_item = source_item_for(idx, model)
             batch_no = str(source_item.get("batch_no") or "").strip()
             source_alloc = {batch_no: qty} if batch_no else {}
@@ -347,7 +430,7 @@ def convert_to_contract(
                 existing = add_list[existing_idx]
                 existing["排产数量"] = int(existing.get("排产数量") or 0) + qty
                 if remark and remark not in str(existing.get("备注") or ""):
-                    existing["备注"] = " | ".join([p for p in [str(existing.get("备注") or "").strip(), remark] if p])
+                    existing["备注"] = " ".join([p for p in [str(existing.get("备注") or "").strip(), remark] if p])
                 existing_alloc = existing.get("指定批次/来源") if isinstance(existing.get("指定批次/来源"), dict) else {}
                 for batch, batch_qty in source_alloc.items():
                     existing_alloc[batch] = int(existing_alloc.get(batch) or 0) + int(batch_qty)
@@ -355,7 +438,7 @@ def convert_to_contract(
 
                 rush_source_rows[existing_idx]["qty"] = int(rush_source_rows[existing_idx].get("qty") or 0) + qty
                 if remark and remark not in str(rush_source_rows[existing_idx].get("remark") or ""):
-                    rush_source_rows[existing_idx]["remark"] = " | ".join(
+                    rush_source_rows[existing_idx]["remark"] = " ".join(
                         [p for p in [str(rush_source_rows[existing_idx].get("remark") or "").strip(), remark] if p]
                     )
                 continue

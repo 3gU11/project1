@@ -18,8 +18,8 @@ from sqlalchemy import bindparam, text
 from config import MACHINE_ARCHIVE_ABS_DIR, GO_SANDBOX_URL
 from core.file_manager import audit_log
 from crud.audit_logs import append_audit_log
-from crud.cloud_dealer_order_sync import push_cloud_completed_state
 from crud.dealer_orders import sync_dealer_order_statuses_by_sales_orders
+from crud.cloud_sync_outbox import enqueue_cloud_sync_event, enqueue_wechat_batch_summary_sync
 from crud.inventory import (
     INVENTORY_COLS,
     append_import_staging,
@@ -151,7 +151,7 @@ def get_inventory(
         data_sql = (
             "SELECT * FROM finished_goods_data"
             f"{where_sql} "
-            "ORDER BY `更新时间` DESC LIMIT :limit OFFSET :skip"
+            "ORDER BY `更新时间` DESC, `流水号` ASC LIMIT :limit OFFSET :skip"
         )
 
         with get_engine().connect() as conn:
@@ -536,7 +536,7 @@ def get_shipping_pending():
 
         orders_df = get_orders()
         if not orders_df.empty:
-            odf = orders_df.copy()
+            odf = orders_df[orders_df["status"].astype(str) != "deleted"].copy()
             odf["订单号"] = odf["订单号"].astype(str).str.strip()
             # 修改点：只要是被占用的订单号存在于 sales_orders 中即可，不限制订单状态必须为 ready
             # 因为发货复核主要是看机器实物的状态（是否为待发货）
@@ -631,6 +631,7 @@ def confirm_shipping(
             if not hit_rows:
                 raise HTTPException(status_code=422, detail="所选机台不存在")
             conn.execute(update_stmt, {"sns": sns, "now_text": now_text})
+        enqueue_wechat_batch_summary_sync("shipping_confirm_inventory")
 
         hit = pd.DataFrame([dict(row) for row in hit_rows]).fillna("")
         impacted_order_ids = {
@@ -700,13 +701,18 @@ def confirm_shipping(
                 dealer_orders = sync_dealer_order_statuses_by_sales_orders(list(impacted_order_ids))
                 for dealer_order in dealer_orders:
                     if dealer_order.get("status") == "completed":
-                        push_cloud_completed_state(
+                        enqueue_cloud_sync_event(
+                            "dealer_order_completed",
                             str(dealer_order.get("order_no") or ""),
-                            contract_no=str(dealer_order.get("contract_no") or ""),
-                            operator=current_operator,
-                            v7_order_no=str(dealer_order.get("v7_order_no") or ""),
+                            {
+                                "order_no": str(dealer_order.get("order_no") or ""),
+                                "contract_no": str(dealer_order.get("contract_no") or ""),
+                                "operator": current_operator,
+                                "v7_order_no": str(dealer_order.get("v7_order_no") or ""),
+                            },
                         )
                         cloud_synced += 1
+                enqueue_wechat_batch_summary_sync("shipping_confirm")
             except Exception as cloud_exc:
                 cloud_warning = f"本地发货已完成，但回写小程序云端失败：{cloud_exc}"
         return {"message": f"发货完成，共 {len(sns)} 台", "warning": cloud_warning, "cloud_synced": cloud_synced}

@@ -50,7 +50,7 @@ $mobileDir = Join-Path $root 'frontend-mobile'
 $goExe = Join-Path $serverDir 'smart-scheduling-server-go.exe'
 
 Log '========================================'
-Log 'V7 Fullstack Launcher (PowerShell)'
+Log 'V8betaVer1.0 Fullstack Launcher (PowerShell)'
 Log "ROOT: $root"
 Log '========================================'
 
@@ -157,7 +157,7 @@ if ($DryRun) {
   if (-not $apiOk) { Fail "FastAPI health check failed. See logs: $apiOut / $apiErr" 4 }
 }
 
-Log "[4/4] Starting V7 frontend on $WebPort..."
+Log "[4/4] Starting V8betaVer1.0 frontend on $WebPort..."
 if ($DryRun) {
   Log '[DRY-RUN] start frontend process'
 } else {

@@ -55,7 +55,7 @@ def run_connectivity_check(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Preflight checks for V7ex release")
+    parser = argparse.ArgumentParser(description="Preflight checks for V8betaVer1.0 release")
     parser.add_argument("--root", default=".")
     parser.add_argument("--health-url", default="http://127.0.0.1:8000/health")
     parser.add_argument("--health-timeout", type=float, default=2.0)

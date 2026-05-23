@@ -10,7 +10,7 @@ function LogOk([string]$m) { Write-Host $m -ForegroundColor Green }
 function LogWarn([string]$m) { Write-Host $m -ForegroundColor Yellow }
 
 Log '========================================'
-Log 'V7 Fullstack Shutdown'
+Log 'V8betaVer1.0 Fullstack Shutdown'
 Log '========================================'
 
 # --- 1. Stop Go backend by process name ---
@@ -75,5 +75,5 @@ foreach ($p in $nodeProcs) {
 
 Log ''
 Log '========================================'
-LogOk 'All V7 services stopped.'
+LogOk 'All V8betaVer1.0 services stopped.'
 Log '========================================'

@@ -206,7 +206,7 @@ const filteredOrders = computed(() => {
     .filter((o) => {
       const s = String(o.status || 'active').toLowerCase()
       // Exclude finished/canceled orders
-      return !['done', 'shipped', 'completed', 'canceled'].includes(s)
+      return !['done', 'shipped', 'completed', 'canceled', 'deleted'].includes(s)
     })
     .filter((o) => {
       const orderId = String(o['订单号'] || '')

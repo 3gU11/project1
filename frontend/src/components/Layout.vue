@@ -6,7 +6,7 @@
       <button type="button" class="collapse-tip" @click="toggleSidebar">
         {{ sidebarCollapsed ? '»' : '«' }}
       </button>
-      <div v-if="!sidebarCollapsed" class="logo">🏭 管理系统 V7.0</div>
+      <div v-if="!sidebarCollapsed" class="logo">🏭 管理系统 V8betaVer1.0</div>
 
       <div v-if="!sidebarCollapsed" class="menu-group">
         <div class="group-title">👤 系统管理</div>
@@ -31,6 +31,7 @@
           @click="go(item.path)"
         >
           {{ item.label }}
+          <span v-if="item.path === '/dealer-orders' && dealerPendingCount > 0" class="menu-badge">{{ dealerPendingCount }}</span>
         </button>
       </div>
     </aside>
@@ -48,6 +49,7 @@ import { useModelDictionaryStore } from '../store/modelDictionary'
 import { getAccessibleMenus } from '../router'
 import { cancelIdleRun, runWhenIdle } from '../utils/compat'
 import { normalizeRole } from '../utils/roles'
+import { apiGet } from '../utils/request'
 
 const userStore = useUserStore()
 const modelDictionaryStore = useModelDictionaryStore()
@@ -56,13 +58,120 @@ const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 const mobileMenuOpen = ref(false)
 let warmupHandle: number | null = null
+const dealerPendingCount = ref(0)
+let dealerPendingTimer: ReturnType<typeof setInterval> | null = null
+
+let globalWs: WebSocket | null = null
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let wsPingTimer: ReturnType<typeof setInterval> | null = null
+let isWsClosing = false
+
+const connectDealerOrdersWs = () => {
+  if (!userStore.userInfo?.permissions?.includes('DEALER_ORDER_REVIEW')) {
+    return
+  }
+  if (globalWs && (globalWs.readyState === WebSocket.OPEN || globalWs.readyState === WebSocket.CONNECTING)) {
+    return
+  }
+  if (!userStore.token) return
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const url = `${protocol}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(userStore.token)}`
+  
+  isWsClosing = false
+  globalWs = new WebSocket(url)
+
+  globalWs.addEventListener('open', () => {
+    console.log('[Dealer WS] connected')
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer)
+      wsReconnectTimer = null
+    }
+    if (wsPingTimer) clearInterval(wsPingTimer)
+    wsPingTimer = setInterval(() => {
+      if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+        globalWs.send(JSON.stringify({ event: 'ping' }))
+      }
+    }, 30000)
+  })
+
+  globalWs.addEventListener('message', (event) => {
+    try {
+      const msg = JSON.parse(event.data)
+      if (msg?.event === 'dealer_orders_changed') {
+        dealerPendingCount.value = Number(msg.data?.total || 0)
+        window.dispatchEvent(new CustomEvent('dealer-orders-updated', { detail: msg.data }))
+      }
+    } catch (err) {
+      // Ignore
+    }
+  })
+
+  globalWs.addEventListener('close', () => {
+    console.log('[Dealer WS] disconnected')
+    globalWs = null
+    if (wsPingTimer) {
+      clearInterval(wsPingTimer)
+      wsPingTimer = null
+    }
+    if (!isWsClosing && userStore.isAuthenticated && userStore.userInfo?.permissions?.includes('DEALER_ORDER_REVIEW')) {
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
+      wsReconnectTimer = setTimeout(connectDealerOrdersWs, 3000)
+    }
+  })
+
+  globalWs.addEventListener('error', (err) => {
+    console.error('[Dealer WS] error:', err)
+  })
+}
+
+const disconnectDealerOrdersWs = () => {
+  isWsClosing = true
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer)
+    wsReconnectTimer = null
+  }
+  if (wsPingTimer) {
+    clearInterval(wsPingTimer)
+    wsPingTimer = null
+  }
+  if (globalWs) {
+    globalWs.close()
+    globalWs = null
+  }
+}
+
+const fetchDealerPendingCount = async () => {
+  if (!userStore.userInfo?.permissions?.includes('DEALER_ORDER_REVIEW')) {
+    dealerPendingCount.value = 0
+    return
+  }
+  try {
+    const res = await apiGet<{ total?: number }>('/dealer-orders/pending-count')
+    dealerPendingCount.value = Number(res.total || 0)
+  } catch {
+    // Silently ignore — badge just won't show
+  }
+}
+
+const handleOrdersUpdated = (e?: Event) => {
+  if (!userStore.userInfo?.permissions?.includes('DEALER_ORDER_REVIEW')) {
+    dealerPendingCount.value = 0
+    return
+  }
+  if (e && (e as CustomEvent).detail) {
+    dealerPendingCount.value = Number((e as CustomEvent).detail.total || 0)
+  } else {
+    fetchDealerPendingCount()
+  }
+}
 
 const visibleMenus = computed(() => {
   const onHome = router.currentRoute.value.path === '/'
   return getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
     if (onHome) {
       // 在首页时，侧边栏仅保留高频入口
-      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban']
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban', '/dealer-orders']
       return allowedInHome.includes(m.path)
     }
     return true
@@ -128,20 +237,35 @@ const handleLogout = () => {
 onMounted(() => {
   syncViewport()
   window.addEventListener('resize', syncViewport)
+  window.addEventListener('dealer-orders-updated', handleOrdersUpdated)
   warmupHandle = runWhenIdle(() => warmupByRole(), 400)
   if (userStore.isAuthenticated) {
     modelDictionaryStore.ensureLoaded().catch(() => {
       // Keep default order when dictionary API is temporarily unavailable.
     })
+    fetchDealerPendingCount()
+    connectDealerOrdersWs()
+    dealerPendingTimer = setInterval(fetchDealerPendingCount, 60000)
   }
 })
 onBeforeUnmount(() => {
   cancelIdleRun(warmupHandle)
   warmupHandle = null
+  if (dealerPendingTimer) { clearInterval(dealerPendingTimer); dealerPendingTimer = null }
+  disconnectDealerOrdersWs()
   window.removeEventListener('resize', syncViewport)
+  window.removeEventListener('dealer-orders-updated', handleOrdersUpdated)
 })
 watch(() => router.currentRoute.value.path, () => {
   if (isMobile.value) closeMobileMenu()
+})
+watch(() => userStore.isAuthenticated, (newVal) => {
+  if (newVal) {
+    fetchDealerPendingCount()
+    connectDealerOrdersWs()
+  } else {
+    disconnectDealerOrdersWs()
+  }
 })
 </script>
 
@@ -252,6 +376,24 @@ watch(() => router.currentRoute.value.path, () => {
   border-color: #60a5fa;
   background: #eff6ff;
   color: #1d4ed8;
+}
+.menu-btn {
+  position: relative;
+}
+.menu-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  line-height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
 }
 .user-info {
   border: 1px solid #e5e7eb;

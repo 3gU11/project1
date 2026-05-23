@@ -2,7 +2,7 @@
 FastAPI proxy for Go intelligent scheduling sandbox service.
 
 All requests to /api/v1/sandbox/* are forwarded to the Go service
-running on 127.0.0.1:3001, with V7 user identity headers injected.
+running on 127.0.0.1:3001, with V8betaVer1.0 user identity headers injected.
 """
 import os
 import logging
@@ -1154,6 +1154,7 @@ async def list_rush_orders(request: Request):
                     dealer_name,
                     model_type,
                     DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date,
+                    remark,
                     source,
                     status,
                     DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
@@ -1164,7 +1165,16 @@ async def list_rush_orders(request: Request):
             """),
             params if status_filter else {},
         ).mappings().all()
-    return JSONResponse(content={"data": [dict(row) for row in rows]})
+    data = []
+    for row in rows:
+        item = dict(row)
+        raw_remark = str(item.get("remark") or "")
+        marker = re.search(r"(?:^|\n)__source_unit_id:([^\n]+)", raw_remark)
+        if marker:
+            item["source_unit_id"] = marker.group(1).strip()
+            item["remark"] = re.sub(r"(?:^|\n)__source_unit_id:[^\n]+", "", raw_remark).strip()
+        data.append(item)
+    return JSONResponse(content={"data": data})
 
 
 @router.api_route("/rush-orders/{order_id}", methods=["PATCH"])
@@ -1176,7 +1186,7 @@ async def update_rush_order_status(
     user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
     _ensure_permission(user_ctx, "PATCH", f"/api/rush-orders/{order_id}")
     next_status = str(payload.status or "").strip()
-    if next_status not in {"pending", "inserted", "deleted"}:
+    if next_status not in {"pending", "inserted", "deleted", "returned"}:
         raise HTTPException(status_code=422, detail="无效的急单状态")
     with get_engine().begin() as conn:
         result = conn.execute(
@@ -1247,6 +1257,273 @@ async def proxy_units_swap_content(request: Request):
 @router.api_route("/units/rush-insert", methods=["POST"])
 async def proxy_units_rush_insert(request: Request):
     return await _forward(request, "/api/units/rush-insert")
+
+
+@router.api_route("/units/{unit_id}/convert-to-rush", methods=["POST"])
+async def convert_unit_to_rush(request: Request, unit_id: str):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", f"/api/units/{unit_id}/convert-to-rush")
+    actor = str(user_ctx.get("username") or "system").strip()
+
+    with get_engine().begin() as conn:
+        unit = conn.execute(
+            text("""
+                SELECT
+                    u.unit_id,
+                    u.contract_no,
+                    u.customer,
+                    u.dealer_name,
+                    u.model_type,
+                    DATE_FORMAT(u.due_date, '%Y-%m-%d') AS due_date,
+                    u.order_remark,
+                    u.is_locked,
+                    b.status AS batch_status
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                WHERE u.unit_id = :uid
+                FOR UPDATE
+            """),
+            {"uid": unit_id},
+        ).mappings().fetchone()
+        if not unit:
+            raise HTTPException(status_code=404, detail="沙盘卡片不存在")
+        if str(unit.get("batch_status") or "") != "Predicted":
+            raise HTTPException(status_code=422, detail="只有待确认预测批次中的卡片可以转为急单")
+        if bool(unit.get("is_locked")):
+            raise HTTPException(status_code=422, detail="卡片已锁定，请先解锁再转急单")
+
+        contract_no = str(unit.get("contract_no") or "").strip()
+        model_type = str(unit.get("model_type") or "").strip()
+        if not contract_no or not model_type:
+            raise HTTPException(status_code=422, detail="空位或备货占位不能转为急单")
+
+        conn.execute(
+            text("""
+                INSERT INTO rush_order_queue
+                    (contract_no, customer, dealer_name, model_type, due_date, remark, source, status, created_by, updated_by)
+                VALUES
+                    (:contract_no, :customer, :dealer_name, :model_type, :due_date, :remark, 'sandbox-card', 'pending', :actor, :actor)
+            """),
+            {
+                "contract_no": contract_no,
+                "customer": str(unit.get("customer") or "").strip(),
+                "dealer_name": str(unit.get("dealer_name") or "").strip(),
+                "model_type": model_type,
+                "due_date": str(unit.get("due_date") or "").strip() or None,
+                "remark": "\n".join(
+                    part for part in [
+                        str(unit.get("order_remark") or "").strip(),
+                        f"__source_unit_id:{unit_id}",
+                    ] if part
+                ),
+                "actor": actor,
+            },
+        )
+        conn.execute(
+            text("""
+                UPDATE units
+                SET contract_no = NULL,
+                    customer = NULL,
+                    dealer_id = NULL,
+                    dealer_name = NULL,
+                    due_date = NULL,
+                    sales_id = NULL,
+                    order_remark = NULL,
+                    is_contract_pinned = 0,
+                    updated_at = NOW()
+                WHERE unit_id = :uid
+            """),
+            {"uid": unit_id},
+        )
+
+    return JSONResponse(content={"success": True, "message": "已转为急单"})
+
+
+@router.api_route("/rush-orders/{order_id}/return-to-sandbox", methods=["POST"])
+async def return_rush_order_to_sandbox(request: Request, order_id: int):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", f"/api/rush-orders/{order_id}/return-to-sandbox")
+    actor = str(user_ctx.get("username") or "system").strip()
+
+    with get_engine().begin() as conn:
+        rush = conn.execute(
+            text("""
+                SELECT
+                    id,
+                    contract_no,
+                    customer,
+                    dealer_name,
+                    model_type,
+                    DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date,
+                    remark,
+                    source,
+                    status
+                FROM rush_order_queue
+                WHERE id = :id
+                FOR UPDATE
+            """),
+            {"id": int(order_id)},
+        ).mappings().fetchone()
+        if not rush:
+            raise HTTPException(status_code=404, detail="急单不存在")
+        if str(rush.get("status") or "") != "pending":
+            raise HTTPException(status_code=422, detail="只有待处理急单可以返回沙盘")
+
+        contract_no = str(rush.get("contract_no") or "").strip()
+        model_type = str(rush.get("model_type") or "").strip()
+        if not contract_no or not model_type:
+            raise HTTPException(status_code=422, detail="急单缺少合同号或机型，无法返回沙盘")
+
+        due_date = str(rush.get("due_date") or "").strip() or None
+        customer = str(rush.get("customer") or "").strip()
+        dealer_name = str(rush.get("dealer_name") or "").strip()
+        remark = str(rush.get("remark") or "").strip()
+
+        source = str(rush.get("source") or "").strip()
+        raw_remark = str(rush.get("remark") or "")
+        marker = re.search(r"(?:^|\n)__source_unit_id:([^\n]+)", raw_remark)
+        source_unit_id = source.split("sandbox-card:", 1)[1].strip() if source.startswith("sandbox-card:") else ""
+        if not source_unit_id and marker:
+            source_unit_id = marker.group(1).strip()
+        remark = re.sub(r"(?:^|\n)__source_unit_id:[^\n]+", "", raw_remark).strip()
+        target_unit_id = ""
+
+        if source_unit_id:
+            source_unit = conn.execute(
+                text("""
+                    SELECT u.unit_id, u.batch_id, u.contract_no, u.is_locked, b.status AS batch_status
+                    FROM units u
+                    JOIN batches b ON b.batch_id = u.batch_id
+                    WHERE u.unit_id = :uid
+                    FOR UPDATE
+                """),
+                {"uid": source_unit_id},
+            ).mappings().fetchone()
+            if source_unit and str(source_unit.get("batch_status") or "") == "Predicted" \
+                    and not bool(source_unit.get("is_locked")) \
+                    and not str(source_unit.get("contract_no") or "").strip():
+                target_unit_id = str(source_unit.get("unit_id") or "")
+
+        if target_unit_id:
+            conn.execute(
+                text("""
+                    UPDATE units
+                    SET contract_no = :contract_no,
+                        customer = :customer,
+                        dealer_name = :dealer_name,
+                        model_type = :model_type,
+                        due_date = :due_date,
+                        order_remark = :remark,
+                        is_contract_pinned = 1,
+                        updated_at = NOW()
+                    WHERE unit_id = :uid
+                """),
+                {
+                    "uid": target_unit_id,
+                    "contract_no": contract_no,
+                    "customer": customer or None,
+                    "dealer_name": dealer_name or None,
+                    "model_type": model_type,
+                    "due_date": due_date,
+                    "remark": remark or None,
+                },
+            )
+        else:
+            target_major = _major_family(model_type)
+            target_batch = conn.execute(
+                text("""
+                    SELECT batch_id, model_type
+                    FROM batches
+                    WHERE status = 'Predicted'
+                      AND UPPER(TRIM(COALESCE(model_type, ''))) <> 'SPECIAL'
+                      AND (
+                        UPPER(TRIM(model_type)) = UPPER(:model_type)
+                        OR UPPER(TRIM(model_type)) = UPPER(:major)
+                      )
+                    ORDER BY
+                      CASE
+                        WHEN UPPER(TRIM(model_type)) = UPPER(:model_type) THEN 0
+                        WHEN UPPER(TRIM(model_type)) = UPPER(:major) THEN 1
+                        ELSE 2
+                      END,
+                      batch_no ASC,
+                      created_at ASC
+                    LIMIT 1
+                    FOR UPDATE
+                """),
+                {"model_type": model_type, "major": target_major},
+            ).mappings().fetchone()
+            if not target_batch:
+                raise HTTPException(status_code=422, detail="没有可返回的待确认预测沙盘列")
+
+            max_slot = conn.execute(
+                text("SELECT COALESCE(MAX(slot_index), 0) FROM units WHERE batch_id = :bid"),
+                {"bid": target_batch["batch_id"]},
+            ).fetchone()[0]
+            next_slot = int(max_slot or 0) + 1
+            unit_id = f"{target_batch['batch_id']}-S{next_slot:02d}"
+            exists = conn.execute(
+                text("SELECT COUNT(*) FROM units WHERE unit_id = :uid"),
+                {"uid": unit_id},
+            ).fetchone()[0]
+            if int(exists or 0) > 0:
+                unit_id = f"{target_batch['batch_id']}-R{order_id}-{next_slot}"
+
+            conn.execute(
+                text("""
+                    INSERT INTO units
+                        (unit_id, batch_id, slot_index, model_type, status, contract_no, customer,
+                         dealer_name, due_date, order_remark, is_locked, is_contract_pinned,
+                         created_at, updated_at)
+                    VALUES
+                        (:unit_id, :batch_id, :slot_index, :model_type, 'Pending', :contract_no, :customer,
+                         :dealer_name, :due_date, :remark, 0, 1, :now, :now)
+                """),
+                {
+                    "unit_id": unit_id,
+                    "batch_id": target_batch["batch_id"],
+                    "slot_index": next_slot,
+                    "model_type": model_type,
+                    "contract_no": contract_no,
+                    "customer": customer or None,
+                    "dealer_name": dealer_name or None,
+                    "due_date": due_date,
+                    "remark": remark or None,
+                    "now": datetime.now(),
+                },
+            )
+            target_unit_id = unit_id
+
+        conn.execute(
+            text("""
+                UPDATE rush_order_queue
+                SET status = 'returned',
+                    updated_by = :actor
+                WHERE id = :id
+            """),
+            {"id": int(order_id), "actor": actor},
+        )
+        conn.execute(
+            text("""
+                INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+                VALUES (:actor, 'rush_return_to_sandbox', 'rush_order', :target_id, :detail, NOW())
+            """),
+            {
+                "actor": actor,
+                "target_id": str(order_id),
+                "detail": json.dumps(
+                    {
+                        "rush_order_id": int(order_id),
+                        "target_unit_id": target_unit_id,
+                        "contract_no": contract_no,
+                        "model_type": model_type,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+
+    return JSONResponse(content={"success": True, "target_unit_id": target_unit_id})
 
 
 @router.api_route("/units/special-card", methods=["POST"])

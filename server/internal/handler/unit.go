@@ -2570,6 +2570,83 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
+
+func (h *UnitHandler) ConvertToRush(c *gin.Context) {
+	tx := h.db.Begin()
+	defer tx.Rollback()
+
+	unitID := c.Param("id")
+	unit, err := h.repo.LockForUpdate(tx, unitID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "unit not found"})
+		return
+	}
+
+	var batch model.Batch
+	if err := tx.Where("batch_id = ?", unit.BatchID).First(&batch).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "batch not found"})
+		return
+	}
+	if batch.Status != model.StatusPredicted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only Predicted batch units can be converted to rush orders"})
+		return
+	}
+	if unit.IsLocked {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unit is locked"})
+		return
+	}
+
+	contractNo := strings.TrimSpace(strPtrVal(unit.ContractNo))
+	modelType := strings.TrimSpace(unit.ModelType)
+	if contractNo == "" || modelType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty or stock placeholder cannot be converted to rush order"})
+		return
+	}
+
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
+	var dueDate interface{}
+	if unit.DueDate != nil {
+		dueDate = unit.DueDate.Format("2006-01-02")
+	}
+	if err := tx.Exec(`
+		INSERT INTO rush_order_queue
+			(contract_no, customer, dealer_name, model_type, due_date, remark, source, status, created_by, updated_by)
+		VALUES
+			(?, ?, ?, ?, ?, ?, 'sandbox-card', 'pending', ?, ?)
+	`,
+		contractNo,
+		strings.TrimSpace(strPtrVal(unit.Customer)),
+		strings.TrimSpace(strPtrVal(unit.DealerName)),
+		modelType,
+		dueDate,
+		strings.TrimSpace(strPtrVal(unit.OrderRemark)),
+		actor,
+		actor,
+	).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create rush order: " + err.Error()})
+		return
+	}
+
+	if err := h.repo.ClearOrderFields(tx, unitID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := tx.Model(&model.Unit{}).Where("unit_id = ?", unitID).Update("is_contract_pinned", false).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.hub.Broadcast("unit:updated", gin.H{"unit_id": unitID, "mode": "convert-to-rush"})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
 func (h *UnitHandler) NotifyUpdate(c *gin.Context) {
 	unitID := c.Param("id")
 	sn := strings.TrimSpace(c.Query("sn"))

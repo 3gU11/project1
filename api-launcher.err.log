@@ -1,0 +1,132 @@
+INFO:     Started server process [24328]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+INFO:     ('127.0.0.1', 56073) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODE2ODMxNzcsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.akLH91M_mBdxKoYPgRFAOemaOtX024_NfIVBBq5OvWc" [accepted]
+INFO:     connection open
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_pending failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_pending&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=regional_rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=regional_rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422
+cloud fetch status=rejected failed: Client error '422 Unprocessable Entity' for url 'https://v8connection-259280-4-1396434787.sh.run.tcloudbase.com/api/v7/dealer-orders?status=rejected&page=1&page_size=100'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/422

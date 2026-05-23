@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <div class="card">
-      <h2>V7ex 仓储移动端</h2>
+      <h2>V8betaVer1.0 仓储移动端</h2>
       <van-tabs v-model:active="tabActive">
         <van-tab title="登录">
           <van-form @submit="onSubmit">

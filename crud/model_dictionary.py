@@ -6,6 +6,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.exc import OperationalError
 
 from database import get_engine
+from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 
 MODEL_CATEGORIES = {"中大型AUTO", "中小型AUTO", "中大型XS", "中小型XS", "中小型G", "特殊"}
 LEGACY_FAMILY_MAP = {
@@ -295,6 +296,8 @@ def replace_model_name_globally(old_name: object, new_name: object) -> dict:
             ).rowcount or 0
 
         total = int(c1) + int(c2) + int(c3) + int(c4)
+        if int(c1):
+            enqueue_wechat_batch_summary_sync("model_dictionary_replace_finished_goods")
         return {
             "old_name": old_clean,
             "new_name": new_clean,

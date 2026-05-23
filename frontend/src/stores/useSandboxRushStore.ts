@@ -44,6 +44,10 @@ export const useRushStore = defineStore('sandbox-rush', {
       // Remove it from local state immediately for snappy UI
       this.removeRushOrder(id)
     },
+    async returnRushOrderToSandbox(id: string | number) {
+      await sandboxApi.returnRushOrderToSandbox(id)
+      this.removeRushOrder(id)
+    },
     clearRushOrders() {
       this.rushOrders = []
     },

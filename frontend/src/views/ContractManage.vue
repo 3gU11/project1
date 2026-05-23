@@ -8,9 +8,6 @@
       <button type="button" class="new-row-toggle" @click="batchPanelOpen = !batchPanelOpen">
         {{ batchPanelOpen ? '▾' : '▸' }} ➕ 录入新合同 (批量)
       </button>
-      <el-button type="primary" plain :loading="dealerOrderLoading" @click="openDealerOrderImport">
-        从经销商订单带入
-      </el-button>
     </div>
 
     <div class="batch-slide" :class="{ open: batchPanelOpen }">
@@ -318,7 +315,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dealerOrderDialogVisible" title="从经销商订单带入合同信息" width="860px">
+    <el-dialog v-model="dealerOrderDialogVisible" title="选择经销商订单转合同" width="860px">
       <div class="dealer-import-toolbar">
         <el-input
           v-model="dealerOrderKeyword"
@@ -327,7 +324,7 @@
           @keyup.enter="loadDealerOrders"
           @clear="loadDealerOrders"
         />
-        <el-tag type="success" size="large">仅已通过审核</el-tag>
+        <el-tag type="success" size="large">待审核/已通过可转合同</el-tag>
         <el-button :loading="dealerOrderLoading" @click="loadDealerOrders">查询</el-button>
       </div>
       <el-table
@@ -337,27 +334,116 @@
         stripe
         size="small"
         height="420"
-        @row-dblclick="prefillFromDealerOrder"
+        @row-dblclick="openDealerOrderConvertDialog"
       >
         <el-table-column prop="order_no" label="订单号" min-width="160" show-overflow-tooltip />
         <el-table-column prop="customer_name" label="客户名称" min-width="150" show-overflow-tooltip />
         <el-table-column prop="contact_name" label="代理商/联系人" width="130" show-overflow-tooltip />
         <el-table-column prop="model" label="机型明细" min-width="220" show-overflow-tooltip />
         <el-table-column prop="quantity" label="数量" width="80" align="right" />
-        <el-table-column prop="status" label="状态" width="100" />
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">{{ dealerOrderStatusText(row) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" :disabled="row.status !== 'approved'" @click="prefillFromDealerOrder(row)">带入</el-button>
+            <el-button size="small" type="primary" :disabled="!canConvertDealerOrder(row)" @click="openDealerOrderConvertDialog(row)">转合同</el-button>
           </template>
         </el-table-column>
       </el-table>
-      <div class="dealer-import-tip">仅已通过审核的经销商订单可带入。带入后只会预填“录入新合同”表单，不会直接生成合同；请检查后再保存。</div>
+      <div class="dealer-import-tip">选择订单后会打开完整转合同表单，可检查合同号、交期、明细和保存方式后生成合同。</div>
+    </el-dialog>
+
+    <el-dialog
+      v-model="dealerConvertDialogVisible"
+      title="从经销商订单转为合同"
+      width="860px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+    >
+      <div class="convert-grid">
+        <div>
+          <div class="ops-label">合同号</div>
+          <el-input v-model="dealerConvertForm.contractNo" placeholder="自动生成" />
+        </div>
+        <div>
+          <div class="ops-label">期望交付日期</div>
+          <el-date-picker v-model="dealerConvertForm.deliveryDate" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        </div>
+        <div>
+          <div class="ops-label">客户名称</div>
+          <el-input v-model="dealerConvertForm.customer" />
+        </div>
+        <div>
+          <div class="ops-label">代理商</div>
+          <el-input v-model="dealerConvertForm.agent" />
+        </div>
+        <div>
+          <div class="ops-label">急单</div>
+          <el-switch v-model="dealerConvertForm.isRush" active-text="是" inactive-text="否" />
+        </div>
+      </div>
+
+      <el-divider />
+      <div class="ops-label">机型明细</div>
+      <el-table :data="dealerConvertForm.items" border size="small" class="form-table">
+        <el-table-column label="#" width="50">
+          <template #default="scope">{{ scope.$index + 1 }}</template>
+        </el-table-column>
+        <el-table-column label="机型" min-width="160">
+          <template #default="scope">
+            <el-select v-model="scope.row.model" filterable placeholder="机型" style="width:100%">
+              <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="数量" width="90">
+          <template #default="scope">
+            <el-input-number v-model="scope.row.qty" :min="1" :controls="false" style="width:100%" />
+          </template>
+        </el-table-column>
+        <el-table-column label="加高" width="70">
+          <template #default="scope">
+            <el-checkbox v-model="scope.row.high" />
+          </template>
+        </el-table-column>
+        <el-table-column label="原备注" min-width="120">
+          <template #default="scope">
+            <el-input v-model="scope.row.remark" placeholder="原备注" />
+          </template>
+        </el-table-column>
+        <el-table-column label="附加备注" min-width="120">
+          <template #default="scope">
+            <el-input v-model="scope.row.extraRemark" placeholder="附加备注" />
+          </template>
+        </el-table-column>
+        <el-table-column label="需要修改数量" width="110">
+          <template #default="scope">
+            <el-input-number v-model="scope.row.ermq" :min="0" :controls="false" style="width:100%" />
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-divider />
+      <div class="ops-label">合同总备注</div>
+      <el-input v-model="dealerConvertForm.contractNote" placeholder="可选" />
+
+      <div class="save-mode-section">
+        <div class="ops-label">保存方式</div>
+        <div class="save-mode-sub">进入沙盘（参与老板计划排产）或使用现货（直接置为已规划）。</div>
+        <div v-if="!dealerConvertCanUseSpot" class="save-mode-blocked">当前“使用现货”不可用：{{ dealerConvertSpotBlockReason }}</div>
+      </div>
+
+      <template #footer>
+        <el-button @click="dealerConvertDialogVisible = false">取消</el-button>
+        <el-button type="warning" :disabled="!dealerConvertCanUseSpot" :loading="dealerConvertSaving" @click="submitDealerConvert('spot')">使用现货</el-button>
+        <el-button type="primary" :loading="dealerConvertSaving" @click="submitDealerConvert('sandbox')">进入沙盘</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Document } from '@element-plus/icons-vue'
 import { apiGet, apiGetAll, apiPost, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
@@ -389,6 +475,11 @@ type ContractSummary = {
 type DealerOrderLine = {
   model?: string
   quantity?: number
+  remark?: string
+  extra_remark?: string
+  factory_remark?: string
+  ERMQ?: number
+  factory_pending?: number
   batch_no?: string
   eta?: string
   inventory_type?: string
@@ -402,6 +493,10 @@ type DealerOrder = {
   quantity?: number
   status?: string
   remark?: string
+  extra_remark?: string
+  factory_remark?: string
+  ERMQ?: number
+  factory_pending?: number
   review_note?: string
   items?: DealerOrderLine[]
 }
@@ -428,6 +523,10 @@ const dealerOrderLoading = ref(false)
 const dealerOrderKeyword = ref('')
 const dealerOrders = ref<DealerOrder[]>([])
 const dealerOrderSource = ref('')
+const dealerConvertDialogVisible = ref(false)
+const dealerConvertSaving = ref(false)
+const dealerConvertCanUseSpot = ref(true)
+const dealerConvertSpotBlockReason = ref('')
 const openMonths = ref<string[]>([])
 const detailPanelRef = ref<HTMLElement | null>(null)
 const { submitWithLock } = useFormSubmit()
@@ -444,6 +543,17 @@ const batchItems = ref<Array<{ model: string; qty: number; high: boolean; rowNot
   { model: '', qty: 1, high: false, rowNote: '' },
 ])
 const modelOptions = computed(() => getModelOrderList())
+type DealerConvertItem = { model: string; qty: number; high: boolean; rowNote: string; remark: string; extraRemark: string; ermq: number }
+const dealerConvertForm = reactive({
+  contractNo: '',
+  deliveryDate: '',
+  customer: '',
+  agent: '',
+  isRush: false,
+  items: [] as DealerConvertItem[],
+  contractNote: '',
+  sourceOrderNo: '',
+})
 const saveModeDialogVisible = ref(false)
 const canUseSpotMode = ref(true)
 const spotModeBlockReason = ref('')
@@ -476,15 +586,22 @@ const resetBatchForm = () => {
 const loadDealerOrders = async () => {
   dealerOrderLoading.value = true
   try {
-    const res = await apiGet<DealerOrderListResponse>('/dealer-orders/', {
+    const keyword = dealerOrderKeyword.value || undefined
+    const responses = await Promise.all(['pending', 'approved'].map((status) => apiGet<DealerOrderListResponse>('/dealer-orders/', {
       params: {
-        status: 'approved',
-        keyword: dealerOrderKeyword.value || undefined,
+        status,
+        keyword,
         page: 1,
         page_size: 100,
       },
-    })
-    dealerOrders.value = res.data || []
+    })))
+    const map = new Map<string, DealerOrder>()
+    for (const res of responses) {
+      for (const order of res.data || []) {
+        if (order.order_no) map.set(order.order_no, order)
+      }
+    }
+    dealerOrders.value = Array.from(map.values())
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取经销商订单失败')
   } finally {
@@ -492,50 +609,75 @@ const loadDealerOrders = async () => {
   }
 }
 
-const openDealerOrderImport = async () => {
-  dealerOrderDialogVisible.value = true
-  if (dealerOrders.value.length === 0) await loadDealerOrders()
+const dealerOrderStatusText = (order: DealerOrder) => {
+  const status = String(order.status || '').trim()
+  if (['complete', 'completed'].includes(status)) return '已完成'
+  if (Number(order.factory_pending || 0) === 1) return '新备注审核中'
+  const map: Record<string, string> = {
+    pending: '待审核',
+    approved: '已通过',
+    contracted: '已转合同',
+    partial_allocated: '部分配货',
+    allocated: '已配货',
+    rejected: '已驳回',
+    cancelled: '已取消',
+  }
+  return map[status] || status || '-'
+}
+
+const canConvertDealerOrder = (order: DealerOrder) => {
+  return ['pending', 'approved'].includes(String(order.status || '').trim()) && Number(order.factory_pending || 0) !== 1
+}
+
+const isRushHint = (order: DealerOrder) => {
+  const remark = String(order.remark || '').toLowerCase()
+  if (remark.includes('急') || remark.includes('加急')) return true
+  const delivery = String(order.delivery_date || '').trim()
+  if (!delivery) return false
+  const days = (new Date(delivery).getTime() - Date.now()) / 86400000
+  return days <= 3
 }
 
 const normalizeDealerOrderItems = (order: DealerOrder) => {
-  const source = order.items?.length ? order.items : [{ model: order.model, quantity: order.quantity }]
+  const source: DealerOrderLine[] = order.items?.length
+    ? order.items
+    : [{ model: order.model, quantity: order.quantity, remark: order.remark, extra_remark: order.extra_remark, factory_remark: order.factory_remark, ERMQ: order.ERMQ }]
   return source
     .map((item) => {
       const model = String(item.model || '').trim()
       const qty = Math.max(1, Number(item.quantity || 1))
-      const high = model.includes('加高')
-      const rowNote = ''
-      return { model, qty, high, rowNote }
+      const remark = String(item.remark || '').trim()
+      const extraRemark = String(item.factory_remark || item.extra_remark || '').trim()
+      const ermq = Number(item.ERMQ || 0)
+      const high = model.includes('加高') || remark.includes('加高') || extraRemark.includes('加高')
+      const rowNote = [remark ? `[备注]${remark}` : '', extraRemark ? `[附加]${extraRemark}` : '', ermq > 0 ? `[改数]${ermq}` : ''].filter(Boolean).join(' ')
+      return { model, qty, high, rowNote, remark, extraRemark, ermq }
     })
     .filter((item) => item.model)
 }
 
-const prefillFromDealerOrder = (order: DealerOrder) => {
-  if (order.status !== 'approved') {
-    ElMessage.warning('只有已通过审核的经销商订单可以带入合同')
+const openDealerOrderConvertDialog = (order: DealerOrder) => {
+  if (!canConvertDealerOrder(order)) {
+    ElMessage.warning('只有待审核或已通过审核的经销商订单可以转合同')
     return
   }
   const rows = normalizeDealerOrderItems(order)
   if (rows.length === 0) {
-    ElMessage.warning('该经销商订单没有可带入的机型明细')
+    ElMessage.warning('该经销商订单没有可转合同的机型明细')
     return
   }
-  batchForm.value.contractId = genContractId()
-  batchForm.value.deadline = String(order.delivery_date || '').slice(0, 10) || todayYmd()
-  batchForm.value.customer = String(order.customer_name || '').trim()
-  batchForm.value.agent = String(order.contact_name || '').trim()
-  batchForm.value.contractNote = String(order.review_note || '').trim()
-  const remark = String(order.remark || '').toLowerCase()
-  const deliveryDate = String(order.delivery_date || '').trim()
-  const daysUntilDelivery = deliveryDate
-    ? (new Date(deliveryDate).getTime() - Date.now()) / 86400000
-    : Infinity
-  batchForm.value.isRush = remark.includes('急') || remark.includes('加急') || daysUntilDelivery <= 3
-  batchItems.value = rows
-  dealerOrderSource.value = String(order.order_no || '').trim()
-  batchPanelOpen.value = true
+  dealerConvertForm.contractNo = genContractId()
+  dealerConvertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
+  dealerConvertForm.customer = String(order.customer_name || '').trim()
+  dealerConvertForm.agent = String(order.contact_name || '').trim()
+  dealerConvertForm.isRush = isRushHint(order)
+  dealerConvertForm.items = rows
+  dealerConvertForm.contractNote = String(order.review_note || '').trim()
+  dealerConvertForm.sourceOrderNo = String(order.order_no || '').trim()
+  dealerConvertCanUseSpot.value = true
+  dealerConvertSpotBlockReason.value = ''
   dealerOrderDialogVisible.value = false
-  ElMessage.success('已带入合同录入表单，请确认后再保存')
+  dealerConvertDialogVisible.value = true
 }
 
 const normalizeStatus = (status: unknown) => {
@@ -736,6 +878,72 @@ const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: nu
   }
 }
 
+const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
+  if (!hasText(dealerConvertForm.contractNo) || !hasText(dealerConvertForm.customer) || !hasText(dealerConvertForm.deliveryDate)) {
+    ElMessage.warning('请先完整填写合同号/客户名/要求交期')
+    return
+  }
+  const validItems = dealerConvertForm.items
+    .map((item) => ({
+      ...item,
+      rowNote: [item.remark?.trim() ? `[备注]${item.remark.trim()}` : '', item.extraRemark?.trim() ? `[附加]${item.extraRemark.trim()}` : '', item.ermq > 0 ? `[改数]${item.ermq}` : ''].filter(Boolean).join(' '),
+    }))
+    .filter((item) => hasText(item.model) && isPositiveInteger(item.qty))
+  if (validItems.length === 0) {
+    ElMessage.warning('请至少填写 1 条机型明细')
+    return
+  }
+  const invalidModels = validItems.map((item) => item.model).filter((m) => !isModelInDictionary(m))
+  if (invalidModels.length > 0) {
+    ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
+    return
+  }
+  if (saveMode === 'spot') {
+    try {
+      const spotAvailability = await evaluateSpotModeAvailability(validItems)
+      if (!spotAvailability.canUseSpot) {
+        dealerConvertCanUseSpot.value = false
+        dealerConvertSpotBlockReason.value = spotAvailability.reason
+        ElMessage.warning(`“使用现货”不可用：${spotAvailability.reason}`)
+        return
+      }
+    } catch (err: any) {
+      ElMessage.error(getApiErrorMessage(err) || '校验现货可用机台失败')
+      return
+    }
+  }
+
+  await submitWithLock(dealerConvertSaving, async () => {
+    const payload = {
+      contract_no: dealerConvertForm.contractNo.trim(),
+      customer_name: dealerConvertForm.customer.trim(),
+      agent_name: dealerConvertForm.agent.trim(),
+      delivery_date: dealerConvertForm.deliveryDate.trim(),
+      save_mode: saveMode,
+      is_rush: dealerConvertForm.isRush,
+      items: validItems,
+      contract_note: dealerConvertForm.contractNote.trim(),
+    }
+    const res = await apiPost<MessageResponse & { warning?: string; contract_no?: string }>(
+      `/dealer-orders/${encodeURIComponent(dealerConvertForm.sourceOrderNo)}/convert-to-contract`,
+      payload,
+    )
+    const autoInserted = Number(res.rush_auto_inserted || 0)
+    const pendingRushCards = Math.max(0, Number(res.rush_created || 0) - autoInserted)
+    const rushText = [
+      autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
+      pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
+    ].filter(Boolean).join('，')
+    const modeText = saveMode === 'spot' ? '已按“使用现货”处理（合同状态=已规划）' : '已按“进入沙盘”处理（合同状态=待规划）'
+    ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    dealerConvertDialogVisible.value = false
+    activeTab.value = saveMode === 'spot' ? '已规划' : '待规划'
+    selectedContractId.value = String(res.contract_no || dealerConvertForm.contractNo).trim()
+    await fetchContracts(true)
+    await loadDealerOrders()
+  }, { errorMessage: '经销商订单转合同失败' })
+}
+
 const askSaveMode = async (canSpot: boolean, reason: string) => {
   canUseSpotMode.value = canSpot
   spotModeBlockReason.value = reason
@@ -808,7 +1016,7 @@ const submitBatchContracts = async () => {
       机型: r.model.trim(),
       排产数量: Number(r.qty),
       要求交期: deadline,
-      备注: [batchForm.value.contractNote.trim(), r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' | '),
+      备注: [batchForm.value.contractNote.trim() ? `[总]${batchForm.value.contractNote.trim()}` : '', r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' '),
     }))
     const res = await apiPost<MessageResponse>('/planning/contracts/batch-create', {
       rows: payloadRows,
@@ -1392,6 +1600,19 @@ onMounted(() => {
   color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
+.convert-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.save-mode-section {
+  margin-top: 16px;
+}
+.save-mode-blocked {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  margin-top: 6px;
+}
 .dealer-import-toolbar {
   display: flex;
   align-items: center;
@@ -1409,6 +1630,7 @@ onMounted(() => {
 
 @media (max-width: 960px) {
   .batch-grid,
+  .convert-grid,
   .workspace-grid,
   .info-grid {
     grid-template-columns: 1fr;

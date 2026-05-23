@@ -1,7 +1,7 @@
 <template>
   <div class="login-container">
     <div class="login-card">
-      <h2 class="title">🔐 V7ex 成品管理系统</h2>
+      <h2 class="title">🔐 V8betaVer1.0 成品管理系统</h2>
       
       <el-tabs v-model="activeTab" class="login-tabs">
         <el-tab-pane label="登录系统" name="login">

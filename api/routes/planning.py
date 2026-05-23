@@ -1015,9 +1015,13 @@ def update_sales_order_api(
             username=current_operator,
         )
 
-        # 【缺口2补全】订单被软删除时，清空沙盘中该订单关联卡片的合同字段，防止幽灵卡片
+        # 【缺口2补全】订单被软删除时，清空沙盘中该订单关联卡片的合同字段，防止幽灵卡片并释放物理库存占用
         if updates.get("status") == "deleted":
             _clear_sandbox_units_by_order(str(order_id))
+            inv_df = get_data()
+            allocated_sns = inv_df[(inv_df["占用订单号"].astype(str) == str(order_id)) & (inv_df["状态"] != "已出库")]["流水号"].tolist()
+            if allocated_sns:
+                revert_to_inbound(allocated_sns, reason=f"订单软删除-自动解绑-{order_id}", operator=current_operator)
 
         return {"message": "订单更新成功"}
     except HTTPException:
@@ -1039,8 +1043,12 @@ def hard_delete_sales_order_api(
         if not mask.any():
             raise HTTPException(status_code=404, detail="订单不存在")
 
-        # 【缺口2补全】彻底删除前先清空沙盘关联卡片，防止幽灵卡片
+        # 【缺口2补全】彻底删除前先清空沙盘关联卡片，防止幽灵卡片并释放物理库存占用
         _clear_sandbox_units_by_order(str(order_id))
+        inv_df = get_data()
+        allocated_sns = inv_df[(inv_df["占用订单号"].astype(str) == str(order_id)) & (inv_df["状态"] != "已出库")]["流水号"].tolist()
+        if allocated_sns:
+            revert_to_inbound(allocated_sns, reason=f"订单彻底删除-自动解绑-{order_id}", operator=current_operator)
 
         df_orders = df_orders[~mask].copy()
         save_orders(df_orders)

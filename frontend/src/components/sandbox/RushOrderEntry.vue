@@ -36,6 +36,7 @@
           </div>
           <div class="rush-card-actions">
             <el-button size="small" type="primary" link @click="autoInsert(element)">自动插入</el-button>
+            <el-button size="small" type="success" link @click="returnToSandbox(element)">返回沙盘</el-button>
             <el-button size="small" type="danger" link @click="deleteRushOrder(element)">删除</el-button>
           </div>
         </div>
@@ -167,6 +168,17 @@ async function deleteRushOrder(order: any) {
     await loadRushOrders()
   } catch (e: any) {
     ElMessage.error(getApiErrorMessage(e) || '删除急单卡失败')
+  }
+}
+
+async function returnToSandbox(order: any) {
+  try {
+    await rushStore.returnRushOrderToSandbox(order.id)
+    emit('auto-inserted')
+    ElMessage.success('急单已返回沙盘')
+    await loadRushOrders()
+  } catch (e: any) {
+    ElMessage.error(getApiErrorMessage(e) || '急单返回沙盘失败')
   }
 }
 
