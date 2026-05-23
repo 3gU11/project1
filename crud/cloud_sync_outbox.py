@@ -76,7 +76,7 @@ def enqueue_cloud_sync_event(
     if event_type not in SYNC_EVENT_TYPES:
         raise ValueError(f"unsupported cloud sync event_type: {event_type}")
     ensure_cloud_sync_outbox_table()
-    eid = (event_id or f"v7-{event_type}-{uuid.uuid4().hex}").strip()
+    eid = (event_id or f"v8-outbox-{event_type}-{uuid.uuid4().hex}").strip()
     payload_json = json.dumps(payload or {}, ensure_ascii=False, default=_json_default)
     with get_engine().begin() as conn:
         insert_cloud_sync_event(conn, eid, event_type, biz_key, payload_json)

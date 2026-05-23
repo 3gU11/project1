@@ -15,13 +15,13 @@ from crud.cloud_sync_outbox import (
 )
 
 
-ACTIVE_HOLD_STATUSES = ("pending", "approved")
+ACTIVE_HOLD_STATUSES = ("regional_pending", "pending", "approved")
 
 CONVERTIBLE_STATUSES = ("pending", "approved")
 
 
 def _enqueue_cloud_sync(conn, event_type: str, order_no: str, payload: dict[str, Any]) -> None:
-    event_id = f"v7-{event_type}-{__import__('uuid').uuid4().hex}"
+    event_id = f"v8-outbox-{event_type}-{__import__('uuid').uuid4().hex}"
     insert_cloud_sync_event(
         conn,
         event_id,
@@ -720,10 +720,10 @@ def get_availability(conn, order: dict) -> dict:
                 "SELECT COALESCE(SUM(GREATEST(quantity - allocated_qty, 0)), 0) "
                 "FROM dealer_orders "
                 "WHERE batch_no=:batch_no AND model=:model "
-                "AND status IN ('pending', 'approved') "
+                "AND status IN :active_hold_statuses "
                 "AND quantity > allocated_qty"
-            ),
-            {"batch_no": hold_batch, "model": model},
+            ).bindparams(bindparam("active_hold_statuses", expanding=True)),
+            {"batch_no": hold_batch, "model": model, "active_hold_statuses": ACTIVE_HOLD_STATUSES},
         ).scalar()
         or 0
     )

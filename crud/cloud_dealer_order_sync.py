@@ -92,6 +92,15 @@ def _cloud_config() -> tuple[str, str]:
     return base_url, api_key
 
 
+def _sync_secret() -> str:
+    return (
+        os.getenv("V8_SYNC_SECRET")
+        or os.getenv("CLOUD_SYNC_SECRET")
+        or _read_dotenv_value("V8_SYNC_SECRET")
+        or _read_dotenv_value("CLOUD_SYNC_SECRET")
+    ).strip()
+
+
 def _as_int(value: Any, default: int = 0) -> int:
     try:
         return int(value if value is not None else default)
@@ -214,9 +223,13 @@ def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], 
     if not order_no:
         raise ValueError("order_no is required")
     client = _get_http_client()
+    headers = {"Idempotency-Key": idempotency_key}
+    secret = _sync_secret()
+    if secret:
+        headers["X-V8-Sync-Secret"] = secret
     response = client.post(
-        f"{base_url}/api/v7/dealer-orders/{order_no}/{path_suffix}",
-        headers={"Idempotency-Key": idempotency_key},
+        f"{base_url}/api/dealer/orders/{order_no}/v8-status",
+        headers=headers,
         json=payload,
     )
     if response.status_code == 404:
@@ -227,7 +240,10 @@ def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], 
         detail = ""
         try:
             body = response.json()
-            detail = str(body.get("detail") if isinstance(body, dict) else body)
+            if isinstance(body, dict):
+                detail = str(body.get("detail") or body.get("message") or body)
+            else:
+                detail = str(body)
         except ValueError:
             detail = response.text
         if detail:
@@ -247,14 +263,19 @@ def push_cloud_review(
     next_status = _clean(status)
     if next_status not in {"approved", "rejected"}:
         raise ValueError("cloud review status must be approved or rejected")
-    payload = {"status": next_status, "reviewedBy": _clean(reviewer), "reviewNote": _clean(note)}
+    payload = {
+        "status": next_status,
+        "reviewedBy": _clean(reviewer),
+        "reviewNote": _clean(note),
+        "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
     if factory_pending is not None:
         payload["factory_pending"] = 1 if _as_int(factory_pending) else 0
     return _post_cloud_order(
         order_no=order_no,
-        path_suffix="review",
+        path_suffix="v8-status",
         payload=payload,
-        idempotency_key=idempotency_key or f"v7-review-{next_status}-{_clean(order_no)}",
+        idempotency_key=idempotency_key or f"v8-outbox-review-{next_status}-{_clean(order_no)}",
     )
 
 
@@ -267,13 +288,16 @@ def push_cloud_contract(
 ) -> dict[str, Any]:
     return _post_cloud_order(
         order_no=order_no,
-        path_suffix="contract",
+        path_suffix="v8-status",
         payload={
+            "status": "contracted",
             "contractNo": _clean(contract_no),
             "v7OrderNo": _clean(v7_order_no),
-            "contractedBy": _clean(operator),
+            "reviewedBy": _clean(operator),
+            "reviewNote": "V8 contract sync",
+            "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         },
-        idempotency_key=idempotency_key or f"v7-contract-{_clean(order_no)}-{_clean(contract_no)}",
+        idempotency_key=idempotency_key or f"v8-outbox-contract-{_clean(order_no)}-{_clean(contract_no)}",
     )
 
 
@@ -286,13 +310,16 @@ def push_cloud_allocate(
 ) -> dict[str, Any]:
     return _post_cloud_order(
         order_no=order_no,
-        path_suffix="allocate",
+        path_suffix="v8-status",
         payload={
+            "status": "allocated",
             "contractNo": _clean(contract_no),
             "v7OrderNo": _clean(v7_order_no),
-            "allocatedBy": _clean(operator),
+            "reviewedBy": _clean(operator),
+            "reviewNote": "V8 allocation sync",
+            "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         },
-        idempotency_key=idempotency_key or f"v7-allocate-{_clean(order_no)}-{_clean(contract_no)}-{_clean(v7_order_no)}",
+        idempotency_key=idempotency_key or f"v8-outbox-allocate-{_clean(order_no)}-{_clean(contract_no)}-{_clean(v7_order_no)}",
     )
 
 
@@ -304,12 +331,15 @@ def push_cloud_complete(
 ) -> dict[str, Any]:
     return _post_cloud_order(
         order_no=order_no,
-        path_suffix="complete",
+        path_suffix="v8-status",
         payload={
-            "completedBy": _clean(operator),
+            "status": "completed",
+            "reviewedBy": _clean(operator),
             "v7OrderNo": _clean(v7_order_no),
+            "reviewNote": "V8 completed sync",
+            "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         },
-        idempotency_key=idempotency_key or f"v7-complete-{_clean(order_no)}-{_clean(v7_order_no)}",
+        idempotency_key=idempotency_key or f"v8-outbox-complete-{_clean(order_no)}-{_clean(v7_order_no)}",
     )
 
 
@@ -520,7 +550,7 @@ def push_wechat_batch_summary_to_cloud(rows: list[dict[str, Any]], idempotency_k
     client = _get_http_client()
     response = client.post(
         f"{base_url}/api/v7/wechat-batch-summary/sync",
-        headers={"Idempotency-Key": idempotency_key or f"v7-wechat-batch-summary-{datetime.now().strftime('%Y%m%d%H%M%S')}"},
+        headers={"Idempotency-Key": idempotency_key or f"v8-outbox-wechat-batch-summary-{datetime.now().strftime('%Y%m%d%H%M%S')}"},
         json={"mode": "replace", "rows": rows},
         timeout=60.0,
     )
