@@ -1,2 +1,22 @@
-2026/05/23 08:24:35 Redis disabled or unavailable; using local in-process locks
-2026/05/23 08:24:35 Listening on :3001
+2026/05/25 18:27:37 Redis disabled or unavailable; using local in-process locks
+2026/05/25 18:27:37 Listening on :3001
+2026/05/25 18:29:53 WARN unknown model type, keep raw value: FR-1080Y
+2026/05/25 18:29:53 WARN unknown model type, keep raw value: FR-850MS
+2026/05/25 18:29:53 WARN unknown model type, keep raw value: FT
+2026/05/25 18:29:53 WARN unknown model type, keep raw value: FR-8060Y(PRO)
+2026/05/25 18:29:53 WARN unknown model type, keep raw value: FL-8560(PRO)
+2026/05/25 18:29:57 WARN unknown model type, keep raw value: FR-1080Y
+2026/05/25 18:29:57 WARN unknown model type, keep raw value: FR-850MS
+2026/05/25 18:29:57 WARN unknown model type, keep raw value: FT
+2026/05/25 18:29:57 WARN unknown model type, keep raw value: FR-8060Y(PRO)
+2026/05/25 18:29:57 WARN unknown model type, keep raw value: FL-8560(PRO)
+2026/05/25 18:30:20 WARN unknown model type, keep raw value: FR-1080Y
+2026/05/25 18:30:20 WARN unknown model type, keep raw value: FR-850MS
+2026/05/25 18:30:20 WARN unknown model type, keep raw value: FT
+2026/05/25 18:30:20 WARN unknown model type, keep raw value: FR-8060Y(PRO)
+2026/05/25 18:30:20 WARN unknown model type, keep raw value: FL-8560(PRO)
+2026/05/25 19:00:11 WARN unknown model type, keep raw value: FR-1080Y
+2026/05/25 19:00:11 WARN unknown model type, keep raw value: FR-850MS
+2026/05/25 19:00:11 WARN unknown model type, keep raw value: FT
+2026/05/25 19:00:11 WARN unknown model type, keep raw value: FR-8060Y(PRO)
+2026/05/25 19:00:11 WARN unknown model type, keep raw value: FL-8560(PRO)

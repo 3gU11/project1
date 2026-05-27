@@ -26,6 +26,7 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 	if err := tx.Table("units").
 		Select(`
 			units.*,
+			fg.状态 AS fg_status,
 			fg.合同备注 AS fg_remark,
 			fg.客户 AS fg_customer,
 			fg.代理商 AS fg_dealer,
@@ -61,16 +62,24 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 			updates["合同备注"] = orderRemark
 		}
 		if cols["状态"] {
-			if u.Status == model.StatusCompleted {
-				if contractNo != "" {
-					updates["状态"] = "待发货"
-				} else {
-					updates["状态"] = "库存中"
-				}
-			} else if contractNo != "" {
-				updates["状态"] = "待发货"
+			if contractNo != "" {
+				updates["状态"] = "已绑定"
 			} else {
-				updates["状态"] = "待入库"
+				fgStatus := strings.TrimSpace(strPtrVal(u.FgStatus))
+				isCompleted := false
+				if fgStatus == "库存中" || fgStatus == "待发货" {
+					isCompleted = true
+				} else if fgStatus == "待入库" || fgStatus == "已绑定" {
+					isCompleted = false
+				} else {
+					isCompleted = (u.Status == model.StatusCompleted)
+				}
+
+				if isCompleted {
+					updates["状态"] = "库存中"
+				} else {
+					updates["状态"] = "待入库"
+				}
 			}
 		}
 		if len(updates) == 0 {

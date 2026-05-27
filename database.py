@@ -838,7 +838,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 
 def _ensure_schema_version_table(conn):
@@ -1317,6 +1317,65 @@ def init_mysql_tables_v2():
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """))
             _record_schema_version(conn, 9, "add dealer_orders and wechat_batch_summary tables")
+
+        if current_version < 10:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS production_history_ledger (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    unit_id VARCHAR(64) NOT NULL,               -- 机台唯一ID
+                    production_line_id VARCHAR(64) NOT NULL,    -- 生产产线ID
+                    production_line_name VARCHAR(100),          -- 生产产线名称
+                    batch_code VARCHAR(100),                    -- 批次号
+                    model_type VARCHAR(100) NOT NULL,           -- 机型
+                    contract_no VARCHAR(100),                   -- 合同号
+                    customer VARCHAR(255),                      -- 客户名称
+                    dealer_name VARCHAR(255),                   -- 经销商名称
+                    order_remark TEXT,                          -- 强改/锁定备注
+                    status VARCHAR(32) NOT NULL,                -- 状态：In_Production (生产中) / Completed (已完工) / Cancelled (已撤销)
+                    scheduled_at DATETIME NOT NULL,             -- 排产上线时间
+                    completed_at DATETIME NULL,                 -- 完工时间
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_phl_unit (unit_id),
+                    INDEX idx_phl_status_time (status, scheduled_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            
+            conn.execute(text("""
+                INSERT INTO production_history_ledger (
+                    unit_id,
+                    production_line_id,
+                    production_line_name,
+                    batch_code,
+                    model_type,
+                    contract_no,
+                    customer,
+                    dealer_name,
+                    order_remark,
+                    status,
+                    scheduled_at
+                )
+                SELECT 
+                    u.unit_id,
+                    u.production_line_id,
+                    pl.line_name,
+                    COALESCE(b.batch_code, CONCAT('第 ', b.batch_no, ' 批')),
+                    u.model_type,
+                    u.contract_no,
+                    u.customer,
+                    u.dealer_name,
+                    u.order_remark,
+                    'In_Production',
+                    COALESCE(u.created_at, NOW())
+                FROM units u
+                LEFT JOIN production_lines pl ON pl.line_id = u.production_line_id
+                LEFT JOIN batches b ON b.batch_id = u.batch_id
+                WHERE u.status = 'In_Production'
+                AND NOT EXISTS (
+                    SELECT 1 FROM production_history_ledger phl 
+                    WHERE phl.unit_id = u.unit_id AND phl.status = 'In_Production'
+                )
+            """))
+            _record_schema_version(conn, 10, "add production_history_ledger table and migrate in-production units")
 
         return {
             "initialized": True,

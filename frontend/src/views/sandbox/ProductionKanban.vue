@@ -5,6 +5,17 @@
         <h3 style="font-size:16px;">产线监控 ({{ lineStore.lines.length }} 条)</h3>
         <div style="display:flex;align-items:center;gap:8px;">
           <el-button size="small" @click="() => refreshAll()" :loading="lineStore.loading">刷新</el-button>
+          <el-dropdown trigger="click" @command="handleDownloadCommand">
+            <el-button type="primary" size="small">
+              下载报表<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="ledger">下载排产报表</el-dropdown-item>
+                <el-dropdown-item command="tracking">下载跟踪单</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
 
@@ -133,13 +144,17 @@
 
   <el-collapse-transition>
     <div v-show="statsPanelOpen" class="kanban-stats-panel stats-floating-panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-weight:bold;color:#303133;">排产汇总列表</span>
+        <el-button size="small" type="primary" @click="exportSummaryToExcel">导出汇总 Excel</el-button>
+      </div>
       <el-table
         :data="kanbanStatsRows"
         size="small"
         border
         stripe
         empty-text="暂无统计数据"
-        max-height="calc(100vh - 150px)"
+        max-height="calc(100vh - 190px)"
         :span-method="statsSpanMethod"
         :row-class-name="statsRowClassName"
       >
@@ -248,6 +263,8 @@ import RushOrderEntry from '../../components/sandbox/RushOrderEntry.vue'
 import TransferSwapPanel from '../../components/sandbox/TransferSwapPanel.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
 import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
+import { apiDownloadBlob, apiDownloadBlobPost } from '../../utils/request'
+import { ArrowDown } from '@element-plus/icons-vue'
 
 const batchStore = useBatchStore()
 const lineStore = useLineStore()
@@ -959,6 +976,55 @@ function handleTransferUrgent() {
 
 
 
+const handleDownloadCommand = async (command: string) => {
+  if (command === 'ledger') {
+    try {
+      ElMessage.info('正在生成排产报表，请稍候…')
+      await apiDownloadBlob('/planning/export-production-history?sheet=ledger', `排产历史数据_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      ElMessage.success('排产数据报表下载成功')
+    } catch (e: any) {
+      ElMessage.error('下载排产报表失败: ' + (e.message || e))
+    }
+  } else if (command === 'tracking') {
+    try {
+      ElMessage.info('正在生成生产跟踪单，请稍候…')
+      await apiDownloadBlob('/planning/export-production-history?sheet=tracking', `生产跟踪单_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      ElMessage.success('生产跟踪单下载成功')
+    } catch (e: any) {
+      ElMessage.error('下载生产跟踪单失败: ' + (e.message || e))
+    }
+  }
+}
+
+
+const exportSummaryToExcel = async () => {
+  try {
+    ElMessage.info('正在导出汇总 Excel，请稍候…')
+    const headers = ['分组', '批次号', '机型', '预计入库时间', '已订数量', '备货数量', '合计']
+    const rows = kanbanStatsRows.value.map(row => [
+      row.groupName || '',
+      row.batchLabel || '',
+      row.modelType || '',
+      row.expectedInbound || '',
+      row.ordered ?? 0,
+      row.stock ?? 0,
+      row.total ?? 0
+    ])
+
+    const payload = {
+      filename: `生产看板汇总_${new Date().toISOString().slice(0, 10)}`,
+      sheet_name: '汇总',
+      headers,
+      rows
+    }
+
+    await apiDownloadBlobPost('/planning/export-excel', payload, `${payload.filename}.xlsx`)
+    ElMessage.success('汇总 Excel 导出成功')
+  } catch (e: any) {
+    ElMessage.error('导出汇总 Excel 失败: ' + (e.message || e))
+  }
+}
+
 let cleanupFns: (() => void)[] = []
 
 onMounted(async () => {
@@ -1184,4 +1250,108 @@ onUnmounted(() => {
     width: auto;
   }
 }
+
+/* ── 1920px 宽屏 / 32寸 FHD 适配 ─────────────────────────── */
+@media (min-width: 1920px) {
+  .stats-floating-toggle {
+    right: 700px;
+    min-width: 108px;
+    height: 42px;
+    font-size: 15px;
+  }
+
+  .stats-floating-panel {
+    top: 94px;
+    right: 420px;
+    width: min(1680px, calc(100vw - 640px));
+    max-height: calc(100vh - 110px);
+  }
+
+  .kanban-stats-panel {
+    padding: 18px;
+  }
+
+  .kanban-stats-panel :deep(.el-table) {
+    font-size: 16px;
+  }
+
+  .kanban-stats-panel :deep(.el-table__header th) {
+    font-size: 15px;
+  }
+
+  .kanban-stats-panel :deep(.el-table__cell) {
+    padding: 14px 4px;
+  }
+
+  .stat-group-cell {
+    min-height: 68px;
+    padding: 14px 18px;
+    gap: 16px;
+  }
+
+  .stat-group-name {
+    font-size: 17px;
+  }
+
+  .stat-number {
+    min-width: 62px;
+    height: 34px;
+    font-size: 22px;
+    border-radius: 8px;
+  }
+}
+
+/* ── 2560px 宽屏 / 32寸 QHD 适配 ────────────────────────────── */
+@media (min-width: 2560px) {
+  .stats-floating-toggle {
+    right: 860px;
+    min-width: 124px;
+    height: 48px;
+    font-size: 17px;
+    border-radius: 10px;
+  }
+
+  .stats-floating-panel {
+    top: 100px;
+    right: 520px;
+    width: min(2200px, calc(100vw - 760px));
+    max-height: calc(100vh - 120px);
+  }
+
+  .kanban-stats-panel {
+    padding: 22px;
+  }
+
+  .kanban-stats-panel :deep(.el-table) {
+    font-size: 18px;
+  }
+
+  .kanban-stats-panel :deep(.el-table__header th) {
+    font-size: 17px;
+  }
+
+  .kanban-stats-panel :deep(.el-table__cell) {
+    padding: 18px 6px;
+  }
+
+  .stat-group-cell {
+    min-height: 80px;
+    padding: 16px 22px;
+    gap: 20px;
+    border-left-width: 6px;
+    border-radius: 8px;
+  }
+
+  .stat-group-name {
+    font-size: 20px;
+  }
+
+  .stat-number {
+    min-width: 76px;
+    height: 42px;
+    font-size: 26px;
+    border-radius: 10px;
+  }
+}
+
 </style>

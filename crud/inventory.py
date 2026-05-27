@@ -92,6 +92,7 @@ def _normalize_import_df(df):
     return normalized[IMPORT_COLS]
 
 
+@lru_cache(maxsize=1)
 def get_data():
     try:
         with get_engine().connect() as conn:
@@ -148,7 +149,8 @@ def get_data_v2():
 
 
 def save_data(df):
-    get_data_v2.cache_clear()  # 清除 v2 版本缓存（get_data 已移除缓存，无需 clear）
+    get_data.cache_clear()
+    get_data_v2.cache_clear()  # 清除 v2 版本缓存
     try:
         df = df.drop_duplicates(subset=['流水号'], keep='last')
         df = df.copy()
@@ -543,6 +545,7 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False):
         )
         trans.commit()
         enqueue_wechat_batch_summary_sync("finished_goods_inbound")
+        get_data.cache_clear()
         get_data_v2.cache_clear()  # 清除 v2 缓存，确保下次读取到最新库存状态
         try:
             import asyncio
@@ -634,6 +637,7 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False):
         enqueue_wechat_batch_summary_sync("finished_goods_inbound_v2")
 
         # 清除所有缓存版本
+        get_data.cache_clear()
         get_data_v2.cache_clear()
 
         # WebSocket 广播（保持不变）

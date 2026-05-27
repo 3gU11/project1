@@ -41,6 +41,11 @@ async def on_startup():
         app.state.watch_dealer_orders_task = asyncio.create_task(watch_dealer_orders_db())
     except Exception as e:
         logger.warning("dealer orders db watch worker not started: %s", e)
+    try:
+        app.state.watch_finished_goods_task = asyncio.create_task(watch_finished_goods_db())
+    except Exception as e:
+        logger.warning("finished goods db watch worker not started: %s", e)
+
 
 
 @app.on_event("shutdown")
@@ -68,6 +73,15 @@ async def on_shutdown():
             await watch_task
         except asyncio.CancelledError:
             pass
+
+    watch_fg_task = getattr(app.state, "watch_finished_goods_task", None)
+    if watch_fg_task:
+        watch_fg_task.cancel()
+        try:
+            await watch_fg_task
+        except asyncio.CancelledError:
+            pass
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -165,6 +179,38 @@ async def watch_dealer_orders_db() -> None:
         except Exception as e:
             logger.debug(f"Error in watch_dealer_orders_db loop: {e}")
         await asyncio.sleep(1.0)
+
+async def watch_finished_goods_db() -> None:
+    """
+    Periodically checks the finished_goods_data table for modifications (updates/inserts/deletes)
+    and triggers a WeChat batch summary sync to the cloud when any change is detected.
+    """
+    import asyncio
+    from sqlalchemy import text
+    from database import get_engine
+    from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
+
+    logger.info("Finished goods database change monitor started")
+    
+    last_val = None
+    while True:
+        try:
+            with get_engine().begin() as conn:
+                table_check = conn.execute(text("SHOW TABLES LIKE 'finished_goods_data'")).fetchone()
+                if table_check:
+                    res = conn.execute(text("SELECT MAX(`更新时间`), COUNT(*) FROM finished_goods_data")).fetchone()
+                    val = (res[0], res[1]) if res else (None, 0)
+                else:
+                    val = (None, 0)
+
+            if last_val is not None and val != last_val:
+                logger.info(f"finished_goods_data change detected: {last_val} -> {val}. Enqueueing wechat_batch_summary sync...")
+                enqueue_wechat_batch_summary_sync("db_change_auto_sync")
+            last_val = val
+        except Exception as e:
+            logger.debug(f"Error in watch_finished_goods_db loop: {e}")
+        await asyncio.sleep(2.0)
+
 
 @app.get("/health")
 def health_check():

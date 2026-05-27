@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import os
@@ -52,16 +52,16 @@ SYNCABLE_STATUSES = {
     "rejected",
     "cancelled",
 }
+# Only statuses supported by the cloud API (regional_* are local-only)
 CLOUD_READ_STATUSES = (
-    "regional_pending",
     "pending",
     "approved",
     "contracted",
     "partial_allocated",
     "allocated",
     "completed",
-    "regional_rejected",
     "rejected",
+    "cancelled",
 )
 
 
@@ -233,7 +233,10 @@ def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], 
         json=payload,
     )
     if response.status_code == 404:
-        return {"skipped": True, "reason": "cloud_order_not_found", "order_no": order_no}
+        # 404 means the order doesn't exist on the cloud yet.
+        # Raise so the outbox marks this as failed and retries later
+        # instead of silently marking the event as synced (old bug).
+        raise RuntimeError(f"cloud order not found (404): order_no={order_no}")
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:

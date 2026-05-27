@@ -441,6 +441,12 @@ def convert_to_contract(
                     rush_source_rows[existing_idx]["remark"] = " ".join(
                         [p for p in [str(rush_source_rows[existing_idx].get("remark") or "").strip(), remark] if p]
                     )
+                # 合并 source_alloc（多个批次信息都保留）
+                existing_rush_alloc = rush_source_rows[existing_idx].get("source_alloc") or {}
+                if isinstance(existing_rush_alloc, dict):
+                    for batch, batch_qty in source_alloc.items():
+                        existing_rush_alloc[batch] = int(existing_rush_alloc.get(batch) or 0) + int(batch_qty)
+                    rush_source_rows[existing_idx]["source_alloc"] = existing_rush_alloc
                 continue
 
             add_index_by_model[model] = len(add_list)
@@ -464,6 +470,7 @@ def convert_to_contract(
                 "due_date": delivery_date,
                 "qty": qty,
                 "remark": remark,
+                "source_alloc": source_alloc,  # 指定批次/来源，用于急单自动插入时优先定位批次
             })
 
         # 5. Create contracts via shared logic

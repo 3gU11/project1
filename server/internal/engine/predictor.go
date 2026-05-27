@@ -433,7 +433,7 @@ type lockedUnitSnapshot struct {
 	LockedAt    *time.Time `gorm:"column:locked_at"`
 }
 
-func (p *Predictor) FullRecompute(targetSlotNo int) ([]model.Batch, error) {
+func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Batch, error) {
 	if targetSlotNo <= 0 {
 		targetSlotNo = 1
 	}
@@ -534,7 +534,7 @@ func (p *Predictor) FullRecompute(targetSlotNo int) ([]model.Batch, error) {
 		b.Status = model.StatusPredicted
 		b.Source = "algorithm"
 		var stockAllocator *StockRatioAllocator
-		if b.BatchNo == targetSlotNo {
+		if b.BatchNo == targetSlotNo && isClicked {
 			stockAllocator = NewStockRatioAllocator(ratios, inventoryCounts)
 		}
 		b.Units = buildFilledUnitsByCategory(b, caps, ratios, family, cat, stockAllocator)

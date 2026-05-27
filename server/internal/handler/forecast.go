@@ -26,13 +26,14 @@ func NewForecastHandler(db *gorm.DB, svc *service.RecomputeSvc) *ForecastHandler
 
 func (h *ForecastHandler) Recompute(c *gin.Context) {
 	var req struct {
-		TargetSlotNo int `json:"target_slot_no"`
+		TargetSlotNo int  `json:"target_slot_no"`
+		IsClicked    bool `json:"is_clicked"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	result, err := h.svc.Recompute(req.TargetSlotNo)
+	result, err := h.svc.Recompute(req.TargetSlotNo, req.IsClicked)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "recompute already in progress" {

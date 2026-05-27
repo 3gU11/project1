@@ -359,7 +359,7 @@ h4, h5, h6, .section-title, .panel-title, .card-head {
   border-radius: 8px;
   padding: 12px;
   margin: 8px;
-  min-width: 320px;
+  min-width: 360px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 .batch-card.type-SPECIAL {
@@ -375,8 +375,8 @@ h4, h5, h6, .section-title, .panel-title, .card-head {
   border-bottom: 1px solid #f0f0f0;
 }
 .batch-card .batch-title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
 }
 .batch-card .batch-meta {
   font-size: 12px;

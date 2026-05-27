@@ -45,7 +45,7 @@ def ensure_cloud_sync_outbox_table() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS cloud_sync_outbox (
                   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                  event_id VARCHAR(64) NOT NULL,
+                  event_id VARCHAR(128) NOT NULL,
                   event_type VARCHAR(64) NOT NULL,
                   biz_key VARCHAR(128) NOT NULL DEFAULT '',
                   payload_json LONGTEXT NOT NULL,
@@ -64,6 +64,20 @@ def ensure_cloud_sync_outbox_table() -> None:
                 """
             )
         )
+        row = conn.execute(
+            text(
+                """
+                SELECT CHARACTER_MAXIMUM_LENGTH
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'cloud_sync_outbox'
+                  AND COLUMN_NAME = 'event_id'
+                """
+            )
+        ).first()
+        current_len = int(row[0] or 0) if row else 0
+        if current_len < 128:
+            conn.execute(text("ALTER TABLE cloud_sync_outbox MODIFY COLUMN event_id VARCHAR(128) NOT NULL"))
     _outbox_table_ensured = True
 
 

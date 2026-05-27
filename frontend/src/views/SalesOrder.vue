@@ -371,6 +371,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
 import { apiDelete, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
@@ -379,6 +380,8 @@ import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 type RowData = Record<string, any>
+
+const route = useRoute()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -1005,6 +1008,10 @@ const confirm = (msg: string, title = '提示'): Promise<boolean> => {
 }
 
 onMounted(() => {
+  const tab = route.query.tab as string
+  if (tab && ['manual', 'import', 'manage'].includes(tab)) {
+    activeTab.value = tab as any
+  }
   fetchData()
 })
 

@@ -297,6 +297,51 @@ func (s *BatchSvc) AssignToLine(batchID string, lineID string, actor string) (*F
 		return nil, err
 	}
 
+	// Cancel any existing active In_Production history for these units first (to avoid duplicates)
+	if err := tx.Exec(`
+UPDATE production_history_ledger 
+SET status = 'Cancelled', completed_at = NOW()
+WHERE status = 'In_Production' AND unit_id IN (SELECT unit_id FROM units WHERE batch_id = ?)
+`, batchID).Error; err != nil {
+		return nil, err
+	}
+
+	// Insert into production_history_ledger
+	insertLedgerSQL := `
+INSERT INTO production_history_ledger (
+    unit_id,
+    production_line_id,
+    production_line_name,
+    batch_code,
+    model_type,
+    contract_no,
+    customer,
+    dealer_name,
+    order_remark,
+    status,
+    scheduled_at
+)
+SELECT 
+    u.unit_id,
+    u.production_line_id,
+    pl.line_name,
+    COALESCE(b.batch_code, CONCAT('第 ', b.batch_no, ' 批')),
+    u.model_type,
+    u.contract_no,
+    u.customer,
+    u.dealer_name,
+    u.order_remark,
+    'In_Production',
+    NOW()
+FROM units u
+LEFT JOIN production_lines pl ON pl.line_id = u.production_line_id
+LEFT JOIN batches b ON b.batch_id = u.batch_id
+WHERE u.batch_id = ?
+`
+	if err := tx.Exec(insertLedgerSQL, batchID).Error; err != nil {
+		return nil, fmt.Errorf("write production history ledger: %w", err)
+	}
+
 	// Sync factory_plan status by contract_no + model_type: 待规划 -> 已规划.
 	type contractModelPair struct {
 		ContractNo string `gorm:"column:contract_no"`
@@ -409,6 +454,15 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 		return err
 	}
 
+	// Update history ledger status to Completed
+	if err := tx.Exec(`
+UPDATE production_history_ledger
+SET status = 'Completed', completed_at = NOW()
+WHERE status = 'In_Production' AND unit_id IN ?
+`, unitIDs).Error; err != nil {
+		return fmt.Errorf("update production history ledger to completed: %w", err)
+	}
+
 	if err := SyncFinishedGoodsByUnitIDs(tx, unitIDs); err != nil {
 		return fmt.Errorf("sync finished_goods: %w", err)
 	}
@@ -471,6 +525,15 @@ func (s *BatchSvc) LockLineUnits(lineID string, unitIDs []string, orderRemark st
 		"updated_at":   gorm.Expr("NOW()"),
 	}).Error; err != nil {
 		return 0, err
+	}
+
+	// Sync remark update to production_history_ledger
+	if err := tx.Exec(`
+UPDATE production_history_ledger
+SET order_remark = ?
+WHERE status = 'In_Production' AND unit_id IN ?
+`, orderRemark, uniqueIDs).Error; err != nil {
+		return 0, fmt.Errorf("sync remark to production history ledger: %w", err)
 	}
 
 	if err := SyncFinishedGoodsByUnitIDs(tx, uniqueIDs); err != nil {

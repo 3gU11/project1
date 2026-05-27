@@ -9,7 +9,7 @@ import pandas as pd
 import re
 import tempfile
 import aiofiles
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Request, Response
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Request, Response, BackgroundTasks
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -24,16 +24,14 @@ from crud.inventory import (
     INVENTORY_COLS,
     append_import_staging,
     delete_import_staging_by_serials,
-    get_data,
     get_import_staging,
     get_warehouse_layout,
-    inbound_to_slot,
     reset_warehouse_layout,
-    save_data,
     save_import_staging,
     save_warehouse_layout,
     archive_shipped_data,
 )
+from utils.cache_adapter import cache
 from crud.logs import append_log
 from crud.model_dictionary import find_disabled_models, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound, save_orders
@@ -55,29 +53,27 @@ def _sync_machine_edit_to_units(serial_nos: list[str]) -> int:
     sns = [str(x).strip() for x in serial_nos if str(x).strip()]
     if not sns:
         return 0
-    updated = 0
     with get_engine().begin() as conn:
-        for sn in sns:
-            result = conn.execute(
-                text(
-                    """
-                    UPDATE units u
-                    JOIN finished_goods_data fg ON TRIM(fg.`流水号`) = :sn
-                    SET
-                        u.order_remark = COALESCE(fg.`合同备注`, ''),
-                        u.model_type = CASE
-                            WHEN COALESCE(TRIM(fg.`机型`), '') <> '' THEN fg.`机型`
-                            ELSE u.model_type
-                        END,
-                        u.updated_at = NOW()
-                    WHERE TRIM(COALESCE(u.serial_no, '')) = :sn
-                       OR TRIM(COALESCE(u.forecast_serial_no, '')) = :sn
-                    """
-                ),
-                {"sn": sn},
-            )
-            updated += int(result.rowcount or 0)
-    return updated
+        result = conn.execute(
+            text(
+                """
+                UPDATE units u
+                JOIN finished_goods_data fg 
+                  ON TRIM(fg.`流水号`) = COALESCE(NULLIF(TRIM(u.serial_no), ''), NULLIF(TRIM(u.forecast_serial_no), ''))
+                SET
+                    u.order_remark = COALESCE(fg.`合同备注`, ''),
+                    u.model_type = CASE
+                        WHEN COALESCE(TRIM(fg.`机型`), '') <> '' THEN fg.`机型`
+                        ELSE u.model_type
+                    END,
+                    u.updated_at = NOW()
+                WHERE TRIM(COALESCE(u.serial_no, '')) IN :sns
+                   OR TRIM(COALESCE(u.forecast_serial_no, '')) IN :sns
+                """
+            ).bindparams(bindparam("sns", expanding=True)),
+            {"sns": sns},
+        )
+        return int(result.rowcount or 0)
 
 
 class LayoutPayload(BaseModel):
@@ -112,13 +108,11 @@ class ArchiveBatchDeletePayload(BaseModel):
 
 
 class MachineInlineUpdatePayload(BaseModel):
-    model: str | None = None
     note: str | None = None
 
 
 class MachineBatchUpdatePayload(BaseModel):
     serial_nos: List[str] = Field(default_factory=list)
-    model: str | None = None
     note: str | None = None
     xs_to_auto: bool = False
     back_cond: bool = False
@@ -200,7 +194,7 @@ def update_inventory(
         unknown_cols = [c for c in df.columns if c not in INVENTORY_COLS]
         if unknown_cols:
             raise HTTPException(status_code=422, detail=f"存在不支持字段: {unknown_cols}")
-        save_data(df)
+        cache.inventory.save_data(df)
         
         append_audit_log(
             user_id=current_user.get("username"),
@@ -220,34 +214,38 @@ def update_inventory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _notify_sandbox_background(sns: List[str]) -> None:
+    for sn in sns:
+        try:
+            requests.post(f"{GO_SANDBOX_URL}/api/units/lookup/notify-update?sn={sn}", timeout=1)
+        except Exception:
+            pass
+
+
 @router.put("/machine-edit/{serial_no}")
 def machine_inline_update(
     serial_no: str, 
     payload: MachineInlineUpdatePayload,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user_context)
 ):
     try:
         sn = str(serial_no).strip()
         if not sn:
             raise HTTPException(status_code=422, detail="流水号不能为空")
-        df = get_data()
+        df = cache.inventory.get_data()
         mask = df["流水号"].astype(str).str.strip() == sn
         if not mask.any():
             raise HTTPException(status_code=404, detail="机台不存在")
             
         changes = []
-        if payload.model is not None:
-            model = str(payload.model).strip()
-            _assert_model_enabled(model)
-            df.loc[mask, "机型"] = model
-            changes.append(f"机型改为 {model}")
         if payload.note is not None:
             df.loc[mask, "合同备注"] = str(payload.note).strip()
             changes.append(f"备注改为 {payload.note}")
             
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        save_data(df)
+        cache.inventory.save_data(df)
         try:
             _sync_machine_edit_to_units([sn])
         except Exception as e:
@@ -263,11 +261,8 @@ def machine_inline_update(
                 content=f"修改机台 {sn}；变更内容：{', '.join(changes)}"
             )
             
-        # Notify Go Sandbox for real-time UI refresh
-        try:
-            requests.post(f"{GO_SANDBOX_URL}/api/units/lookup/notify-update?sn={sn}", timeout=2)
-        except Exception as e:
-            logging.error(f"Failed to notify Go sandbox for SN {sn}: {e}")
+        # Notify Go Sandbox for real-time UI refresh in the background
+        background_tasks.add_task(_notify_sandbox_background, [sn])
             
         return {"message": "更新成功"}
     except HTTPException:
@@ -280,23 +275,19 @@ def machine_inline_update(
 def machine_batch_update(
     payload: MachineBatchUpdatePayload,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user_context)
 ):
     try:
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not sns:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 台机台")
-        df = get_data()
+        df = cache.inventory.get_data()
         mask = df["流水号"].astype(str).isin(sns)
         if not mask.any():
             raise HTTPException(status_code=404, detail="未找到对应机台")
 
         changes = []
-        if payload.model is not None and str(payload.model).strip():
-            _assert_model_enabled(str(payload.model).strip())
-            df.loc[mask, "机型"] = str(payload.model).strip()
-            changes.append(f"机型改为 {payload.model}")
-
         note_parts = []
         if payload.note and str(payload.note).strip():
             note_parts.append(str(payload.note).strip())
@@ -310,15 +301,15 @@ def machine_batch_update(
             changes.append(f"备注改为 {new_note}")
             
         df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        save_data(df)
+        cache.inventory.save_data(df)
         try:
             _sync_machine_edit_to_units(sns)
         except Exception as e:
             logging.error(f"Failed to sync machine batch edit to units: {e}")
-        # Notify Go Sandbox
-        for _sn in sns:
-            try: requests.post(f"{GO_SANDBOX_URL}/api/units/lookup/notify-update?sn={_sn}", timeout=1)
-            except: pass
+        
+        # Notify Go Sandbox in background
+        if sns:
+            background_tasks.add_task(_notify_sandbox_background, sns)
         
         if changes:
             append_audit_log(
@@ -394,7 +385,7 @@ def inbound_machine_to_slot(
     current_user: dict = Depends(get_current_user_context)
 ):
     try:
-        result = inbound_to_slot(payload.serial_no, payload.slot_code, is_transfer=bool(payload.is_transfer))
+        result = cache.inventory.inbound_to_slot(payload.serial_no, payload.slot_code, is_transfer=bool(payload.is_transfer))
         if not result.get("ok"):
             raise HTTPException(status_code=422, detail=result)
         
@@ -524,7 +515,7 @@ def delete_import_staging_rows(
 @router.get("/shipping/pending")
 def get_shipping_pending():
     try:
-        df = get_data()
+        df = cache.inventory.get_data()
         pending = df[df["状态"].astype(str) == "待发货"].copy()
         if pending.empty:
             return {"data": [], "total": 0}
@@ -765,7 +756,7 @@ def _ensure_sn_dir(serial_no: str) -> str:
 @router.get("/machine-archive/serials")
 def machine_archive_serials():
     try:
-        df = get_data()
+        df = cache.inventory.get_data()
         sns = sorted(df["流水号"].astype(str).str.strip().replace({"nan": ""}).tolist(), reverse=True) if not df.empty else []
         sns = [x for x in sns if x]
         return {"data": sns}

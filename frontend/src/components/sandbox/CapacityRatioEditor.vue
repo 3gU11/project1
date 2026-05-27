@@ -1,14 +1,13 @@
 <template>
   <div class="ratio-editor-layout">
     <div class="ratio-editor-left">
-      <button class="ratio-collapse-toggle" type="button" @click="expanded = !expanded">
+      <button class="ratio-collapse-toggle" :class="{ 'is-active': expanded }" type="button" @click="expanded = !expanded">
         <span>机型目标比例配置</span>
         <span class="arrow" :class="{ open: expanded }">▾</span>
       </button>
 
       <div v-show="expanded" class="ratio-collapse-body">
-        <div class="ratio-content-grid">
-          <div class="ratio-config-panel">
+        <div class="ratio-config-panel">
             <div class="section-block">
               <strong>大类目标比例（用于沙盘达成目标库存结构）</strong>
               <div class="ratio-row">
@@ -24,7 +23,10 @@
                     style="width:60px"
                   />%
                 </div>
-                <span class="sum-text">目标合计(不含特殊): {{ sumLevel1NoSpecial }}</span>
+                <span :class="['sum-badge', sumLevel1NoSpecial === 100 ? 'is-valid' : 'is-invalid']">
+                  目标合计(不含特殊): {{ sumLevel1NoSpecial }}%
+                  <span class="status-icon">{{ sumLevel1NoSpecial === 100 ? '✓' : '⚠' }}</span>
+                </span>
               </div>
             </div>
 
@@ -43,97 +45,73 @@
                     style="width:60px"
                   />%
                 </div>
-                <span class="sum-text">目标合计: {{ sumLevel3(group.category) }} / 目标: 100</span>
+                <span :class="['sum-badge', sumLevel3(group.category) === 100 ? 'is-valid' : 'is-invalid']">
+                  目标合计: {{ sumLevel3(group.category) }}% / 100%
+                  <span class="status-icon">{{ sumLevel3(group.category) === 100 ? '✓' : '⚠' }}</span>
+                </span>
               </div>
             </div>
 
-            <el-button type="primary" @click="save" :loading="saving">保存目标比例</el-button>
-            <span v-if="msg" class="message" :style="{ color: msgColor }">{{ msg }}</span>
-          </div>
-
-          <div class="inventory-ratio-panel">
-            <div class="inventory-ratio-header">
-              <strong>库存机型分布</strong>
-              <span>库存中 + 待入库，共 {{ inventoryTotal }} 台</span>
+            <div class="panel-actions">
+              <el-button type="primary" @click="save" :loading="saving">保存目标比例</el-button>
+              <transition name="fade">
+                <span v-if="msg" class="message-bubble" :style="{ backgroundColor: msgBgColor, borderColor: msgBorderColor, color: msgColor }">
+                  {{ msg }}
+                </span>
+              </transition>
             </div>
-            <div class="inventory-table-shell">
-              <el-table
-                :data="inventoryRatioRows"
-                size="small"
-                height="300"
-                stripe
-                v-loading="inventoryLoading"
-                empty-text="暂无库存数据"
-              >
-                <el-table-column prop="name" label="机型" min-width="150" show-overflow-tooltip />
-                <el-table-column label="数量" width="72" align="center">
-                  <template #default="{ row }">
-                    <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
-                    <span v-else style="color: #dcdfe6;">-</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="加高" width="72" align="center">
-                  <template #default="{ row }">
-                    <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
-                    <span v-else style="color: #dcdfe6;">-</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="占比" width="86" align="center">
-                  <template #default="{ row }">
-                    <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
-                    <span v-else style="color: #dcdfe6;">-</span>
-                  </template>
-                </el-table-column>
-              </el-table>
-              <button class="inventory-zoom-overlay" type="button" @click="inventoryPanelOpen = true">
-                <span class="inventory-zoom-icon"></span>
-                <span>放大查看</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
 
-    <transition name="inventory-panel-pop">
-      <div v-if="inventoryPanelOpen" class="inventory-zoom-backdrop" @click.self="inventoryPanelOpen = false">
-        <div class="inventory-ratio-panel inventory-expanded-panel">
-          <div class="inventory-ratio-header">
-            <strong>库存机型分布</strong>
-            <span>库存中 + 待入库，共 {{ inventoryTotal }} 台</span>
-            <button class="inventory-close-button" type="button" @click="inventoryPanelOpen = false">关闭</button>
-          </div>
-          <el-table
-            :data="inventoryRatioRows"
-            size="small"
-            height="calc(100vh - 190px)"
-            stripe
-            v-loading="inventoryLoading"
-            empty-text="暂无库存数据"
-          >
-            <el-table-column prop="name" label="机型" min-width="220" show-overflow-tooltip />
-            <el-table-column label="数量" width="120" align="center">
-              <template #default="{ row }">
-                <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
-                <span v-else style="color: #dcdfe6;">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="加高" width="120" align="center">
-              <template #default="{ row }">
-                <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
-                <span v-else style="color: #dcdfe6;">-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="占比" width="140" align="center">
-              <template #default="{ row }">
-                <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
-                <span v-else style="color: #dcdfe6;">-</span>
-              </template>
-            </el-table-column>
-          </el-table>
+    <!-- Inventory Section (Always Visible on the Right, Minimized Height by Default) -->
+    <div class="inventory-ratio-panel" :class="{ 'is-dragging': isDragging, 'is-zoomed': isZoomed }" :style="{ transform: 'translate(' + dragPos.x + 'px, ' + dragPos.y + 'px)' }" @mousedown="handleDragStart">
+      <div class="inventory-ratio-header">
+        <div class="header-title-area">
+          <strong>库存机型分布</strong>
+          <span>库存中 + 待入库，共 {{ inventoryTotal }} 台</span>
         </div>
+        <button class="header-zoom-button" type="button" @click.stop="isZoomed = !isZoomed">
+          <svg v-if="!isZoomed" class="zoom-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          <svg v-else class="zoom-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg>
+          <span>{{ isZoomed ? '收起' : '放大' }}</span>
+        </button>
       </div>
-    </transition>
+      <div class="inventory-table-shell">
+        <el-table
+          :data="inventoryRatioRows"
+          size="small"
+          :height="isZoomed ? undefined : (expanded ? 300 : 180)"
+          stripe
+          v-loading="inventoryLoading"
+          empty-text="暂无库存数据"
+        >
+          <el-table-column prop="name" label="机型" min-width="120" show-overflow-tooltip />
+          <el-table-column label="数量" width="56" align="center">
+            <template #default="{ row }">
+              <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
+              <span v-else style="color: #dcdfe6;">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="加高" width="56" align="center">
+            <template #default="{ row }">
+              <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
+              <span v-else style="color: #dcdfe6;">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="占比" width="66" align="center">
+            <template #default="{ row }">
+              <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
+              <span v-else style="color: #dcdfe6;">-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <button v-if="!isZoomed" class="inventory-zoom-overlay" type="button" @click="isZoomed = true">
+          <span class="inventory-zoom-icon"></span>
+          <span>放大查看</span>
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -180,8 +158,46 @@ const globalLevel2 = reactive<Record<string, number>>({
 const saving = ref(false)
 const msg = ref('')
 const msgColor = ref('#67c23a')
-const expanded = ref(true)
-const inventoryPanelOpen = ref(false)
+const msgBgColor = computed(() => {
+  return msgColor.value === '#67c23a' ? '#f0fdf4' : '#fef2f2'
+})
+const msgBorderColor = computed(() => {
+  return msgColor.value === '#67c23a' ? '#bbf7d0' : '#fecaca'
+})
+const expanded = ref(false)
+const isZoomed = ref(false)
+
+const dragPos = ref({ x: 0, y: 0 })
+const isDragging = ref(false)
+
+function handleDragStart(e: MouseEvent) {
+  if (e.button !== 0) return
+  const target = e.target as HTMLElement
+  if (target.closest('button') || target.closest('.el-scrollbar__bar') || target.closest('.el-scrollbar__thumb')) return
+  isDragging.value = true
+  const startX = e.clientX
+  const startY = e.clientY
+  const startOffsetX = dragPos.value.x
+  const startOffsetY = dragPos.value.y
+
+  const handleDragMove = (moveEvent: MouseEvent) => {
+    if (!isDragging.value) return
+    moveEvent.preventDefault() // 拖动时阻止文本选中
+    dragPos.value = {
+      x: startOffsetX + (moveEvent.clientX - startX),
+      y: startOffsetY + (moveEvent.clientY - startY)
+    }
+  }
+
+  const handleDragEnd = () => {
+    isDragging.value = false
+    window.removeEventListener('mousemove', handleDragMove)
+    window.removeEventListener('mouseup', handleDragEnd)
+  }
+
+  window.addEventListener('mousemove', handleDragMove)
+  window.addEventListener('mouseup', handleDragEnd)
+}
 const inventoryLoading = ref(false)
 const inventoryTotal = ref(0)
 const inventoryRatioRows = ref<Array<{ name: string; current_qty: number; current_pct: number }>>([])
@@ -550,60 +566,240 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.ratio-editor-layout { display: flex; gap: 16px; }
-.ratio-editor-left { flex: 1; min-width: 60%; }
-.ratio-collapse-toggle {
+.ratio-editor-layout {
+  position: relative;
   width: 100%;
+}
+.ratio-editor-left {
+  width: calc(100% - 420px);
+  min-width: 0;
+}
+.ratio-collapse-toggle {
+  width: 240px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 18px;
-  font-weight: 700;
-  background: #f5f7fa;
-  border: 1px solid #dcdfe6;
-  border-radius: 8px;
-  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px 16px;
   cursor: pointer;
-  margin-bottom: 12px;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
-.ratio-collapse-toggle .arrow { transition: transform 0.2s ease; }
-.ratio-collapse-toggle .arrow.open { transform: rotate(180deg); }
+.ratio-collapse-toggle:hover {
+  border-color: #3b82f6;
+  color: #1d4ed8;
+  background: #f8fafc;
+}
+.ratio-collapse-toggle.is-active {
+  border-color: #3b82f6;
+  background: #f8fafc;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+.ratio-collapse-toggle .arrow { 
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1); 
+  font-size: 12px;
+  color: #9ca3af;
+}
+.ratio-collapse-toggle:hover .arrow {
+  color: #3b82f6;
+}
+.ratio-collapse-toggle .arrow.open { 
+  transform: rotate(180deg); 
+  color: #3b82f6;
+}
+
 .ratio-collapse-body {
-  max-height: 360px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-.ratio-content-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.95fr);
-  gap: 18px;
-  align-items: start;
-}
-.ratio-config-panel { min-width: 0; }
-.inventory-ratio-panel {
-  min-width: 0;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 10px 12px 12px;
+  padding: 16px;
+  margin-top: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.03);
+}
+
+.ratio-config-panel { 
+  min-width: 0; 
+}
+.inventory-ratio-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1000;
+  width: 400px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.2s, border-color 0.2s;
+  cursor: grab;
+}
+.inventory-ratio-panel :deep(.el-table),
+.inventory-ratio-panel :deep(.el-table tr),
+.inventory-ratio-panel :deep(.el-table td) {
+  cursor: grab;
+}
+.inventory-ratio-panel.is-zoomed {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+.inventory-ratio-panel.is-zoomed :deep(.el-table),
+.inventory-ratio-panel.is-zoomed :deep(.el-table__inner-wrapper),
+.inventory-ratio-panel.is-zoomed :deep(.el-table__body-wrapper),
+.inventory-ratio-panel.is-zoomed :deep(.el-scrollbar),
+.inventory-ratio-panel.is-zoomed :deep(.el-scrollbar__wrap) {
+  height: auto !important;
+  max-height: none !important;
+}
+.inventory-ratio-panel.is-dragging {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+  border-color: #3b82f6;
+  cursor: grabbing;
+}
+.inventory-ratio-panel.is-dragging :deep(.el-table),
+.inventory-ratio-panel.is-dragging :deep(.el-table tr),
+.inventory-ratio-panel.is-dragging :deep(.el-table td) {
+  cursor: grabbing;
 }
 .inventory-ratio-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 8px;
+  user-select: none;
 }
-.inventory-ratio-header span {
-  color: #909399;
-  font-size: 12px;
+.header-title-area {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
-.section-block { margin-bottom: 12px; }
+.header-title-area strong {
+  font-size: 14px;
+  color: #1f2937;
+}
+.header-title-area span {
+  color: #6b7280;
+  font-size: 11px;
+}
+.header-zoom-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.header-zoom-button:hover {
+  background: #f3f4f6;
+  border-color: #3b82f6;
+  color: #2563eb;
+}
+.header-zoom-button:active {
+  background: #e5e7eb;
+}
+.header-zoom-button .zoom-icon {
+  flex-shrink: 0;
+  color: currentColor;
+}
+.section-block { 
+  background: #fdfdfd;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.01);
+}
+.section-block strong {
+  display: block;
+  font-size: 13px;
+  color: #374151;
+  margin-bottom: 10px;
+  border-left: 3px solid #3b82f6;
+  padding-left: 8px;
+}
 .group-block { margin-top: 8px; margin-bottom: 6px; }
 .ratio-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 6px; }
-.ratio-item { display: flex; align-items: center; gap: 4px; }
-.sum-text { font-size: 12px; color: #888; }
-.message { margin-left: 8px; font-size: 13px; }
+.ratio-item { 
+  display: flex; 
+  align-items: center; 
+  gap: 6px;
+  background: #f9fafb;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #f3f4f6;
+  transition: all 0.2s ease;
+}
+.ratio-item:hover {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+.ratio-item label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4b5563;
+}
+.sum-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+.sum-badge.is-valid {
+  background-color: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+.sum-badge.is-invalid {
+  background-color: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+.sum-badge .status-icon {
+  font-size: 12px;
+}
+.panel-actions {
+  display: flex;
+  align-items: center;
+  margin-top: 16px;
+}
+.message-bubble {
+  margin-left: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.3s ease;
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
 .inventory-table-shell {
   position: relative;
   border-radius: 6px;
@@ -659,75 +855,20 @@ onMounted(async () => {
   font-weight: 800;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
 }
-.inventory-zoom-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 3000;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  padding: 82px 36px 28px;
-  background: transparent;
-  pointer-events: auto;
-}
-.inventory-expanded-panel {
-  width: min(920px, calc(100vw - 72px));
-  max-height: calc(100vh - 110px);
-  overflow: hidden;
-  padding: 14px;
-  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.22);
-  transform-origin: top right;
-  pointer-events: auto;
-}
-.inventory-close-button {
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  background: #fff;
-  color: #606266;
-  padding: 4px 10px;
-  cursor: pointer;
-}
-.inventory-close-button:hover {
-  color: #2563eb;
-  border-color: #93c5fd;
-}
-
-.inventory-panel-pop-enter-active,
-.inventory-panel-pop-leave-active {
-  transition:
-    opacity 0.24s ease,
-    transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1),
-    clip-path 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.inventory-panel-pop-enter-from,
-.inventory-panel-pop-leave-to {
-  opacity: 0;
-  transform: translate(26px, -20px) scale(0.72);
-  clip-path: polygon(100% 0, 100% 0, 100% 0, 100% 0);
-}
-
-.inventory-panel-pop-enter-to,
-.inventory-panel-pop-leave-from {
-  opacity: 1;
-  transform: translate(0, 0) scale(1);
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
-}
-
-@media (max-width: 1200px) {
-  .ratio-content-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 1000px) {
+  .ratio-editor-layout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
   }
-}
-
-@media (max-width: 768px) {
-  .inventory-zoom-backdrop {
-    padding: 72px 12px 18px;
-  }
-
-  .inventory-expanded-panel {
+  .ratio-editor-left {
     width: 100%;
-    max-height: calc(100vh - 90px);
+  }
+  .inventory-ratio-panel {
+    position: static;
+    width: 100%;
+    margin-top: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 }
 </style>

@@ -1598,6 +1598,16 @@ async def return_unit_to_sandbox(request: Request, unit_id: str):
             {"bid": target_batch_id, "slot": next_slot, "uid": unit_id},
         )
 
+        # 标记历史台账记录为已撤销
+        conn.execute(
+            text("""
+                UPDATE production_history_ledger
+                SET status = 'Cancelled', completed_at = NOW()
+                WHERE status = 'In_Production' AND unit_id = :uid
+            """),
+            {"uid": unit_id},
+        )
+
         remaining = conn.execute(
             text("""
                 SELECT COUNT(*) AS cnt FROM units

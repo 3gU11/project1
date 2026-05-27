@@ -55,17 +55,11 @@
     <el-divider />
     <h3>批量修改</h3>
     <el-row :gutter="10">
-      <el-col :span="8">
-        <div class="label">新的机型（可选）</div>
-        <el-select v-model="batchModel" filterable clearable placeholder="请选择机型（不选则不改）" style="width: 100%">
-          <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
-        </el-select>
-      </el-col>
-      <el-col :span="8">
+      <el-col :span="12">
         <div class="label">新的合同备注</div>
         <el-input v-model="batchNote" />
       </el-col>
-      <el-col :span="8">
+      <el-col :span="12">
         <div class="label">快捷选项</div>
         <el-checkbox v-model="optXsAuto">XS改X手自一体</el-checkbox>
         <el-checkbox v-model="optBackCond">后导电</el-checkbox>
@@ -82,7 +76,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
-import { getModelOrderList } from '../utils/modelOrder'
 type MessageResponse = { message?: string }
 
 type Row = Record<string, any>
@@ -94,7 +87,6 @@ const keywordDebounced = ref('')
 let keywordTimer: number | null = null
 const selectedSerials = ref<string[]>([])
 const selectedSet = ref<Set<string>>(new Set())
-const batchModel = ref('')
 const batchNote = ref('')
 const optXsAuto = ref(false)
 const optBackCond = ref(false)
@@ -114,10 +106,6 @@ watch(keyword, (v) => {
   keywordTimer = window.setTimeout(() => {
     keywordDebounced.value = v
   }, 180)
-})
-
-const modelOptions = computed(() => {
-  return getModelOrderList()
 })
 
 const loadData = async () => {
@@ -183,7 +171,6 @@ const saveBatch = async () => {
   try {
     const res = await apiPost<MessageResponse>('/inventory/machine-edit/batch-update', {
       serial_nos: selectedSerials.value,
-      model: batchModel.value || null,
       note: batchNote.value || null,
       xs_to_auto: optXsAuto.value,
       back_cond: optBackCond.value,

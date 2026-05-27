@@ -141,6 +141,44 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// 同步修改到历史排产台账中
+	var newCustomer *string
+	var newDealer *string
+	var newRemark *string
+	var newModel string
+
+	if cVal, ok := req["customer"].(string); ok {
+		newCustomer = &cVal
+	} else if oldUnit != nil {
+		newCustomer = oldUnit.Customer
+	}
+
+	if dVal, ok := req["dealer_name"].(string); ok {
+		newDealer = &dVal
+	} else if oldUnit != nil {
+		newDealer = oldUnit.DealerName
+	}
+
+	if rVal, ok := req["order_remark"].(string); ok {
+		newRemark = &rVal
+	} else if oldUnit != nil {
+		newRemark = oldUnit.OrderRemark
+	}
+
+	if mVal, ok := req["model_type"].(string); ok {
+		newModel = mVal
+	} else if oldUnit != nil {
+		newModel = oldUnit.ModelType
+	}
+
+	if err := tx.Exec(`
+UPDATE production_history_ledger
+SET customer = ?, dealer_name = ?, order_remark = ?, model_type = ?
+WHERE status = 'In_Production' AND unit_id = ?
+`, newCustomer, newDealer, newRemark, newModel, c.Param("id")).Error; err != nil {
+		fmt.Printf("Update: sync production_history_ledger failed: %v\n", err)
+	}
+
 	if err := service.SyncFinishedGoodsByUnitIDs(tx, []string{c.Param("id")}); err != nil {
 		// Log error but continue as primary update succeeded
 		fmt.Printf("Update: sync finished_goods failed: %v\n", err)

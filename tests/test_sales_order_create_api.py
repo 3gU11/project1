@@ -37,27 +37,40 @@ def test_create_sales_order_preserves_http_exception(monkeypatch):
 
 def test_link_contracts_to_order_marks_all_contract_rows_converted(monkeypatch):
     import api.routes.planning as planning_route
+    from unittest.mock import MagicMock
 
-    plan_df = pd.DataFrame(
-        [
-            {"合同号": "C-001", "机型": "FR-100", "排产数量": 1, "状态": "已规划", "订单号": ""},
-            {"合同号": "C-001", "机型": "FR-200", "排产数量": 1, "状态": "已规划", "订单号": ""},
-            {"合同号": "C-002", "机型": "FR-300", "排产数量": 1, "状态": "已规划", "订单号": ""},
-        ]
-    )
-    saved = {}
-
-    monkeypatch.setattr(planning_route, "get_factory_plan", lambda: plan_df.copy())
-    monkeypatch.setattr(planning_route, "save_factory_plan", lambda df: saved.setdefault("df", df.copy()))
+    mock_conn = MagicMock()
+    
+    mock_result_existing = MagicMock()
+    mock_result_existing.fetchall.return_value = []
+    
+    mock_result_update = MagicMock()
+    mock_result_update.rowcount = 2
+    
+    mock_conn.execute.side_effect = [mock_result_existing, mock_result_update]
+    
+    mock_engine = MagicMock()
+    mock_engine.begin.return_value.__enter__.return_value = mock_conn
+    mock_engine.begin.return_value.__exit__ = lambda self, *args: None
+    
+    monkeypatch.setattr(planning_route, "get_engine", lambda: mock_engine)
     monkeypatch.setattr(planning_route, "_sync_order_to_units_and_import", lambda contract_ids, order_id: {})
     monkeypatch.setattr(planning_route, "_occupy_inventory_for_order", lambda contract_ids, order_id: 0)
 
     linked = _link_contracts_to_order(["C-001"], "SO-TEST")
 
     assert linked == 2
-    linked_rows = saved["df"][saved["df"]["合同号"] == "C-001"]
-    assert linked_rows["订单号"].tolist() == ["SO-TEST", "SO-TEST"]
-    assert linked_rows["状态"].tolist() == ["已转订单", "已转订单"]
-    untouched = saved["df"][saved["df"]["合同号"] == "C-002"].iloc[0]
-    assert untouched["订单号"] == ""
-    assert untouched["状态"] == "已规划"
+    
+    call_args_list = mock_conn.execute.call_args_list
+    assert len(call_args_list) == 2
+    
+    select_call = call_args_list[0]
+    select_params = select_call[0][1]
+    assert select_params["cids"] == ["C-001"]
+    assert select_params["oid"] == "SO-TEST"
+    
+    update_call = call_args_list[1]
+    update_params = update_call[0][1]
+    assert update_params["cids"] == ["C-001"]
+    assert update_params["oid"] == "SO-TEST"
+    assert update_params["status"] == "已转订单"

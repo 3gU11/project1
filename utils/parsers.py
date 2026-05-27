@@ -4,9 +4,7 @@ from datetime import datetime
 import pandas as pd
 from crud.inventory import (
     append_import_staging,
-    get_data,
     get_import_staging,
-    save_data,
     save_import_staging,
 )
 
@@ -133,6 +131,7 @@ def process_paste_data(raw_text):
     except Exception as e: return -1, f"解析错误: {str(e)}"
 
 def execute_import_transaction_payload(payload, retry_times=1):
+    from utils.cache_adapter import cache
     result = {"success": [], "failed": []}
     if not payload:
         return result
@@ -155,7 +154,7 @@ def execute_import_transaction_payload(payload, retry_times=1):
         if track_no in staged_map:
             plan_df.loc[plan_df["流水号"] == track_no, "预计入库时间"] = expect_date
 
-    db_df = get_data().copy()
+    db_df = cache.inventory.get_data().copy()
     existing_sns = set(db_df["流水号"].astype(str).str.strip().tolist()) if not db_df.empty else set()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
     rows_to_add = []
@@ -194,7 +193,7 @@ def execute_import_transaction_payload(payload, retry_times=1):
         last_error = None
         for _ in range(retry_times + 1):
             try:
-                save_data(merged_df)
+                cache.inventory.save_data(merged_df)
                 last_error = None
                 break
             except Exception as e:

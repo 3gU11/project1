@@ -29,8 +29,7 @@
       />
       <el-radio-group v-model="filters.status" class="status-tabs" @change="onStatusChange">
         <el-radio-button label="">全部订单</el-radio-button>
-        <el-radio-button label="factory_pending">新备注审核中</el-radio-button>
-        <el-radio-button label="pending">待审核</el-radio-button>
+        <el-radio-button label="todo">待审核</el-radio-button>
         <el-radio-button label="approved">已通过</el-radio-button>
         <el-radio-button label="contracted">已转合同</el-radio-button>
         <el-radio-button label="partial_allocated">部分配货</el-radio-button>
@@ -261,16 +260,33 @@
       <div class="ops-label">合同总备注</div>
       <el-input v-model="convertForm.contractNote" placeholder="可选" />
 
+      <el-divider />
+      <div class="ops-label">📎 附加合同文件 (可选)</div>
+      <el-upload
+        ref="convertUploadRef"
+        :auto-upload="false"
+        :show-file-list="true"
+        multiple
+        :on-change="onConvertFileChange"
+        :on-remove="onConvertFileRemove"
+      >
+        <el-button>选择文件</el-button>
+      </el-upload>
+
       <div class="save-mode-section">
         <div class="ops-label">保存方式</div>
-        <div class="save-mode-hint">进入沙盘（参与老板计划排产）或使用现货（直接置为已规划）。</div>
+        <div class="save-mode-hint">
+          {{ isRushActive ? '进入生产看板（参与急单排产）' : '进入沙盘（参与老板计划排产）' }}或使用现货（直接置为已规划）。
+        </div>
         <div v-if="!convertCanUseSpot" class="save-mode-blocked">当前"使用现货"不可用：{{ convertSpotBlockReason }}</div>
       </div>
 
       <template #footer>
         <el-button @click="convertDialogVisible = false">取消</el-button>
         <el-button type="warning" :disabled="!convertCanUseSpot" :loading="convertSaving" @click="submitConvert('spot')">使用现货</el-button>
-        <el-button type="primary" :loading="convertSaving" @click="submitConvert('sandbox')">进入沙盘</el-button>
+        <el-button type="primary" :loading="convertSaving" @click="submitConvert('sandbox')">
+          {{ isRushActive ? '进入生产看板' : '进入沙盘' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -278,6 +294,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -472,6 +489,8 @@ const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemar
 const canConvertDealerOrder = (row: DealerOrder) => ['pending', 'approved'].includes(String(row.status || '').trim()) && !isFactoryPending(row)
 
 const modelOptions = computed(() => getModelOrderList())
+const router = useRouter()
+const isRushActive = computed(() => convertForm.isRush)
 type ConvertItem = { model: string; qty: number; high: boolean; rowNote: string; remark: string; extraRemark: string; ermq: number }
 const convertDialogVisible = ref(false)
 const convertSaving = ref(false)
@@ -487,6 +506,21 @@ const convertForm = reactive({
   contractNote: '',
   sourceOrderNo: '',
 })
+
+const convertPickedFiles = ref<File[]>([])
+const convertUploadRef = ref<any>(null)
+
+const onConvertFileChange = (uploadFile: any) => {
+  const raw = uploadFile.raw as File | undefined
+  if (!raw) return
+  convertPickedFiles.value.push(raw)
+}
+
+const onConvertFileRemove = (uploadFile: any) => {
+  const raw = uploadFile.raw as File | undefined
+  if (!raw) return
+  convertPickedFiles.value = convertPickedFiles.value.filter((f) => !(f.name === raw.name && f.size === raw.size))
+}
 
 const todayYmd = () => new Date().toISOString().slice(0, 10)
 const genContractId = () => {
@@ -547,6 +581,11 @@ const openConvertDialog = (order: DealerOrder) => {
   convertForm.sourceOrderNo = String(order.order_no || '').trim()
   convertCanUseSpot.value = true
   convertSpotBlockReason.value = ''
+  
+  // 重置上传的文件
+  convertPickedFiles.value = []
+  convertUploadRef.value?.clearFiles()
+
   convertDialogVisible.value = true
 }
 
@@ -723,7 +762,7 @@ const syncCloudOrders = async () => {
       max_pages: 20,
     }, { timeout: 120_000 })
     ElMessage.success(`同步完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}`)
-    if (Number(res.factory_pending_orders || 0) > 0) filters.status = ''
+    if (Number(res.factory_pending_orders || 0) > 0) filters.status = 'todo'
     page.value = 1
     selectedOrderNo.value = ''
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
@@ -892,17 +931,50 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
       contract_note: convertForm.contractNote.trim(),
     }
     const res = await apiPost<MessageResponse>(`/dealer-orders/${encodeURIComponent(convertForm.sourceOrderNo)}/convert-to-contract`, payload)
+    
+    // 上传附件（如果有选中文件）
+    if (convertPickedFiles.value.length > 0) {
+      const contractNoStr = res.contract_no || convertForm.contractNo || ''
+      const contractIds = contractNoStr.split(/[、,]/).map((s) => s.trim()).filter(Boolean)
+      for (const cid of contractIds) {
+        for (const f of convertPickedFiles.value) {
+          const fd = new FormData()
+          fd.append('file', f)
+          try {
+            await apiPost(`/planning/contract/${encodeURIComponent(cid)}/files`, fd, {
+              params: { customer_name: convertForm.customer.trim(), uploader_name: 'Web' },
+              headers: { 'Content-Type': 'multipart/form-data' },
+            })
+          } catch (uploadErr: any) {
+            console.error(`Failed to upload attachment ${f.name} to contract ${cid}:`, uploadErr)
+            ElMessage.warning(`合同 ${cid} 附件 ${f.name} 上传失败，请稍后在合同管理中重新上传`)
+          }
+        }
+      }
+    }
+
     const autoInserted = Number(res.rush_auto_inserted || 0)
     const pendingRushCards = Math.max(0, Number(res.rush_created || 0) - autoInserted)
     const rushText = [
       autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
       pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
     ].filter(Boolean).join('，')
-    const modeText = saveMode === 'spot' ? '已按"使用现货"处理（合同状态：已规划）' : '已按"进入沙盘"处理（合同状态：待规划）'
+    const modeText = saveMode === 'spot'
+      ? '已按“使用现货”处理（合同状态：已规划）'
+      : (convertForm.isRush ? '已按“进入生产看板”处理（合同状态：待规划）' : '已按“进入沙盘”处理（合同状态：待规划）')
     ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
     convertDialogVisible.value = false
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadOrders()
+    if (saveMode === 'sandbox') {
+      if (convertForm.isRush) {
+        router.push('/production-kanban')
+      } else {
+        router.push('/prediction-sandbox')
+      }
+    } else if (saveMode === 'spot') {
+      router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    }
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '经销商订单转合同失败')
   } finally {
@@ -912,7 +984,28 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
 
 let pollTimer: any = null
 
-onMounted(() => {
+onMounted(async () => {
+  await loadTodoStats()
+  if (todoStats.total > 0) {
+    filters.status = 'todo'
+  } else {
+    try {
+      const res = await apiGet<OrderListResponse>('/dealer-orders/', {
+        params: {
+          status: 'approved',
+          page: 1,
+          page_size: 1,
+        },
+      })
+      if (Number(res.total || 0) > 0) {
+        filters.status = 'approved'
+      } else {
+        filters.status = ''
+      }
+    } catch {
+      filters.status = ''
+    }
+  }
   loadOrders()
   loadCloudSyncStatus()
   

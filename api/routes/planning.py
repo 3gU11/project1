@@ -268,13 +268,8 @@ def _trigger_sandbox_recompute_sync(user_ctx: dict):
         logging.getLogger(__name__).warning(f"Auto-recompute failed: {e}")
 
 
-def _is_high_rush_row(row: dict[str, Any]) -> bool:
-    return "加高" in str(row.get("remark") or "")
-
-
-def _auto_insert_high_rush_orders(rows: list[dict[str, Any]], user_ctx: dict, current_operator: str = "") -> int:
-    high_rows = [row for row in (rows or []) if _is_high_rush_row(row)]
-    if not high_rows:
+def _auto_insert_rush_orders(rows: list[dict[str, Any]], user_ctx: dict, current_operator: str = "") -> int:
+    if not rows:
         return 0
 
     headers = {
@@ -290,8 +285,13 @@ def _auto_insert_high_rush_orders(rows: list[dict[str, Any]], user_ctx: dict, cu
     import logging
     logger = logging.getLogger(__name__)
     with httpx.Client(timeout=20.0, trust_env=False) as client:
-        for row in high_rows:
+        for row in rows:
             qty = int(row.get("qty") or 0)
+            # 从 指定批次/来源 字典中取第一个批次号作为优先插入批次
+            source_alloc = row.get("source_alloc") or {}
+            preferred_batch_no = ""
+            if isinstance(source_alloc, dict) and source_alloc:
+                preferred_batch_no = str(next(iter(source_alloc), "")).strip()
             for _ in range(max(0, qty)):
                 payload = {
                     "mode": "auto",
@@ -302,14 +302,15 @@ def _auto_insert_high_rush_orders(rows: list[dict[str, Any]], user_ctx: dict, cu
                         "dealer_name": str(row.get("dealer_name") or "").strip(),
                         "due_date": str(row.get("due_date") or "").strip(),
                         "remark": str(row.get("remark") or "").strip(),
+                        "preferred_batch_no": preferred_batch_no,
                     },
-                    "reason": "加高急单录入后自动进入沙盘",
+                    "reason": "急单录入后自动进入沙盘",
                 }
                 try:
                     resp = client.post(f"{GO_SANDBOX_URL}/api/units/rush-insert", headers=headers, json=payload)
                     if resp.status_code >= 400:
-                        logger.warning("High rush auto insert failed for %s: %s", payload["rush_order"]["contract_no"], resp.text)
-                        break
+                        logger.warning("Rush auto insert failed for %s: %s", payload["rush_order"]["contract_no"], resp.text)
+                        continue
                     with get_engine().begin() as conn:
                         conn.execute(text("""
                             UPDATE rush_order_queue
@@ -328,8 +329,8 @@ def _auto_insert_high_rush_orders(rows: list[dict[str, Any]], user_ctx: dict, cu
                         })
                     inserted += 1
                 except Exception as e:
-                    logger.warning("High rush auto insert exception for %s: %s", payload["rush_order"]["contract_no"], e)
-                    break
+                    logger.warning("Rush auto insert exception for %s: %s", payload["rush_order"]["contract_no"], e)
+                    continue
     return inserted
 
 
@@ -1429,7 +1430,7 @@ def _process_contracts_batch(
         rush_q_rows,
         created_by=user_ctx.get("username") or operator,
     )
-    rush_auto_inserted = _auto_insert_high_rush_orders(rush_q_rows, user_ctx, operator)
+    rush_auto_inserted = _auto_insert_rush_orders(rush_q_rows, user_ctx, operator)
 
     added_contract_ids = list(set([str(item["合同号"]) for item in clean_add_list]))
     contract_ids_str = "、".join(added_contract_ids)
@@ -1452,7 +1453,7 @@ def _process_contracts_batch(
         module="合同管理",
         action_type="批量录入",
         biz_type="合同",
-        content=f"批量录入合同 {len(clean_add_list)} 条（合同号：{contract_ids_str}）；跳过重复 {existed} 条；加高急单自动入沙盘 {rush_auto_inserted} 条",
+        content=f"批量录入合同 {len(clean_add_list)} 条（合同号：{contract_ids_str}）；跳过重复 {existed} 条；急单自动入沙盘 {rush_auto_inserted} 条",
         user_id=user_ctx.get("username"),
         username=operator,
     )
@@ -1868,3 +1869,414 @@ def save_contract_plan(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"规划保存失败: {e}")
+
+
+@router.get("/export-production-history")
+def export_production_history(sheet: str = "all"):
+    """导出截至目前的所有排产数据（包括生产中和已完工的机台明细）为 Excel 格式，包含排产台账和跟踪单"""
+    from collections import OrderedDict, defaultdict
+    try:
+        include_ledger = sheet in ("all", "ledger")
+        include_tracking = sheet in ("all", "tracking")
+
+        with get_engine().connect() as conn:
+            if include_ledger:
+                sql_ledger = """
+                    SELECT 
+                        phl.unit_id AS `机台ID`,
+                        COALESCE(phl.production_line_name, '待排产队列') AS `产线`,
+                        phl.batch_code AS `批次号`,
+                        phl.model_type AS `机型`,
+                        phl.contract_no AS `合同号`,
+                        phl.customer AS `客户名`,
+                        phl.dealer_name AS `经销商`,
+                        CASE phl.status
+                            WHEN 'Completed' THEN '已完工'
+                            WHEN 'In_Production' THEN '生产中'
+                            WHEN 'Cancelled' THEN '已撤销'
+                            ELSE phl.status
+                        END AS `状态`,
+                        COALESCE(fgb.batch_inbound_date, b.expected_inbound_date, fg.`预计入库时间`) AS `预计入库时间`,
+                        COALESCE(u.is_locked, 0) AS `锁定状态`,
+                        phl.order_remark AS `备注`,
+                        phl.scheduled_at AS `排产上线时间`,
+                        phl.completed_at AS `完工时间`,
+                        COALESCE(u.serial_no, u.forecast_serial_no) AS `流水号`
+                    FROM production_history_ledger phl
+                    LEFT JOIN units u ON u.unit_id = phl.unit_id
+                    LEFT JOIN batches b ON (b.batch_code COLLATE utf8mb4_general_ci = phl.batch_code COLLATE utf8mb4_general_ci AND phl.batch_code <> '') 
+                        OR b.batch_id COLLATE utf8mb4_general_ci = SUBSTRING_INDEX(phl.unit_id, '-', 5) COLLATE utf8mb4_general_ci
+                    LEFT JOIN (
+                        SELECT `批次号` AS batch_code, MIN(`预计入库时间`) AS batch_inbound_date 
+                        FROM finished_goods_data 
+                        WHERE TRIM(COALESCE(`批次号`, '')) <> '' 
+                        GROUP BY `批次号`
+                    ) fgb ON TRIM(COALESCE(fgb.batch_code, '')) COLLATE utf8mb4_general_ci = TRIM(COALESCE(b.batch_code, '')) COLLATE utf8mb4_general_ci
+                    LEFT JOIN finished_goods_data fg ON fg.`流水号` COLLATE utf8mb4_general_ci = COALESCE(u.serial_no, u.forecast_serial_no) COLLATE utf8mb4_general_ci
+                    WHERE phl.status IN ('In_Production', 'Completed')
+                    ORDER BY phl.scheduled_at DESC, phl.id DESC
+                """
+                df_ledger = pd.read_sql(text(sql_ledger), conn)
+                records = df_ledger.to_dict('records')
+            else:
+                records = []
+
+            if include_tracking:
+                sql_ledger_for_t = """
+                    SELECT 
+                        phl.unit_id AS `机台ID`,
+                        phl.batch_code AS `批次号`,
+                        phl.model_type AS `机型`,
+                        phl.order_remark AS `备注`,
+                        COALESCE(u.serial_no, u.forecast_serial_no) AS `流水号`
+                    FROM production_history_ledger phl
+                    LEFT JOIN units u ON u.unit_id = phl.unit_id
+                    LEFT JOIN batches b ON (b.batch_code COLLATE utf8mb4_general_ci = phl.batch_code COLLATE utf8mb4_general_ci AND phl.batch_code <> '') 
+                        OR b.batch_id COLLATE utf8mb4_general_ci = SUBSTRING_INDEX(phl.unit_id, '-', 5) COLLATE utf8mb4_general_ci
+                    WHERE phl.status IN ('In_Production', 'Completed')
+                      AND b.status IN ('Confirmed', 'In_Production')
+                """
+                df_ledger_for_t = pd.read_sql(text(sql_ledger_for_t), conn)
+                records_for_t = df_ledger_for_t.to_dict('records')
+
+                sql_pending = """
+                    SELECT 
+                        u.unit_id AS `机台ID`,
+                        '待排产队列' AS `产线`,
+                        COALESCE(b.batch_code, '-') AS `批次号`,
+                        u.model_type AS `机型`,
+                        u.contract_no AS `合同号`,
+                        u.customer AS `客户名`,
+                        u.dealer_name AS `经销商`,
+                        '待排产' AS `状态`,
+                        b.expected_inbound_date AS `预计入库时间`,
+                        COALESCE(u.is_locked, 0) AS `锁定状态`,
+                        u.order_remark AS `备注`,
+                        u.created_at AS `排产上线时间`,
+                        NULL AS `完工时间`,
+                        COALESCE(u.serial_no, u.forecast_serial_no) AS `流水号`
+                    FROM units u
+                    LEFT JOIN batches b ON b.batch_id = u.batch_id
+                    WHERE u.status = 'Pending'
+                      AND b.status IN ('Confirmed', 'In_Production')
+                    ORDER BY u.created_at DESC, u.unit_id DESC
+                """
+                df_pending = pd.read_sql(text(sql_pending), conn)
+                records_pending = df_pending.to_dict('records')
+            else:
+                records_for_t = []
+                records_pending = []
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        wb = Workbook()
+
+        # 创建 Sheet
+        if include_ledger and include_tracking:
+            ws = wb.active
+            ws.title = "排产台账"
+            ws2 = wb.create_sheet(title="跟踪单")
+        elif include_ledger:
+            ws = wb.active
+            ws.title = "排产台账"
+        elif include_tracking:
+            ws2 = wb.active
+            ws2.title = "跟踪单"
+
+        # 样式定义
+        header_fill = PatternFill(start_color="5C765C", end_color="5C765C", fill_type="solid")
+        header_font = Font(name="宋体", size=11, bold=True, color="FFFFFF")
+        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        thin_border = Border(
+            left=Side(style='thin', color='D3D3D3'),
+            right=Side(style='thin', color='D3D3D3'),
+            top=Side(style='thin', color='D3D3D3'),
+            bottom=Side(style='thin', color='D3D3D3')
+        )
+        green_fill = PatternFill(start_color="EAF2E8", end_color="EAF2E8", fill_type="solid")
+        orange_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+
+        # 辅助宽度计算函数
+        def get_display_width(s):
+            width = 0
+            for char in s:
+                if ord(char) > 127:
+                    width += 2
+                else:
+                    width += 1
+            return width
+
+        def format_cell_value(model_type, remark, qty, target_width=20):
+            prefix = f"{model_type} {remark}" if remark else model_type
+            w = get_display_width(prefix)
+            spaces = max(2, target_width - w)
+            return prefix + " " * spaces + str(qty)
+
+        # ------------------ 填充 Sheet 1: 排产台账 ------------------
+        if include_ledger:
+            model_columns = ["300", "400", "500", "600", "7055", "8055", "8060"]
+
+            batches = OrderedDict()
+            for r in records:
+                batch_code = str(r.get("批次号") or "").strip()
+                if not batch_code:
+                    batch_code = "-"
+                if batch_code not in batches:
+                    batches[batch_code] = {
+                        "batch_code": batch_code,
+                        "units": [],
+                        "due_dates": set()
+                    }
+                batches[batch_code]["units"].append(r)
+                due_date = r.get("预计入库时间")
+                if due_date and str(due_date).strip() not in ("", None, "-", "None", "NaT"):
+                    batches[batch_code]["due_dates"].add(due_date)
+
+            ws.views.sheetView[0].showGridLines = True
+            headers = ["批次号"] + model_columns + ["合计", "预计入库时间"]
+            ws.append(headers)
+
+            for col_idx in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col_idx)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = header_alignment
+
+            start_row = 2
+            total_cols = len(headers)
+
+            sorted_batches = sorted(batches.items(), key=lambda x: (x[0] == "-", x[0]))
+            for batch_code, batch in sorted_batches:
+                unique_pairs = []
+                pair_qty = defaultdict(int)
+                for unit in batch["units"]:
+                    orig_model = str(unit.get("机型") or "").strip()
+                    remark = str(unit.get("备注") or "").strip()
+                    if remark in ("None", "none", "null", "NULL"):
+                        remark = ""
+                    pair = (orig_model, remark)
+                    if pair_qty[pair] == 0:
+                        unique_pairs.append(pair)
+                    pair_qty[pair] += 1
+
+                matched_by_col = defaultdict(list)
+                special_pairs = []
+                for pair in unique_pairs:
+                    orig_model, remark = pair
+                    combined = (orig_model + remark).upper()
+                    matched_col = None
+                    for series in model_columns:
+                        if series in combined:
+                            matched_col = series
+                            break
+                    if matched_col:
+                        matched_by_col[matched_col].append(pair)
+                    else:
+                        special_pairs.append(pair)
+
+                col_assigned_count = {col: len(matched_by_col[col]) for col in model_columns}
+                for pair in special_pairs:
+                    best_col = min(model_columns, key=lambda c: col_assigned_count[c])
+                    matched_by_col[best_col].append(pair)
+                    col_assigned_count[best_col] += 1
+
+                entries_by_model = {}
+                for col_key in model_columns:
+                    entries = []
+                    for orig_model, remark in matched_by_col[col_key]:
+                        qty = pair_qty[(orig_model, remark)]
+                        entries.append(format_cell_value(orig_model, remark, qty, target_width=20))
+                    entries_by_model[col_key] = entries
+
+                max_rows = max(len(entries) for entries in entries_by_model.values())
+                if max_rows == 0:
+                    max_rows = 1
+
+                end_row = start_row + max_rows - 1
+
+                for r in range(start_row, end_row + 1):
+                    for c in range(1, total_cols + 1):
+                        cell = ws.cell(row=r, column=c)
+                        cell.font = Font(name="宋体", size=10)
+                        cell.border = thin_border
+                        if c == total_cols:
+                            cell.fill = orange_fill
+                        else:
+                            cell.fill = green_fill
+                        if c == 1 or c == total_cols - 1 or c == total_cols:
+                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                        else:
+                            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+                ws.cell(row=start_row, column=1).value = batch_code
+                if end_row > start_row:
+                    ws.merge_cells(start_row=start_row, start_column=1, end_row=end_row, end_column=1)
+
+                for m_idx, m_type in enumerate(model_columns, start=2):
+                    entries = entries_by_model[m_type]
+                    for i, entry in enumerate(entries):
+                        ws.cell(row=start_row + i, column=m_idx).value = entry
+                    if len(entries) <= 1 and end_row > start_row:
+                        ws.merge_cells(start_row=start_row, start_column=m_idx, end_row=end_row, end_column=m_idx)
+
+                total_qty = len(batch["units"])
+                ws.cell(row=start_row, column=total_cols - 1).value = total_qty
+                if end_row > start_row:
+                    ws.merge_cells(start_row=start_row, start_column=total_cols - 1, end_row=end_row, end_column=total_cols - 1)
+
+                due_dates_list = []
+                for d in batch["due_dates"]:
+                    try:
+                        dt = pd.to_datetime(d)
+                        due_dates_list.append(f"预计{dt.year}. {dt.month}. {dt.day}")
+                    except:
+                        due_dates_list.append(str(d))
+                due_date_str = ", ".join(sorted(due_dates_list)) if due_dates_list else "-"
+                ws.cell(row=start_row, column=total_cols).value = due_date_str
+                if end_row > start_row:
+                    ws.merge_cells(start_row=start_row, start_column=total_cols, end_row=end_row, end_column=total_cols)
+
+                start_row = end_row + 1
+
+            for col in ws.columns:
+                col_idx = col[0].column
+                col_letter = get_column_letter(col_idx)
+                if 2 <= col_idx <= 8:
+                    ws.column_dimensions[col_letter].width = 24
+                else:
+                    max_len = 0
+                    for cell in col:
+                        val = str(cell.value or '')
+                        w = get_display_width(val)
+                        if w > max_len:
+                            max_len = w
+                    ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        # ------------------ 填充 Sheet 2: 跟踪单 ------------------
+        if include_tracking:
+            ws2.views.sheetView[0].showGridLines = True
+            headers2 = ["生产批次", "型号", "生产编号"]
+            ws2.append(headers2)
+
+            for col_idx in range(1, len(headers2) + 1):
+                cell = ws2.cell(row=1, column=col_idx)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = header_alignment
+
+            combined_records = records_for_t + records_pending
+
+            batches_tracking = defaultdict(list)
+            for r in combined_records:
+                b_code = str(r.get("批次号") or "").strip()
+                if not b_code:
+                    b_code = "-"
+                batches_tracking[b_code].append(r)
+
+            sorted_tracking_batches = sorted(batches_tracking.items(), key=lambda x: (x[0] == "-", x[0]))
+
+            start_row_t = 2
+            for b_code, b_units in sorted_tracking_batches:
+                def sort_key(u):
+                    sn = str(u.get("流水号") or "").strip()
+                    uid = str(u.get("机台ID") or "").strip()
+                    return (sn == "", sn, uid)
+
+                sorted_units = sorted(b_units, key=sort_key)
+                num_units = len(sorted_units)
+                end_row_t = start_row_t + num_units - 1
+
+                ws2.cell(row=start_row_t, column=1).value = b_code
+                if end_row_t > start_row_t:
+                    ws2.merge_cells(start_row=start_row_t, start_column=1, end_row=end_row_t, end_column=1)
+
+                for i, u in enumerate(sorted_units):
+                    row_idx = start_row_t + i
+                    model = str(u.get("机型") or "").strip()
+                    remark = str(u.get("备注") or "").strip()
+                    if remark in ("None", "none", "null", "NULL"):
+                        remark = ""
+
+                    model_text = f"{model} {remark}" if remark else model
+                    sn_text = str(u.get("流水号") or u.get("机台ID") or "").strip() or "-"
+
+                    ws2.cell(row=row_idx, column=2).value = model_text
+                    ws2.cell(row=row_idx, column=3).value = sn_text
+
+                    for c in range(1, 4):
+                        cell = ws2.cell(row=row_idx, column=c)
+                        cell.font = Font(name="宋体", size=10)
+                        cell.border = thin_border
+                        cell.fill = green_fill
+                        if c == 1 or c == 3:
+                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                        else:
+                            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+                start_row_t = end_row_t + 1
+
+            for col in ws2.columns:
+                max_len = 0
+                for cell in col:
+                    val = str(cell.value or '')
+                    w = get_display_width(val)
+                    if w > max_len:
+                        max_len = w
+                col_letter = get_column_letter(col[0].column)
+                ws2.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        import io
+        from fastapi.responses import StreamingResponse
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        file_prefix = "production_history" if sheet != "tracking" else "production_tracking"
+        headers = {
+            "Content-Disposition": f"attachment; filename={file_prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+        }
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=headers
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出排产数据失败: {e}")
+
+
+class ExportExcelPayload(BaseModel):
+    filename: str
+    sheet_name: str
+    headers: List[str]
+    rows: List[List[Any]]
+
+
+@router.post("/export-excel")
+def export_excel(payload: ExportExcelPayload):
+    """通用数据导出为 Excel xlsx 格式"""
+    try:
+        import io
+        from fastapi.responses import StreamingResponse
+        
+        df = pd.DataFrame(payload.rows, columns=payload.headers)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name=payload.sheet_name)
+        output.seek(0)
+        
+        headers = {
+            "Content-Disposition": f"attachment; filename={payload.filename}.xlsx"
+        }
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=headers
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出 Excel 失败: {e}")
+

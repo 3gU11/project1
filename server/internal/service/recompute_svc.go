@@ -20,7 +20,7 @@ func NewRecomputeSvc(lm *lock.Manager, p *engine.Predictor, hub *ws.Hub) *Recomp
 	return &RecomputeSvc{lockMgr: lm, predictor: p, wsHub: hub}
 }
 
-func (s *RecomputeSvc) Recompute(targetSlotNo int) (interface{}, error) {
+func (s *RecomputeSvc) Recompute(targetSlotNo int, isClicked bool) (interface{}, error) {
 	if targetSlotNo <= 0 {
 		targetSlotNo = 1
 	}
@@ -33,7 +33,7 @@ func (s *RecomputeSvc) Recompute(targetSlotNo int) (interface{}, error) {
 	}
 	defer unlock()
 
-	batches, err := s.predictor.FullRecompute(targetSlotNo)
+	batches, err := s.predictor.FullRecompute(targetSlotNo, isClicked)
 	if err != nil {
 		return nil, fmt.Errorf("recompute: %w", err)
 	}

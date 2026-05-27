@@ -121,4 +121,24 @@ export const apiDownloadBlob = async (url: string, fileName: string): Promise<vo
   window.URL.revokeObjectURL(blobUrl)
 }
 
+/**
+ * POST方式下载文件（blob 模式），复用 axios 拦截器自动携带 token。
+ * @param url   相对路径，例如 /planning/export-excel
+ * @param data  POST 请求体 payload
+ * @param fileName  浏览器保存时使用的文件名
+ */
+export const apiDownloadBlobPost = async (url: string, data: any, fileName: string): Promise<void> => {
+  const response = await request.post(url, data, { responseType: 'blob', timeout: 120000 })
+  const blob = new Blob([response.data])
+  const blobUrl = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.setAttribute('download', fileName)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(blobUrl)
+}
+
+
 export default request

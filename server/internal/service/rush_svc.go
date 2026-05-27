@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,12 +33,13 @@ type RushInsertReq struct {
 	TargetUnitID   string `json:"target_unit_id"`
 	FallbackUnitID string `json:"fallback_unit_id"`
 	RushOrder      struct {
-		ContractNo string `json:"contract_no" binding:"required"`
-		Customer   string `json:"customer"`
-		ModelType  string `json:"model_type" binding:"required"`
-		DealerName string `json:"dealer_name"`
-		DueDate    string `json:"due_date"`
-		Remark     string `json:"remark"`
+		ContractNo        string `json:"contract_no" binding:"required"`
+		Customer          string `json:"customer"`
+		ModelType         string `json:"model_type" binding:"required"`
+		DealerName        string `json:"dealer_name"`
+		DueDate           string `json:"due_date"`
+		Remark            string `json:"remark"`
+		PreferredBatchNo  string `json:"preferred_batch_no"` // 优先插入的批次号（来自指定批次/来源）
 	} `json:"rush_order" binding:"required"`
 	Reason string `json:"reason"`
 }
@@ -87,13 +89,23 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 	affectedUnitIDs := map[string]struct{}{}
 
 	isHigh := strings.Contains(req.RushOrder.Remark, "加高")
+	preferredBatchNo := strings.TrimSpace(req.RushOrder.PreferredBatchNo)
 
 	var chain []model.Unit
 	if !isHigh {
-		// 1) Build production chain by exact model, ordered by earliest batch line then next lines.
-		chain, err = s.loadProductionModelChain(tx, family, targetModel)
-		if err != nil {
-			return fmt.Errorf("load production model chain: %w", err)
+		// 1) Build production chain. If preferred_batch_no is given, try that batch first.
+		if preferredBatchNo != "" {
+			chain, err = s.loadProductionModelChain(tx, family, targetModel, preferredBatchNo)
+			if err != nil {
+				return fmt.Errorf("load production model chain (preferred): %w", err)
+			}
+		}
+		// Fallback: if no chain found in preferred batch, search all in-production batches.
+		if len(chain) == 0 {
+			chain, err = s.loadProductionModelChain(tx, family, targetModel, "")
+			if err != nil {
+				return fmt.Errorf("load production model chain: %w", err)
+			}
 		}
 	}
 
@@ -167,59 +179,65 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 		overflow = &tmp
 	}
 
-	// 2) If overflow exists, insert into sandbox first predicted batch of same family.
+	// 2) If overflow exists, insert into sandbox. If preferred_batch_no given, try that batch first.
 	if overflow != nil && overflow.ContractNo != "" {
-		chain2, err := s.loadSandboxModelChain(tx, family, targetModel)
-		if err != nil {
-			return fmt.Errorf("load sandbox chain: %w", err)
+		var chain2 []model.Unit
+		// Try preferred batch first if specified.
+		if preferredBatchNo != "" {
+			chain2, err = s.loadSandboxModelChain(tx, family, targetModel, preferredBatchNo)
+			if err != nil {
+				return fmt.Errorf("load sandbox chain (preferred): %w", err)
+			}
+		}
+		// Fallback to all sandbox batches if preferred batch has no slot.
+		if len(chain2) == 0 {
+			chain2, err = s.loadSandboxModelChain(tx, family, targetModel, "")
+			if err != nil {
+				return fmt.Errorf("load sandbox chain: %w", err)
+			}
 		}
 		if len(chain2) == 0 {
-			if err := s.enqueueOverflow(tx, family, overflow); err != nil {
-				return fmt.Errorf("enqueue overflow: %w", err)
+			return fmt.Errorf("no available empty slot on the board to absorb rush order")
+		}
+		c2 := *overflow
+		for i := range chain2 {
+			u := chain2[i]
+			if u.IsLocked {
+				return fmt.Errorf("sandbox unit locked: %s", u.UnitID)
 			}
-		} else {
-			c2 := *overflow
-			for i := range chain2 {
-				u := chain2[i]
-				if u.IsLocked {
-					return fmt.Errorf("sandbox unit locked: %s", u.UnitID)
-				}
-				next := orderPayload{}
-				if u.ContractNo != nil && strings.TrimSpace(*u.ContractNo) != "" {
-					next.ContractNo = strings.TrimSpace(*u.ContractNo)
-					next.Customer = strings.TrimSpace(strPtrVal(u.Customer))
-					next.DealerName = strings.TrimSpace(strPtrVal(u.DealerName))
-					next.DueDate = u.DueDate
-					next.SalesID = u.SalesID
-					next.OrderRemark = u.OrderRemark
-					next.ModelType = strings.TrimSpace(u.ModelType)
-				}
-				updates := map[string]interface{}{
-					"contract_no":  c2.ContractNo,
-					"customer":     c2.Customer,
-					"dealer_name":  c2.DealerName,
-					"due_date":     c2.DueDate,
-					"sales_id":     c2.SalesID,
-					"order_remark": c2.OrderRemark,
-					"model_type":   c2.ModelType,
-					"is_locked":    false,
-					"locked_by":    nil,
-					"locked_at":    nil,
-				}
-				if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
-					return fmt.Errorf("write sandbox chain: %w", err)
-				}
-				affectedUnitIDs[u.UnitID] = struct{}{}
-				if next.ContractNo == "" {
-					c2.ContractNo = ""
-					break
-				}
-				c2 = next
-				if i == len(chain2)-1 {
-					if err := s.enqueueOverflow(tx, family, &c2); err != nil {
-						return fmt.Errorf("enqueue tail overflow: %w", err)
-					}
-				}
+			next := orderPayload{}
+			if u.ContractNo != nil && strings.TrimSpace(*u.ContractNo) != "" {
+				next.ContractNo = strings.TrimSpace(*u.ContractNo)
+				next.Customer = strings.TrimSpace(strPtrVal(u.Customer))
+				next.DealerName = strings.TrimSpace(strPtrVal(u.DealerName))
+				next.DueDate = u.DueDate
+				next.SalesID = u.SalesID
+				next.OrderRemark = u.OrderRemark
+				next.ModelType = strings.TrimSpace(u.ModelType)
+			}
+			updates := map[string]interface{}{
+				"contract_no":  c2.ContractNo,
+				"customer":     c2.Customer,
+				"dealer_name":  c2.DealerName,
+				"due_date":     c2.DueDate,
+				"sales_id":     c2.SalesID,
+				"order_remark": c2.OrderRemark,
+				"model_type":   c2.ModelType,
+				"is_locked":    false,
+				"locked_by":    nil,
+				"locked_at":    nil,
+			}
+			if err := s.unitRepo.UpdateOrderFields(tx, u.UnitID, updates); err != nil {
+				return fmt.Errorf("write sandbox chain: %w", err)
+			}
+			affectedUnitIDs[u.UnitID] = struct{}{}
+			if next.ContractNo == "" {
+				c2.ContractNo = ""
+				break
+			}
+			c2 = next
+			if i == len(chain2)-1 {
+				return fmt.Errorf("no available empty slot on the board to absorb rush order")
 			}
 		}
 	}
@@ -242,7 +260,7 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 		targetUnitIDForLog = chain[0].UnitID
 	} else {
 		// Attempt to get sandbox landing unit id
-		chain2, err := s.loadSandboxModelChain(tx, family, targetModel)
+		chain2, err := s.loadSandboxModelChain(tx, family, targetModel, "")
 		if err == nil && len(chain2) > 0 {
 			targetUnitIDForLog = chain2[0].UnitID
 			// Also lock the first card in sandbox
@@ -319,7 +337,7 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 		if chainModel == "" {
 			chainModel = targetModel
 		}
-		chain, err = s.loadProductionModelChain(tx, family, chainModel)
+		chain, err = s.loadProductionModelChain(tx, family, chainModel, "")
 		if err != nil && err.Error() != "target model is empty" {
 			// ignore non-fatal errors
 		}
@@ -334,7 +352,7 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 	var chain2 []model.Unit
 	start2 := -1
 	if start < 0 {
-		chain2, err = s.loadSandboxModelChain(tx, family, targetModel)
+		chain2, err = s.loadSandboxModelChain(tx, family, targetModel, "")
 		if err != nil {
 			return fmt.Errorf("load sandbox chain: %w", err)
 		}
@@ -422,7 +440,7 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 
 	if overflow != nil && overflow.ContractNo != "" {
 		if len(chain2) == 0 {
-			chain2, err = s.loadSandboxModelChain(tx, family, targetModel)
+			chain2, err = s.loadSandboxModelChain(tx, family, targetModel, "")
 			if err != nil {
 				return fmt.Errorf("load sandbox chain: %w", err)
 			}
@@ -526,7 +544,9 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 	return nil
 }
 
-func (s *RushSvc) loadProductionModelChain(tx *gorm.DB, family, targetModel string) ([]model.Unit, error) {
+// loadProductionModelChain returns units in in-production batches for the given family+model.
+// If batchNo is non-empty, only units from that specific batch are returned.
+func (s *RushSvc) loadProductionModelChain(tx *gorm.DB, family, targetModel, batchNo string) ([]model.Unit, error) {
 	normalizedModel := strings.TrimSpace(targetModel)
 	if normalizedModel == "" {
 		return nil, fmt.Errorf("target model is empty")
@@ -534,7 +554,7 @@ func (s *RushSvc) loadProductionModelChain(tx *gorm.DB, family, targetModel stri
 
 	// Production chain: exact model only, earliest in-production batches first.
 	var units []model.Unit
-	err := tx.Model(&model.Unit{}).
+	q := tx.Model(&model.Unit{}).
 		Select("units.*").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Joins("JOIN batches b ON b.batch_id = units.batch_id").
@@ -545,8 +565,15 @@ func (s *RushSvc) loadProductionModelChain(tx *gorm.DB, family, targetModel stri
 		Where("TRIM(units.model_type) = ?", normalizedModel).
 		Order("COALESCE(pl.display_order, 999999) ASC").
 		Order("b.batch_no ASC").
-		Order("units.slot_index ASC").
-		Find(&units).Error
+		Order("units.slot_index ASC")
+	if batchNo != "" {
+		if _, err := strconv.Atoi(batchNo); err == nil {
+			q = q.Where("b.batch_code = ? OR b.batch_no = ?", batchNo, batchNo)
+		} else {
+			q = q.Where("b.batch_code = ?", batchNo)
+		}
+	}
+	err := q.Find(&units).Error
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +618,9 @@ func (s *RushSvc) resolveBatchFamily(tx *gorm.DB, modelType string) (string, err
 	return engine.NormalizeModelType(modelName), nil
 }
 
-func (s *RushSvc) loadSandboxModelChain(tx *gorm.DB, family, targetModel string) ([]model.Unit, error) {
+// loadSandboxModelChain returns units in sandbox (Confirmed/Predicted) batches for the given family+model.
+// If batchNo is non-empty, only units from that specific batch are returned.
+func (s *RushSvc) loadSandboxModelChain(tx *gorm.DB, family, targetModel, batchNo string) ([]model.Unit, error) {
 	normalizedModel := strings.TrimSpace(targetModel)
 	isHighModel := strings.Contains(normalizedModel, "加高")
 
@@ -612,6 +641,13 @@ func (s *RushSvc) loadSandboxModelChain(tx *gorm.DB, family, targetModel string)
 		q = q.Where("(TRIM(units.model_type) = ? OR units.model_type = ?)", normalizedModel, family)
 	} else if normalizedModel == "" {
 		q = q.Where("units.model_type = ?", family)
+	}
+	if batchNo != "" {
+		if _, err := strconv.Atoi(batchNo); err == nil {
+			q = q.Where("b.batch_code = ? OR b.batch_no = ?", batchNo, batchNo)
+		} else {
+			q = q.Where("b.batch_code = ?", batchNo)
+		}
 	}
 	err := q.Find(&units).Error
 	if err != nil {

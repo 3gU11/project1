@@ -26,21 +26,21 @@ class TestUpsertV2:
 
         with patch("crud.inventory.get_engine") as mock_engine:
             mock_conn = MagicMock()
-            mock_trans = MagicMock()
             mock_engine.return_value.begin.return_value.__enter__ = lambda self: mock_conn
             mock_engine.return_value.begin.return_value.__exit__ = lambda self, *args: None
 
-            # 模拟 SHOW COLUMNS 返回 Location_Code 存在
-            mock_conn.execute.return_value.fetchone.return_value = ("Location_Code",)
+            def capture_execute(sql, params=None):
+                sql_str = str(sql)
+                if "SHOW COLUMNS" in sql_str:
+                    col = params.get("column_name") if params else "Location_Code"
+                    return MagicMock(fetchone=MagicMock(return_value=(col,)))
+                elif "ALTER TABLE" in sql_str:
+                    return MagicMock()
+                mock_result = MagicMock()
+                mock_result.rowcount = 1  # 1 = INSERT
+                return mock_result
 
-            # 模拟 UPSERT 执行结果
-            mock_result = MagicMock()
-            mock_result.rowcount = 1  # 1 = INSERT
-            mock_conn.execute.side_effect = [
-                MagicMock(fetchone=MagicMock(return_value=("Location_Code",))),  # SHOW COLUMNS
-                mock_result,  # UPSERT SN001
-                mock_result,  # UPSERT SN002
-            ]
+            mock_conn.execute.side_effect = capture_execute
 
             result = save_data_v2(df)
 
@@ -75,15 +75,19 @@ class TestUpsertV2:
             mock_conn = MagicMock()
             mock_engine.return_value.begin.return_value.__enter__ = lambda self: mock_conn
             mock_engine.return_value.begin.return_value.__exit__ = lambda self, *args: None
-            mock_conn.execute.return_value.fetchone.return_value = ("Location_Code",)
 
-            mock_result = MagicMock()
-            mock_result.rowcount = 1
-            mock_conn.execute.side_effect = [
-                MagicMock(fetchone=MagicMock(return_value=("Location_Code",))),
-                mock_result,  # SN001 (last)
-                mock_result,  # SN002
-            ]
+            def capture_execute(sql, params=None):
+                sql_str = str(sql)
+                if "SHOW COLUMNS" in sql_str:
+                    col = params.get("column_name") if params else "Location_Code"
+                    return MagicMock(fetchone=MagicMock(return_value=(col,)))
+                elif "ALTER TABLE" in sql_str:
+                    return MagicMock()
+                mock_result = MagicMock()
+                mock_result.rowcount = 1
+                return mock_result
+
+            mock_conn.execute.side_effect = capture_execute
 
             result = save_data_v2(df)
 
@@ -102,14 +106,19 @@ class TestUpsertV2:
             mock_conn = MagicMock()
             mock_engine.return_value.begin.return_value.__enter__ = lambda self: mock_conn
             mock_engine.return_value.begin.return_value.__exit__ = lambda self, *args: None
-            mock_conn.execute.return_value.fetchone.return_value = ("Location_Code",)
 
-            mock_result = MagicMock()
-            mock_result.rowcount = 1
-            mock_conn.execute.side_effect = [
-                MagicMock(fetchone=MagicMock(return_value=("Location_Code",))),
-                mock_result,
-            ]
+            def capture_execute(sql, params=None):
+                sql_str = str(sql)
+                if "SHOW COLUMNS" in sql_str:
+                    col = params.get("column_name") if params else "Location_Code"
+                    return MagicMock(fetchone=MagicMock(return_value=(col,)))
+                elif "ALTER TABLE" in sql_str:
+                    return MagicMock()
+                mock_result = MagicMock()
+                mock_result.rowcount = 1
+                return mock_result
+
+            mock_conn.execute.side_effect = capture_execute
 
             # v2 不应该抛出列缺失错误
             result = save_data_v2(df)
@@ -133,14 +142,19 @@ class TestUpsertV1V2Comparison:
             mock_conn = MagicMock()
             mock_engine.return_value.begin.return_value.__enter__ = lambda self: mock_conn
             mock_engine.return_value.begin.return_value.__exit__ = lambda self, *args: None
-            mock_conn.execute.return_value.fetchone.return_value = ("Location_Code",)
 
-            mock_result = MagicMock()
-            mock_result.rowcount = 1
-            mock_conn.execute.side_effect = [
-                MagicMock(fetchone=MagicMock(return_value=("Location_Code",))),
-                mock_result,
-            ]
+            def capture_execute(sql, params=None):
+                sql_str = str(sql)
+                if "SHOW COLUMNS" in sql_str:
+                    col = params.get("column_name") if params else "Location_Code"
+                    return MagicMock(fetchone=MagicMock(return_value=(col,)))
+                elif "ALTER TABLE" in sql_str:
+                    return MagicMock()
+                mock_result = MagicMock()
+                mock_result.rowcount = 1
+                return mock_result
+
+            mock_conn.execute.side_effect = capture_execute
 
             result = save_data_v2(df)
             assert result["inserted"] == 1

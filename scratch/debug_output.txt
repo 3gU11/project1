@@ -1,0 +1,45 @@
+=== wechat_batch_summary ===
+                          summary_id batch_no expected_inbound_time       model  quantity  heightened original_batch_no original_expected_inbound_time          updated_at
+0   3329f451bc19a4d1f307b9fb1852e1f7    05-03            2026-05-28  FR-400AUTO         3           0                                             None 2026-05-23 19:26:12
+1   4bf96d7bddf675bb60cb1bd496db2a37    04-04            2026-05-07  FR-400AUTO         2           0                                             None 2026-05-23 19:26:12
+2   54d9a4070cd7e55fc2fc9d3902bccc5a    06-01            2026-05-28  FR-400AUTO         3           0                                             None 2026-05-23 19:36:08
+3   6094f0e3a677e45e649fd0ac5f4fe485    03-19            2026-04-30  FR-400AUTO        12           0                                             None 2026-05-23 19:26:12
+4   829f737a7428065145f8c95463f22c20    03-10            2026-04-25  FR-400AUTO         1           0                                             None 2026-05-23 19:26:12
+5   9c49803710822c6b1afaa40d0c3488cb    03-17            2026-04-27  FR-400AUTO        11           0                                             None 2026-05-23 19:26:12
+6   abfa141bf156edc839a8aeb227988e7b    03-12            2026-04-25  FR-400AUTO         3           0                                             None 2026-05-23 19:26:12
+7   b4a6f7947e62cef8b0707f0010aa7d92    03-15            2026-04-22  FR-400AUTO         9           0                                             None 2026-05-23 19:26:12
+8   dfa790341e7f9c45f6fb9e54c30d6490    06-02            2026-05-29  FR-400AUTO        21           0                                             None 2026-05-23 19:36:25
+9   e10554ef315f23661e396fb3746d6d5e    04-06            2026-05-09  FR-400AUTO        11           0                                             None 2026-05-23 19:26:12
+10  e352edc527468d987fecc4acbffa783c    04-12            2026-05-12  FR-400AUTO         5           0                                             None 2026-05-23 19:26:12
+11  e9583feb295eeecf27bdb8e187eaea9b    04-02            2026-05-04  FR-400AUTO         4           0                                             None 2026-05-23 19:26:12
+12  fee79d1c5ad4fc7bc209fab23f41de62      库存中                   NaT  FR-400AUTO         6           0                                             None 2026-05-23 19:36:25
+13  2dd3e9ee7b8195b990aa8a5e95c5a4f0    03-19            2026-04-30  FR-500AUTO         5           0                                             None 2026-05-23 19:26:12
+14  3b8e4285b906d2b9a81145aba44f1803    04-02            2026-05-04  FR-500AUTO         9           0                                             None 2026-05-23 19:26:12
+15  6304f2910aa42e4814bb6a329414b66c    05-04            2026-06-11  FR-500AUTO         3           0                                             None 2026-05-23 19:26:12
+16  68976919fb8faeec76210d3cfac53296    04-04            2026-05-07  FR-500AUTO         4           0                                             None 2026-05-23 19:26:12
+17  ae6c00c5db61c18cca8cef2cbb7935d9    04-11            2026-04-30  FR-500AUTO         2           0                                             None 2026-05-23 19:26:12
+18  b57c17280525167cd59728a85b3d2a0b    04-12            2026-05-12  FR-500AUTO        10           0                                             None 2026-05-23 19:26:12
+19  b65007ddd1c8ab6dfbd59cec6d2acb0b    06-02            2026-05-29  FR-500AUTO         5           0                                             None 2026-05-23 19:26:12
+20  c7e6e171057a19b4ef5ebb645c256810    03-12            2026-04-25  FR-500AUTO         5           0                                             None 2026-05-23 19:26:12
+21  cf8f1751fc267fbc3d7fc4c12b8d4021    06-01            2026-05-28  FR-500AUTO        21           0                                             None 2026-05-23 19:26:12
+22  f157a3057b41f7a44c1fa8b5c382933b    03-15            2026-04-22  FR-500AUTO         7           0                                             None 2026-05-23 19:26:12
+23  f73c06d4b4e38c8afab21d1baf04e974    04-06            2026-05-09  FR-500AUTO         5           0                                             None 2026-05-23 19:26:12
+
+=== finished_goods_data counts ===
+            机型        状态  cnt
+0   FR-400AUTO       已出库  146
+1   FR-500AUTO       已出库  141
+2   FR-400AUTO       库存中    6
+3   FR-500AUTO  库存中（A05）    1
+4   FR-400AUTO  库存中（C07）    1
+5   FR-400AUTO  库存中（D07）    1
+6   FR-500AUTO  库存中（D09）    1
+7   FR-400AUTO       待入库   85
+8   FR-500AUTO       待入库   76
+9   FR-400AUTO       待发货   14
+10  FR-500AUTO       待发货   19
+
+=== finished_goods_data detail (96- batch) ===
+Empty DataFrame
+Columns: [流水号, 批次号, 预计入库时间, 机型, 状态, 占用订单号, 客户, 代理商]
+Index: []

@@ -22,12 +22,14 @@
             <span class="pair-label">急</span>
             <span class="pair-contract">{{ pair.urgentUnit?.contract_no || '?' }}</span>
             <span class="pair-model">{{ pair.urgentUnit?.model_type || '' }}</span>
+            <span class="pair-due">交期 {{ formatUnitDueDate(pair.urgentUnit) }}</span>
           </div>
           <span class="pair-arrow">→</span>
           <div class="pair-unit target">
             <span class="pair-label">标</span>
             <span class="pair-contract">{{ pair.targetUnit?.contract_no || '点击选择' }}</span>
             <span class="pair-model">{{ pair.targetUnit?.model_type || '' }}</span>
+            <span class="pair-due">交期 {{ formatUnitDueDate(pair.targetUnit) }}</span>
           </div>
         </div>
         <div v-if="pair.status === 'done'" class="pair-status done">已完成</div>
@@ -159,6 +161,7 @@ import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTransferStore } from '../../stores/useSandboxTransferStore'
 import { useLineStore } from '../../stores/useSandboxLineStore'
+import { formatDate } from '../../utils/sandboxModelType'
 
 const store = useTransferStore()
 const lineStore = useLineStore()
@@ -180,6 +183,11 @@ const allKanbanUnits = computed(() => {
 })
 
 const candidates = ref<any[]>([])
+
+function formatUnitDueDate(unit: any) {
+  const due = unit?.due_date || unit?.promised_due_date || ''
+  return due ? formatDate(due) : '-'
+}
 
 function searchUnits() {
   const keyword = urgentSearch.value.trim().toLowerCase()
@@ -369,6 +377,8 @@ defineExpose({
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
 }
 .pair-label {
   display: inline-flex;
@@ -385,6 +395,13 @@ defineExpose({
 .pair-unit.target .pair-label { background: #1677ff; }
 .pair-contract { font-weight: 600; }
 .pair-model { color: #888; font-size: 11px; }
+.pair-due {
+  flex-basis: 100%;
+  margin-left: 22px;
+  color: #e65100;
+  font-size: 11px;
+  font-weight: 600;
+}
 .pair-arrow { color: #999; font-weight: 700; }
 .pair-status {
   margin-top: 4px;

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -13,7 +13,13 @@ client = TestClient(app)
 
 
 def test_get_operation_logs_filters_new_business_fields(monkeypatch):
+    from sqlalchemy import event
     engine = create_engine("sqlite:///:memory:")
+    
+    @event.listens_for(engine, "connect")
+    def connect(dbapi_connection, connection_record):
+        dbapi_connection.create_function("DATE_FORMAT", 2, lambda val, fmt: str(val)[:10] if val else "")
+
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -26,20 +32,20 @@ def test_get_operation_logs_filters_new_business_fields(monkeypatch):
         rows = [
             {
                 "user_id": "boss",
-                "username": "老板",
-                "operate_time": "2026-04-18 10:00:00",
-                "module": "销售下单",
-                "action_type": "新增",
-                "biz_type": "订单",
+                "username": "boss_user",
+                "operate_time": (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S"),
+                "module": "sales_order",
+                "action_type": "create",
+                "biz_type": "order",
                 "content": "创建订单：SO-001",
             },
             {
                 "user_id": "admin",
-                "username": "管理员",
-                "operate_time": "2026-04-18 09:00:00",
-                "module": "用户管理",
-                "action_type": "修改",
-                "biz_type": "用户",
+                "username": "admin_user",
+                "operate_time": (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d %H:%M:%S"),
+                "module": "user_manage",
+                "action_type": "modify",
+                "biz_type": "user",
                 "content": "修改用户：demo",
             },
         ]
@@ -51,19 +57,19 @@ def test_get_operation_logs_filters_new_business_fields(monkeypatch):
     df, total = audit_logs.get_operation_logs(
         page=1,
         page_size=20,
-        user="老板",
-        module="销售",
-        operation="新增",
-        biz_type="订单",
+        user="boss",
+        module="sales",
+        operation="create",
+        biz_type="order",
         days=30,
     )
 
     assert total == 1
     assert list(df.columns) == ["时间", "姓名", "模块", "操作类型", "业务对象", "操作内容"]
-    assert df.iloc[0]["姓名"] == "老板"
-    assert df.iloc[0]["模块"] == "销售下单"
-    assert df.iloc[0]["操作类型"] == "新增"
-    assert df.iloc[0]["业务对象"] == "订单"
+    assert df.iloc[0]["姓名"] == "boss_user"
+    assert df.iloc[0]["模块"] == "sales_order"
+    assert df.iloc[0]["操作类型"] == "create"
+    assert df.iloc[0]["业务对象"] == "order"
     assert df.iloc[0]["操作内容"] == "创建订单：SO-001"
 
 

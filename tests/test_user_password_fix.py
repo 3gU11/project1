@@ -35,7 +35,7 @@ def test_list_users_excludes_password():
         with patch("pandas.read_sql") as mock_read_sql:
             mock_read_sql.side_effect = [mock_total_df, mock_df]
             
-            result = list_users.__wrapped__(skip=0, limit=10, status="", role="", keyword="", _ctx={"role": "Admin"})
+            result = list_users(skip=0, limit=10, status="", role="", keyword="", _ctx={"role": "Admin"})
             
             assert "data" in result
             assert len(result["data"]) == 2
@@ -61,7 +61,7 @@ def test_audit_user_does_not_affect_passwords():
         mock_result.fetchone.return_value = ("user1",)
         mock_conn.execute.return_value = mock_result
         
-        result = audit_user.__wrapped__(
+        result = audit_user(
             payload=payload,
             request=MagicMock(),
             _ctx={"username": "admin", "name": "管理员"}
@@ -75,7 +75,7 @@ def test_audit_user_does_not_affect_passwords():
         
         # 第二次调用应该是 UPDATE
         second_call = call_args_list[1]
-        sql = str(second_call[1][1])  # text(sql)
+        sql = str(second_call[0][0])  # text(sql)
         assert "UPDATE" in sql
         assert "password" not in sql  # 不涉及密码字段
 
@@ -99,7 +99,7 @@ def test_patch_user_does_not_affect_passwords():
         mock_result.fetchone.return_value = ("user1",)
         mock_conn.execute.return_value = mock_result
         
-        result = patch_user.__wrapped__(
+        result = patch_user(
             username="user1",
             payload=payload,
             request=MagicMock(),
@@ -109,7 +109,7 @@ def test_patch_user_does_not_affect_passwords():
         # 获取最后一次执行的是 UPDATE
         call_args_list = mock_conn.execute.call_args_list
         last_call = call_args_list[-1]
-        sql = str(last_call[1][1])  # text(sql)
+        sql = str(last_call[0][0])  # text(sql)
         
         assert "UPDATE" in sql
         assert "role = :role" in sql or "name = :name" in sql

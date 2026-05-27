@@ -303,7 +303,9 @@
     >
       <div class="save-mode-body">
         <div>请选择保存方式：</div>
-        <div class="save-mode-sub">进入沙盘（参与老板计划排产）或使用现货（直接置为已规划）。</div>
+        <div class="save-mode-sub">
+          {{ isRushOrderActive ? '进入生产看板（参与急单排产）' : '进入沙盘（参与老板计划排产）' }}或使用现货（直接置为已规划）。
+        </div>
         <div v-if="!canUseSpotMode" class="save-mode-hint">
           当前“使用现货”不可用：{{ spotModeBlockReason }}
         </div>
@@ -311,7 +313,9 @@
       <template #footer>
         <el-button @click="closeSaveModeDialog">取消</el-button>
         <el-button type="warning" :disabled="!canUseSpotMode" @click="chooseSaveMode('spot')">使用现货</el-button>
-        <el-button type="primary" @click="chooseSaveMode('sandbox')">进入沙盘</el-button>
+        <el-button type="primary" @click="chooseSaveMode('sandbox')">
+          {{ isRushOrderActive ? '进入生产看板' : '进入沙盘' }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -429,14 +433,18 @@
 
       <div class="save-mode-section">
         <div class="ops-label">保存方式</div>
-        <div class="save-mode-sub">进入沙盘（参与老板计划排产）或使用现货（直接置为已规划）。</div>
+        <div class="save-mode-sub">
+          {{ isDealerRushActive ? '进入生产看板（参与急单排产）' : '进入沙盘（参与老板计划排产）' }}或使用现货（直接置为已规划）。
+        </div>
         <div v-if="!dealerConvertCanUseSpot" class="save-mode-blocked">当前“使用现货”不可用：{{ dealerConvertSpotBlockReason }}</div>
       </div>
 
       <template #footer>
         <el-button @click="dealerConvertDialogVisible = false">取消</el-button>
         <el-button type="warning" :disabled="!dealerConvertCanUseSpot" :loading="dealerConvertSaving" @click="submitDealerConvert('spot')">使用现货</el-button>
-        <el-button type="primary" :loading="dealerConvertSaving" @click="submitDealerConvert('sandbox')">进入沙盘</el-button>
+        <el-button type="primary" :loading="dealerConvertSaving" @click="submitDealerConvert('sandbox')">
+          {{ isDealerRushActive ? '进入生产看板' : '进入沙盘' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -444,6 +452,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Document } from '@element-plus/icons-vue'
 import { apiGet, apiGetAll, apiPost, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
@@ -453,6 +462,8 @@ import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
+
+const router = useRouter()
 
 type StatusTab = '待规划' | '已规划' | '已完成'
 type MessageResponse = {
@@ -554,6 +565,8 @@ const dealerConvertForm = reactive({
   contractNote: '',
   sourceOrderNo: '',
 })
+const isRushOrderActive = computed(() => batchForm.value.isRush)
+const isDealerRushActive = computed(() => dealerConvertForm.isRush)
 const saveModeDialogVisible = ref(false)
 const canUseSpotMode = ref(true)
 const spotModeBlockReason = ref('')
@@ -934,13 +947,24 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
       autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
       pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
     ].filter(Boolean).join('，')
-    const modeText = saveMode === 'spot' ? '已按“使用现货”处理（合同状态=已规划）' : '已按“进入沙盘”处理（合同状态=待规划）'
+    const modeText = saveMode === 'spot'
+      ? '已按“使用现货”处理（合同状态=已规划）'
+      : (dealerConvertForm.isRush ? '已按“进入生产看板”处理（合同状态=待规划）' : '已按“进入沙盘”处理（合同状态=待规划）')
     ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
     dealerConvertDialogVisible.value = false
     activeTab.value = saveMode === 'spot' ? '已规划' : '待规划'
     selectedContractId.value = String(res.contract_no || dealerConvertForm.contractNo).trim()
     await fetchContracts(true)
     await loadDealerOrders()
+    if (saveMode === 'sandbox') {
+      if (dealerConvertForm.isRush) {
+        router.push('/production-kanban')
+      } else {
+        router.push('/prediction-sandbox')
+      }
+    } else if (saveMode === 'spot') {
+      router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    }
   }, { errorMessage: '经销商订单转合同失败' })
 }
 
@@ -1041,15 +1065,27 @@ const submitBatchContracts = async () => {
       autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
       pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
     ].filter(Boolean).join('，')
-    const modeText = saveMode === 'spot' ? '已按“使用现货”处理（合同状态=已规划）' : '已按“进入沙盘”处理（合同状态=待规划）'
+    const modeText = saveMode === 'spot'
+      ? '已按“使用现货”处理（合同状态=已规划）'
+      : (batchForm.value.isRush ? '已按“进入生产看板”处理（合同状态=待规划）' : '已按“进入沙盘”处理（合同状态=待规划）')
     ElMessage.success(`${res.message || '批量录入成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
     activeTab.value = saveMode === 'spot' ? '已规划' : '待规划'
     selectedContractId.value = cid
     batchPanelOpen.value = false
+    const isRush = batchForm.value.isRush
     resetBatchForm()
     batchFormDraft.clearDraft()
     batchItemsDraft.clearDraft()
     await fetchContracts(true)
+    if (saveMode === 'sandbox') {
+      if (isRush) {
+        router.push('/production-kanban')
+      } else {
+        router.push('/prediction-sandbox')
+      }
+    } else if (saveMode === 'spot') {
+      router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    }
   }, { errorMessage: '批量录入失败' })
 }
 

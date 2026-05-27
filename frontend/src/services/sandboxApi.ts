@@ -96,10 +96,13 @@ export const markSpot = (id: string) =>
   apiPost(`${P}/units/${id}/mark-spot`)
 
 // Forecast
-export const recompute = (targetSlotNo?: number) =>
+export const recompute = (targetSlotNo?: number, isClicked?: boolean) =>
   apiPost(
     `${P}/forecast/recompute`,
-    targetSlotNo && targetSlotNo > 0 ? { target_slot_no: targetSlotNo } : undefined,
+    {
+      target_slot_no: targetSlotNo ?? 1,
+      is_clicked: !!isClicked
+    },
     { timeout: 130000 }
   )
 
