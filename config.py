@@ -1,8 +1,5 @@
 import os
 
-# 禁用 PaddleOCR 联网模型检查，解决启动慢的问题
-os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
-
 # MySQL Configuration
 MYSQL_HOST = os.environ.get("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
@@ -41,17 +38,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONTRACT_ABS_DIR = os.path.join(BASE_DIR, CONTRACT_DIR)
 MACHINE_ARCHIVE_ABS_DIR = os.path.join(BASE_DIR, MACHINE_ARCHIVE_DIR)
 
-# Optional dependency flags
-try:
-    from paddleocr import PaddleOCR
-    import pdfplumber
-    import docx
-    OCR_AVAILABLE = True
-except ImportError:
-    PaddleOCR = None
-    pdfplumber = None
-    docx = None
-    OCR_AVAILABLE = False
+# Optional dependency flags (PaddleOCR and related features are disabled/unused)
+PaddleOCR = None
+pdfplumber = None
+docx = None
+OCR_AVAILABLE = False
 
 try:
     import mammoth
