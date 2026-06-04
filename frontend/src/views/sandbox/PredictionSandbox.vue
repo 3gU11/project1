@@ -61,7 +61,7 @@
         :key="batch.batch_id"
         class="batch-card"
         :class="[`type-${batch.model_type}`, { 'batch-confirmed': batch.status === 'Confirmed', 'batch-target-slot': isTargetOptimizedBatch(batch), 'batch-recompute-target': isSelectedRecomputeTarget(batch), 'batch-placeholder-slot': isNonTargetPredictedBatch(batch), 'is-valid-drop-target': dragging && isValidDragTargetBatch(batch), 'is-invalid-drop-target': dragging && !isValidDragTargetBatch(batch) }]"
-        :style="{ position: 'relative', width: '390px', minWidth: '390px', maxWidth: '390px', borderLeft: selectedBatches.includes(batchSlotOrder(batch)) ? '4px solid #409eff' : '' }"
+        :style="{ position: 'relative', width: '390px', minWidth: '390px', maxWidth: '390px', borderLeft: selectedBatches.includes(getBatchUniqueId(batch)) ? '4px solid #409eff' : '' }"
       >
         <div v-if="targetBadgeText(batch)" class="batch-target-badge">
           {{ targetBadgeText(batch) }}
@@ -71,12 +71,12 @@
           <el-tag v-else-if="batch.status === 'Confirmed'" type="success" size="small" class="corner-tag">已确认</el-tag>
           <el-tag v-else size="small" class="corner-tag">{{ batch.status }}</el-tag>
         </div>
-        <div class="batch-header" @click="toggleSelect(batchSlotOrder(batch))" style="cursor: pointer;">
+        <div class="batch-header" @click="toggleSelect(getBatchUniqueId(batch))" style="cursor: pointer;">
           <div class="batch-header-main">
             <div class="batch-headline">
               <el-checkbox
-                :model-value="selectedBatches.includes(batchSlotOrder(batch))"
-                @change="toggleSelect(batchSlotOrder(batch))"
+                :model-value="selectedBatches.includes(getBatchUniqueId(batch))"
+                @change="toggleSelect(getBatchUniqueId(batch))"
                 class="batch-select"
                 @click.stop
               />
@@ -323,7 +323,7 @@ const batchStore = useBatchStore()
 const recomputing = ref(false)
 const optimizedTargetSlotNo = ref(1)
 
-const selectedBatches = ref<number[]>([])
+const selectedBatches = ref<string[]>([])
 const batchCodeInputs = ref<Record<string, string>>({})
 const inboundDateInputs = ref<Record<string, string>>({})
 const lastBatchCodeFromDB = ref('')
@@ -372,8 +372,8 @@ async function autoRecomputeOnEnter() {
 }
 const selectedRecomputeTarget = computed(() => {
   if (selectedBatches.value.length !== 1) return null
-  const selectedSlot = Number(selectedBatches.value[0])
-  const batch = batchStore.batches.find((b: any) => batchSlotOrder(b) === selectedSlot)
+  const selectedBatchId = selectedBatches.value[0]
+  const batch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
   if (!batch || String(batch.status || '') !== 'Predicted' || isSpecialBatch(batch)) return null
   return batch
 })
@@ -452,9 +452,15 @@ const filteredBatches = computed(() => {
 })
 
 function batchSlotOrder(batch: any): number {
+  // Use forecast_slot_no for ordering, but ensure uniqueness by combining with status
   const slotNo = Number(batch?.forecast_slot_no)
   if (Number.isFinite(slotNo) && slotNo > 0) return slotNo
   return Number(batch?.batch_no || 0)
+}
+
+// Get unique identifier for batch selection (use batch_id instead of slot number)
+function getBatchUniqueId(batch: any): string {
+  return String(batch?.batch_id || '')
 }
 
 // 根据大类库存缺口自动推断本次备货建议列
@@ -1028,15 +1034,15 @@ function formatBatchCode(batchNo: any) {
 
 const canRevoke = computed(() => {
   if (selectedBatches.value.length !== 1) return false
-  const selectedSlot = Number(selectedBatches.value[0])
-  const batch = batchStore.batches.find((b: any) => batchSlotOrder(b) === selectedSlot)
+  const selectedBatchId = selectedBatches.value[0]
+  const batch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
   return batch?.status === 'Confirmed'
 })
 
 async function batchRevoke() {
   if (selectedBatches.value.length !== 1) return
-  const selectedSlot = Number(selectedBatches.value[0])
-  const batch = batchStore.batches.find((b: any) => batchSlotOrder(b) === selectedSlot)
+  const selectedBatchId = selectedBatches.value[0]
+  const batch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
   if (!batch) return
   const selectedId = batch.batch_id
   try {
@@ -1060,15 +1066,22 @@ function displayBatchCode(batch: any) {
   return formatBatchCode(batch.batch_no)
 }
 
-async function toggleSelect(slotNo: number) {
+async function toggleSelect(batchId: string) {
   if (recomputing.value || batchStore.loading) return
-  const isSelected = selectedBatches.value[0] === slotNo
-  selectedBatches.value = isSelected ? [] : [slotNo]
-  
+  const isSelected = selectedBatches.value[0] === batchId
+  selectedBatches.value = isSelected ? [] : [batchId]
+
   if (!isSelected) {
-    // 选中列直接进行重算
-    const selectedBatch = batchStore.batches.find((b: any) => batchSlotOrder(b) === slotNo)
+    const selectedBatch = batchStore.batches.find((b: any) => getBatchUniqueId(b) === batchId)
     if (selectedBatch && String(selectedBatch.status || '') === 'Predicted' && !isSpecialBatch(selectedBatch)) {
+      const slotNo = batchSlotOrder(selectedBatch)
+
+      // 如果点击的已经是"本次备货建议"列，只选中不重算
+      if (slotNo === optimizedTargetSlotNo.value) {
+        return
+      }
+
+      // 选中其他预测列时才触发重算
       recomputing.value = true
       try {
         await sandboxApi.recompute(slotNo, true)
@@ -1165,8 +1178,8 @@ async function handleRecompute() {
   let targetSlotNo: number | undefined
   let isClicked = false
   if (selectedBatches.value.length === 1) {
-    const selectedSlot = Number(selectedBatches.value[0])
-    const selectedBatch = batchStore.batches.find((b: any) => batchSlotOrder(b) === selectedSlot)
+    const selectedBatchId = selectedBatches.value[0]
+    const selectedBatch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
     if (!selectedBatch || String(selectedBatch.status || '') !== 'Predicted') {
       ElMessage.warning('请选择 1 个待确认预测批次作为重算目标列')
       return
@@ -1211,8 +1224,8 @@ async function batchConfirm() {
     ElMessage.warning('审核前请勾选 1 个待审批次')
     return
   }
-  const selectedSlot = Number(selectedBatches.value[0])
-  const batch = batchStore.batches.find((b: any) => batchSlotOrder(b) === selectedSlot)
+  const selectedBatchId = selectedBatches.value[0]
+  const batch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
   if (!batch) return
   const selectedId = batch.batch_id
 

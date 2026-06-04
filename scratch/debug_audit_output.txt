@@ -1,4 +1,0 @@
-=== audit_log (May 23) ===
-Empty DataFrame
-Columns: [timestamp, user, ip, action, details]
-Index: []

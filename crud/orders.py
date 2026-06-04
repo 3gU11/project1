@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 
 from crud.inventory import get_data, save_data
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
+from crud.inbound_history import record_inbound_history
 from crud.logs import append_log
 from database import get_engine
 from utils.cache import fetch_data_with_cache
@@ -220,6 +221,10 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     # 记录原先是 待入库 的机台（用于日志）
     current_status_df = df[df['流水号'].isin(selected_sns)]
     pending_inbound_sns = current_status_df[current_status_df['状态'] == '待入库']['流水号'].tolist()
+    pending_status_map = {
+        str(row.get("流水号", "")).strip(): str(row.get("状态", "") or "").strip()
+        for _, row in current_status_df.iterrows()
+    }
     if pending_inbound_sns:
         append_log("直接配货-自动入库", pending_inbound_sns, operator=operator)
 
@@ -256,6 +261,16 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                                 text("UPDATE finished_goods_data SET 合同备注 = :note WHERE 流水号 = :sn"),
                                 {"note": note, "sn": sn}
                             )
+                if pending_inbound_sns:
+                    record_inbound_history(
+                        conn,
+                        pending_inbound_sns,
+                        source="直接配货-自动入库",
+                        operator=operator or "",
+                        inbound_time=now_str,
+                        status_before=pending_status_map,
+                        status_after="待发货",
+                    )
         except Exception as e:
             raise RuntimeError(f"配货写入失败: {e}") from e
 

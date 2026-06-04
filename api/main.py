@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,7 @@ app.include_router(model_dictionary.router, prefix="/api/v1/model-dictionary", t
 app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles"])
 app.include_router(sandbox.router, prefix="/api/v1/sandbox", tags=["Sandbox"])
 app.include_router(dealer_orders.router, prefix="/api/v1/dealer-orders", tags=["DealerOrders"])
+app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 
 # Register sandbox WS directly on app (bypasses router-level HTTP dependencies)
 app.websocket("/api/v1/sandbox/ws")(sandbox.proxy_ws)

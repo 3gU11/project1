@@ -188,12 +188,12 @@ def execute_import_transaction_payload(payload, retry_times=1):
 
     if rows_to_add:
         df_add = pd.DataFrame(rows_to_add)
-        merged_df = pd.concat([db_df, df_add], ignore_index=True)
-        merged_df = merged_df.drop_duplicates(subset=['流水号'], keep='first')
+        from config import USE_UPSERT_OPTIMIZED
+        save_df = df_add if USE_UPSERT_OPTIMIZED else pd.concat([db_df, df_add], ignore_index=True).drop_duplicates(subset=['流水号'], keep='first')
         last_error = None
         for _ in range(retry_times + 1):
             try:
-                cache.inventory.save_data(merged_df)
+                cache.inventory.save_data(save_df)
                 last_error = None
                 break
             except Exception as e:

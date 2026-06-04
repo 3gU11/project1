@@ -151,7 +151,7 @@ export const getLastBatchCode = () =>
 
 // Auto-import plan_import → finished_goods_data on line assignment
 export const importBatchToFinishedGoods = (batchId: string) =>
-  apiPost(`${P}/batches/${batchId}/import-to-finished-goods`)
+  apiPost(`${P}/batches/${batchId}/import-to-finished-goods`, undefined, { timeout: 120000 })
 
 // Production Queue (overflow waiting orders)
 export const getProductionQueue = (params?: Record<string, any>) =>

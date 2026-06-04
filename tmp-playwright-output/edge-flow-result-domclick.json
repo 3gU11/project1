@@ -1,0 +1,125 @@
+{
+  "ok": false,
+  "error": "locator.waitFor: Timeout 60000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.el-dialog').filter({ hasText: '最终确认' }).last() to be visible\u001b[22m\n\n    at D:\\CURSORpj\\V8BetaV1.1\\tmp_pw_edge_domclick.js:73:25",
+  "metrics": {
+    "loginMs": 1021,
+    "openSandboxMs": 1138
+  },
+  "screenshot": "D:\\CURSORpj\\V8BetaV1.1\\tmp-playwright-output\\edge-flow-fail-1780391268769.png",
+  "recentNetwork": [
+    {
+      "url": "http://127.0.0.1:8000/api/v1/roles/",
+      "method": "GET",
+      "status": 200,
+      "ms": 6
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/auth/login",
+      "method": "POST",
+      "status": 200,
+      "ms": 7
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/dealer-orders/pending-count",
+      "method": "GET",
+      "status": 200,
+      "ms": 51
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/model-dictionary/",
+      "method": "GET",
+      "status": 200,
+      "ms": 52
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/model-types",
+      "method": "GET",
+      "status": 200,
+      "ms": 12
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/model-types",
+      "method": "GET",
+      "status": 200,
+      "ms": 34
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/dealer-orders/pending-count",
+      "method": "GET",
+      "status": 200,
+      "ms": 35
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/model-dictionary/",
+      "method": "GET",
+      "status": 200,
+      "ms": 38
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/capacity-ratio",
+      "method": "GET",
+      "status": 200,
+      "ms": 25
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/inventory/?skip=0&limit=1000",
+      "method": "GET",
+      "status": 200,
+      "ms": 124
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/batches/last-batch-code",
+      "method": "GET",
+      "status": 200,
+      "ms": 136
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/inventory/?skip=1000&limit=1000",
+      "method": "GET",
+      "status": 200,
+      "ms": 81
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/inventory/?skip=2000&limit=1000",
+      "method": "GET",
+      "status": 200,
+      "ms": 38
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/forecast/recompute",
+      "method": "POST",
+      "status": 200,
+      "ms": 131
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/batches?status=Predicted,Confirmed",
+      "method": "GET",
+      "status": 200,
+      "ms": 590
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/forecast/recompute",
+      "method": "POST",
+      "status": 200,
+      "ms": 214
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/batches?status=Predicted,Confirmed",
+      "method": "GET",
+      "status": 200,
+      "ms": 469
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/sandbox/batches?status=Predicted,Confirmed",
+      "method": "GET",
+      "status": 200,
+      "ms": 563
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/dealer-orders/pending-count",
+      "method": "GET",
+      "status": 200,
+      "ms": 18
+    }
+  ]
+}

@@ -36,6 +36,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', permission: 'TRACEABILITY', isManagement: true, component: () => import('../views/Traceability.vue') },
   { path: '/production-kanban', name: 'ProductionKanban', label: '🏭 生产看板', title: '生产看板', permission: 'KANBAN_VIEW', isManagement: true, component: () => import('../views/sandbox/ProductionKanban.vue') },
   { path: '/prediction-sandbox', name: 'PredictionSandbox', label: '👑 预测沙盘', title: '预测沙盘', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/PredictionSandbox.vue') },
+  { path: '/reports', name: 'Reports', label: '📊 报表管理', title: '报表管理', permission: 'REPORT_VIEW', isManagement: true, component: () => import('../views/ReportManagement.vue') },
 ]
 
 export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({

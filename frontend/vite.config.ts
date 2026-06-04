@@ -31,7 +31,9 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
-    }
+    },
+    // Ensure all routes fallback to index.html for SPA routing
+    historyApiFallback: true,
   },
   test: {
     environment: 'jsdom',

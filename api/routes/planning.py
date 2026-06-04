@@ -1186,9 +1186,16 @@ def complete_order_allocation_api(
             raise HTTPException(status_code=422, detail=f"配货未完成：{'；'.join(missing)}")
 
         serials = allocated_df["流水号"].astype(str).str.strip().tolist()
+        pending_inbound_df = allocated_df[allocated_df["状态"].astype(str).str.strip() == "待入库"].copy()
+        pending_inbound_serials = pending_inbound_df["流水号"].astype(str).str.strip().tolist()
+        pending_status_map = {
+            str(row.get("流水号", "")).strip(): str(row.get("状态", "") or "").strip()
+            for _, row in pending_inbound_df.iterrows()
+        }
         if serials:
             from database import get_engine
             from sqlalchemy import text, bindparam
+            from crud.inbound_history import record_inbound_history
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
             try:
                 with get_engine().begin() as conn:
@@ -1201,6 +1208,16 @@ def complete_order_allocation_api(
                         """).bindparams(bindparam("sns", expanding=True)),
                         {"now": now_str, "sns": serials}
                     )
+                    if pending_inbound_serials:
+                        record_inbound_history(
+                            conn,
+                            pending_inbound_serials,
+                            source="配货自动入库",
+                            operator=current_operator,
+                            inbound_time=now_str,
+                            status_before=pending_status_map,
+                            status_after="待发货",
+                        )
             except Exception as ex:
                 raise HTTPException(status_code=500, detail=f"更新机台状态为待发货失败: {ex}")
             append_log("配货自动入库", serials, operator=current_operator)
@@ -1970,6 +1987,8 @@ def export_production_history(sheet: str = "all"):
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
+        from openpyxl.cell.text import InlineFont
+        from openpyxl.cell.rich_text import TextBlock, CellRichText
 
         wb = Workbook()
 
@@ -2010,14 +2029,18 @@ def export_production_history(sheet: str = "all"):
             return width
 
         def format_cell_value(model_type, remark, qty, target_width=20):
-            prefix = f"{model_type} {remark}" if remark else model_type
-            w = get_display_width(prefix)
-            spaces = max(2, target_width - w)
-            return prefix + " " * spaces + str(qty)
+            # Return tuple of (model_text, quantity) for rich text formatting
+            if remark:
+                model_text = f"{model_type} {remark}"
+            else:
+                model_text = model_type
+            return (model_text, qty)
 
         # ------------------ 填充 Sheet 1: 排产台账 ------------------
         if include_ledger:
-            model_columns = ["300", "400", "500", "600", "7055", "8055", "8060"]
+            # Optimize column layout: separate 7055 and 8055, remove expected inbound time
+            # 300 (narrow), 400, 500, 600/8060 (merged), 7055, 8055
+            model_columns = ["300", "400", "500", "600", "7055", "8055"]
 
             batches = OrderedDict()
             for r in records:
@@ -2036,7 +2059,7 @@ def export_production_history(sheet: str = "all"):
                     batches[batch_code]["due_dates"].add(due_date)
 
             ws.views.sheetView[0].showGridLines = True
-            headers = ["批次号"] + model_columns + ["合计", "预计入库时间"]
+            headers = ["批次号"] + model_columns + ["合计"]
             ws.append(headers)
 
             for col_idx in range(1, len(headers) + 1):
@@ -2049,7 +2072,15 @@ def export_production_history(sheet: str = "all"):
             total_cols = len(headers)
 
             sorted_batches = sorted(batches.items(), key=lambda x: (x[0] == "-", x[0]))
+            batch_index = 0  # Track batch index for alternating colors
             for batch_code, batch in sorted_batches:
+                # Determine fill color based on batch index (alternating)
+                if batch_index % 2 == 0:
+                    batch_fill = green_fill
+                else:
+                    batch_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # Light yellow
+                batch_index += 1
+
                 unique_pairs = []
                 pair_qty = defaultdict(int)
                 for unit in batch["units"]:
@@ -2068,10 +2099,24 @@ def export_production_history(sheet: str = "all"):
                     orig_model, remark = pair
                     combined = (orig_model + remark).upper()
                     matched_col = None
-                    for series in model_columns:
-                        if series in combined:
-                            matched_col = series
-                            break
+
+                    # Match models to columns with merging logic
+                    # Check longer patterns first to avoid substring matching issues
+                    if "8060" in combined:
+                        matched_col = "600"  # Merge 8060 with 600
+                    elif "8055" in combined:
+                        matched_col = "8055"
+                    elif "7055" in combined:
+                        matched_col = "7055"
+                    elif "600" in combined:
+                        matched_col = "600"
+                    elif "500" in combined:
+                        matched_col = "500"
+                    elif "400" in combined:
+                        matched_col = "400"
+                    elif "300" in combined:
+                        matched_col = "300"
+
                     if matched_col:
                         matched_by_col[matched_col].append(pair)
                     else:
@@ -2105,7 +2150,7 @@ def export_production_history(sheet: str = "all"):
                         if c == total_cols:
                             cell.fill = orange_fill
                         else:
-                            cell.fill = green_fill
+                            cell.fill = batch_fill  # Use alternating batch color
                         if c == 1 or c == total_cols - 1 or c == total_cols:
                             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                         else:
@@ -2118,42 +2163,63 @@ def export_production_history(sheet: str = "all"):
                 for m_idx, m_type in enumerate(model_columns, start=2):
                     entries = entries_by_model[m_type]
                     for i, entry in enumerate(entries):
-                        ws.cell(row=start_row + i, column=m_idx).value = entry
+                        cell = ws.cell(row=start_row + i, column=m_idx)
+
+                        # entry is a tuple of (model_text, qty)
+                        if entry:
+                            model_text, qty = entry
+                            content_length = len(model_text) + len(str(qty))
+
+                            # Determine font size based on content length
+                            if content_length > 100:
+                                font_size = 7
+                            elif content_length > 60:
+                                font_size = 8
+                            elif content_length > 40:
+                                font_size = 9
+                            else:
+                                font_size = 10
+
+                            # Always use rich text with colored quantity
+                            rich_text = CellRichText(
+                                TextBlock(InlineFont(rFont="宋体", sz=font_size, color="000000"), f"{model_text}  "),
+                                TextBlock(InlineFont(rFont="宋体", sz=font_size, b=True, color="FF0000"), str(qty))
+                            )
+                            cell.value = rich_text
+
                     if len(entries) <= 1 and end_row > start_row:
                         ws.merge_cells(start_row=start_row, start_column=m_idx, end_row=end_row, end_column=m_idx)
 
                 total_qty = len(batch["units"])
-                ws.cell(row=start_row, column=total_cols - 1).value = total_qty
-                if end_row > start_row:
-                    ws.merge_cells(start_row=start_row, start_column=total_cols - 1, end_row=end_row, end_column=total_cols - 1)
-
-                due_dates_list = []
-                for d in batch["due_dates"]:
-                    try:
-                        dt = pd.to_datetime(d)
-                        due_dates_list.append(f"预计{dt.year}. {dt.month}. {dt.day}")
-                    except:
-                        due_dates_list.append(str(d))
-                due_date_str = ", ".join(sorted(due_dates_list)) if due_dates_list else "-"
-                ws.cell(row=start_row, column=total_cols).value = due_date_str
+                ws.cell(row=start_row, column=total_cols).value = total_qty
                 if end_row > start_row:
                     ws.merge_cells(start_row=start_row, start_column=total_cols, end_row=end_row, end_column=total_cols)
 
                 start_row = end_row + 1
 
-            for col in ws.columns:
-                col_idx = col[0].column
+            # Adjust column widths for A4 landscape - now 8 columns total (removed 预计入库时间)
+            # Columns: 批次号, 300, 400, 500, 600/8060, 7055, 8055, 合计
+            ws.column_dimensions['A'].width = 10  # 批次号
+            ws.column_dimensions['B'].width = 14  # 300 (narrower)
+            for col_idx in range(3, 8):  # 400, 500, 600/8060, 7055, 8055
                 col_letter = get_column_letter(col_idx)
-                if 2 <= col_idx <= 8:
-                    ws.column_dimensions[col_letter].width = 24
-                else:
-                    max_len = 0
-                    for cell in col:
-                        val = str(cell.value or '')
-                        w = get_display_width(val)
-                        if w > max_len:
-                            max_len = w
-                    ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+                ws.column_dimensions[col_letter].width = 20  # Model columns
+            ws.column_dimensions[get_column_letter(8)].width = 8   # 合计
+            # Total: 10 + 14 + 5*20 + 8 = 132 units (fits A4 landscape well)
+
+            # Set page setup for A4 landscape - allow content to flow naturally
+            ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+            ws.page_setup.paperSize = ws.PAPERSIZE_A4
+            ws.page_setup.fitToWidth = 1  # Fit columns to one page width
+            ws.page_setup.fitToHeight = 0  # Allow unlimited pages vertically
+            ws.print_options.horizontalCentered = True
+
+            # Disable auto-scaling to prevent content compression
+            ws.page_setup.scale = 100  # Use 100% scale, no shrinking
+            ws.sheet_properties.pageSetUpPr.fitToPage = False  # Disable fit-to-page
+
+            # Set print area to ensure all columns are included
+            ws.print_area = f'A1:H{ws.max_row}'
 
         # ------------------ 填充 Sheet 2: 跟踪单 ------------------
         if include_tracking:

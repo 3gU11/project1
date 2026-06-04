@@ -838,7 +838,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 
 
 def _ensure_schema_version_table(conn):
@@ -1376,6 +1376,75 @@ def init_mysql_tables_v2():
                 )
             """))
             _record_schema_version(conn, 10, "add production_history_ledger table and migrate in-production units")
+
+        if current_version < 11:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS inbound_history (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    serial_no VARCHAR(100) NOT NULL,
+                    inbound_time DATETIME NOT NULL,
+                    source VARCHAR(50) NOT NULL DEFAULT '',
+                    slot_code VARCHAR(100) NOT NULL DEFAULT '',
+                    operator VARCHAR(100) NOT NULL DEFAULT '',
+                    batch_no VARCHAR(100) NOT NULL DEFAULT '',
+                    model VARCHAR(255) NOT NULL DEFAULT '',
+                    customer VARCHAR(255) NOT NULL DEFAULT '',
+                    dealer VARCHAR(255) NOT NULL DEFAULT '',
+                    contract_no VARCHAR(100) NOT NULL DEFAULT '',
+                    order_no VARCHAR(100) NOT NULL DEFAULT '',
+                    status_before VARCHAR(50) NOT NULL DEFAULT '',
+                    status_after VARCHAR(50) NOT NULL DEFAULT '',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_inbound_history_event (serial_no, inbound_time, source),
+                    INDEX idx_inbound_history_time (inbound_time),
+                    INDEX idx_inbound_history_serial (serial_no),
+                    INDEX idx_inbound_history_batch (batch_no),
+                    INDEX idx_inbound_history_model (model),
+                    INDEX idx_inbound_history_customer (customer)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            
+            conn.execute(text("""
+                INSERT IGNORE INTO inbound_history (
+                    serial_no, inbound_time, source, slot_code, operator,
+                    batch_no, model, customer, dealer, contract_no, order_no,
+                    status_before, status_after
+                )
+                SELECT
+                    tl.`流水号` AS serial_no,
+                    tl.`时间` AS inbound_time,
+                    tl.`操作类型` AS source,
+                    COALESCE(fg.`Location_Code`, '') AS slot_code,
+                    COALESCE(tl.`操作员`, '') AS operator,
+                    COALESCE(fg.`批次号`, sh.`批次号`, '') AS batch_no,
+                    COALESCE(fg.`机型`, sh.`机型`, '') AS model,
+                    COALESCE(fg.`客户`, sh.`客户`, '') AS customer,
+                    COALESCE(fg.`代理商`, sh.`代理商`, '') AS dealer,
+                    COALESCE(fg.`合同号`, sh.`合同号`, '') AS contract_no,
+                    COALESCE(fg.`占用订单号`, sh.`占用订单号`, '') AS order_no,
+                    '待入库' AS status_before,
+                    COALESCE(fg.`状态`, sh.`状态`, '') AS status_after
+                FROM transaction_log tl
+                LEFT JOIN finished_goods_data fg
+                    ON fg.`流水号` COLLATE utf8mb4_general_ci = tl.`流水号` COLLATE utf8mb4_general_ci
+                LEFT JOIN shipping_history sh
+                    ON sh.`流水号` COLLATE utf8mb4_general_ci = tl.`流水号` COLLATE utf8mb4_general_ci
+                WHERE tl.`流水号` IS NOT NULL
+                    AND TRIM(tl.`流水号`) <> ''
+                    AND (
+                        tl.`操作类型` = '直接配货-自动入库'
+                        OR tl.`操作类型` = '配货自动入库'
+                        OR (
+                            tl.`操作类型` LIKE '%入库%'
+                            AND tl.`操作类型` NOT LIKE '%退回%'
+                            AND tl.`操作类型` NOT LIKE '%释放%'
+                            AND tl.`操作类型` NOT LIKE '%撤回%'
+                        )
+                    )
+                    AND COALESCE(fg.`状态`, sh.`状态`, '') <> '待入库'
+                    AND COALESCE(fg.`状态`, sh.`状态`, '') <> ''
+            """))
+            _record_schema_version(conn, 11, "create inbound_history table and backfill from transaction logs")
 
         return {
             "initialized": True,

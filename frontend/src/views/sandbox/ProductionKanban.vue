@@ -289,6 +289,7 @@ const locking = ref(false)
 const dragging = ref(false)
 const pendingRefresh = ref(false)
 const modelFamilyMap = ref<Record<string, string>>({})
+let refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 
 const editForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', order_remark: '' })
@@ -672,6 +673,16 @@ async function forceRefreshAll() {
   await Promise.all([lineStore.fetchLines(), batchStore.fetchBatches()])
 }
 
+function debouncedRefresh(delay: number = 300) {
+  if (refreshDebounceTimer) {
+    clearTimeout(refreshDebounceTimer)
+  }
+  refreshDebounceTimer = setTimeout(async () => {
+    await refreshAll({ silent: true })
+    refreshDebounceTimer = null
+  }, delay)
+}
+
 async function flushPendingRefresh() {
   if (dragging.value || !pendingRefresh.value) return
   pendingRefresh.value = false
@@ -800,12 +811,12 @@ async function onKanbanDrop(evt: any, line: any) {
   const targetUnit = resolveTargetUnit(evt, line)
   cleanupDroppedClone(line)
   if (!isRushOrder(rushOrder)) {
-    await forceRefreshAll()
+    debouncedRefresh()
     return
   }
   if (!targetUnit) {
     ElMessage.error('未识别目标机台')
-    await forceRefreshAll()
+    debouncedRefresh()
     return
   }
   await handleRushDrop(rushOrder, targetUnit)
@@ -891,10 +902,10 @@ async function doDirectRushInsert(rushOrder: any, targetUnit: any) {
     await rushStore.executeRushInsertAtTarget(targetUnit.unit_id, rushOrder)
     await rushStore.markRushOrderStatus(rushOrder.id, 'inserted')
     ElMessage.success('急单已插入')
-    await forceRefreshAll()
+    debouncedRefresh()
   } catch (e: any) {
     ElMessage.error(e.message)
-    await forceRefreshAll()
+    debouncedRefresh()
   }
 }
 

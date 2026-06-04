@@ -15,6 +15,9 @@
         <button v-if="can('/dealer-orders')" class="btn-base top-card" @click="go('/dealer-orders')">
           <span class="icon">🧾</span> 经销商订单审核
         </button>
+        <button v-if="can('/reports')" class="btn-base top-card" @click="go('/reports')">
+          <span class="icon">📈</span> 报表管理
+        </button>
       </div>
     </section>
 

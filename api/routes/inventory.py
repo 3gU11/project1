@@ -234,18 +234,38 @@ def machine_inline_update(
         sn = str(serial_no).strip()
         if not sn:
             raise HTTPException(status_code=422, detail="流水号不能为空")
-        df = cache.inventory.get_data()
-        mask = df["流水号"].astype(str).str.strip() == sn
-        if not mask.any():
-            raise HTTPException(status_code=404, detail="机台不存在")
             
         changes = []
+        note_val = None
         if payload.note is not None:
-            df.loc[mask, "合同备注"] = str(payload.note).strip()
+            note_val = str(payload.note).strip()
             changes.append(f"备注改为 {payload.note}")
             
-        df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        cache.inventory.save_data(df)
+        now_val = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        with get_engine().begin() as conn:
+            # 校验流水号是否存在
+            exists = conn.execute(
+                text("SELECT COUNT(*) FROM finished_goods_data WHERE TRIM(`流水号`) = :sn"),
+                {"sn": sn}
+            ).scalar() or 0
+            if exists == 0:
+                raise HTTPException(status_code=404, detail="机台不存在")
+                
+            # 执行直接更新
+            if payload.note is not None:
+                conn.execute(
+                    text("UPDATE finished_goods_data SET `合同备注` = :note, `更新时间` = :now WHERE TRIM(`流水号`) = :sn"),
+                    {"note": note_val, "now": now_val, "sn": sn}
+                )
+            else:
+                conn.execute(
+                    text("UPDATE finished_goods_data SET `更新时间` = :now WHERE TRIM(`流水号`) = :sn"),
+                    {"now": now_val, "sn": sn}
+                )
+                
+        cache.inventory.cache_clear()
+        
         try:
             _sync_machine_edit_to_units([sn])
         except Exception as e:
@@ -282,10 +302,6 @@ def machine_batch_update(
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not sns:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 台机台")
-        df = cache.inventory.get_data()
-        mask = df["流水号"].astype(str).isin(sns)
-        if not mask.any():
-            raise HTTPException(status_code=404, detail="未找到对应机台")
 
         changes = []
         note_parts = []
@@ -295,13 +311,40 @@ def machine_batch_update(
             note_parts.append("XS改X手自一体")
         if payload.back_cond:
             note_parts.append("后导电")
+            
+        new_note = None
         if note_parts:
             new_note = "；".join(note_parts)
-            df.loc[mask, "合同备注"] = new_note
             changes.append(f"备注改为 {new_note}")
             
-        df.loc[mask, "更新时间"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        cache.inventory.save_data(df)
+        now_val = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        with get_engine().begin() as conn:
+            # 校验流水号是否存在并统计匹配行数
+            match_count = conn.execute(
+                text("SELECT COUNT(*) FROM finished_goods_data WHERE TRIM(`流水号`) IN :sns")
+                .bindparams(bindparam("sns", expanding=True)),
+                {"sns": sns}
+            ).scalar() or 0
+            if match_count == 0:
+                raise HTTPException(status_code=404, detail="未找到对应机台")
+                
+            # 执行直接更新
+            if new_note is not None:
+                conn.execute(
+                    text("UPDATE finished_goods_data SET `合同备注` = :note, `更新时间` = :now WHERE TRIM(`流水号`) IN :sns")
+                    .bindparams(bindparam("sns", expanding=True)),
+                    {"note": new_note, "now": now_val, "sns": sns}
+                )
+            else:
+                conn.execute(
+                    text("UPDATE finished_goods_data SET `更新时间` = :now WHERE TRIM(`流水号`) IN :sns")
+                    .bindparams(bindparam("sns", expanding=True)),
+                    {"now": now_val, "sns": sns}
+                )
+                
+        cache.inventory.cache_clear()
+        
         try:
             _sync_machine_edit_to_units(sns)
         except Exception as e:
@@ -318,10 +361,10 @@ def machine_batch_update(
                 action_type="批量修改",
                 module="机台档案",
                 biz_type="机台",
-                content=f"批量修改 {int(mask.sum())} 台机台；变更内容：{', '.join(changes)}"
+                content=f"批量修改 {match_count} 台机台；变更内容：{', '.join(changes)}"
             )
             
-        return {"message": f"批量更新成功，共 {int(mask.sum())} 台"}
+        return {"message": f"批量更新成功，共 {match_count} 台"}
     except HTTPException:
         raise
     except Exception as e:
@@ -385,14 +428,20 @@ def inbound_machine_to_slot(
     current_user: dict = Depends(get_current_user_context)
 ):
     try:
-        result = cache.inventory.inbound_to_slot(payload.serial_no, payload.slot_code, is_transfer=bool(payload.is_transfer))
+        operator = current_user.get("name") or current_user.get("username") or "System"
+        result = cache.inventory.inbound_to_slot(
+            payload.serial_no,
+            payload.slot_code,
+            is_transfer=bool(payload.is_transfer),
+            operator=operator,
+        )
         if not result.get("ok"):
             raise HTTPException(status_code=422, detail=result)
         
         action = "调拨机台" if payload.is_transfer else "机台入库"
         append_audit_log(
             user_id=current_user.get("username"),
-            username=current_user.get("name") or current_user.get("username") or "System",
+            username=operator,
             action_type="调拨" if payload.is_transfer else "入库",
             module="入库作业",
             biz_type="机台",

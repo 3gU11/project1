@@ -32,7 +32,7 @@ GO_INTERNAL_TOKEN = os.environ.get("GO_INTERNAL_TOKEN", "")
 
 DEFAULT_TIMEOUT = 30.0
 RECOMPUTE_TIMEOUT = 120.0
-LONG_RUNNING_PATHS = {"/forecast/recompute"}
+LONG_RUNNING_PATHS = {"/forecast/recompute", "/api/units/rush-insert"}
 
 router = APIRouter(prefix="", dependencies=[Depends(get_current_user_token)])
 

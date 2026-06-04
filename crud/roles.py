@@ -53,6 +53,7 @@ PERMISSION_CATALOG = [
     {"code": "QUERY", "label": "库存查询", "group": "查询"},
     {"code": "INBOUND", "label": "成品入库", "group": "生产/仓储"},
     {"code": "TRACEABILITY", "label": "汇总与追溯", "group": "查询"},
+    {"code": "REPORT_VIEW", "label": "报表管理", "group": "管理与统筹"},
     {"code": "KANBAN_VIEW", "label": "生产看板(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_VIEW", "label": "预测沙盘(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_EDIT", "label": "预测沙盘(编辑)", "group": "管理与统筹"},

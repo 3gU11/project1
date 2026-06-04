@@ -1,0 +1,6 @@
+2026/06/02-16:42:44.367 6dc0 Reusing MANIFEST D:\CURSORpj\V8BetaV1.1\tmp-playwright-output\edge-profile\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/06/02-16:42:44.368 6dc0 Recovering log #4
+2026/06/02-16:42:44.369 6dc0 Reusing old log D:\CURSORpj\V8BetaV1.1\tmp-playwright-output\edge-profile\Default\EdgeCoupons/coupons_data.db/000004.log 
+2026/06/02-16:42:44.396 99c8 Level-0 table #8: started
+2026/06/02-16:42:44.404 99c8 Level-0 table #8: 682752 bytes OK
+2026/06/02-16:42:44.421 99c8 Delete type=0 #4

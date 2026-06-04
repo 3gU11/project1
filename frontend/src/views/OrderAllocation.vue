@@ -386,7 +386,14 @@ const onAllocatedSelectionChange = (rows: Row[]) => {
 }
 
 const getAllocationRowClassName = ({ row }: { row: Row }) => {
-  return String(row['合同号'] || '').trim() ? 'contract-specified-row' : ''
+  const hasContract = String(row['合同号'] || '').trim()
+  const hasOrder = String(row['占用订单号'] || '').trim()
+
+  // 有合同号 或 已配货给订单 → 绿色底色高亮
+  if (hasContract || hasOrder) {
+    return 'contract-specified-row'
+  }
+  return ''
 }
 
 watch(candidateStatusFilter, () => {

@@ -1,0 +1,5 @@
+2026/06/02-16:39:58.138 55ac Creating DB D:\CURSORpj\V8BetaV1.1\tmp-playwright-output\edge-profile\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/06/02-16:39:58.199 55ac Reusing MANIFEST D:\CURSORpj\V8BetaV1.1\tmp-playwright-output\edge-profile\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/06/02-16:39:58.422 719c Level-0 table #5: started
+2026/06/02-16:39:58.432 719c Level-0 table #5: 682649 bytes OK
+2026/06/02-16:39:58.441 719c Delete type=0 #3

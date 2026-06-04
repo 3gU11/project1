@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 
 from database import get_engine
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
+from crud.inbound_history import record_inbound_history
 from utils.cache import fetch_data_with_cache
 from utils.local_cache import ttl_cache
 
@@ -181,10 +182,8 @@ def save_data(df):
 def save_data_v2(df):
     """
     优化版 save_data：使用 UPSERT (INSERT ... ON DUPLICATE KEY UPDATE)
-    避免 DELETE + INSERT 全表重写，大幅提升性能
+    通过批量执行 (executemany) 并处理 NaT/NaN 提升性能和稳定性
     """
-    from sqlalchemy import bindparam
-
     get_data_v2.cache_clear()
 
     try:
@@ -193,12 +192,15 @@ def save_data_v2(df):
         for col in INVENTORY_COLS:
             if col not in df.columns:
                 df[col] = ""
+        
+        # 预处理：将 pandas NaT/NaN 转换为 Python None，并清理字符串
+        df["占用订单号"] = df["占用订单号"].apply(lambda v: None if str(v).strip() in ("", "nan", "None", "NaT") else str(v).strip())
         for dt_col in ["预计入库时间", "更新时间"]:
             df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce")
-        df["占用订单号"] = df["占用订单号"].apply(lambda v: None if str(v).strip() == "" else str(v).strip())
+            
         fill_cols = [c for c in INVENTORY_COLS if c not in ["预计入库时间", "更新时间", "占用订单号"]]
         for col in fill_cols:
-            df[col] = df[col].fillna("")
+            df[col] = df[col].fillna("").astype(str).str.strip()
 
         with get_engine().begin() as conn:
             _ensure_finished_goods_contract_note_column(conn)
@@ -236,29 +238,24 @@ def save_data_v2(df):
                     `合同号` = VALUES(`合同号`)
             """)
 
-            # 分批处理，避免单条 SQL 过长
-            CHUNK_SIZE = 500
-            inserted = 0
-            updated = 0
+            # 转换为 Python 字典列表
+            rows = df[INVENTORY_COLS].to_dict('records')
+            
+            # 手动清洗 dict 中的 NaT/Timestamp 对象，防止 PyMySQL 报错
+            for r in rows:
+                for k in ["预计入库时间", "更新时间"]:
+                    val = r[k]
+                    if pd.isna(val):
+                        r[k] = None
+                    elif hasattr(val, 'to_pydatetime'):
+                        r[k] = val.to_pydatetime()
 
-            for start in range(0, len(df), CHUNK_SIZE):
-                chunk = df.iloc[start:start + CHUNK_SIZE]
-                rows = chunk[INVENTORY_COLS].to_dict('records')
-
-                for row in rows:
-                    result = conn.execute(upsert_sql, row)
-                    # 根据 MySQL 返回的 rowcount 判断是 INSERT 还是 UPDATE
-                    # rowcount=1 表示 INSERT, rowcount=2 表示 UPDATE (MySQL 特性)
-                    if result.rowcount == 1:
-                        inserted += 1
-                    elif result.rowcount == 2:
-                        updated += 1
-                    else:
-                        # 对于某些驱动，可能无法区分，统一计为更新
-                        inserted += 1
+            # 使用 SQLAlchemy 批量绑定参数执行 (executemany)
+            result = conn.execute(upsert_sql, rows)
+            affected = result.rowcount if result.rowcount is not None else len(rows)
 
         enqueue_wechat_batch_summary_sync("finished_goods_save_v2")
-        return {"inserted": inserted, "updated": updated}
+        return {"inserted": affected, "updated": 0}
 
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"保存失败: {e}") from e
@@ -498,7 +495,7 @@ def reset_warehouse_layout(layout_id="default"):
     return {"layout_id": layout_id, "layout_json": {"slots": []}, "update_time": ""}
 
 
-def inbound_to_slot(serial_no, slot_code, is_transfer=False):
+def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
     if not serial_no or not slot_code:
         return {"ok": False, "code": "E_INVALID_PARAM", "message": "流水号与库位号不能为空"}
         
@@ -535,14 +532,26 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False):
         if not is_transfer and current_status.startswith("库存中"):
             trans.rollback()
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
+        status_after = f"库存中（{slot_code}）"
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
                 "SET `状态`=:status, `Location_Code`=:slot_code, `更新时间`=:updated_at "
                 "WHERE `流水号`=:sn"
             ),
-            {"status": f"库存中（{slot_code}）", "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
+            {"status": status_after, "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
         )
+        if not is_transfer:
+            record_inbound_history(
+                conn,
+                [serial_no],
+                source="机台入库",
+                operator=operator,
+                slot_code=slot_code,
+                inbound_time=now_text,
+                status_before=current_status,
+                status_after=status_after,
+            )
         trans.commit()
         enqueue_wechat_batch_summary_sync("finished_goods_inbound")
         get_data.cache_clear()
@@ -572,7 +581,7 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False):
             conn.close()
 
 
-def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False):
+def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
     """
     优化版入库函数：使用 SQL COUNT 替代全表扫描
     解决 P1 性能问题：原函数读取全表到 Python 内存过滤
@@ -625,14 +634,26 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False):
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
 
         # 更新入库（保持不变）
+        status_after = f"库存中（{slot_code}）"
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
                 "SET `状态`=:status, `Location_Code`=:slot_code, `更新时间`=:updated_at "
                 "WHERE `流水号`=:sn"
             ),
-            {"status": f"库存中（{slot_code}）", "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
+            {"status": status_after, "slot_code": slot_code, "updated_at": now_text, "sn": serial_no},
         )
+        if not is_transfer:
+            record_inbound_history(
+                conn,
+                [serial_no],
+                source="机台入库",
+                operator=operator,
+                slot_code=slot_code,
+                inbound_time=now_text,
+                status_before=current_status,
+                status_after=status_after,
+            )
         trans.commit()
         enqueue_wechat_batch_summary_sync("finished_goods_inbound_v2")
 
