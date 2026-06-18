@@ -38,12 +38,14 @@ const tabbarItems = computed(() => {
   if (userStore.userInfo?.role === 'Prod') {
     return [
       { title: '查询', to: '/query', icon: 'search' },
+      { title: '找货', to: '/locator', icon: 'location-o' },
       { title: '我的', to: '/profile', icon: 'user-o' },
     ]
   }
 
   const items = [
     { title: '入库', to: '/query', icon: 'scan' },
+    { title: '找货', to: '/locator', icon: 'location-o' },
     { title: '看板', to: '/dashboard', icon: 'chart-trending-o' },
   ]
   if (canViewProduction.value) {

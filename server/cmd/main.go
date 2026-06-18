@@ -49,7 +49,7 @@ func main() {
 	uh := handler.NewUnitHandler(db, unitRepo, batchRepo, rushSvc, cfg.PythonURL, cfg.InternalToken, hub)
 	fh := handler.NewForecastHandler(db, recomputeSvc)
 	lh := handler.NewLineHandler(db, batchSvc)
-	ch := handler.NewCapacityHandler(configRepo)
+	ch := handler.NewCapacityHandler(db, configRepo)
 	ah := handler.NewAuthHandler(db)
 	mh := handler.NewMetaHandler(db)
 	qh := handler.NewQueueHandler(db)

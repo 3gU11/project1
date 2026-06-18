@@ -370,7 +370,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
@@ -386,13 +386,18 @@ const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
-const loadedOnce = ref(false)
 const { submitWithLock } = useFormSubmit()
 const rows = ref<RowData[]>([])
 const planRows = ref<RowData[]>([])
-const inventoryRows = ref<RowData[]>([])
+const ordersLoaded = ref(false)
+const plansLoaded = ref(false)
 
-const activeTab = ref<'manual' | 'import' | 'manage'>('manual')
+const initialTab = String(route.query.tab || '')
+const activeTab = ref<'manual' | 'import' | 'manage'>(
+  ['manual', 'import', 'manage'].includes(initialTab)
+    ? (initialTab as 'manual' | 'import' | 'manage')
+    : 'manual'
+)
 const keyword = ref('')
 const statusFilter = ref<'active' | 'done' | 'deleted'>('active')
 const monthFilter = ref('all')
@@ -453,20 +458,6 @@ const availableModels = computed(() => {
   return getModelOrderList()
 })
 
-const parseOrderDemandTotal = (order: RowData) => {
-  const raw = String(order['需求机型'] || '')
-  let total = 0
-  for (const tokenRaw of raw.split(';')) {
-    const token = tokenRaw.trim()
-    if (!token) continue
-    const m = token.match(/[x×:：]\s*(\d+)$/i)
-    if (m) total += Number(m[1]) || 0
-  }
-  if (total > 0) return total
-  const fallback = Number(order['需求数量'] || 0)
-  return Number.isFinite(fallback) ? Math.max(0, fallback) : 0
-}
-
 const splitDemandModelTokens = (value: unknown) => {
   return String(value || '')
     .split(';')
@@ -490,32 +481,9 @@ const setQtyValue = (row: { qty: number }, value: unknown) => {
   row.qty = normalizeQtyValue(value)
 }
 
-const shippedCountByOrder = computed(() => {
-  const map = new Map<string, number>()
-  for (const r of inventoryRows.value) {
-    if (String(r['状态'] || '') !== '已出库') continue
-    const oid = String(r['占用订单号'] || '').trim()
-    if (!oid) continue
-    map.set(oid, (map.get(oid) || 0) + 1)
-  }
-  return map
-})
-
-const completedOrderIdSet = computed(() => {
-  const set = new Set<string>()
-  for (const r of rows.value) {
-    const oid = String(r['订单号'] || '').trim()
-    if (!oid) continue
-    const need = parseOrderDemandTotal(r)
-    const shipped = shippedCountByOrder.value.get(oid) || 0
-    if (need > 0 && shipped >= need) set.add(oid)
-  }
-  return set
-})
-
 const isEditingCompletedOrder = computed(() => {
   if (!editingId.value) return false
-  return editForm.status === 'done' || completedOrderIdSet.value.has(editingId.value)
+  return editForm.status === 'done'
 })
 
 const isEditingDeletedOrder = computed(() => {
@@ -527,16 +495,14 @@ const manageRowsFiltered = computed(() => {
   const term = keyword.value.trim().toLowerCase()
   return rows.value
     .filter((r) => {
-      const oid = String(r['订单号'] || '')
       const status = String(r.status || 'active')
       if (statusFilter.value === 'deleted') return status === 'deleted'
       if (status === 'deleted') return false
 
-      const completed = completedOrderIdSet.value.has(oid)
-      if (statusFilter.value === 'done') return status === 'done' || completed
+      if (statusFilter.value === 'done') return status === 'done'
       // active
       if (!['active', 'ready', 'packed', 'done'].includes(status)) return false
-      return !completed && status !== 'done'
+      return status !== 'done'
     })
     .filter((r) => {
       if (monthFilter.value === 'all') return true
@@ -582,38 +548,79 @@ const mergeWarningText = computed(() => {
   if (customers.size > 1) return '注意：您选择了不同客户的合同进行合并，请确认是否正确。'
   return '提示：请确认合并后的客户、代理、交期、机型数量与备注。'
 })
-const showInitialSkeleton = computed(() => loading.value && !loadedOnce.value && !loadError.value)
+const activeTabLoaded = computed(() => {
+  if (activeTab.value === 'import') return plansLoaded.value
+  if (activeTab.value === 'manage') return ordersLoaded.value
+  return true
+})
+const showInitialSkeleton = computed(() => loading.value && !activeTabLoaded.value && !loadError.value)
 
 const addManualRow = () => {
   manualRows.value.push({ model: '', qty: 1, high: false, rowNote: '' })
 }
 
-const fetchData = async () => {
+const normalizeOrderRows = (nextOrders: RowData[]) => {
+  return nextOrders.map((row) => ({
+    ...row,
+    '下单时间': String(row['下单时间'] || '').slice(0, 10),
+    '发货时间': String(row['发货时间'] || '').slice(0, 10),
+  }))
+}
+
+const loadOrders = async (force = false) => {
+  if (ordersLoaded.value && !force) return
+  const nextOrders = await apiGetAll<RowData>('/planning/orders')
+  rows.value = normalizeOrderRows(nextOrders)
+  ordersLoaded.value = true
+}
+
+const loadPlans = async (force = false) => {
+  if (plansLoaded.value && !force) return
+  planRows.value = await apiGetAll<RowData>('/planning/')
+  plansLoaded.value = true
+}
+
+const runDataLoad = async (loader: () => Promise<void>) => {
   loading.value = true
   loadError.value = ''
   try {
-    const [nextOrders, nextPlans, nextInventory] = await Promise.all([
-      apiGetAll<RowData>('/planning/orders'),
-      apiGetAll<RowData>('/planning/'),
-      apiGetAll<RowData>('/inventory/'),
-    ])
-    rows.value = nextOrders.map((row) => ({
-      ...row,
-      '下单时间': String(row['下单时间'] || '').slice(0, 10),
-      '发货时间': String(row['发货时间'] || '').slice(0, 10),
-    }))
-    planRows.value = nextPlans
-    inventoryRows.value = nextInventory
+    await loader()
   } catch (err: any) {
     loadError.value = getApiErrorMessage(err) || '读取数据失败'
     ElMessage.error(loadError.value)
   } finally {
     loading.value = false
-    loadedOnce.value = true
   }
 }
+
+const fetchData = async (force = false) => {
+  if (activeTab.value === 'manual') {
+    loadError.value = ''
+    return
+  }
+  await runDataLoad(async () => {
+    if (activeTab.value === 'import') {
+      await loadPlans(force)
+      return
+    }
+    if (activeTab.value === 'manage') {
+      await loadOrders(force)
+    }
+  })
+}
+
+const refreshLoadedData = async () => {
+  const loaders: Array<() => Promise<void>> = []
+  if (ordersLoaded.value) loaders.push(() => loadOrders(true))
+  if (plansLoaded.value) loaders.push(() => loadPlans(true))
+  if (loaders.length === 0) return
+  await runDataLoad(async () => {
+    await Promise.all(loaders.map((loader) => loader()))
+  })
+}
+
 const retryFetch = () => {
-  void fetchData()
+  void fetchData(true)
 }
 
 const getPlannedImportRowKey = (row: RowData) => {
@@ -698,7 +705,7 @@ const createManualOrder = async () => {
     manualRows.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
     manualForm.note = ''
     manualForm.source = ''
-    await fetchData()
+    await refreshLoadedData()
   }, { successMessage: '订单已创建', errorMessage: '创建失败' })
 }
 
@@ -759,7 +766,7 @@ const createOrderFromPlanned = async () => {
     selectedPlannedImportRows.value = []
     mergeRows.value = []
     plannedImportTableRef.value?.clearSelection()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '转换失败' })
 }
 
@@ -949,7 +956,7 @@ const saveEdit = async () => {
       status: editForm.status,
     })
     ElMessage.success('订单已更新')
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '保存失败' })
 }
 
@@ -964,7 +971,7 @@ const deleteOrder = async () => {
     })
     ElMessage.success('订单已标记删除')
     clearEditPanel()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '删除失败' })
 }
 
@@ -976,7 +983,7 @@ const restoreOrder = async () => {
     })
     ElMessage.success('订单已还原')
     clearEditPanel()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '还原失败' })
 }
 
@@ -989,7 +996,7 @@ const hardDeleteOrder = async () => {
     await apiDelete(`/planning/orders/${encodeURIComponent(editingId.value)}`)
     ElMessage.success('订单已从数据库永久清除')
     clearEditPanel()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '彻底删除失败' })
 }
 
@@ -1007,12 +1014,15 @@ const confirm = (msg: string, title = '提示'): Promise<boolean> => {
   })
 }
 
-onMounted(() => {
-  const tab = route.query.tab as string
-  if (tab && ['manual', 'import', 'manage'].includes(tab)) {
-    activeTab.value = tab as any
+watch(activeTab, () => {
+  void fetchData()
+}, { immediate: true })
+
+watch(() => route.query.tab, (tab) => {
+  const nextTab = String(tab || '')
+  if (['manual', 'import', 'manage'].includes(nextTab) && nextTab !== activeTab.value) {
+    activeTab.value = nextTab as 'manual' | 'import' | 'manage'
   }
-  fetchData()
 })
 
 watch([keyword, statusFilter, monthFilter], () => {

@@ -64,6 +64,20 @@ def _build_go_headers(user_ctx: dict) -> dict:
     return headers
 
 
+def _serial_month_from_batch_code(batch_code: str, inbound_date=None) -> str:
+    """Return the numeric month segment used by generated forecast serial numbers."""
+    match = re.match(r"^\s*(0[1-9]|1[0-2])(?:-\d{2})?", str(batch_code or ""))
+    if match:
+        return match.group(1)
+    if inbound_date is not None:
+        if hasattr(inbound_date, "strftime"):
+            return inbound_date.strftime("%m")
+        inbound_match = re.match(r"^\d{4}-(0[1-9]|1[0-2])-\d{2}", str(inbound_date))
+        if inbound_match:
+            return inbound_match.group(1)
+    return datetime.now().strftime("%m")
+
+
 def _get_timeout(path: str) -> float:
     for lp in LONG_RUNNING_PATHS:
         if path.endswith(lp):
@@ -122,6 +136,7 @@ async def _get_client() -> httpx.AsyncClient:
         _client = httpx.AsyncClient(
             base_url=GO_SANDBOX_URL,
             timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
+            trust_env=False,
         )
     return _client
 
@@ -136,7 +151,7 @@ async def proxy_ws(websocket: WebSocket):
 
     role = str(user_ctx.get("role") or "").strip()
     perms = get_role_permissions(role)
-    if "SANDBOX_VIEW" not in perms:
+    if "SANDBOX_VIEW" not in perms and "MOBILE_KANBAN_VIEW" not in perms and not _is_line_operator(role):
         await websocket.close(code=4003, reason="Forbidden")
         return
 
@@ -148,7 +163,7 @@ async def proxy_ws(websocket: WebSocket):
     go_headers.append(("X-Role", str(user_ctx.get("role") or "")))
 
     try:
-        async with websockets.connect(go_ws_url, additional_headers=go_headers) as go_ws:
+        async with websockets.connect(go_ws_url, additional_headers=go_headers, proxy=None) as go_ws:
             await websocket.accept()
 
             async def client_to_go():
@@ -699,6 +714,7 @@ async def sync_batch_preview(request: Request, batch_id: str):
     _ensure_permission(user_ctx, "GET", f"/api/batches/{batch_id}/sync-preview")
 
     batch_code = str(request.query_params.get("batch_code", "")).strip()
+    expected_inbound_date = str(request.query_params.get("expected_inbound_date", "")).strip()
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -736,12 +752,7 @@ async def sync_batch_preview(request: Request, batch_id: str):
     if count == 0:
         return JSONResponse(content={"count": 0, "first_serial": "", "last_serial": ""})
 
-    month_part = "01"
-    if batch_code and "-" in batch_code:
-        month_part = batch_code.split("-")[0]
-    elif batch_code:
-        month_part = batch_code
-
+    month_part = _serial_month_from_batch_code(batch_code, expected_inbound_date)
     target_prefix = f"96-{month_part}-"
 
     with engine.connect() as conn:
@@ -956,13 +967,8 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
             status_code=200,
         )
 
-    # Generate serial numbers: 96-{month}-{seq}
-    month_part = "01"
-    if batch_code and "-" in batch_code:
-        month_part = batch_code.split("-")[0]
-    elif batch_code:
-        month_part = batch_code
-
+    # Generate serial numbers: 96-{month}-{seq}. Free-form batch codes use the inbound month.
+    month_part = _serial_month_from_batch_code(batch_code, inbound_date)
     target_prefix = f"96-{month_part}-"
 
     with engine.connect() as conn:
@@ -1231,7 +1237,7 @@ async def proxy_model_types(request: Request):
                 model_name = str(r[0]).strip()
                 if not model_name:
                     continue
-                family = _normalize_model_family(r[1])
+                family = _normalize_model_family(r[1]) or _model_category(model_name, {})
                 model_types.append(
                     {
                         "model_type": model_name,

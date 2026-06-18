@@ -244,22 +244,180 @@
             <div class="detail-section actions-section">
               <div>
                 <div class="section-title">可用操作</div>
-                <div class="ops-hint">取消后会清理预测沙盒占用、排产队列和急单队列，并触发重算。</div>
+                <div class="ops-hint">待规划合同可转为已规划并同步沙盘；取消后会清理预测沙盒占用、排产队列和急单队列，并触发重算。</div>
               </div>
-              <el-button
-                v-if="canCancelSelected"
-                type="danger"
-                :loading="executing"
-                @click="cancelSelectedContract"
-              >
-                取消合同
-              </el-button>
-              <el-tag v-else type="info">当前状态无可用操作</el-tag>
+              <div class="action-buttons">
+                <el-button
+                  v-if="canEditSelected"
+                  type="warning"
+                  :loading="contractEditSaving"
+                  @click="openContractEditDialog"
+                >
+                  修改合同
+                </el-button>
+                <el-button
+                  v-if="canMarkPlannedSelected"
+                  type="primary"
+                  :loading="executing"
+                  @click="markSelectedContractPlanned"
+                >
+                  转为已规划
+                </el-button>
+                <el-button
+                  v-if="canCancelSelected"
+                  type="danger"
+                  :loading="executing"
+                  @click="cancelSelectedContract"
+                >
+                  取消合同
+                </el-button>
+                <el-tag v-if="!hasAvailableAction" type="info">当前状态无可用操作</el-tag>
+              </div>
             </div>
           </template>
         </main>
       </div>
     </section>
+
+    <el-dialog
+      v-model="contractEditDialogVisible"
+      title="修改合同"
+      width="920px"
+      destroy-on-close
+    >
+      <div class="contract-edit-form">
+        <div class="edit-grid">
+          <div>
+            <div class="ops-label">合同号</div>
+            <el-input v-model="contractEditForm.contractNo" disabled />
+          </div>
+          <div>
+            <div class="ops-label">客户名</div>
+            <el-input v-model="contractEditForm.customer" />
+          </div>
+          <div>
+            <div class="ops-label">代理商</div>
+            <el-input v-model="contractEditForm.agent" />
+          </div>
+          <div>
+            <div class="ops-label">要求交期</div>
+            <el-date-picker v-model="contractEditForm.dueDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          </div>
+        </div>
+
+        <el-divider />
+        <div class="section-title">机型明细</div>
+        <el-table :data="contractEditForm.items" border stripe class="form-table">
+          <el-table-column label="#" width="56">
+            <template #default="scope">{{ scope.$index + 1 }}</template>
+          </el-table-column>
+          <el-table-column label="机型" min-width="210">
+            <template #default="scope">
+              <el-select v-model="scope.row.model" filterable placeholder="请选择机型" style="width: 100%">
+                <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="数量" width="110">
+            <template #default="scope">
+              <el-input-number v-model="scope.row.qty" :min="1" :controls="false" style="width: 100%" />
+            </template>
+          </el-table-column>
+          <el-table-column label="备注" min-width="220">
+            <template #default="scope">
+              <el-input v-model="scope.row.remark" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90">
+            <template #default="scope">
+              <el-button link type="danger" :disabled="contractEditForm.items.length <= 1" @click="removeContractEditItem(scope.$index)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="batch-row-actions">
+          <el-button link type="primary" @click="addContractEditItem">+ 添加机型行</el-button>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="contractEditDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="contractEditSaving" @click="precheckContractEdit">保存并预检影响</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="contractImpactDialogVisible"
+      title="确认合同修改影响"
+      width="980px"
+      destroy-on-close
+    >
+      <div v-if="contractEditPreview" class="impact-dialog-body">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`该合同已绑定 ${contractEditPreview.impact?.bound_units || 0} 张沙盘/产线卡片，确认后会按下面方案同步。`"
+        />
+        <div class="impact-stats">
+          <span v-for="(qty, status) in contractEditPreview.impact?.by_status || {}" :key="status">{{ status }}：{{ qty }}</span>
+        </div>
+
+        <div class="section-title">卡片处理</div>
+        <el-table :data="contractUnitDecisions" border stripe max-height="360" size="small">
+          <el-table-column prop="unit_id" label="卡片" min-width="190" show-overflow-tooltip />
+          <el-table-column prop="from_model" label="原机型" min-width="150" />
+          <el-table-column prop="model_family" label="机型族" min-width="120" />
+          <el-table-column label="批次" min-width="150">
+            <template #default="scope">
+              {{ scope.row.batch_status || '-' }} / {{ scope.row.batch_id || '-' }} / {{ scope.row.slot_index || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="处理" width="150">
+            <template #default="scope">
+              <el-radio-group v-model="scope.row.action" size="small">
+                <el-radio-button label="keep">保留</el-radio-button>
+                <el-radio-button label="release">释放</el-radio-button>
+              </el-radio-group>
+            </template>
+          </el-table-column>
+          <el-table-column label="目标机型" min-width="190">
+            <template #default="scope">
+              <el-select
+                v-model="scope.row.to_model"
+                filterable
+                :disabled="scope.row.action === 'release'"
+                placeholder="选择目标机型"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="m in targetModelsForFamily(scope.row.model_family)"
+                  :key="m"
+                  :label="m"
+                  :value="m"
+                />
+              </el-select>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="section-title supplement-title">补排调整</div>
+        <el-table v-if="contractDecisionSupplements.length > 0" :data="contractDecisionSupplements" border stripe size="small">
+          <el-table-column prop="model" label="机型" min-width="180" />
+          <el-table-column prop="model_family" label="机型族" min-width="140" />
+          <el-table-column label="补排数量" width="140">
+            <template #default="scope">
+              <el-input-number v-model="scope.row.qty" :min="0" :controls="false" style="width: 100%" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="reason" label="原因" min-width="220" />
+        </el-table>
+        <div v-else class="impact-empty">无需新增补排。</div>
+        <el-alert v-if="contractImpactError" class="impact-error" type="error" :closable="false" show-icon :title="contractImpactError" />
+      </div>
+      <template #footer>
+        <el-button @click="contractImpactDialogVisible = false">返回修改</el-button>
+        <el-button type="primary" :disabled="Boolean(contractImpactError)" :loading="contractEditSaving" @click="confirmContractEditImpact">确认并同步</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="previewDialogVisible"
@@ -455,7 +613,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Document } from '@element-plus/icons-vue'
-import { apiGet, apiGetAll, apiPost, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiGetAll, apiPost, apiPut, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
@@ -515,6 +673,37 @@ type DealerOrderListResponse = {
   data: DealerOrder[]
   total: number
 }
+type ContractEditItem = { model: string; qty: number; remark: string }
+type ContractUnitDecision = {
+  unit_id: string
+  from_model: string
+  to_model: string
+  model_family: string
+  batch_status: string
+  batch_id: string
+  slot_index: number | string
+  action: 'keep' | 'release'
+}
+type ContractSupplementDecision = {
+  model: string
+  model_family: string
+  qty: number
+  reason?: string
+}
+type ContractEditPreview = {
+  blocked?: boolean
+  blocked_reason?: string
+  requires_mapping?: boolean
+  preview_token?: string
+  diff?: any
+  impact?: { bound_units?: number; by_status?: Record<string, number> }
+  unit_plan?: {
+    assignments?: any[]
+    releases?: any[]
+    supplements?: ContractSupplementDecision[]
+  }
+  families?: Record<string, string>
+}
 
 const statusTabs: StatusTab[] = ['待规划', '已规划', '已完成']
 const completedStatuses = new Set(['已转订单', '已下单', '已完工'])
@@ -540,8 +729,21 @@ const dealerConvertCanUseSpot = ref(true)
 const dealerConvertSpotBlockReason = ref('')
 const openMonths = ref<string[]>([])
 const detailPanelRef = ref<HTMLElement | null>(null)
+const contractEditDialogVisible = ref(false)
+const contractImpactDialogVisible = ref(false)
+const contractEditSaving = ref(false)
+const contractEditPreview = ref<ContractEditPreview | null>(null)
+const contractUnitDecisions = ref<ContractUnitDecision[]>([])
+const contractDecisionSupplements = ref<ContractSupplementDecision[]>([])
 const { submitWithLock } = useFormSubmit()
 const contractsStore = useContractsStore()
+const contractEditForm = reactive({
+  contractNo: '',
+  customer: '',
+  agent: '',
+  dueDate: '',
+  items: [] as ContractEditItem[],
+})
 const batchForm = ref({
   contractId: '',
   deadline: '',
@@ -787,6 +989,9 @@ const tabCounts = computed<Record<StatusTab, number>>(() => {
 
 const selectedContract = computed(() => contractCards.value.find((contract) => contract.id === selectedContractId.value) || null)
 const canCancelSelected = computed(() => Boolean(selectedContract.value && cancellableStatuses.has(selectedContract.value.status)))
+const canMarkPlannedSelected = computed(() => Boolean(selectedContract.value && selectedContract.value.status === '待规划'))
+const canEditSelected = computed(() => Boolean(selectedContract.value && !completedStatuses.has(selectedContract.value.status)))
+const hasAvailableAction = computed(() => canEditSelected.value || canMarkPlannedSelected.value || canCancelSelected.value)
 const showOrderNo = computed(() => activeTab.value === '已完成')
 
 const syncSelection = () => {
@@ -811,6 +1016,257 @@ const statusTagType = (status: string) => {
   if (status === '已规划') return 'primary'
   if (completedStatuses.has(status)) return 'success'
   return 'info'
+}
+
+const buildContractEditPayload = () => ({
+  客户名: contractEditForm.customer.trim(),
+  代理商: contractEditForm.agent.trim(),
+  要求交期: contractEditForm.dueDate,
+  items: contractEditForm.items
+    .map((item) => ({
+      机型: item.model.trim(),
+      排产数量: Number(item.qty || 0),
+      备注: item.remark.trim(),
+    }))
+    .filter((item) => item.机型 && item.排产数量 > 0),
+})
+
+const validateContractEditForm = () => {
+  if (!hasText(contractEditForm.contractNo) || !hasText(contractEditForm.customer) || !hasText(contractEditForm.dueDate)) {
+    ElMessage.warning('请先完整填写客户名和要求交期')
+    return false
+  }
+  const validRows = contractEditForm.items.filter((item) => hasText(item.model) && isPositiveInteger(item.qty))
+  if (validRows.length === 0) {
+    ElMessage.warning('请至少保留 1 条机型明细')
+    return false
+  }
+  const invalidModels = validRows.map((item) => item.model.trim()).filter((m) => !isModelInDictionary(m))
+  if (invalidModels.length > 0) {
+    ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
+    return false
+  }
+  return true
+}
+
+const openContractEditDialog = () => {
+  const contract = selectedContract.value
+  if (!contract) return
+  contractEditForm.contractNo = contract.id
+  contractEditForm.customer = contract.customer || ''
+  contractEditForm.agent = contract.agent || ''
+  contractEditForm.dueDate = contract.dueDate || todayYmd()
+  contractEditForm.items = contract.rows.map((row) => ({
+    model: String(row['机型'] || '').trim(),
+    qty: Math.max(1, Number(row['排产数量'] || 1)),
+    remark: String(row['备注'] || '').trim(),
+  }))
+  if (contractEditForm.items.length === 0) {
+    contractEditForm.items = [{ model: '', qty: 1, remark: '' }]
+  }
+  contractEditPreview.value = null
+  contractUnitDecisions.value = []
+  contractDecisionSupplements.value = []
+  contractImpactDialogVisible.value = false
+  contractEditDialogVisible.value = true
+}
+
+const addContractEditItem = () => {
+  contractEditForm.items.push({ model: '', qty: 1, remark: '' })
+}
+
+const removeContractEditItem = (index: number) => {
+  if (contractEditForm.items.length <= 1) return
+  contractEditForm.items.splice(index, 1)
+}
+
+const buildRecommendedImpactDecision = (preview: ContractEditPreview) => {
+  const plan = preview.unit_plan || {}
+  const decisions: ContractUnitDecision[] = []
+  for (const item of plan.assignments || []) {
+    const unitId = String(item.unit_id || '').trim()
+    if (!unitId) continue
+    decisions.push({
+      unit_id: unitId,
+      from_model: String(item.from_model || item.model || ''),
+      to_model: String(item.to_model || item.model || ''),
+      model_family: String(item.model_family || ''),
+      batch_status: String(item.batch_status || ''),
+      batch_id: String(item.batch_id || ''),
+      slot_index: item.slot_index ?? '',
+      action: 'keep',
+    })
+  }
+  for (const item of plan.releases || []) {
+    const unitId = String(item.unit_id || '').trim()
+    if (!unitId) continue
+    decisions.push({
+      unit_id: unitId,
+      from_model: String(item.model || item.from_model || ''),
+      to_model: String(item.model || item.from_model || ''),
+      model_family: String(item.model_family || ''),
+      batch_status: String(item.batch_status || ''),
+      batch_id: String(item.batch_id || ''),
+      slot_index: item.slot_index ?? '',
+      action: 'release',
+    })
+  }
+  contractUnitDecisions.value = decisions
+  const supplementsByModel = new Map<string, ContractSupplementDecision>()
+  for (const item of plan.supplements || []) {
+    const model = String(item.model || '')
+    if (!model) continue
+    supplementsByModel.set(model, {
+      model,
+      model_family: String(item.model_family || ''),
+      qty: Number(item.qty || 0),
+      reason: String(item.reason || ''),
+    })
+  }
+  const counts = preview.diff?.new_demand?.counts || {}
+  const families = preview.families || {}
+  for (const model of Object.keys(counts)) {
+    if (!supplementsByModel.has(model)) {
+      supplementsByModel.set(model, {
+        model,
+        model_family: String(families[model] || ''),
+        qty: 0,
+        reason: '如释放更多卡片，可在这里补排',
+      })
+    }
+  }
+  contractDecisionSupplements.value = Array.from(supplementsByModel.values()).map((item) => ({
+    model: String(item.model || ''),
+    model_family: String(item.model_family || ''),
+    qty: Number(item.qty || 0),
+    reason: String(item.reason || ''),
+  })).filter((item) => item.model)
+}
+
+const targetModelsForFamily = (family: string) => {
+  const families = contractEditPreview.value?.families || {}
+  const counts = contractEditPreview.value?.diff?.new_demand?.counts || {}
+  return Object.entries(families)
+    .filter(([model, f]) => Object.prototype.hasOwnProperty.call(counts, model) && String(f || '') === String(family || ''))
+    .map(([model]) => model)
+}
+
+const contractImpactError = computed(() => {
+  const preview = contractEditPreview.value
+  if (!preview?.requires_mapping) return ''
+  const counts = preview.diff?.new_demand?.counts || {}
+  const byModel = new Map<string, number>()
+  for (const row of contractUnitDecisions.value) {
+    if (row.action !== 'keep') continue
+    const model = String(row.to_model || '').trim()
+    if (!model) return `卡片 ${row.unit_id} 还没有选择目标机型`
+    if (!Object.prototype.hasOwnProperty.call(counts, model)) return `${model} 不在新合同明细中`
+    byModel.set(model, (byModel.get(model) || 0) + 1)
+  }
+  for (const item of contractDecisionSupplements.value) {
+    const model = String(item.model || '').trim()
+    if (!model) continue
+    byModel.set(model, (byModel.get(model) || 0) + Number(item.qty || 0))
+  }
+  for (const [model, qty] of Object.entries(counts)) {
+    const expected = Number(qty || 0)
+    const actual = Number(byModel.get(model) || 0)
+    if (actual !== expected) return `${model} 数量不一致：当前方案 ${actual}，合同 ${expected}`
+  }
+  return ''
+})
+
+const submitContractEdit = async (mappingDecision?: any) => {
+  const contractNo = contractEditForm.contractNo.trim()
+  const payload = {
+    ...buildContractEditPayload(),
+    confirmed_impact: Boolean(mappingDecision),
+    mapping_decision: mappingDecision || null,
+  }
+  const res = await apiPut<MessageResponse & { sync?: any; conflicts?: any[] }>(
+    `/planning/contract/${encodeURIComponent(contractNo)}`,
+    payload,
+    { timeout: 120000 },
+  )
+  ElMessage.success(res.message || '合同修改已保存')
+  contractEditDialogVisible.value = false
+  contractImpactDialogVisible.value = false
+  const oldTab = activeTab.value
+  await fetchContracts(true)
+  activeTab.value = oldTab
+  selectedContractId.value = contractNo
+}
+
+const precheckContractEdit = async () => {
+  if (!validateContractEditForm()) return
+  await submitWithLock(contractEditSaving, async () => {
+    const contractNo = contractEditForm.contractNo.trim()
+    const payload = buildContractEditPayload()
+    const preview = await apiPost<ContractEditPreview>(
+      `/planning/contract/${encodeURIComponent(contractNo)}/edit-preview`,
+      payload,
+      { timeout: 120000 },
+    )
+    if (preview.blocked) {
+      ElMessageBox.alert(preview.blocked_reason || '当前合同修改被拦截', '无法保存', { type: 'error' })
+      return
+    }
+    contractEditPreview.value = preview
+    if (preview.requires_mapping) {
+      buildRecommendedImpactDecision(preview)
+      contractImpactDialogVisible.value = true
+      return
+    }
+    try {
+      await ElMessageBox.confirm('该修改不会触发机型数量重排，确认保存并同步全局数据？', '确认保存', {
+        confirmButtonText: '确认保存',
+        cancelButtonText: '返回',
+        type: 'warning',
+      })
+    } catch {
+      return
+    }
+    await submitContractEdit()
+  }, { errorMessage: '合同编辑预检失败' })
+}
+
+const confirmContractEditImpact = async () => {
+  const preview = contractEditPreview.value
+  if (!preview) return
+  if (contractImpactError.value) {
+    ElMessage.warning(contractImpactError.value)
+    return
+  }
+  const assignments = contractUnitDecisions.value
+    .filter((row) => row.action === 'keep')
+    .map((row) => ({
+      unit_id: row.unit_id,
+      from_model: row.from_model,
+      to_model: row.to_model,
+      model_family: row.model_family,
+      batch_status: row.batch_status,
+      batch_id: row.batch_id,
+      slot_index: row.slot_index,
+    }))
+  const releases = contractUnitDecisions.value
+    .filter((row) => row.action === 'release')
+    .map((row) => ({
+      unit_id: row.unit_id,
+      model: row.from_model,
+      model_family: row.model_family,
+      batch_status: row.batch_status,
+      batch_id: row.batch_id,
+      slot_index: row.slot_index,
+    }))
+  const supplements = contractDecisionSupplements.value
+    .filter((item) => item.model && Number(item.qty || 0) > 0)
+    .map((item) => ({ model: item.model, model_family: item.model_family, qty: Number(item.qty), reason: item.reason || '人工确认补排' }))
+  await submitWithLock(contractEditSaving, async () => {
+    await submitContractEdit({
+      preview_token: preview.preview_token,
+      unit_plan: { assignments, releases, supplements },
+    })
+  }, { errorMessage: '合同修改保存失败' })
 }
 
 const fetchContracts = async (force = false) => {
@@ -841,6 +1297,27 @@ const cancelSelectedContract = async () => {
     await apiPost(`/planning/contract/${encodeURIComponent(contract.id)}/status`, { status: '已取消' })
     await fetchContracts(true)
   }, { successMessage: '合同已取消，预测沙盒已同步重算', errorMessage: '取消合同失败' })
+}
+
+const markSelectedContractPlanned = async () => {
+  const contract = selectedContract.value
+  if (!contract || contract.status !== '待规划') return
+  try {
+    await ElMessageBox.confirm(`确认将合同「${contract.id}」同步到沙盘并转为已规划？`, '转为已规划', {
+      confirmButtonText: '确认转为已规划',
+      cancelButtonText: '返回',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  await submitWithLock(executing, async () => {
+    const contractId = contract.id
+    await apiPost(`/planning/contract/${encodeURIComponent(contractId)}/status`, { status: '已规划' })
+    activeTab.value = '已规划'
+    selectedContractId.value = contractId
+    await fetchContracts(true)
+  }, { successMessage: '合同已转为已规划并同步沙盘', errorMessage: '转为已规划失败' })
 }
 
 const addBatchItem = () => {
@@ -1453,11 +1930,17 @@ onMounted(() => {
 .contract-meta,
 .attachment-header,
 .attachment-item,
-.actions-section {
+.actions-section,
+.action-buttons {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+.action-buttons {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .contract-card-head strong {
   color: var(--color-gray-900);
@@ -1522,6 +2005,45 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.contract-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.impact-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.impact-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--color-gray-600);
+  font-size: var(--font-size-sm);
+}
+.impact-stats span {
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  background: var(--color-gray-50);
+}
+.supplement-title {
+  margin-top: 4px;
+}
+.impact-empty {
+  color: var(--color-gray-500);
+  font-size: var(--font-size-sm);
+  padding: 8px 0;
+}
+.impact-error {
+  margin-top: 4px;
 }
 .detail-section {
   margin-top: var(--space-3);

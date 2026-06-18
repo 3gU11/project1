@@ -28,7 +28,10 @@ func OpenMySQL(cfg config.Config) (*gorm.DB, error) {
 }
 
 func ensureSchema(db *gorm.DB) error {
-	if err := addColumnIfMissing(db, "batches", "batch_code", "ALTER TABLE batches ADD COLUMN batch_code VARCHAR(16) NULL AFTER batch_no"); err != nil {
+	if err := addColumnIfMissing(db, "batches", "batch_code", "ALTER TABLE batches ADD COLUMN batch_code VARCHAR(64) NULL AFTER batch_no"); err != nil {
+		return err
+	}
+	if err := ensureBatchCodeLength(db); err != nil {
 		return err
 	}
 	if err := addColumnIfMissing(db, "batches", "expected_inbound_date", "ALTER TABLE batches ADD COLUMN expected_inbound_date DATE NULL AFTER due_date_end"); err != nil {
@@ -151,6 +154,23 @@ WHERE TABLE_SCHEMA = DATABASE()
 		return nil
 	}
 	return db.Exec(alterSQL).Error
+}
+
+func ensureBatchCodeLength(db *gorm.DB) error {
+	var maxLength int64
+	if err := db.Raw(`
+SELECT COALESCE(CHARACTER_MAXIMUM_LENGTH, 0)
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'batches'
+  AND COLUMN_NAME = 'batch_code'
+LIMIT 1`).Scan(&maxLength).Error; err != nil {
+		return err
+	}
+	if maxLength >= 64 {
+		return nil
+	}
+	return db.Exec("ALTER TABLE batches MODIFY COLUMN batch_code VARCHAR(64) NULL").Error
 }
 
 func ensureFH300CModel(db *gorm.DB) error {

@@ -74,6 +74,7 @@ func (h *UnitHandler) Update(c *gin.Context) {
 
 	// Capture old state for sync
 	oldUnit, _ := h.repo.GetByID(c.Param("id"))
+	boundContract := oldUnit != nil && oldUnit.ContractNo != nil && strings.TrimSpace(*oldUnit.ContractNo) != ""
 
 	// Remove protected fields
 	delete(req, "unit_id")
@@ -96,6 +97,14 @@ func (h *UnitHandler) Update(c *gin.Context) {
 	for key := range req {
 		if _, ok := allowedFields[key]; !ok {
 			delete(req, key)
+		}
+	}
+	if boundContract {
+		for _, key := range []string{"model_type", "customer", "dealer_name"} {
+			if _, exists := req[key]; exists {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "绑定合同的卡片只能在合同管理修改机型、客户和代理商"})
+				return
+			}
 		}
 	}
 
@@ -141,42 +150,54 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// 同步修改到历史排产台账中
-	var newCustomer *string
-	var newDealer *string
-	var newRemark *string
-	var newModel string
+	// 同步修改到历史排产台账中。绑定合同卡片这里只允许备注变化。
+	if boundContract {
+		if rVal, ok := req["order_remark"].(string); ok {
+			if err := tx.Exec(`
+UPDATE production_history_ledger
+SET order_remark = ?
+WHERE status = 'In_Production' AND unit_id = ?
+`, rVal, c.Param("id")).Error; err != nil {
+				fmt.Printf("Update: sync production_history_ledger remark failed: %v\n", err)
+			}
+		}
+	} else {
+		var newCustomer *string
+		var newDealer *string
+		var newRemark *string
+		var newModel string
 
-	if cVal, ok := req["customer"].(string); ok {
-		newCustomer = &cVal
-	} else if oldUnit != nil {
-		newCustomer = oldUnit.Customer
-	}
+		if cVal, ok := req["customer"].(string); ok {
+			newCustomer = &cVal
+		} else if oldUnit != nil {
+			newCustomer = oldUnit.Customer
+		}
 
-	if dVal, ok := req["dealer_name"].(string); ok {
-		newDealer = &dVal
-	} else if oldUnit != nil {
-		newDealer = oldUnit.DealerName
-	}
+		if dVal, ok := req["dealer_name"].(string); ok {
+			newDealer = &dVal
+		} else if oldUnit != nil {
+			newDealer = oldUnit.DealerName
+		}
 
-	if rVal, ok := req["order_remark"].(string); ok {
-		newRemark = &rVal
-	} else if oldUnit != nil {
-		newRemark = oldUnit.OrderRemark
-	}
+		if rVal, ok := req["order_remark"].(string); ok {
+			newRemark = &rVal
+		} else if oldUnit != nil {
+			newRemark = oldUnit.OrderRemark
+		}
 
-	if mVal, ok := req["model_type"].(string); ok {
-		newModel = mVal
-	} else if oldUnit != nil {
-		newModel = oldUnit.ModelType
-	}
+		if mVal, ok := req["model_type"].(string); ok {
+			newModel = mVal
+		} else if oldUnit != nil {
+			newModel = oldUnit.ModelType
+		}
 
-	if err := tx.Exec(`
+		if err := tx.Exec(`
 UPDATE production_history_ledger
 SET customer = ?, dealer_name = ?, order_remark = ?, model_type = ?
 WHERE status = 'In_Production' AND unit_id = ?
 `, newCustomer, newDealer, newRemark, newModel, c.Param("id")).Error; err != nil {
-		fmt.Printf("Update: sync production_history_ledger failed: %v\n", err)
+			fmt.Printf("Update: sync production_history_ledger failed: %v\n", err)
+		}
 	}
 
 	if err := service.SyncFinishedGoodsByUnitIDs(tx, []string{c.Param("id")}); err != nil {
@@ -193,38 +214,18 @@ WHERE status = 'In_Production' AND unit_id = ?
 
 	// 【缺口1补全】反向同步：如果修改了机型或备注，且属于某个合同，则写回 Python
 	if oldUnit != nil && newUnit != nil && newUnit.ContractNo != nil && *newUnit.ContractNo != "" {
-		newModel := newUnit.ModelType
 		newRemark := ""
 		if newUnit.OrderRemark != nil {
 			newRemark = *newUnit.OrderRemark
 		}
 
-		oldModel := oldUnit.ModelType
 		oldRemark := ""
 		if oldUnit.OrderRemark != nil {
 			oldRemark = *oldUnit.OrderRemark
 		}
 
-		// 只有在关键字段变动时才发起同步
-		oldCustomer := ""
-		if oldUnit.Customer != nil {
-			oldCustomer = *oldUnit.Customer
-		}
-		oldDealerName := ""
-		if oldUnit.DealerName != nil {
-			oldDealerName = *oldUnit.DealerName
-		}
-		newCustomer := ""
-		if newUnit.Customer != nil {
-			newCustomer = *newUnit.Customer
-		}
-		newDealerName := ""
-		if newUnit.DealerName != nil {
-			newDealerName = *newUnit.DealerName
-		}
-
-		if newModel != oldModel || newRemark != oldRemark || newCustomer != oldCustomer || newDealerName != oldDealerName {
-			go h.SyncToPython(*newUnit.ContractNo, oldModel, newModel, newRemark, newCustomer, newDealerName)
+		if newRemark != oldRemark {
+			go h.SyncRemarkToPython(*newUnit.ContractNo, newUnit.ModelType, newRemark)
 		}
 	}
 
@@ -232,16 +233,13 @@ WHERE status = 'In_Production' AND unit_id = ?
 	c.JSON(http.StatusOK, gin.H{"unit": newUnit})
 }
 
-func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark, customer, dealerName string) {
-	// 简单的 HTTP Client 调用 Python 内部接口
+func (h *UnitHandler) SyncRemarkToPython(contractNo, model, remark string) {
 	url := fmt.Sprintf("%s/internal/planning/unit-sync", h.pythonURL)
 	payload := map[string]string{
 		"contract_no":  contractNo,
-		"old_model":    oldModel,
-		"new_model":    newModel,
+		"old_model":    model,
+		"new_model":    model,
 		"order_remark": remark,
-		"customer":     customer,
-		"dealer_name":  dealerName,
 	}
 	body, _ := json.Marshal(payload)
 
@@ -265,6 +263,48 @@ func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark, custo
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("SyncToPython: status non-200: %d\n", resp.StatusCode)
+	}
+}
+
+func (h *UnitHandler) NotifyContractCancelToPython(contractNo, actor, source string) {
+	contractNo = strings.TrimSpace(contractNo)
+	if contractNo == "" || h.pythonURL == "" {
+		return
+	}
+	if actor == "" {
+		actor = "system"
+	}
+	if source == "" {
+		source = "go"
+	}
+	url := fmt.Sprintf("%s/internal/planning/contract-cancel-sync", h.pythonURL)
+	payload := map[string]string{
+		"contract_no": contractNo,
+		"operator":    actor,
+		"source":      source,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
+	if err != nil {
+		fmt.Printf("NotifyContractCancelToPython: failed to create request: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if h.internalToken != "" {
+		req.Header.Set("X-Internal-Token", h.internalToken)
+	}
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("NotifyContractCancelToPython: request failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		fmt.Printf("NotifyContractCancelToPython: status non-2xx: %d\n", resp.StatusCode)
 	}
 }
 
@@ -1832,6 +1872,62 @@ func supplementLevel3MapFromModelDict(db *gorm.DB, level3 map[string]map[string]
 			}
 		}
 	}
+	normalizeUnitLevel3RatioSums(level3)
+}
+
+func normalizeUnitLevel3RatioSums(level3 map[string]map[string]int) {
+	for _, category := range []string{"中小型G", "中小型XS", "中大型XS", "中小型AUTO", "中大型AUTO"} {
+		ratios := level3[category]
+		if len(ratios) == 0 {
+			continue
+		}
+		sum := 0
+		for _, value := range ratios {
+			if value > 0 {
+				sum += value
+			}
+		}
+		if sum == 100 {
+			continue
+		}
+		keys := make([]string, 0, len(ratios))
+		for key := range ratios {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		if sum <= 0 {
+			for _, key := range keys {
+				ratios[key] = 0
+			}
+			if len(keys) > 0 {
+				ratios[keys[0]] = 100
+			}
+			continue
+		}
+		type remainder struct {
+			key string
+			rem float64
+		}
+		used := 0
+		remainders := make([]remainder, 0, len(keys))
+		for _, key := range keys {
+			exact := float64(ratios[key]) * 100.0 / float64(sum)
+			base := int(math.Floor(exact))
+			ratios[key] = base
+			used += base
+			remainders = append(remainders, remainder{key: key, rem: exact - float64(base)})
+		}
+		sort.SliceStable(remainders, func(i, j int) bool {
+			if remainders[i].rem != remainders[j].rem {
+				return remainders[i].rem > remainders[j].rem
+			}
+			return remainders[i].key < remainders[j].key
+		})
+		for i := 0; used < 100 && i < len(remainders); i++ {
+			ratios[remainders[i].key]++
+			used++
+		}
+	}
 }
 
 func rehomeLevel3ModelsByDictionary(level3 map[string]map[string]int, dictCatByModel map[string]string) {
@@ -2522,6 +2618,10 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 	defer tx.Rollback()
 
 	unitID := c.Param("id")
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
 	unit, err := h.repo.LockForUpdate(tx, unitID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "unit not found"})
@@ -2604,6 +2704,13 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if contractNo != "" {
+		go h.NotifyContractCancelToPython(contractNo, actor, "mark-spot")
+		h.hub.Broadcast("unit:updated", gin.H{"contract_no": contractNo, "unit_id": unitID, "mode": "contract-cancelled-by-mark-spot"})
+	} else {
+		h.hub.Broadcast("unit:updated", gin.H{"unit_id": unitID, "mode": "mark-spot"})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})

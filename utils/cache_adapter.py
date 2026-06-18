@@ -66,11 +66,11 @@ class CacheAdapter:
             get_data_v2.cache_clear()
 
         @staticmethod
-        def inbound_to_slot(serial_no, slot_code, is_transfer=False):
+        def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
             """入库/调拨，自动根据配置选择优化版本"""
             if USE_INBOUND_SQL_OPTIMIZED:
-                return inbound_to_slot_v2(serial_no, slot_code, is_transfer)
-            return inbound_to_slot(serial_no, slot_code, is_transfer)
+                return inbound_to_slot_v2(serial_no, slot_code, is_transfer, operator=operator)
+            return inbound_to_slot(serial_no, slot_code, is_transfer, operator=operator)
 
     class OrdersCache:
         """订单数据缓存接口"""

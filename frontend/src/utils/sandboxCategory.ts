@@ -13,7 +13,9 @@ export function normalizeMajorFamily(value: string) {
 
 export function categoryOfModel(modelType: string, modelFamily?: string): SandboxCategory | '' {
   const dictFamily = normalizeSandboxCategory(String(modelFamily || '').trim())
-  const raw = dictFamily || String(modelType || '').trim()
+  const raw = dictFamily && !['G', 'XS', 'AUTO'].includes(dictFamily.toUpperCase())
+    ? dictFamily
+    : String(modelType || '').trim()
   if (!raw) return ''
   if (raw.includes('特殊')) return '特殊'
   if (raw.includes('中小型G')) return '中小型G'

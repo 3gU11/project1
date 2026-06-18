@@ -3,7 +3,7 @@
     <van-nav-bar :title="pageTitle" fixed placeholder />
 
     <div class="card search-card">
-      <van-search v-model="keyword" placeholder="搜索批次号/流水号/机型/库位" @search="load" />
+      <van-search v-model="keyword" placeholder="搜索流水号/批次号/机型" @search="load" />
       
       <!-- 库管角色：增加快捷过滤器 -->
       <div v-if="isProd" class="filter-bar">

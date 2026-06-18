@@ -69,7 +69,7 @@
         <div class="fs-meta">管理员：{{ userNameText }}&nbsp;&nbsp; 当前时间：{{ nowText }}</div>
 
         <section v-for="section in groupedSlotSections" :key="`fs-${section.zone}`" class="zone-section fs-zone-section">
-          <div class="zone-title">{{ section.zone }} 区 · {{ section.items.length }} 个库位</div>
+          <div class="zone-title">{{ section.label }} · {{ section.items.length }} 个库位</div>
           <div class="slot-grid fullscreen-grid">
             <button
               v-for="s in section.items"
@@ -97,7 +97,7 @@
 
       <template v-else>
         <section v-for="section in groupedSlotSections" :key="section.zone" class="zone-section">
-          <div class="zone-title">{{ section.zone }} 区 · {{ section.items.length }} 个库位</div>
+          <div class="zone-title">{{ section.label }} · {{ section.items.length }} 个库位</div>
           <div class="slot-grid">
             <button
               v-for="s in section.items"
@@ -316,17 +316,40 @@ const filteredSlotCards = computed(() => {
     return code.includes(kw) || sns.includes(kw)
   })
 })
+
+const zoneOrder = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', '大机型区域', '待发货缓冲区', '实验室区', '整机报废区', '未分区']
+const resolveSlotZone = (codeValue: any) => {
+  const code = String(codeValue || '').trim()
+  if (!code) return '未分区'
+  const alpha = code.match(/^[A-Za-z]+/)
+  if (alpha) return alpha[0].toUpperCase()
+  const text = code.replace(/\d+$/, '').trim()
+  return text || '未分区'
+}
+const zoneLabel = (zone: string) => zone.endsWith('区') ? zone : `${zone} 区`
+const compareZones = (a: string, b: string) => {
+  const ia = zoneOrder.indexOf(a)
+  const ib = zoneOrder.indexOf(b)
+  const oa = ia >= 0 ? ia : zoneOrder.length
+  const ob = ib >= 0 ? ib : zoneOrder.length
+  if (oa !== ob) return oa - ob
+  return a.localeCompare(b, 'zh-CN', { numeric: true })
+}
+
 const groupedSlotSections = computed(() => {
   const groups = new Map<string, any[]>()
   for (const slot of filteredSlotCards.value) {
-    const m = String(slot.code || '').match(/^[A-Za-z]+/)
-    const zone = m ? m[0].toUpperCase() : '未分区'
+    const zone = resolveSlotZone(slot.code)
     if (!groups.has(zone)) groups.set(zone, [])
     groups.get(zone)!.push(slot)
   }
   return Array.from(groups.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([zone, items]) => ({ zone, items: items.sort((a, b) => String(a.code).localeCompare(String(b.code), 'zh-CN', { numeric: true })) }))
+    .sort((a, b) => compareZones(a[0], b[0]))
+    .map(([zone, items]) => ({
+      zone,
+      label: zoneLabel(zone),
+      items: items.sort((a, b) => String(a.code).localeCompare(String(b.code), 'zh-CN', { numeric: true })),
+    }))
 })
 
 const slotStyle = (_slot: any) => ({})

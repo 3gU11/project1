@@ -1,0 +1,24 @@
+{
+  "root": "E:\\V8\\project1",
+  "startedAt": "2026-06-18T14:30:00+08:00",
+  "ports": {
+    "go": "3001",
+    "api": "8000",
+    "web": "8888",
+    "mobile": null
+  },
+  "processes": [
+    {
+      "name": "Go backend",
+      "pid": 53012
+    },
+    {
+      "name": "FastAPI",
+      "pid": 22740
+    },
+    {
+      "name": "frontend",
+      "pid": 49160
+    }
+  ]
+}

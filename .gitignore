@@ -16,3 +16,7 @@ server/.env
 server/.gocache-build/
 server/.gomodcache-build/
 server/.gopath-build/
+
+machine_archives/
+
+scripts/

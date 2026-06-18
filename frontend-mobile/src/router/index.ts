@@ -26,6 +26,12 @@ const routes = [
         meta: { roles: ['Inbound'] }
       },
       {
+        path: 'locator',
+        name: 'InventoryLocator',
+        component: () => import('../views/InventoryLocator.vue'),
+        meta: { roles: ['Inbound', 'Prod'] }
+      },
+      {
         path: 'production',
         name: 'MobileProduction',
         component: () => import('../views/ProductionKanban.vue'),

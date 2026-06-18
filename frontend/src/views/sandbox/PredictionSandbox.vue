@@ -318,6 +318,7 @@ import UnitCard from '../../components/sandbox/UnitCard.vue'
 import CapacityRatioEditor from '../../components/sandbox/CapacityRatioEditor.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
 import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
+import { compareModels } from '../../utils/modelOrder'
 
 const batchStore = useBatchStore()
 const recomputing = ref(false)
@@ -595,6 +596,18 @@ const specialModelTypes = computed(() => {
 
 const seriesFilterOptions = ['中小型G', '中小型XS', '中大型XS', '中小型AUTO', '中大型AUTO', '特殊']
 
+function modelsForBatchCategory(batch: any) {
+  const category = displayBatchCategory(batch)
+  if (!category || category === '特殊') return []
+  const merged = new Set<string>([...modelTypes.value, ...batchStore.modelTypes])
+  return [...merged]
+    .map((m) => String(m || '').trim())
+    .filter(Boolean)
+    .filter((m) => !isFamilyToken(m))
+    .filter((m) => categoryOfModel(m, modelFamilyMap.value[m.toUpperCase()] || '') === category)
+    .sort(compareModels)
+}
+
 function displayBatchCategory(batch: any) {
   const batchModel = String(batch?.model_type || '').trim()
   const batchUpper = batchModel.toUpperCase()
@@ -812,6 +825,9 @@ function resetBatchStockEdit(batch: any) {
   const batchId = String(batch?.batch_id || '')
   if (!batchId) return
   const counts = { ...currentStockCounts(batch) }
+  for (const model of modelsForBatchCategory(batch)) {
+    if (counts[model] === undefined) counts[model] = 0
+  }
   for (const model of orderedModelNames(batch)) {
     if (counts[model] === undefined) counts[model] = 0
   }
@@ -823,7 +839,11 @@ function resetAllStockEdits() {
   for (const batch of batchStore.batches) {
     const batchId = String(batch?.batch_id || '')
     if (!batchId) continue
-    next[batchId] = { ...currentStockCounts(batch) }
+    const counts = { ...currentStockCounts(batch) }
+    for (const model of modelsForBatchCategory(batch)) {
+      if (counts[model] === undefined) counts[model] = 0
+    }
+    next[batchId] = counts
   }
   stockEdits.value = next
 }
@@ -840,10 +860,10 @@ function ensureBatchStockEdit(batch: any) {
 function stockEditRows(batch: any) {
   const edit = ensureBatchStockEdit(batch)
   const current = currentStockCounts(batch)
-  const models = new Set<string>([...orderedModelNames(batch), ...Object.keys(current), ...Object.keys(edit)])
+  const models = new Set<string>([...modelsForBatchCategory(batch), ...orderedModelNames(batch), ...Object.keys(current), ...Object.keys(edit)])
   return [...models]
     .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b))
+    .sort(compareModels)
     .map((model) => ({ model }))
 }
 
@@ -1235,9 +1255,8 @@ async function batchConfirm() {
     ElMessage.warning('请在列顶输入批次号')
     return
   }
-  const codePattern = /^\d{2}-\d{2}[\u4e00-\u9fa5A-Za-z0-9_-]{0,20}$/
-  if (!codePattern.test(batchCode)) {
-    ElMessage.warning('批次号格式错误：必须以 MM-SS 开头，后面可追加20字以内中文/字母/数字/下划线/中划线')
+  if (batchCode.length > 64 || /[\u0000-\u001F\u007F]/.test(batchCode)) {
+    ElMessage.warning('批次号最多64个字符，不能包含换行等控制字符')
     return
   }
 
@@ -1250,7 +1269,7 @@ async function batchConfirm() {
   // Preview serial number range before final confirm
   let previewMsg = ''
   try {
-    const preview: any = await sandboxApi.previewSyncToPlan(selectedId, batchCode)
+    const preview: any = await sandboxApi.previewSyncToPlan(selectedId, batchCode, inboundDate)
     if (preview && preview.count > 0) {
       previewMsg = `\n\n该批次共 ${preview.count} 张卡片待同步\n流水号范围: ${preview.first_serial} ~ ${preview.last_serial}`
     } else {

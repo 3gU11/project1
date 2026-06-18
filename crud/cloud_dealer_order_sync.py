@@ -65,6 +65,80 @@ CLOUD_READ_STATUSES = (
 )
 
 
+def _ensure_wechat_batch_summary_schema(conn) -> None:
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS wechat_batch_summary (
+              summary_id CHAR(32) NOT NULL,
+              batch_no VARCHAR(100) NOT NULL,
+              expected_inbound_time DATETIME NULL,
+              model VARCHAR(100) NOT NULL,
+              quantity INT NOT NULL DEFAULT 0,
+              heightened TINYINT(1) NOT NULL DEFAULT 0,
+              original_batch_no VARCHAR(100) DEFAULT '',
+              original_expected_inbound_time DATETIME NULL,
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (summary_id),
+              INDEX idx_wbs_batch (batch_no),
+              INDEX idx_wbs_inbound (expected_inbound_time),
+              INDEX idx_wbs_model (model)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """
+        )
+    )
+
+    def has_column(column_name: str) -> bool:
+        return conn.execute(
+            text("SHOW COLUMNS FROM wechat_batch_summary LIKE :column_name"),
+            {"column_name": column_name},
+        ).fetchone() is not None
+
+    missing_columns = [
+        ("heightened", "TINYINT(1) NOT NULL DEFAULT 0"),
+        ("original_batch_no", "VARCHAR(100) DEFAULT ''"),
+        ("original_expected_inbound_time", "DATETIME NULL"),
+        ("updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+    ]
+    for column_name, column_def in missing_columns:
+        if not has_column(column_name):
+            conn.execute(text(f"ALTER TABLE wechat_batch_summary ADD COLUMN {column_name} {column_def}"))
+
+    for column_name, column_def in [
+        ("批次号", "VARCHAR(100) NOT NULL DEFAULT ''"),
+        ("预计入库时间", "DATETIME NULL"),
+        ("机型", "VARCHAR(100) NOT NULL DEFAULT ''"),
+        ("数量", "INT NOT NULL DEFAULT 0"),
+        ("更新时间", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+    ]:
+        if not has_column(column_name):
+            conn.execute(text(f"ALTER TABLE wechat_batch_summary ADD COLUMN `{column_name}` {column_def}"))
+        else:
+            conn.execute(text(f"ALTER TABLE wechat_batch_summary MODIFY COLUMN `{column_name}` {column_def}"))
+
+    def has_index(index_name: str) -> bool:
+        return conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'wechat_batch_summary'
+                  AND INDEX_NAME = :index_name
+                """
+            ),
+            {"index_name": index_name},
+        ).scalar() > 0
+
+    for index_name, column_name in [
+        ("idx_wbs_batch", "batch_no"),
+        ("idx_wbs_inbound", "expected_inbound_time"),
+        ("idx_wbs_model", "model"),
+    ]:
+        if not has_index(index_name):
+            conn.execute(text(f"CREATE INDEX {index_name} ON wechat_batch_summary ({column_name})"))
+
+
 def _read_dotenv_value(key: str) -> str:
     env_path = Path(__file__).resolve().parents[1] / ".env"
     if not env_path.exists():
@@ -411,37 +485,27 @@ def push_cloud_completed_state(
 def refresh_local_wechat_batch_summary() -> dict[str, Any]:
     """Rebuild the local mini-program inventory read model from finished_goods_data."""
     with get_engine().begin() as conn:
+        _ensure_wechat_batch_summary_schema(conn)
         try:
             conn.execute(text("CALL `refresh_wechat_batch_summary_all`()"))
         except Exception:
-            conn.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS wechat_batch_summary (
-                      summary_id CHAR(32) NOT NULL,
-                      batch_no VARCHAR(100) NOT NULL,
-                      expected_inbound_time DATETIME NULL,
-                      model VARCHAR(100) NOT NULL,
-                      quantity INT NOT NULL DEFAULT 0,
-                      heightened TINYINT(1) NOT NULL DEFAULT 0,
-                      original_batch_no VARCHAR(100) DEFAULT '',
-                      original_expected_inbound_time DATETIME NULL,
-                      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                      PRIMARY KEY (summary_id),
-                      INDEX idx_wbs_batch (batch_no),
-                      INDEX idx_wbs_inbound (expected_inbound_time),
-                      INDEX idx_wbs_model (model)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                    """
-                )
+            has_order_remark = conn.execute(
+                text("SHOW COLUMNS FROM finished_goods_data LIKE '订单备注'")
+            ).fetchone() is not None
+            order_remark_high_clause = (
+                "OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'"
+                if has_order_remark
+                else ""
             )
+
             conn.execute(text("TRUNCATE TABLE wechat_batch_summary"))
             conn.execute(
                 text(
-                    """
+                    f"""
                     INSERT INTO wechat_batch_summary
                       (summary_id, batch_no, expected_inbound_time, model, quantity,
-                       heightened, original_batch_no, original_expected_inbound_time)
+                       heightened, original_batch_no, original_expected_inbound_time,
+                       `批次号`, `预计入库时间`, `机型`, `数量`)
                     SELECT
                       MD5(CONCAT(
                         s.batch_no, '|',
@@ -454,7 +518,11 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       s.quantity,
                       s.heightened,
                       s.original_batch_no,
-                      s.original_expected_inbound_time
+                      s.original_expected_inbound_time,
+                      s.batch_no,
+                      s.expected_inbound_time,
+                      s.model,
+                      s.quantity
                     FROM (
                       SELECT
                         IF(raw.is_high, '加高', raw.source_batch_no) AS batch_no,
@@ -474,7 +542,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                             OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
                             OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
                             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+                            {order_remark_high_clause}
                           ) AS is_high
                         FROM finished_goods_data
                         WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
@@ -501,7 +569,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                             OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
                             OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
                             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
+                            {order_remark_high_clause}
                           ) AS is_high
                         FROM finished_goods_data
                         WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
@@ -517,7 +585,22 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       quantity = VALUES(quantity),
                       heightened = VALUES(heightened),
                       original_batch_no = VALUES(original_batch_no),
-                      original_expected_inbound_time = VALUES(original_expected_inbound_time)
+                      original_expected_inbound_time = VALUES(original_expected_inbound_time),
+                      `批次号` = VALUES(`批次号`),
+                      `预计入库时间` = VALUES(`预计入库时间`),
+                      `机型` = VALUES(`机型`),
+                      `数量` = VALUES(`数量`)
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE wechat_batch_summary
+                    SET `批次号` = batch_no,
+                        `预计入库时间` = expected_inbound_time,
+                        `机型` = model,
+                        `数量` = quantity
                     """
                 )
             )
@@ -527,6 +610,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
 
 def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
     with get_engine().begin() as conn:
+        _ensure_wechat_batch_summary_schema(conn)
         rows = conn.execute(
             text(
                 """

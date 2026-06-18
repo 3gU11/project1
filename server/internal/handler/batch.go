@@ -3,9 +3,10 @@ package handler
 import (
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -64,13 +65,15 @@ func (h *BatchHandler) Confirm(c *gin.Context) {
 	var batchCode *string
 	code := strings.TrimSpace(req.BatchCode)
 	if code != "" {
-		if !regexp.MustCompile(`^(0[1-9]|1[0-2])-\d{2}$`).MatchString(code) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code format must be MM-SS"})
+		if utf8.RuneCountInString(code) > 64 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code must be 64 characters or fewer"})
 			return
 		}
-		if strings.HasSuffix(code, "-00") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code out of range"})
-			return
+		for _, r := range code {
+			if unicode.IsControl(r) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code contains invalid characters"})
+				return
+			}
 		}
 		batchCode = &code
 	}

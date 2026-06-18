@@ -838,7 +838,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 
 
 def _ensure_schema_version_table(conn):
@@ -870,6 +870,116 @@ def _record_schema_version(conn, version, description=""):
     )
 
 
+def _table_exists(conn, table_name):
+    raw = conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.TABLES "
+        "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t"
+    ), {"db": MYSQL_DB, "t": table_name}).scalar()
+    return int(raw or 0) > 0
+
+
+def _column_exists_in_table(conn, table_name, column_name):
+    raw = conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:t AND COLUMN_NAME=:c"
+    ), {"db": MYSQL_DB, "t": table_name, "c": column_name}).scalar()
+    return int(raw or 0) > 0
+
+
+def _has_unique_sales_order_no(conn):
+    raw = conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.STATISTICS "
+        "WHERE TABLE_SCHEMA=:db "
+        "AND TABLE_NAME='sales_orders' "
+        "AND COLUMN_NAME='订单号' "
+        "AND NON_UNIQUE=0"
+    ), {"db": MYSQL_DB}).scalar()
+    return int(raw or 0) > 0
+
+
+def _sales_orders_primary_key_columns(conn):
+    return [
+        row[0] for row in conn.execute(text(
+            "SELECT COLUMN_NAME FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA=:db "
+            "AND TABLE_NAME='sales_orders' "
+            "AND INDEX_NAME='PRIMARY' "
+            "ORDER BY SEQ_IN_INDEX"
+        ), {"db": MYSQL_DB}).fetchall()
+    ]
+
+
+def _ensure_sales_orders_unique_order_no(conn):
+    """Keep sales_orders upsert-safe even after importing legacy SQL dumps."""
+    if not _table_exists(conn, "sales_orders"):
+        return
+    if not _column_exists_in_table(conn, "sales_orders", "订单号"):
+        return
+
+    conn.execute(text("UPDATE sales_orders SET `订单号`=TRIM(`订单号`) WHERE `订单号` IS NOT NULL"))
+    conn.execute(text("DELETE FROM sales_orders WHERE TRIM(COALESCE(`订单号`, ''))=''"))
+
+    duplicate_count = conn.execute(text(
+        "SELECT COUNT(*) FROM ("
+        "SELECT `订单号` FROM sales_orders GROUP BY `订单号` HAVING COUNT(*) > 1"
+        ") dup"
+    )).scalar()
+
+    temp_col = "_sales_orders_dedupe_id"
+    temp_col_exists = _column_exists_in_table(conn, "sales_orders", temp_col)
+    temp_col_added = False
+    temp_col_was_primary = False
+
+    if int(duplicate_count or 0) > 0:
+        primary_cols = _sales_orders_primary_key_columns(conn)
+        temp_col_was_primary = primary_cols == [temp_col]
+        if not temp_col_exists:
+            if primary_cols:
+                conn.execute(text(
+                    f"ALTER TABLE sales_orders "
+                    f"ADD COLUMN `{temp_col}` BIGINT NOT NULL AUTO_INCREMENT FIRST, "
+                    f"ADD UNIQUE INDEX `{temp_col}` (`{temp_col}`)"
+                ))
+            else:
+                conn.execute(text(
+                    f"ALTER TABLE sales_orders "
+                    f"ADD COLUMN `{temp_col}` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST"
+                ))
+                temp_col_was_primary = True
+            temp_col_added = True
+            temp_col_exists = True
+
+        if temp_col_exists:
+            conn.execute(text(f"""
+                DELETE old_row FROM sales_orders old_row
+                INNER JOIN sales_orders new_row
+                    ON old_row.`订单号` = new_row.`订单号`
+                   AND old_row.`{temp_col}` < new_row.`{temp_col}`
+            """))
+        else:
+            raise RuntimeError("sales_orders has duplicate order numbers and no dedupe key")
+
+    if not _has_unique_sales_order_no(conn):
+        conn.execute(text(
+            "ALTER TABLE sales_orders "
+            "MODIFY COLUMN `订单号` VARCHAR(100) NOT NULL"
+        ))
+        conn.execute(text(
+            "ALTER TABLE sales_orders "
+            "ADD UNIQUE INDEX `uq_sales_orders_order_no` (`订单号`)"
+        ))
+
+    if temp_col_exists and (temp_col_added or _column_exists_in_table(conn, "sales_orders", temp_col)):
+        if temp_col_was_primary or _sales_orders_primary_key_columns(conn) == [temp_col]:
+            conn.execute(text(f"ALTER TABLE sales_orders DROP PRIMARY KEY, DROP COLUMN `{temp_col}`"))
+        else:
+            try:
+                conn.execute(text(f"ALTER TABLE sales_orders DROP INDEX `{temp_col}`"))
+            except Exception:
+                pass
+            conn.execute(text(f"ALTER TABLE sales_orders DROP COLUMN `{temp_col}`"))
+
+
 def init_mysql_tables_v2():
     """
     优化版数据库初始化：使用 Schema 版本控制，避免每次启动全量迁移
@@ -887,6 +997,7 @@ def init_mysql_tables_v2():
         # 如果已经是最新版本，跳过大部分初始化
         if current_version >= CURRENT_SCHEMA_VERSION:
             # 只执行必要的轻量级检查（如默认用户）
+            _ensure_sales_orders_unique_order_no(conn)
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             for uid, info in DEFAULT_USERS.items():
                 conn.execute(text(
@@ -1445,6 +1556,10 @@ def init_mysql_tables_v2():
                     AND COALESCE(fg.`状态`, sh.`状态`, '') <> ''
             """))
             _record_schema_version(conn, 11, "create inbound_history table and backfill from transaction logs")
+
+        if current_version < 12:
+            _ensure_sales_orders_unique_order_no(conn)
+            _record_schema_version(conn, 12, "dedupe sales_orders and enforce unique order number")
 
         return {
             "initialized": True,

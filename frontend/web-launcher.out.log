@@ -1,19 +1,39 @@
 
 > v6ss-frontend@1.0.0 dev
-> vite --host 0.0.0.0 --port 3000 --strictPort
+> vite --host 0.0.0.0 --port 8888 --strictPort
 
 
-  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1924[22m[2m[0m ms[22m
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m11474[22m[2m[0m ms[22m
 
-  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3000[22m/[39m
-  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.21.8.43:[1m3000[22m/[39m
-[2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
-[2m14:13:23[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
-[2m14:13:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
-[2m14:19:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
-[2m15:06:29[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
-[2m15:50:29[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
-[2m16:25:26[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ReportManagement.vue[22m
-[2m16:26:20[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ReportManagement.vue[22m
-[2m17:13:27[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
-[2m17:13:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ReportManagement.vue[22m
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m8888[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.21.8.85:[1m8888[22m/[39m
+[2m00:48:40[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m00:49:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m00:49:30[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m00:50:35[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m00:50:52[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m00:51:20[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m00:55:55[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m00:56:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/SalesOrder.vue[22m
+[2m01:02:00[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/OrderAllocation.vue[22m
+[2m01:02:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/OrderAllocation.vue[22m
+[2m01:02:36[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/OrderAllocation.vue[22m
+[2m01:03:55[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/OrderAllocation.vue[22m
+[2m01:07:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/OrderAllocation.vue[22m
+[2m19:23:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue[22m
+[2m19:23:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue[22m
+[2m19:23:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue[22m
+[2m19:24:34[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue[22m
+[2m19:24:52[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue[22m
+[2m19:25:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue?vue&type=style&index=0&scoped=027238d7&lang.css[22m
+[2m19:37:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue[22m
+[2m19:41:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/ContractManage.vue[22m
+[2m13:32:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WarehouseDashboard.vue[22m
+[2m14:15:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue[22m
+[2m14:16:03[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue, /src/views/sandbox/ProductionKanban.vue, /src/components/sandbox/CapacityRatioEditor.vue, /src/components/sandbox/TransferSwapPanel.vue, /src/components/sandbox/RushOrderEntry.vue[22m
+[2m14:16:27[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/PredictionSandbox.vue[22m
+[2m14:16:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/sandbox/UnitCard.vue[22m
+[2m14:17:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
+[2m14:17:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
+[2m14:17:21[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue[22m
+[2m14:17:53[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/sandbox/ProductionKanban.vue?vue&type=style&index=0&scoped=d14762d8&lang.css[22m

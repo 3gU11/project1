@@ -148,7 +148,6 @@ const loading = ref(false)
 const saving = ref(false)
 const orderKeyword = ref('')
 const orders = ref<Row[]>([])
-const inventoryRows = ref<Row[]>([])
 const allocations = ref<Row[]>([])
 const cacheStore = useCacheStore()
 const route = useRoute()
@@ -180,26 +179,6 @@ const parseDemandEntries = (order: Row | null) => {
   return entries
 }
 
-const parseOrderDemandTotal = (order: Row) => {
-  let total = 0
-  for (const e of parseDemandEntries(order)) total += e.qty
-  if (total > 0) return total
-  const fallback = Number(order['需求数量'] || 0)
-  return Number.isFinite(fallback) ? Math.max(0, fallback) : 0
-}
-
-const shippedByOrderId = computed(() => {
-  const map = new Map<string, number>()
-  for (const row of inventoryRows.value) {
-    const orderId = String(row['占用订单号'] || '').trim()
-    const status = String(row['状态'] || '').trim()
-    if (!orderId) continue
-    if (status !== '已出库') continue
-    map.set(orderId, (map.get(orderId) || 0) + 1)
-  }
-  return map
-})
-
 const filteredOrders = computed(() => {
   const term = orderKeyword.value.trim().toLowerCase()
   let result = orders.value
@@ -207,13 +186,6 @@ const filteredOrders = computed(() => {
       const s = String(o.status || 'active').toLowerCase()
       // Exclude finished/canceled orders
       return !['done', 'shipped', 'completed', 'canceled', 'deleted'].includes(s)
-    })
-    .filter((o) => {
-      const orderId = String(o['订单号'] || '')
-      const need = parseOrderDemandTotal(o)
-      const shipped = shippedByOrderId.value.get(orderId) || 0
-      // If we have shipping data, use it. But status 'done' is the primary filter above.
-      return !(need > 0 && shipped >= need)
     })
     .filter((o) => {
       if (!term) return true
@@ -309,35 +281,48 @@ const confirmedRows = computed(() => {
 const confirmedAllocatedTotal = computed(() => confirmedRows.value.length)
 
 const CACHE_ORDERS = 'allocation:orders'
-const CACHE_INVENTORY = 'allocation:inventory'
 const loadData = async (force = false) => {
   loading.value = true
   try {
     if (!force) {
       const orderCached = cacheStore.get<Row[]>(CACHE_ORDERS)
-      const inventoryCached = cacheStore.get<Row[]>(CACHE_INVENTORY)
-      if (orderCached && inventoryCached) {
+      if (orderCached) {
         orders.value = orderCached
-        inventoryRows.value = inventoryCached
         await tryAutoSelectOrderFromQuery()
         return
       }
     }
-    const [nextOrders, nextInventoryRows] = await Promise.all([
-      apiGetAll<Row>('/planning/orders'),
-      apiGetAll<Row>('/inventory/'),
-    ])
+    const nextOrders = await apiGetAll<Row>('/planning/orders')
     orders.value = nextOrders
-    inventoryRows.value = nextInventoryRows
     cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)
-    cacheStore.set(CACHE_INVENTORY, nextInventoryRows, 8_000)
     await tryAutoSelectOrderFromQuery()
+    refreshSelectedOrderFromList()
     if (selectedOrderId.value) await loadAllocations()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取数据失败')
   } finally {
     loading.value = false
   }
+}
+
+const updateOrderStatusLocally = (orderId: string, status: string) => {
+  if (!orderId) return
+  const nextOrders = orders.value.map((order) => (
+    String(order['订单号'] || '') === orderId ? { ...order, status } : order
+  ))
+  orders.value = nextOrders
+  const matched = nextOrders.find((order) => String(order['订单号'] || '') === orderId)
+  if (matched) selectedOrder.value = matched
+  cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)
+}
+
+const refreshCurrentOrder = async (nextStatus?: string) => {
+  if (nextStatus) {
+    updateOrderStatusLocally(selectedOrderId.value, nextStatus)
+  } else {
+    refreshSelectedOrderFromList()
+  }
+  await loadAllocations()
 }
 
 const loadAllocations = async () => {
@@ -439,7 +424,7 @@ const allocateSelected = async () => {
     })
     ElMessage.success('配货复核已确认')
     selectedCandidateSerials.value = []
-    await loadData(true)
+    await refreshCurrentOrder()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '配货复核失败')
   } finally {
@@ -463,9 +448,7 @@ const releaseSelected = async () => {
     if (released > 0) ElMessage.success(res.message || `已释放 ${released} 台机台`)
     else ElMessage.warning(res.message || '当前没有可释放机台')
     selectedAllocatedSerials.value = []
-    await loadData(true)
-    refreshSelectedOrderFromList()
-    await loadAllocations()
+    await refreshCurrentOrder(released > 0 ? 'active' : undefined)
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '释放失败')
   } finally {
@@ -479,9 +462,7 @@ const completeAllocation = async () => {
   try {
     const res = await apiPost<{ message?: string }>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`, {})
     ElMessage.success(res.message || '配货完成')
-    await loadData(true)
-    refreshSelectedOrderFromList()
-    await loadAllocations()
+    await refreshCurrentOrder('ready')
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '配货完成失败')
   } finally {
@@ -489,36 +470,20 @@ const completeAllocation = async () => {
   }
 }
 
-const allocatedByOrderId = computed(() => {
-  const map = new Map<string, number>()
-  for (const row of inventoryRows.value) {
-    const orderId = String(row['占用订单号'] || '').trim()
-    if (!orderId) continue
-    map.set(orderId, (map.get(orderId) || 0) + 1)
-  }
-  return map
-})
-
 const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
   const s = String(o.status || 'active')
   if (s === 'packed') return { text: '已打包', type: 'primary' }
   if (s === 'shipped') return { text: '已出库', type: 'info' }
   if (s === 'canceled') return { text: '已取消', type: 'danger' }
 
-  const orderId = String(o['订单号'] || '')
-  const need = parseOrderDemandTotal(o)
-  const allocated = allocatedByOrderId.value.get(orderId) || 0
-
   if (s === 'ready') {
     return { text: '已满足', type: 'success' }
   }
-  if (need > 0 && allocated >= need) return { text: '待完成', type: 'warning' }
   return { text: '待配齐', type: 'danger' }
 }
 
 onMounted(() => {
-  // Always force refresh when entering the allocation page to ensure dispatched orders are removed
-  loadData(true)
+  loadData()
 })
 </script>
 

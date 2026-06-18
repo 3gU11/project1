@@ -78,6 +78,7 @@
             空闲 - 可分配待排产批次
           </div>
         </div>
+
       </div>
     </div>
 
@@ -105,19 +106,28 @@
           </h3>
           <div class="queue-scroll">
             <div v-for="batch in queueBatches" :key="batch.batch_id" class="queue-batch-item">
-              <div class="queue-batch-card">
+              <div
+                class="queue-batch-card"
+                :class="{ active: selectedQueueBatchId === batch.batch_id }"
+                @click="showQueueBatchPreview(batch)"
+              >
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
                   <span class="queue-batch-label">
                     <strong>[{{ displayBatchCategory(batch) }}] {{ displayBatchCode(batch) }}</strong>
                     ({{ batch.units?.length || 0 }}/{{ batch.capacity }})
                   </span>
-                  <el-button
-                    size="small" type="primary"
-                    @click="showAssignDialog(batch)"
-                    :disabled="assignableLinesForBatch(batch).length === 0"
-                  >
-                    整批分配
-                  </el-button>
+                  <div class="queue-batch-actions">
+                    <el-button size="small" :icon="FullScreen" @click.stop="showQueueBatchPreview(batch)">
+                      展开
+                    </el-button>
+                    <el-button
+                      size="small" type="primary"
+                      @click.stop="showAssignDialog(batch)"
+                      :disabled="assignableLinesForBatch(batch).length === 0"
+                    >
+                      整批分配
+                    </el-button>
+                  </div>
                 </div>
                 <div style="font-size:11px;color:#999;">
                   {{ fmtDate(batch.due_date_start) }} ~ {{ fmtDate(batch.due_date_end) }}
@@ -133,6 +143,102 @@
       </div>
     </div>
   </div>
+
+  <el-dialog
+    v-model="queueBatchDialogVisible"
+    class="queue-batch-dialog"
+    width="min(1480px, 96vw)"
+    top="5vh"
+    destroy-on-close
+    :close-on-click-modal="false"
+    @closed="closeQueueBatchPreview"
+  >
+    <template #header>
+      <div v-if="selectedQueueBatch" class="queue-dialog-title">
+        <div class="queue-dialog-title-main">
+          <span class="line-name">待排产批次</span>
+          <span class="line-status queue-preview-status">待排产</span>
+          <span class="queue-preview-category">{{ displayBatchCategory(selectedQueueBatch) }}</span>
+          <strong>批次: {{ displayBatchCode(selectedQueueBatch) }}</strong>
+          <span class="line-inbound-date">
+            {{ fmtDate(selectedQueueBatch.due_date_start) }} ~ {{ fmtDate(selectedQueueBatch.due_date_end) }}
+          </span>
+        </div>
+        <div class="queue-dialog-title-meta">
+          <span>卡片 {{ selectedQueueBatch.units?.length || 0 }} / {{ selectedQueueBatch.capacity || '-' }}</span>
+          <span>把右侧急单拖到左侧目标卡片即可插入</span>
+        </div>
+      </div>
+    </template>
+
+    <div v-if="selectedQueueBatch" class="queue-dialog-layout">
+      <section class="queue-dialog-main">
+        <div class="queue-dialog-summary">
+          <div>
+            <span class="summary-label">批次类型</span>
+            <strong>{{ displayBatchCategory(selectedQueueBatch) }}</strong>
+          </div>
+          <div>
+            <span class="summary-label">容量</span>
+            <strong>{{ selectedQueueBatch.units?.length || 0 }} / {{ selectedQueueBatch.capacity || '-' }}</strong>
+          </div>
+          <div>
+            <span class="summary-label">交期区间</span>
+            <strong>{{ fmtDate(selectedQueueBatch.due_date_start) }} ~ {{ fmtDate(selectedQueueBatch.due_date_end) }}</strong>
+          </div>
+        </div>
+
+        <div
+          class="production-line queue-dialog-line"
+          :data-queue-batch-id="selectedQueueBatch.batch_id"
+        >
+          <div class="line-header queue-preview-header">
+            <span class="line-name">批次全部卡片</span>
+            <span class="line-status queue-preview-status">可插入急单</span>
+            <span class="queue-preview-category">{{ displayBatchCategory(selectedQueueBatch) }}</span>
+            <span style="flex:1;"></span>
+            <el-button
+              size="small"
+              type="primary"
+              @click="showAssignDialog(selectedQueueBatch)"
+              :disabled="assignableLinesForBatch(selectedQueueBatch).length === 0"
+            >
+              整批分配
+            </el-button>
+          </div>
+          <div class="queue-preview-body">
+            <VueDraggable
+              :model-value="selectedQueueBatch.units || []"
+              :group="{ name: 'line-units', pull: false, put: ['rush-orders'] }"
+              item-key="unit_id"
+              :sort="false"
+              @start="onDragStart"
+              @add="(evt: any) => onQueuePreviewDrop(evt, selectedQueueBatch)"
+              @end="onDragEnd"
+              class="line-units queue-dialog-units"
+            >
+              <template v-for="u in selectedQueueBatch.units" :key="u.unit_id">
+                <UnitCard
+                  :unit="{ ...u, model_family: u.model_family || modelFamilyMap[String(u.model_type || '').toUpperCase()] || '' }"
+                  :force-show-serial-no="true"
+                  :selected="false"
+                  @select="() => {}"
+                />
+              </template>
+            </VueDraggable>
+            <div v-if="!selectedQueueBatch.units?.length" class="queue-empty">
+              暂无卡片
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <aside class="queue-dialog-rush">
+        <RushOrderEntry @auto-inserted="() => refreshAll({ silent: true })" />
+      </aside>
+    </div>
+  </el-dialog>
 
   <el-button
     class="stats-floating-toggle"
@@ -250,7 +356,7 @@
 
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useBatchStore } from '../../stores/useSandboxBatchStore'
@@ -264,7 +370,7 @@ import TransferSwapPanel from '../../components/sandbox/TransferSwapPanel.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
 import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
 import { apiDownloadBlob, apiDownloadBlobPost } from '../../utils/request'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, FullScreen } from '@element-plus/icons-vue'
 
 const batchStore = useBatchStore()
 const lineStore = useLineStore()
@@ -272,7 +378,9 @@ const rushStore = useRushStore()
 const transferStore = useTransferStore()
 
 const queueFilter = ref('')
-const statsPanelOpen = ref(false)
+const selectedQueueBatchId = ref('')
+const queueBatchDialogVisible = ref(false)
+const statsPanelOpen = ref(true)
 const assignVisible = ref(false)
 const assigningBatch = ref<any>(null)
 const selectedLineId = ref<string | null>(null)
@@ -382,6 +490,12 @@ const queueBatches = computed(() => {
   let batches = batchStore.batches.filter((b: any) => b.status === 'Confirmed')
   if (queueFilter.value) batches = batches.filter((b: any) => displayBatchCategory(b) === queueFilter.value)
   return batches
+})
+
+const selectedQueueBatch = computed(() => {
+  const id = String(selectedQueueBatchId.value || '')
+  if (!id) return null
+  return queueBatches.value.find((batch: any) => String(batch?.batch_id || '') === id) || null
 })
 
 const kanbanStatsRows = computed<KanbanStatRow[]>(() => {
@@ -557,6 +671,19 @@ function scrollToLine(lineId: string | null | undefined) {
 function navigateToLine(lineId: string | null | undefined) {
   scrollToLine(lineId)
   statsPanelOpen.value = false
+}
+
+function showQueueBatchPreview(batch: any) {
+  const batchId = String(batch?.batch_id || '')
+  if (!batchId) return
+  selectedQueueBatchId.value = batchId
+  queueBatchDialogVisible.value = true
+  statsPanelOpen.value = false
+}
+
+function closeQueueBatchPreview() {
+  selectedQueueBatchId.value = ''
+  queueBatchDialogVisible.value = false
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -822,6 +949,22 @@ async function onKanbanDrop(evt: any, line: any) {
   await handleRushDrop(rushOrder, targetUnit)
 }
 
+async function onQueuePreviewDrop(evt: any, batch: any) {
+  const rushOrder = getDroppedData(evt)
+  const targetUnit = resolveTargetUnit(evt, batch)
+  cleanupDroppedClone(batch)
+  if (!isRushOrder(rushOrder)) {
+    debouncedRefresh()
+    return
+  }
+  if (!targetUnit) {
+    ElMessage.error('未识别目标机台')
+    debouncedRefresh()
+    return
+  }
+  await handleRushDrop(rushOrder, targetUnit)
+}
+
 function getDroppedData(evt: any) {
   return evt?.data || evt?.clonedData || evt?.item?.__draggable_context?.element
 }
@@ -1051,6 +1194,10 @@ onMounted(async () => {
   cleanupFns.push(onEvent('line:completed', () => refreshAll({ silent: true })))
 })
 
+onActivated(() => {
+  statsPanelOpen.value = true
+})
+
 onUnmounted(() => {
   cleanupFns.forEach(fn => fn())
   cleanupFns = []
@@ -1206,6 +1353,18 @@ onUnmounted(() => {
   padding: 6px 10px;
   background: #fafafa;
   border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+.queue-batch-card:hover {
+  background: #f5f9ff;
+  border-color: #91caff;
+}
+.queue-batch-card.active {
+  background: #e6f4ff;
+  border-color: #1677ff;
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.12);
 }
 .queue-batch-card.in-production-card {
   background: #e6f7ff;
@@ -1213,6 +1372,12 @@ onUnmounted(() => {
 }
 .queue-batch-label {
   font-size: 12px;
+}
+.queue-batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .queue-empty {
   color: #ccc;
@@ -1229,6 +1394,108 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: bold;
   margin-left: 8px;
+}
+
+.queue-batch-dialog :deep(.el-dialog__body) {
+  padding-top: 0;
+}
+.queue-dialog-title {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.queue-dialog-title-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-right: 32px;
+}
+.queue-dialog-title-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+.queue-dialog-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  height: min(760px, calc(90vh - 116px));
+  min-height: 520px;
+}
+.queue-dialog-main,
+.queue-dialog-rush {
+  min-height: 0;
+}
+.queue-dialog-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.queue-dialog-rush {
+  overflow-y: auto;
+}
+.queue-dialog-rush :deep(.rush-entry) {
+  height: 100%;
+  box-sizing: border-box;
+}
+.queue-dialog-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  flex-shrink: 0;
+}
+.queue-dialog-summary > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.summary-label {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.queue-dialog-line {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #91caff;
+  box-shadow: none;
+}
+.queue-preview-header {
+  flex-shrink: 0;
+  padding-bottom: 8px;
+  background: #fff;
+  border-bottom: 1px solid #e6f4ff;
+}
+.queue-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 8px;
+}
+.queue-dialog-units {
+  min-height: 100%;
+}
+.queue-preview-status {
+  background: #e6f4ff;
+  color: #0958d9;
+}
+.queue-preview-category {
+  font-size: 12px;
+  color: #0958d9;
+  background: #f0f7ff;
+  border: 1px solid #bae0ff;
+  border-radius: 10px;
+  padding: 1px 8px;
 }
 
 .selecting-banner {
@@ -1251,6 +1518,24 @@ onUnmounted(() => {
 }
 
 @media (max-width: 1280px) {
+  .queue-dialog-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+  }
+
+  .queue-dialog-main {
+    min-height: 460px;
+  }
+
+  .queue-dialog-rush {
+    max-height: 320px;
+  }
+
+  .queue-dialog-summary {
+    grid-template-columns: 1fr;
+  }
+
   .stats-floating-toggle {
     right: 24px;
   }

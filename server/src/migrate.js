@@ -12,6 +12,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS batches (
     batch_id            VARCHAR(64)  NOT NULL COMMENT 'BATCH-YYYYMM-NNN',
     batch_no            INT          NOT NULL,
+    batch_code          VARCHAR(64)  NULL COMMENT 'Business batch code',
     model_type          VARCHAR(100) NOT NULL COMMENT 'Single model per batch',
     capacity            INT          NOT NULL COMMENT 'G/XS=30, AUTO=27',
     status              VARCHAR(32)  NOT NULL DEFAULT 'Predicted'

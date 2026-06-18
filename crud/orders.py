@@ -75,6 +75,9 @@ def get_orders():
         fill_cols = [c for c in ORDER_COLS if c not in ["需求数量", "下单时间", "发货时间", "指定批次/来源"]]
         for col in fill_cols:
             df[col] = df[col].fillna("")
+        df["订单号"] = df["订单号"].astype(str).str.strip()
+        df = df[df["订单号"] != ""].copy()
+        df = df.drop_duplicates(subset=["订单号"], keep="last")
         mask = (df['status'] == "") | (df['status'].isna())
         if mask.any():
             df.loc[mask, 'status'] = "active"
@@ -110,6 +113,9 @@ def get_orders_v2():
         fill_cols = [c for c in ORDER_COLS if c not in ["需求数量", "下单时间", "发货时间", "指定批次/来源"]]
         for col in fill_cols:
             df[col] = df[col].fillna("")
+        df["订单号"] = df["订单号"].astype(str).str.strip()
+        df = df[df["订单号"] != ""].copy()
+        df = df.drop_duplicates(subset=["订单号"], keep="last")
         mask = (df['status'] == "") | (df['status'].isna())
         if mask.any():
             df.loc[mask, 'status'] = "active"
@@ -140,10 +146,51 @@ def save_orders(df):
         fill_cols = [c for c in ORDER_COLS if c not in ["需求数量", "下单时间", "发货时间", "指定批次/来源"]]
         for col in fill_cols:
             df[col] = df[col].fillna("")
+        df["订单号"] = df["订单号"].astype(str).str.strip()
+        df = df[df["订单号"] != ""].copy()
+        df = df.drop_duplicates(subset=["订单号"], keep="last")
         with get_engine().begin() as conn:
-            conn.execute(text("DELETE FROM sales_orders"))
             if not df.empty:
-                df[ORDER_COLS].to_sql('sales_orders', conn, if_exists='append', index=False, method='multi', chunksize=500)
+                tmp_table = f"tmp_sales_orders_save_{uuid.uuid4().hex}"
+                try:
+                    df[ORDER_COLS].to_sql(tmp_table, conn, if_exists='replace', index=False, method='multi', chunksize=500)
+                    cols_sql = ", ".join(f"`{col}`" for col in ORDER_COLS)
+                    select_sql = ", ".join(f"t.`{col}`" for col in ORDER_COLS)
+                    update_assignments = []
+                    for col in ORDER_COLS:
+                        if col == "订单号":
+                            continue
+                        if col == "下单时间":
+                            update_assignments.append(
+                                "so.`下单时间` = CASE "
+                                "WHEN t.`下单时间` IS NOT NULL "
+                                "AND so.`下单时间` IS NOT NULL "
+                                "AND TIME(t.`下单时间`) = '00:00:00' "
+                                "AND DATE(t.`下单时间`) = DATE(so.`下单时间`) "
+                                "THEN so.`下单时间` ELSE t.`下单时间` END"
+                            )
+                        else:
+                            update_assignments.append(f"so.`{col}` = t.`{col}`")
+                    update_sql = ", ".join(update_assignments)
+                    upsert_sql = ", ".join(f"`{col}`=VALUES(`{col}`)" for col in ORDER_COLS if col != "订单号")
+                    conn.execute(text(f"""
+                        UPDATE sales_orders so
+                        INNER JOIN `{tmp_table}` t ON so.`订单号` = t.`订单号`
+                        SET {update_sql}
+                    """))
+                    conn.execute(text(f"""
+                        INSERT INTO sales_orders ({cols_sql})
+                        SELECT {select_sql} FROM `{tmp_table}` t
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM sales_orders so WHERE so.`订单号` = t.`订单号`
+                        )
+                        ON DUPLICATE KEY UPDATE {upsert_sql}
+                    """))
+                finally:
+                    try:
+                        conn.execute(text(f"DROP TABLE IF EXISTS `{tmp_table}`"))
+                    except Exception:
+                        pass
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"订单保存失败: {e}") from e
 
@@ -160,6 +207,17 @@ def _normalize_order_note(value) -> str:
     if text.lower() in {"none", "nan", "null"}:
         return ""
     return text
+
+
+def _normalize_allocation_model(value) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text.replace("(加高)", "").replace("（加高）", "").strip()
+
+
+def _is_high_model_hint(*values) -> bool:
+    return any("加高" in str(value or "") for value in values)
 
 
 def create_sales_order(customer, agent, model_data, note, pack_option="", delivery_time="", source_batch=""):
@@ -201,17 +259,33 @@ def _build_model_note_map(order_id):
     from crud.planning import get_factory_plan_v2
     plan_df = get_factory_plan_v2()
     if plan_df.empty:
-        return {}
+        return []
     matched = plan_df[plan_df['订单号'].astype(str).str.strip() == str(order_id).strip()]
     if matched.empty:
-        return {}
-    note_map = {}
+        return []
+    note_map = []
     for _, row in matched.iterrows():
         model = str(row.get('机型', '')).strip()
         note = _normalize_order_note(row.get('备注', ''))
         if model and note:
-            note_map[model] = note
+            note_map.append({
+                "model": _normalize_allocation_model(model),
+                "high": _is_high_model_hint(model, note),
+                "note": note,
+            })
     return note_map
+
+
+def _find_model_note(model_note_map, model, row_note=""):
+    clean_model = _normalize_allocation_model(model)
+    high = _is_high_model_hint(model, row_note)
+    for item in model_note_map:
+        if item["model"] == clean_model and item["high"] == high:
+            return item["note"]
+    for item in model_note_map:
+        if item["model"] == clean_model:
+            return item["note"]
+    return ""
 
 
 def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
@@ -255,7 +329,7 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                         if row.empty:
                             continue
                         model = str(row.iloc[0].get('机型', '')).strip()
-                        note = model_note_map.get(model, "")
+                        note = _find_model_note(model_note_map, model, row.iloc[0].get('合同备注', ''))
                         if note:
                             conn.execute(
                                 text("UPDATE finished_goods_data SET 合同备注 = :note WHERE 流水号 = :sn"),
