@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -41,6 +42,23 @@ func main() {
 	configRepo := repo.NewConfigRepo(db)
 
 	batchSvc := service.NewBatchSvc(db, batchRepo, unitRepo, configRepo, hub)
+	if completed, reconcileErr := batchSvc.ReconcileInboundBatches(nil, "system-startup"); reconcileErr != nil {
+		log.Printf("startup inbound reconciliation failed: %v", reconcileErr)
+	} else if len(completed) > 0 {
+		log.Printf("startup inbound reconciliation completed %d batches", len(completed))
+	}
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			completed, reconcileErr := batchSvc.ReconcileInboundBatches(nil, "system-periodic")
+			if reconcileErr != nil {
+				log.Printf("periodic inbound reconciliation failed: %v", reconcileErr)
+			} else if len(completed) > 0 {
+				log.Printf("periodic inbound reconciliation completed %d batches", len(completed))
+			}
+		}
+	}()
 	rushSvc := service.NewRushSvc(db, unitRepo, batchRepo, hub)
 	predictor := engine.NewPredictor(db, batchRepo, unitRepo, configRepo)
 	recomputeSvc := service.NewRecomputeSvc(lockMgr, predictor, hub)
@@ -53,9 +71,10 @@ func main() {
 	ah := handler.NewAuthHandler(db)
 	mh := handler.NewMetaHandler(db)
 	qh := handler.NewQueueHandler(db)
+	ph := handler.NewPhotoHandler(db, cfg.OCREnabled, cfg.OCRServiceURL, cfg.OCRTimeoutMS)
 
 	r := gin.Default()
-	router.Setup(r, db, hub, bh, uh, fh, lh, ch, ah, mh, qh, cfg.AllowOrigins)
+	router.Setup(r, db, hub, bh, uh, fh, lh, ch, ah, mh, qh, ph, cfg.AllowOrigins)
 
 	log.Printf("Listening on %s", cfg.HTTPAddr)
 	if err := r.Run(cfg.HTTPAddr); err != nil {

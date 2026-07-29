@@ -241,7 +241,6 @@ func rehomeLevel3ModelsByDictionary(level3 map[string]map[string]int, dictCatByM
 	for category, ratios := range next {
 		level3[category] = ratios
 	}
-	normalizeLevel3RatioSums(level3)
 }
 
 func normalizeLevel3RatioSums(level3 map[string]map[string]int) {
@@ -511,6 +510,7 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 		FROM units u
 		JOIN batches b ON b.batch_id = u.batch_id
 		WHERE b.status = ?
+		  AND COALESCE(b.source, '') <> 'manual'
 		  AND u.contract_no IS NOT NULL
 		  AND TRIM(u.contract_no) != ''
 		  AND (
@@ -652,8 +652,24 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 			return nil, fmt.Errorf("delete old %s: %w", mt, err)
 		}
 	}
-	if err := tx.Exec("DELETE FROM forecast_batch_slots").Error; err != nil {
+	if err := tx.Exec("DELETE FROM forecast_batch_slots WHERE COALESCE(source, '') <> ?", "manual").Error; err != nil {
 		return nil, fmt.Errorf("delete forecast batch slots: %w", err)
+	}
+	if err := tx.Exec(`
+		DELETE FROM forecast_batch_slots
+		WHERE source = ?
+		  AND (
+		    batch_id IS NULL
+		    OR batch_id NOT IN (
+		      SELECT batch_id FROM batches WHERE status = ?
+		    )
+		  )`,
+		"manual", model.StatusPredicted,
+	).Error; err != nil {
+		return nil, fmt.Errorf("delete stale manual forecast slots: %w", err)
+	}
+	if err := shiftManualPredictedSlots(tx, len(allBatches)); err != nil {
+		return nil, fmt.Errorf("shift manual forecast slots: %w", err)
 	}
 
 	now := time.Now()
@@ -771,6 +787,61 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return allBatches, nil
+}
+
+func shiftManualPredictedSlots(tx *gorm.DB, startAfter int) error {
+	var manualSlots []model.ForecastBatchSlot
+	if err := tx.Model(&model.ForecastBatchSlot{}).
+		Joins("JOIN batches b ON b.batch_id = forecast_batch_slots.batch_id").
+		Where("forecast_batch_slots.source = ?", "manual").
+		Where("b.status = ?", model.StatusPredicted).
+		Order("forecast_batch_slots.slot_no ASC").
+		Find(&manualSlots).Error; err != nil {
+		return err
+	}
+	if len(manualSlots) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	var maxSlotNo int
+	if err := tx.Model(&model.ForecastBatchSlot{}).
+		Select("COALESCE(MAX(slot_no), 0)").
+		Scan(&maxSlotNo).Error; err != nil {
+		return err
+	}
+	tempOffset := max(maxSlotNo, startAfter+len(manualSlots)) + 10000
+	for i, slot := range manualSlots {
+		if err := tx.Model(&model.ForecastBatchSlot{}).
+			Where("slot_no = ?", slot.SlotNo).
+			Updates(map[string]interface{}{
+				"slot_no":    tempOffset + i + 1,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+	}
+	for i, slot := range manualSlots {
+		if slot.BatchID == nil || strings.TrimSpace(*slot.BatchID) == "" {
+			continue
+		}
+		newSlotNo := startAfter + i + 1
+		tempSlotNo := tempOffset + i + 1
+		if err := tx.Model(&model.Batch{}).
+			Where("batch_id = ?", *slot.BatchID).
+			Update("batch_no", newSlotNo).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.ForecastBatchSlot{}).
+			Where("slot_no = ?", tempSlotNo).
+			Updates(map[string]interface{}{
+				"slot_no":    newSlotNo,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Predictor) loadModelSortOrderMap() (map[string]int, error) {

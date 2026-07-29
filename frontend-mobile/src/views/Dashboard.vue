@@ -14,7 +14,7 @@
           <span class="slot-card__code">{{ slot.code }}</span>
           <span class="slot-card__tag">{{ slotTag(slot) }}</span>
         </div>
-        <div class="slot-card__count">{{ slot.current }} / {{ slot.max }}</div>
+        <div class="slot-card__count">{{ slot.current }} / {{ capacityText(slot) }}</div>
         <div class="slot-card__desc">当前已装 {{ slot.current }} 台机器</div>
       </div>
     </div>
@@ -24,7 +24,7 @@
         <div class="popup-header">
           <div class="popup-title">{{ currentSlot?.code || '-' }}</div>
           <div class="popup-subtitle">
-            {{ currentSlot ? `${currentSlot.current} / ${currentSlot.max}` : '-' }} · {{ currentSlot ? slotTag(currentSlot) : '' }}
+            {{ currentSlot ? `${currentSlot.current} / ${capacityText(currentSlot)}` : '-' }} · {{ currentSlot ? slotTag(currentSlot) : '' }}
           </div>
         </div>
 
@@ -54,7 +54,7 @@
             @click="targetSlotCode = slot.code"
           >
             <div class="target-card__code">{{ slot.code }}</div>
-            <div class="target-card__meta">{{ slot.current }} / {{ slot.max }}</div>
+            <div class="target-card__meta">{{ slot.current }} / {{ capacityText(slot) }}</div>
           </div>
         </div>
         <van-empty v-else description="没有可调拨的目标库位" />
@@ -84,6 +84,7 @@ import { showFailToast, showSuccessToast, showToast } from 'vant'
 import { inventoryApi } from '@/api/inventory'
 import { useInventoryStore } from '@/store/inventory'
 import type { MobileMachine, MobileSlot } from '@/utils/mapper'
+import { useInventoryAutoRefresh } from '@/utils/useInventoryAutoRefresh'
 
 const inventoryStore = useInventoryStore()
 const showSlotPopup = ref(false)
@@ -103,22 +104,23 @@ const availableTargetSlots = computed(() => {
   return inventoryStore.slots.filter((slot) => {
     if (!slot.code || slot.code === currentCode) return false
     if (slot.status.includes('锁定') || slot.status.includes('异常')) return false
-    return slot.current < slot.max
+    return slot.unlimited || slot.max === null || slot.current < slot.max
   })
 })
 
 const canTransfer = computed(() => !!selectedSerialNo.value && !!targetSlotCode.value)
+const capacityText = (slot: MobileSlot) => slot.unlimited || slot.max === null ? '不限' : String(slot.max)
 
 const slotClass = (slot: MobileSlot) => {
   if (slot.status.includes('锁定') || slot.status.includes('异常')) return 'slot-card--locked'
-  if (slot.current >= slot.max) return 'slot-card--full'
+  if (!slot.unlimited && slot.max !== null && slot.current >= slot.max) return 'slot-card--full'
   if (slot.current > 0) return 'slot-card--occupied'
   return 'slot-card--idle'
 }
 
 const slotTag = (slot: MobileSlot) => {
   if (slot.status.includes('锁定') || slot.status.includes('异常')) return '锁定/异常'
-  if (slot.current >= slot.max) return '已满'
+  if (!slot.unlimited && slot.max !== null && slot.current >= slot.max) return '已满'
   if (slot.current > 0) return '占用'
   return '空闲'
 }
@@ -160,6 +162,7 @@ const confirmTransfer = async () => {
 }
 
 onMounted(loadData)
+useInventoryAutoRefresh(loadData)
 </script>
 
 <style scoped>

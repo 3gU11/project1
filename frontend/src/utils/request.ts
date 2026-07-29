@@ -27,6 +27,12 @@ request.interceptors.request.use(
     if (userStore.token) {
       config.headers.Authorization = `Bearer ${userStore.token}`
     }
+    if (userStore.userInfo?.username) {
+      config.headers['X-Username'] = userStore.userInfo.username
+    }
+    if (userStore.userInfo?.role) {
+      config.headers['X-Role'] = userStore.userInfo.role
+    }
     return config
   },
   (error) => {

@@ -84,10 +84,11 @@
                 <div class="code">{{ s.code }}</div>
                 <div class="badge" :class="s.statusClass">{{ s.statusText }}</div>
               </div>
-              <div class="count-row"><span class="count-num">{{ s.count }}</span><span class="count-max">/ {{ maxCap }}</span></div>
-              <div class="bar"><div class="bar-inner" :class="s.statusClass" :style="{ width: `${Math.min(100, (s.count / maxCap) * 100)}%` }" /></div>
+              <div class="count-row"><span class="count-num">{{ s.count }}</span><span class="count-max">/ {{ slotCapacityText(s) }}</span></div>
+              <div class="bar"><div class="bar-inner" :class="s.statusClass" :style="{ width: slotFillWidth(s) }" /></div>
               <div class="sns">
-                <div v-for="sn in s.serialNos.slice(0, 5)" :key="`${s.code}-${sn}`" class="sn-item">{{ sn }}</div>
+                <div v-for="sn in previewSerialNos(s)" :key="`${s.code}-${sn}`" class="sn-item">{{ sn }}</div>
+                <div v-if="hiddenSerialCount(s) > 0" class="sn-item more">另有 {{ hiddenSerialCount(s) }} 台</div>
                 <div v-if="s.serialNos.length === 0" class="sn-item empty">暂无库存</div>
               </div>
             </button>
@@ -112,10 +113,11 @@
                 <div class="code">{{ s.code }}</div>
                 <div class="badge" :class="s.statusClass">{{ s.statusText }}</div>
               </div>
-              <div class="count-row"><span class="count-num">{{ s.count }}</span><span class="count-max">/ {{ maxCap }}</span></div>
-              <div class="bar"><div class="bar-inner" :class="s.statusClass" :style="{ width: `${Math.min(100, (s.count / maxCap) * 100)}%` }" /></div>
+              <div class="count-row"><span class="count-num">{{ s.count }}</span><span class="count-max">/ {{ slotCapacityText(s) }}</span></div>
+              <div class="bar"><div class="bar-inner" :class="s.statusClass" :style="{ width: slotFillWidth(s) }" /></div>
               <div class="sns">
-                <div v-for="sn in s.serialNos.slice(0, 5)" :key="`${s.code}-${sn}`" class="sn-item">{{ sn }}</div>
+                <div v-for="sn in previewSerialNos(s)" :key="`${s.code}-${sn}`" class="sn-item">{{ sn }}</div>
+                <div v-if="hiddenSerialCount(s) > 0" class="sn-item more">另有 {{ hiddenSerialCount(s) }} 台</div>
                 <div v-if="s.serialNos.length === 0" class="sn-item empty">暂无库存</div>
               </div>
             </button>
@@ -229,11 +231,11 @@ import {
   getFullscreenElementCompat,
   requestFullscreenCompat,
 } from '../utils/compat'
+import { canonicalSlotCode, getSlotCapacity, isOldFactorySlot, isScrapSlot, isUnlimitedSlot, type WarehouseSlot } from './inboundLayout'
 
-type Slot = Record<string, any>
+type Slot = WarehouseSlot & Record<string, any>
 type Row = Record<string, any>
 type LayoutResponse = { layout_json?: { slots?: Slot[] } }
-const maxCap = 5
 const cacheStore = useCacheStore()
 const loading = ref(false)
 const saving = ref(false)
@@ -288,7 +290,13 @@ const slotCards = computed(() => {
     const y = rawY === null ? fallbackY : rawY
     const w = asFinite(s.w) ?? fallbackW
     const h = asFinite(s.h) ?? fallbackH
-    const active = inventory.value.filter((r) => String(r['Location_Code'] || '') === code && String(r['状态'] || '').includes('库存中'))
+    const capacity = getSlotCapacity(code)
+    const scrapSlot = isScrapSlot(code)
+    const unlimitedSlot = isUnlimitedSlot(code)
+    const active = inventory.value.filter((r) => {
+      const status = String(r['状态'] || '').trim()
+      return canonicalSlotCode(r['Location_Code']) === code && (status.includes('库存中') || (scrapSlot && status === '报废'))
+    })
     const count = active.length
     const serialNos = active.map((r) => String(r['流水号'] || '')).filter(Boolean)
     let statusText = '空闲'
@@ -296,14 +304,14 @@ const slotCards = computed(() => {
     if (['锁定', '异常'].includes(statusCfg)) {
       statusText = '锁定/异常'
       statusClass = 'locked'
-    } else if (count >= maxCap) {
+    } else if (!unlimitedSlot && count >= capacity) {
       statusText = '满载'
       statusClass = 'full'
     } else if (count > 0) {
       statusText = '占用'
       statusClass = 'occupied'
     }
-    return { ...s, code, x, y, w, h, count, statusText, statusClass, serialNos }
+    return { ...s, code, x, y, w, h, capacity, count, statusText, statusClass, serialNos, unlimitedSlot }
   }).sort((a, b) => String(a.code).localeCompare(String(b.code), 'zh-CN', { numeric: true }))
 })
 
@@ -317,10 +325,12 @@ const filteredSlotCards = computed(() => {
   })
 })
 
-const zoneOrder = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', '大机型区域', '待发货缓冲区', '实验室区', '整机报废区', '未分区']
+const zoneOrder = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', '大机型区域', '闲置区', '待发货缓冲区', '实验室区', '老厂', '新厂应急缓冲', '报废区', '整机报废区', '未分区']
 const resolveSlotZone = (codeValue: any) => {
   const code = String(codeValue || '').trim()
   if (!code) return '未分区'
+  if (isOldFactorySlot(code)) return '老厂'
+  if (isUnlimitedSlot(code)) return '新厂应急缓冲'
   const alpha = code.match(/^[A-Za-z]+/)
   if (alpha) return alpha[0].toUpperCase()
   const text = code.replace(/\d+$/, '').trim()
@@ -353,6 +363,23 @@ const groupedSlotSections = computed(() => {
 })
 
 const slotStyle = (_slot: any) => ({})
+const slotCapacityText = (slot: any) => isUnlimitedSlot(slot?.code) ? '不限' : String(slot?.capacity ?? '')
+const slotFillWidth = (slot: any) => {
+  if (isUnlimitedSlot(slot?.code)) {
+    return slot?.count > 0 ? '100%' : '0%'
+  }
+  const capacity = Number(slot?.capacity || 0)
+  if (capacity <= 0) return '0%'
+  return `${Math.min(100, (Number(slot?.count || 0) / capacity) * 100)}%`
+}
+const previewSerialNos = (slot: any) => {
+  const serialNos = Array.isArray(slot?.serialNos) ? slot.serialNos : []
+  return serialNos.slice(0, 5)
+}
+const hiddenSerialCount = (slot: any) => {
+  const serialNos = Array.isArray(slot?.serialNos) ? slot.serialNos : []
+  return Math.max(0, serialNos.length - 5)
+}
 
 const summary = computed(() => {
   const s = { idle: 0, occupied: 0, full: 0, locked: 0 }
@@ -369,13 +396,18 @@ const showInitialSkeleton = computed(() => loading.value && !loadedOnce.value &&
 const currentSlotMachines = computed(() => {
   const code = String(currentSlot.value?.code || '')
   if (!code) return []
-  return inventory.value.filter((r) => String(r['Location_Code'] || '') === code && String(r['状态'] || '').includes('库存中'))
+  const scrapSlot = isScrapSlot(code)
+  return inventory.value.filter((r) => {
+    const status = String(r['状态'] || '').trim()
+    return canonicalSlotCode(r['Location_Code']) === code && (status.includes('库存中') || (scrapSlot && status === '报废'))
+  })
 })
 const currentSlotSns = computed(() => currentSlotMachines.value.map((r) => String(r['流水号'] || '')).filter(Boolean))
+const currentSlotIsScrap = computed(() => isScrapSlot(currentSlot.value?.code))
 const availableTargetSlots = computed(() => {
   const currentCode = String(currentSlot.value?.code || '')
   return slotCards.value
-    .filter((s) => s.code !== currentCode && s.statusClass !== 'locked' && s.count < maxCap)
+    .filter((s) => s.code !== currentCode && s.statusClass !== 'locked' && s.count < s.capacity)
     .map((s) => String(s.code))
 })
 const canInbound = computed(() => {
@@ -384,7 +416,7 @@ const canInbound = computed(() => {
   if (slot.statusClass === 'locked' || slot.statusClass === 'full') return false
   return !!directSn.value.trim()
 })
-const canTransfer = computed(() => !!targetSlot.value && !!transferSn.value.trim())
+const canTransfer = computed(() => !currentSlotIsScrap.value && !!targetSlot.value && !!transferSn.value.trim())
 
 const CACHE_LAYOUT = 'warehouse:layout:default'
 const CACHE_INVENTORY = 'warehouse:inventory'
@@ -404,7 +436,7 @@ const loadData = async (force = false) => {
 
     const [layoutRes, nextInventory] = await Promise.all([
       apiGet<LayoutResponse>('/inventory/layout/default'),
-      apiGetAll<Row>('/inventory/'),
+      apiGetAll<Row>('/inventory/?include_scrap=1'),
     ])
     const nextSlots = layoutRes.layout_json?.slots || []
     slots.value = nextSlots
@@ -758,6 +790,7 @@ watch(isFullscreen, (v) => {
 .sns { margin-top: var(--space-2); display: grid; gap: 4px; }
 .sn-item { font-size: clamp(13px, 1vw, 15px); color: var(--color-gray-300); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sn-item.empty { color: var(--color-gray-500); text-align: center; margin-top: var(--space-2); }
+.sn-item.more { color: #93c5fd; font-weight: 700; }
 
 .bottom-legend {
   margin-top: var(--space-2);

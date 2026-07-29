@@ -15,9 +15,15 @@
         <div class="batch-panel">
           <div class="batch-grid">
             <div>
-              <div class="ops-label">系统自动生成合同号</div>
-              <div class="auto-id">{{ batchForm.contractId }}</div>
-              <div class="tip">格式: HT + 日期 + 随机4位</div>
+              <div class="ops-label">合同号</div>
+              <el-input
+                v-model="batchForm.contractId"
+                class="auto-id-input"
+                maxlength="128"
+                placeholder="请输入合同号"
+                clearable
+              />
+              <div class="tip">默认自动生成，可按需手动修改</div>
             </div>
             <div>
               <div class="ops-label">期望交付日期</div>
@@ -40,13 +46,22 @@
           <el-divider />
           <div class="ops-label">📎 附加合同文件 (可选)</div>
           <el-upload
+            v-model:file-list="batchUploadFiles"
+            class="contract-drop-upload"
+            drag
             :auto-upload="false"
             :show-file-list="true"
             multiple
+            :accept="contractFileAccept"
             :on-change="onBatchFileChange"
             :on-remove="onBatchFileRemove"
+            @drop.capture="onBatchUploadDrop"
           >
-            <el-button>选择文件</el-button>
+            <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+            <div class="el-upload__text">拖入合同文件到这里，或 <em>点击选择</em></div>
+            <template #tip>
+              <div class="el-upload__tip">支持 PDF、Word、JPG/JPEG，单个文件不超过 50MB；不支持拖入文件夹。</div>
+            </template>
           </el-upload>
 
           <el-divider />
@@ -116,6 +131,15 @@
               placeholder="搜索合同号 / 客户 / 代理商"
               @clear="contractSearchKeyword = ''"
             />
+            <el-select
+              v-model="contractModelFilter"
+              class="list-filter-control"
+              clearable
+              filterable
+              placeholder="按机台筛选"
+            >
+              <el-option v-for="model in contractModelOptions" :key="model" :label="model" :value="model" />
+            </el-select>
           </div>
 
           <div v-loading="loading" class="month-list">
@@ -235,8 +259,22 @@
               </div>
 
               <div class="attachment-upload-row">
-                <el-upload :auto-upload="false" :show-file-list="false" :on-change="onExistingContractFileChange">
-                  <el-button size="small">➕ 追加附件</el-button>
+                <el-upload
+                  v-model:file-list="existingAttachmentUploadFiles"
+                  class="contract-drop-upload compact"
+                  drag
+                  :auto-upload="false"
+                  :show-file-list="false"
+                  multiple
+                  :accept="contractFileAccept"
+                  :on-change="onExistingContractFileChange"
+                  @drop.capture="onBatchUploadDrop"
+                >
+                  <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+                  <div class="el-upload__text">拖入附件，或 <em>点击追加</em></div>
+                  <template #tip>
+                    <div class="el-upload__tip">PDF、Word、JPG/JPEG，单个不超过 50MB；不支持文件夹。</div>
+                  </template>
                 </el-upload>
               </div>
             </div>
@@ -612,13 +650,13 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading, Document } from '@element-plus/icons-vue'
+import { Loading, Document, UploadFilled } from '@element-plus/icons-vue'
 import { apiGet, apiGetAll, apiPost, apiPut, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
-import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
+import { compareModels, getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
 import PageHeader from '../components/PageHeader.vue'
 
 const router = useRouter()
@@ -717,7 +755,10 @@ const allRows = ref<any[]>([])
 const activeTab = ref<StatusTab>('待规划')
 const selectedContractId = ref('')
 const contractSearchKeyword = ref('')
+const contractModelFilter = ref('')
 const batchPickedFiles = ref<File[]>([])
+const batchUploadFiles = ref<any[]>([])
+const existingAttachmentUploadFiles = ref<any[]>([])
 const dealerOrderDialogVisible = ref(false)
 const dealerOrderLoading = ref(false)
 const dealerOrderKeyword = ref('')
@@ -775,18 +816,14 @@ const spotModeBlockReason = ref('')
 let saveModeDialogResolver: ((mode: 'sandbox' | 'spot' | null) => void) | null = null
 
 const todayYmd = () => new Date().toISOString().slice(0, 10)
-const genContractId = () => {
-  const now = new Date()
-  const y = now.getFullYear().toString()
-  const m = `${now.getMonth() + 1}`.padStart(2, '0')
-  const d = `${now.getDate()}`.padStart(2, '0')
-  const rnd = Math.floor(Math.random() * 9000 + 1000)
-  return `HT${y}${m}${d}${rnd}`
+const fetchNextContractId = async () => {
+  const res = await apiGet<{ contract_no: string }>('/planning/contracts/next-id')
+  return String(res.contract_no || '').trim()
 }
 
-const resetBatchForm = () => {
+const resetBatchForm = async () => {
   batchForm.value = {
-    contractId: genContractId(),
+    contractId: '',
     deadline: todayYmd(),
     customer: '',
     agent: '',
@@ -795,7 +832,13 @@ const resetBatchForm = () => {
   }
   batchItems.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
   batchPickedFiles.value = []
+  batchUploadFiles.value = []
   dealerOrderSource.value = ''
+  try {
+    batchForm.value.contractId = await fetchNextContractId()
+  } catch (err) {
+    ElMessage.error(getApiErrorMessage(err) || '生成合同号失败')
+  }
 }
 
 const loadDealerOrders = async () => {
@@ -871,7 +914,7 @@ const normalizeDealerOrderItems = (order: DealerOrder) => {
     .filter((item) => item.model)
 }
 
-const openDealerOrderConvertDialog = (order: DealerOrder) => {
+const openDealerOrderConvertDialog = async (order: DealerOrder) => {
   if (!canConvertDealerOrder(order)) {
     ElMessage.warning('只有待审核或已通过审核的经销商订单可以转合同')
     return
@@ -881,7 +924,7 @@ const openDealerOrderConvertDialog = (order: DealerOrder) => {
     ElMessage.warning('该经销商订单没有可转合同的机型明细')
     return
   }
-  dealerConvertForm.contractNo = genContractId()
+  dealerConvertForm.contractNo = ''
   dealerConvertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   dealerConvertForm.customer = String(order.customer_name || '').trim()
   dealerConvertForm.agent = String(order.contact_name || '').trim()
@@ -891,6 +934,12 @@ const openDealerOrderConvertDialog = (order: DealerOrder) => {
   dealerConvertForm.sourceOrderNo = String(order.order_no || '').trim()
   dealerConvertCanUseSpot.value = true
   dealerConvertSpotBlockReason.value = ''
+  try {
+    dealerConvertForm.contractNo = await fetchNextContractId()
+  } catch (err) {
+    ElMessage.error(getApiErrorMessage(err) || '生成合同号失败')
+    return
+  }
   dealerOrderDialogVisible.value = false
   dealerConvertDialogVisible.value = true
 }
@@ -950,12 +999,25 @@ const buildContractSummaries = (rows: any[]) => {
   })
 }
 
+const contractModelOptions = computed(() => {
+  const models = new Set<string>()
+  for (const row of allRows.value) {
+    const model = String(row['机型'] || '').trim()
+    if (model) models.add(model)
+  }
+  return Array.from(models).sort(compareModels)
+})
+
 const contractCards = computed(() => {
   const keyword = contractSearchKeyword.value.trim().toLowerCase()
+  const modelFilter = contractModelFilter.value.trim()
   const tabRows = allRows.value.filter((row) => rowTab(row) === activeTab.value)
   const summaries = buildContractSummaries(tabRows)
-  if (!keyword) return summaries
   return summaries.filter((contract) => {
+    if (modelFilter && !contract.rows.some((row) => String(row['机型'] || '').trim() === modelFilter)) {
+      return false
+    }
+    if (!keyword) return true
     return [contract.id, contract.customer, contract.agent, contract.modelSummary]
       .map((value) => value.toLowerCase())
       .some((value) => value.includes(keyword))
@@ -1324,16 +1386,75 @@ const addBatchItem = () => {
   batchItems.value.push({ model: '', qty: 1, high: false, rowNote: '' })
 }
 
-const onBatchFileChange = (uploadFile: any) => {
-  const raw = uploadFile.raw as File | undefined
-  if (!raw) return
-  batchPickedFiles.value.push(raw)
+const contractFileAccept = '.pdf,.doc,.docx,.jpg,.jpeg'
+const allowedContractFileExts = new Set(contractFileAccept.split(','))
+const contractFileMaxSize = 50 * 1024 * 1024
+
+const batchFileKey = (file: File) => `${file.name}__${file.size}__${file.lastModified || 0}`
+
+const getBatchUploadRaw = (uploadFile: any) => uploadFile?.raw as File | undefined
+
+const getContractFileError = (file: File) => {
+  const name = String(file.name || '').trim()
+  const dotIndex = name.lastIndexOf('.')
+  const ext = dotIndex >= 0 ? name.slice(dotIndex).toLowerCase() : ''
+  if (!name || !ext) return '请选择具体文件，不支持文件夹'
+  if (!allowedContractFileExts.has(ext)) return '仅支持 PDF、Word、JPG/JPEG 文件'
+  if (file.size > contractFileMaxSize) return '单个文件不能超过 50MB'
+  return ''
 }
 
-const onBatchFileRemove = (uploadFile: any) => {
-  const raw = uploadFile.raw as File | undefined
+const syncBatchPickedFiles = (uploadFiles: any[] = batchUploadFiles.value, notifyDuplicate = false) => {
+  const seen = new Set<string>()
+  const nextUploadFiles: any[] = []
+  const nextPickedFiles: File[] = []
+  let duplicateCount = 0
+
+  for (const item of uploadFiles || []) {
+    const raw = getBatchUploadRaw(item)
+    if (!raw || getContractFileError(raw)) continue
+    const key = batchFileKey(raw)
+    if (seen.has(key)) {
+      duplicateCount += 1
+      continue
+    }
+    seen.add(key)
+    nextUploadFiles.push(item)
+    nextPickedFiles.push(raw)
+  }
+
+  if (notifyDuplicate && duplicateCount > 0) ElMessage.warning('重复文件已自动忽略')
+  batchUploadFiles.value = nextUploadFiles
+  batchPickedFiles.value = nextPickedFiles
+}
+
+const onBatchUploadDrop = (evt: DragEvent) => {
+  const items = Array.from(evt.dataTransfer?.items || [])
+  const hasDirectory = items.some((item: any) => {
+    const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null
+    return Boolean(entry?.isDirectory)
+  })
+  if (!hasDirectory) return
+  evt.preventDefault()
+  evt.stopPropagation()
+  ElMessage.warning('请拖入文件，不支持拖入文件夹')
+}
+
+const onBatchFileChange = (uploadFile: any, uploadFiles: any[] = []) => {
+  const raw = getBatchUploadRaw(uploadFile)
   if (!raw) return
-  batchPickedFiles.value = batchPickedFiles.value.filter((f) => !(f.name === raw.name && f.size === raw.size))
+  const error = getContractFileError(raw)
+  if (error) {
+    ElMessage.warning(`${raw.name || '该项目'}：${error}`)
+    batchUploadFiles.value = (uploadFiles || batchUploadFiles.value).filter((item) => item.uid !== uploadFile.uid)
+    syncBatchPickedFiles(batchUploadFiles.value)
+    return
+  }
+  syncBatchPickedFiles(uploadFiles, true)
+}
+
+const onBatchFileRemove = (_uploadFile: any, uploadFiles: any[] = []) => {
+  syncBatchPickedFiles(uploadFiles)
 }
 
 const getInStockCountByModel = async () => {
@@ -1550,7 +1671,7 @@ const submitBatchContracts = async () => {
     selectedContractId.value = cid
     batchPanelOpen.value = false
     const isRush = batchForm.value.isRush
-    resetBatchForm()
+    await resetBatchForm()
     batchFormDraft.clearDraft()
     batchItemsDraft.clearDraft()
     await fetchContracts(true)
@@ -1678,9 +1799,15 @@ const deleteAttachment = async (contractId: string, fileName: string) => {
 }
 
 const onExistingContractFileChange = async (uploadFile: any) => {
-  const raw = uploadFile.raw as File | undefined
+  const raw = getBatchUploadRaw(uploadFile)
   const contract = selectedContract.value
   if (!raw || !contract) return
+  const error = getContractFileError(raw)
+  if (error) {
+    ElMessage.warning(`${raw.name || '该项目'}：${error}`)
+    existingAttachmentUploadFiles.value = []
+    return
+  }
   const fd = new FormData()
   fd.append('file', raw)
   try {
@@ -1693,10 +1820,12 @@ const onExistingContractFileChange = async (uploadFile: any) => {
     await fetchAttachments(contract.id)
   } catch (e) {
     ElMessage.error(getApiErrorMessage(e) || '上传附件失败')
+  } finally {
+    existingAttachmentUploadFiles.value = []
   }
 }
 
-watch([activeTab, contractSearchKeyword], () => {
+watch([activeTab, contractSearchKeyword, contractModelFilter], () => {
   syncSelection()
 })
 
@@ -1709,7 +1838,7 @@ watch(selectedContractId, (newId) => {
 })
 
 onMounted(() => {
-  resetBatchForm()
+  void resetBatchForm()
   fetchContracts(true)
 })
 </script>
@@ -1777,10 +1906,43 @@ onMounted(() => {
   font-weight: 700;
   color: var(--color-gray-800);
 }
+.auto-id-input :deep(.el-input__wrapper) {
+  background: var(--color-gray-50);
+}
+.auto-id-input :deep(.el-input__inner) {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-gray-800);
+}
 .batch-row-actions,
 .batch-save,
 .attachment-upload-row {
   margin-top: var(--space-2);
+}
+.contract-drop-upload :deep(.el-upload) {
+  width: 100%;
+}
+.contract-drop-upload :deep(.el-upload-dragger) {
+  width: 100%;
+  padding: 18px 12px;
+  border-radius: var(--radius-md);
+}
+.contract-drop-upload :deep(.el-icon--upload) {
+  font-size: 28px;
+  margin-bottom: 4px;
+}
+.contract-drop-upload.compact :deep(.el-upload-dragger) {
+  padding: 10px 12px;
+}
+.contract-drop-upload.compact :deep(.el-icon--upload) {
+  font-size: 20px;
+  margin-bottom: 2px;
+}
+.contract-drop-upload.compact :deep(.el-upload__text) {
+  font-size: var(--font-size-sm);
+}
+.contract-drop-upload :deep(.el-upload__tip) {
+  color: var(--color-gray-500);
 }
 .ops-label {
   font-size: var(--font-size-sm);
@@ -1856,6 +2018,10 @@ onMounted(() => {
 .list-tools {
   padding: var(--space-2);
   border-bottom: 1px solid var(--color-gray-100);
+}
+.list-filter-control {
+  width: 100%;
+  margin-top: 8px;
 }
 .month-list {
   padding: var(--space-2);

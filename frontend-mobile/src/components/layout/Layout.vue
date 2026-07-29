@@ -18,8 +18,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useUserStore } from '@/store/user'
+import { startInventorySync, stopInventorySync } from '@/utils/inventorySync'
 
 const userStore = useUserStore()
 
@@ -54,6 +55,9 @@ const tabbarItems = computed(() => {
   items.push({ title: '我的', to: '/profile', icon: 'user-o' })
   return items
 })
+
+onMounted(() => startInventorySync(userStore.token))
+onBeforeUnmount(stopInventorySync)
 </script>
 
 <style scoped>

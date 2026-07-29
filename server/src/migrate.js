@@ -47,7 +47,7 @@ const migrations = [
     customer            VARCHAR(255) NULL,
     dealer_id           VARCHAR(64)  NULL,
     sales_id            VARCHAR(64)  NULL,
-    order_remark        VARCHAR(500) NULL,
+    order_remark        TEXT NULL,
     is_locked           TINYINT(1)   NOT NULL DEFAULT 0,
     locked_by           VARCHAR(100) NULL,
     locked_at           DATETIME     NULL,

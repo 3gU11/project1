@@ -75,6 +75,12 @@ func (h *UnitHandler) Update(c *gin.Context) {
 	// Capture old state for sync
 	oldUnit, _ := h.repo.GetByID(c.Param("id"))
 	boundContract := oldUnit != nil && oldUnit.ContractNo != nil && strings.TrimSpace(*oldUnit.ContractNo) != ""
+	if oldUnit != nil && oldUnit.Status == model.StatusInProduction {
+		if _, exists := req["model_type"]; exists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "生产看板上线卡片不允许手动修改机型，请到机台编辑修改"})
+			return
+		}
+	}
 
 	// Remove protected fields
 	delete(req, "unit_id")
@@ -203,6 +209,11 @@ WHERE status = 'In_Production' AND unit_id = ?
 	if err := service.SyncFinishedGoodsByUnitIDs(tx, []string{c.Param("id")}); err != nil {
 		// Log error but continue as primary update succeeded
 		fmt.Printf("Update: sync finished_goods failed: %v\n", err)
+	}
+
+	if err := service.SyncPlanImportByUnitIDs(tx, []string{c.Param("id")}, req); err != nil {
+		// Log error but continue as primary update succeeded
+		fmt.Printf("Update: sync plan_import failed: %v\n", err)
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -454,18 +465,15 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 
 	sourceMT := engine.NormalizeModelType(unit.ModelType)
 	targetMT := engine.NormalizeModelType(targetBatch.ModelType)
-	if sourceMT != targetMT {
-		allowMismatch := false
-		if !isSameBatch && sourceBatch.Status == model.StatusPredicted && targetBatch.Status == model.StatusPredicted {
-			preferredSlot := slotFromRequest(requestedSlot, 1)
-			ejectUnit, pickErr := h.pickEjectableUnboundUnit(tx, req.TargetBatchID, preferredSlot)
-			if pickErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": pickErr.Error()})
-				return
-			}
-			allowMismatch = ejectUnit != nil
+	if !isSameBatch {
+		sourceGroup := engine.ProductionGroupForBatch(sourceBatch.ModelType, sourceBatch.Capacity)
+		targetGroup := engine.ProductionGroupForBatch(targetBatch.ModelType, targetBatch.Capacity)
+		unitGroup := engine.ProductionGroupForModel(unit.ModelType)
+		if !engine.ProductionGroupsCompatible(sourceGroup, targetGroup) || unitGroup != sourceGroup {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "production group mismatch: cannot move between incompatible batches"})
+			return
 		}
-		if !allowMismatch {
+		if sourceMT != targetMT && sourceGroup != engine.ProductionGroupLarge {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "model type mismatch: cannot move between different model types"})
 			return
 		}
@@ -552,10 +560,23 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 	}
 	overflowTouchedBatchIDs = append(overflowTouchedBatchIDs, gapTouchedBatchIDs...)
 
-	ratioBatchIDs := append([]string{sourceBatchID, req.TargetBatchID}, overflowTouchedBatchIDs...)
-	if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, targetMT, ratioBatchIDs...); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	sourceBatchMT := engine.NormalizeModelType(sourceBatch.ModelType)
+	if sourceBatchMT == targetMT {
+		ratioBatchIDs := append([]string{sourceBatchID, req.TargetBatchID}, overflowTouchedBatchIDs...)
+		if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, targetMT, ratioBatchIDs...); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, sourceBatchMT, sourceBatchID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		targetRatioBatchIDs := append([]string{req.TargetBatchID}, overflowTouchedBatchIDs...)
+		if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, targetMT, targetRatioBatchIDs...); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	if !directEjectApplied {
@@ -803,9 +824,8 @@ func (h *UnitHandler) moveSpecialUnitToRegularBatch(tx *gorm.DB, unit *model.Uni
 		return 0, fmt.Errorf("cross-batch move is only supported in predicted columns")
 	}
 
-	sourceMT := engine.NormalizeModelType(unit.ModelType)
 	targetMT := engine.NormalizeModelType(targetBatch.ModelType)
-	if sourceMT != targetMT || !isLargeFamilyBatch(targetBatch) || (sourceMT != "XS" && sourceMT != "AUTO") {
+	if !isLargeFamilyBatch(targetBatch) || engine.ProductionGroupForModel(unit.ModelType) != engine.ProductionGroupLarge {
 		return 0, fmt.Errorf("only special <-> large XS/AUTO cross-column moves are allowed")
 	}
 
@@ -890,11 +910,7 @@ func (h *UnitHandler) moveRegularUnitToSpecialBatch(tx *gorm.DB, unit *model.Uni
 	if !strings.EqualFold(strings.TrimSpace(targetBatch.ModelType), "SPECIAL") {
 		return 0, fmt.Errorf("target must be special column")
 	}
-	sourceMT := engine.NormalizeModelType(unit.ModelType)
-	if sourceMT != "XS" && sourceMT != "AUTO" {
-		return 0, fmt.Errorf("only large XS/AUTO can move to special columns")
-	}
-	if engine.NormalizeModelType(sourceBatch.ModelType) != sourceMT || !isLargeFamilyBatch(sourceBatch) {
+	if !isLargeFamilyBatch(sourceBatch) || engine.ProductionGroupForModel(unit.ModelType) != engine.ProductionGroupLarge {
 		return 0, fmt.Errorf("only large XS/AUTO can move to special columns")
 	}
 
@@ -921,8 +937,7 @@ func isLargeFamilyBatch(batch *model.Batch) bool {
 	if batch == nil {
 		return false
 	}
-	family := engine.NormalizeModelType(batch.ModelType)
-	return batch.Capacity == 16 && (family == "XS" || family == "AUTO")
+	return engine.ProductionGroupForBatch(batch.ModelType, batch.Capacity) == engine.ProductionGroupLarge
 }
 
 func (h *UnitHandler) moveSpecialUnit(tx *gorm.DB, unit *model.Unit, sourceBatchID string, targetBatchID string, requestedSlot *int) (int, error) {
@@ -2349,26 +2364,6 @@ func slotFromRequest(slot *int, fallback int) int {
 	return fallback
 }
 
-func normalizeModelFamily(modelType string) string {
-	upper := strings.ToUpper(strings.TrimSpace(modelType))
-	if upper == "" {
-		return ""
-	}
-	if upper == "FH-300C" {
-		return "G"
-	}
-	if strings.Contains(upper, "AUTO") {
-		return "AUTO"
-	}
-	if strings.Contains(upper, "XS") {
-		return "XS"
-	}
-	if upper == "G" || strings.HasSuffix(upper, "G") {
-		return "G"
-	}
-	return upper
-}
-
 func (h *UnitHandler) SwapContent(c *gin.Context) {
 	var req service.SwapContentReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -2475,6 +2470,7 @@ func (h *UnitHandler) RepairFamilyMismatches(c *gin.Context) {
 		SlotIndex      int
 		ModelType      string
 		BatchModelType string
+		BatchCapacity  int
 	}
 	var rows []mismatchRow
 	if err := h.db.Raw(`
@@ -2483,7 +2479,8 @@ SELECT
   u.batch_id,
   u.slot_index,
   u.model_type,
-  b.model_type AS batch_model_type
+  b.model_type AS batch_model_type,
+  b.capacity AS batch_capacity
 FROM units u
 JOIN batches b ON b.batch_id = u.batch_id
 WHERE b.status IN ('Predicted', 'Confirmed', 'In_Production')
@@ -2495,7 +2492,9 @@ WHERE b.status IN ('Predicted', 'Confirmed', 'In_Production')
 
 	mismatches := make([]mismatchRow, 0)
 	for _, r := range rows {
-		if uf, bf := normalizeModelFamily(r.ModelType), normalizeModelFamily(r.BatchModelType); uf != "" && bf != "" && uf != bf {
+		unitGroup := engine.ProductionGroupForModel(r.ModelType)
+		batchGroup := engine.ProductionGroupForBatch(r.BatchModelType, r.BatchCapacity)
+		if unitGroup != "" && batchGroup != "" && unitGroup != batchGroup {
 			mismatches = append(mismatches, r)
 		}
 	}
@@ -2506,7 +2505,7 @@ WHERE b.status IN ('Predicted', 'Confirmed', 'In_Production')
 		tx := h.db.Begin()
 		var src mismatchRow
 		if err := tx.Raw(`
-SELECT u.unit_id, u.batch_id, u.slot_index, u.model_type, b.model_type AS batch_model_type
+SELECT u.unit_id, u.batch_id, u.slot_index, u.model_type, b.model_type AS batch_model_type, b.capacity AS batch_capacity
 FROM units u
 JOIN batches b ON b.batch_id = u.batch_id
 WHERE u.unit_id = ?
@@ -2516,24 +2515,28 @@ FOR UPDATE
 			failed = append(failed, gin.H{"unit_id": item.UnitID, "error": err.Error()})
 			continue
 		}
-		srcFamily := normalizeModelFamily(src.BatchModelType)
-		unitFamily := normalizeModelFamily(src.ModelType)
-		if srcFamily == "" || unitFamily == "" || srcFamily == unitFamily {
+		srcGroup := engine.ProductionGroupForBatch(src.BatchModelType, src.BatchCapacity)
+		unitGroup := engine.ProductionGroupForModel(src.ModelType)
+		if srcGroup == "" || unitGroup == "" || srcGroup == unitGroup {
 			tx.Rollback()
 			continue
 		}
 
-		var familyExpr string
-		switch unitFamily {
-		case "AUTO":
-			familyExpr = "UPPER(b2.model_type) LIKE '%AUTO%'"
-		case "XS":
-			familyExpr = "UPPER(b2.model_type) LIKE '%XS%'"
-		case "G":
-			familyExpr = "(UPPER(b2.model_type) = 'G' OR UPPER(b2.model_type) LIKE '%G')"
+		var groupExpr string
+		switch unitGroup {
+		case engine.ProductionGroupLarge:
+			groupExpr = "(b2.capacity = 16 AND (UPPER(b2.model_type) LIKE '%XS%' OR UPPER(b2.model_type) LIKE '%AUTO%'))"
+		case engine.ProductionGroupSmallAUTO:
+			groupExpr = "(b2.capacity <> 16 AND UPPER(b2.model_type) LIKE '%AUTO%')"
+		case engine.ProductionGroupSmallXS:
+			groupExpr = "(b2.capacity <> 16 AND UPPER(b2.model_type) LIKE '%XS%')"
+		case engine.ProductionGroupSmallG:
+			groupExpr = "(UPPER(b2.model_type) = 'G' OR UPPER(b2.model_type) LIKE '%G')"
+		case engine.ProductionGroupSpecial:
+			groupExpr = "UPPER(TRIM(b2.model_type)) = 'SPECIAL'"
 		default:
 			tx.Rollback()
-			failed = append(failed, gin.H{"unit_id": item.UnitID, "error": "unsupported family " + unitFamily})
+			failed = append(failed, gin.H{"unit_id": item.UnitID, "error": "unsupported production group " + unitGroup})
 			continue
 		}
 
@@ -2547,7 +2550,7 @@ SELECT u2.unit_id, u2.batch_id, u2.slot_index
 FROM units u2
 JOIN batches b2 ON b2.batch_id = u2.batch_id
 WHERE b2.status IN ('Predicted', 'Confirmed', 'In_Production')
-  AND ` + familyExpr + `
+  AND ` + groupExpr + `
   AND u2.contract_no IS NULL
   AND u2.is_locked = 0
 ORDER BY b2.due_date_start ASC, u2.slot_index ASC

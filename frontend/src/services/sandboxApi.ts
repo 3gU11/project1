@@ -25,6 +25,9 @@ export const confirmBatch = (id: string, batchCode?: string, expectedInboundDate
 export const batchConfirm = (batchIds: string[]) =>
   apiPost(`${P}/batches/batch-confirm`, { batch_ids: batchIds })
 
+export const createManualPredictedBatch = (data: { model_family: string; quantity: number; remark?: string }) =>
+  apiPost(`${P}/batches/manual-predicted`, data)
+
 export const insertEmptySlot = (id: string, beforeSlotIndex: number, sizeKey?: string) =>
   apiPost(`${P}/batches/${id}/insert-empty-slot`, {
     before_slot_index: beforeSlotIndex,

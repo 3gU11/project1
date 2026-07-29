@@ -2,6 +2,7 @@ param(
   [switch]$DryRun,
   [switch]$NoMobile,
   [string]$GoPort = '3001',
+  [string]$OCRPort = '8010',
   [string]$ApiPort = '8000',
   [string]$WebPort = '8888',
   [string]$MobilePort = '5174',
@@ -33,6 +34,7 @@ function Resolve-PythonExe([string]$requested, [string]$repoRoot) {
   }
 
   foreach ($candidate in @(
+    (Join-Path $repoRoot '.venv312\Scripts\python.exe'),
     (Join-Path $repoRoot '.venv\Scripts\python.exe'),
     (Join-Path $repoRoot 'venv\Scripts\python.exe')
   )) {
@@ -56,6 +58,7 @@ function Save-PidFile() {
     startedAt = $script:startedAt
     ports = [ordered]@{
       go = $GoPort
+      ocr = $OCRPort
       api = $ApiPort
       web = $WebPort
       mobile = if ($NoMobile) { $null } else { $MobilePort }
@@ -187,6 +190,8 @@ $script:startedProcesses = @()
 
 $goOut = Join-Path $serverDir 'go-launcher.out.log'
 $goErr = Join-Path $serverDir 'go-launcher.err.log'
+$ocrOut = Join-Path $serverDir 'ocr-launcher.out.log'
+$ocrErr = Join-Path $serverDir 'ocr-launcher.err.log'
 $apiOut = Join-Path $root 'api-launcher.out.log'
 $apiErr = Join-Path $root 'api-launcher.err.log'
 $webOut = Join-Path $frontendDir 'web-launcher.out.log'
@@ -200,6 +205,7 @@ Log "ROOT: $root"
 Log '========================================'
 
 Test-PortValue -port $GoPort -label 'Go'
+Test-PortValue -port $OCRPort -label 'OCR'
 Test-PortValue -port $ApiPort -label 'API'
 Test-PortValue -port $WebPort -label 'frontend'
 Test-PortValue -port $MobilePort -label 'mobile frontend'
@@ -218,8 +224,13 @@ if (-not $goCmd -and (Test-Path -LiteralPath 'C:\Program Files\Go\bin\go.exe')) 
 if (-not $goCmd -and (Test-Path -LiteralPath 'C:\Program Files (x86)\Go\bin\go.exe')) {
   $goCmd = 'C:\Program Files (x86)\Go\bin\go.exe'
 }
-if (-not $goCmd) { Fail 'go not found in PATH or fallback paths.' 1 }
-Log "Go: $goCmd"
+if ($goCmd) {
+  Log "Go: $goCmd"
+} elseif (Test-Path -LiteralPath $goExe) {
+  Log "Go compiler not found; using existing binary: $goExe"
+} else {
+  Fail 'go not found in PATH or fallback paths, and server\smart-scheduling-server-go.exe is missing.' 1
+}
 
 $npmCmd = Resolve-CommandSource 'npm.cmd'
 if (-not $npmCmd) { $npmCmd = Resolve-CommandSource 'npm' }
@@ -233,40 +244,68 @@ if (-not $DryRun) {
   New-Item -ItemType Directory -Force -Path $goModCache | Out-Null
 }
 
-Log '[1/5] Cleaning old V8 processes...'
+Log '[1/6] Cleaning old V8 processes...'
 if ($DryRun) {
   Log "[DRY-RUN] powershell -File '$stopScript'"
 } elseif (Test-Path -LiteralPath $stopScript) {
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript -GoPort $GoPort -ApiPort $ApiPort -WebPort $WebPort -MobilePort $MobilePort | ForEach-Object { Log $_ }
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $stopScript -GoPort $GoPort -OCRPort $OCRPort -ApiPort $ApiPort -WebPort $WebPort -MobilePort $MobilePort | ForEach-Object { Log $_ }
   if ($LASTEXITCODE -ne 0) { Fail "Stop script failed with exit code $LASTEXITCODE" 2 }
 } else {
   Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }
 
 if (-not $DryRun) {
-  Remove-Item -LiteralPath $goOut,$goErr,$apiOut,$apiErr,$webOut,$webErr -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $goOut,$goErr,$ocrOut,$ocrErr,$apiOut,$apiErr,$webOut,$webErr -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath $mobileDir) {
     Remove-Item -LiteralPath $mobileOut,$mobileErr -ErrorAction SilentlyContinue
   }
 }
 
-Log '[2/5] Building Go sandbox binary...'
+Log '[2/6] Building Go sandbox binary...'
 if ($DryRun) {
-  Log "[DRY-RUN] $goCmd build -o '$goExe' .\cmd\main.go"
+  if ($goCmd) {
+    Log "[DRY-RUN] $goCmd build -o '$goExe' .\cmd\main.go"
+  } else {
+    Log "[DRY-RUN] Go compiler missing; would use existing binary '$goExe'"
+  }
 } else {
-  Push-Location $serverDir
-  try {
-    $env:GOCACHE = $goCache
-    $env:GOMODCACHE = $goModCache
-    & $goCmd build -o $goExe .\cmd\main.go
-    if ($LASTEXITCODE -ne 0) { Fail 'Go build failed.' 3 }
-  } finally {
-    Pop-Location
+  if ($goCmd) {
+    Push-Location $serverDir
+    try {
+      $env:GOCACHE = $goCache
+      $env:GOMODCACHE = $goModCache
+      & $goCmd build -o $goExe .\cmd\main.go
+      if ($LASTEXITCODE -ne 0) { Fail 'Go build failed.' 3 }
+    } finally {
+      Pop-Location
+    }
+  } else {
+    Log "Skipping Go build; existing binary will be started."
   }
 }
 
-Log "[3/5] Starting Go sandbox on $GoPort..."
-if (-not $DryRun) { $env:HTTP_ADDR = ":$GoPort" }
+Log "[3/6] Starting OCR service on $OCRPort..."
+if (-not $DryRun) {
+  $env:OCR_HOST = '127.0.0.1'
+  $env:OCR_PORT = $OCRPort
+}
+$null = Start-LoggedProcess `
+  -name 'OCR service' `
+  -filePath $PythonExe `
+  -argumentList @('ocr_service.py') `
+  -workingDirectory $serverDir `
+  -stdoutPath $ocrOut `
+  -stderrPath $ocrErr
+if (-not $DryRun -and -not (Wait-Http -url "http://127.0.0.1:$OCRPort/health" -timeoutSeconds 60 -label 'OCR health')) {
+  Fail-Launch "OCR health check failed. See logs: $ocrOut / $ocrErr" 4
+}
+
+Log "[4/6] Starting Go sandbox on $GoPort..."
+if (-not $DryRun) {
+  $env:HTTP_ADDR = ":$GoPort"
+  $env:OCR_ENABLED = 'true'
+  $env:OCR_SERVICE_URL = "http://127.0.0.1:$OCRPort/ocr"
+}
 $null = Start-LoggedProcess `
   -name 'Go backend' `
   -filePath $goExe `
@@ -275,10 +314,10 @@ $null = Start-LoggedProcess `
   -stdoutPath $goOut `
   -stderrPath $goErr
 if (-not $DryRun -and -not (Wait-Http -url "http://127.0.0.1:$GoPort/api/health" -timeoutSeconds 45 -label 'Go health')) {
-  Fail-Launch "Go health check failed. See logs: $goOut / $goErr" 4
+  Fail-Launch "Go health check failed. See logs: $goOut / $goErr" 5
 }
 
-Log "[4/5] Starting FastAPI on $ApiPort..."
+Log "[5/6] Starting FastAPI on $ApiPort..."
 if (-not $DryRun) { $env:GO_SANDBOX_URL = "http://127.0.0.1:$GoPort" }
 $null = Start-LoggedProcess `
   -name 'FastAPI' `
@@ -288,10 +327,10 @@ $null = Start-LoggedProcess `
   -stdoutPath $apiOut `
   -stderrPath $apiErr
 if (-not $DryRun -and -not (Wait-Http -url "http://127.0.0.1:$ApiPort/health" -timeoutSeconds 90 -label 'FastAPI health')) {
-  Fail-Launch "FastAPI health check failed. See logs: $apiOut / $apiErr" 5
+  Fail-Launch "FastAPI health check failed. See logs: $apiOut / $apiErr" 6
 }
 
-Log "[5/5] Starting frontends..."
+Log "[6/6] Starting frontends..."
 if (-not $DryRun) {
   $env:VITE_API_BASE_URL = '/api/v1'
   $env:VITE_PROXY_TARGET = "http://127.0.0.1:$ApiPort"
@@ -330,6 +369,7 @@ if ($NoMobile) {
 
 Log ''
 Log 'Started.'
+Log "OCR health: http://127.0.0.1:$OCRPort/health"
 Log "Go health : http://127.0.0.1:$GoPort/api/health"
 Log "API docs  : http://127.0.0.1:$ApiPort/docs"
 Log "Frontend  : http://127.0.0.1:$WebPort"
@@ -338,6 +378,8 @@ Log "PID file  : $pidFile"
 Log 'Logs:'
 Log "- $goOut"
 Log "- $goErr"
+Log "- $ocrOut"
+Log "- $ocrErr"
 Log "- $apiOut"
 Log "- $apiErr"
 Log "- $webOut"

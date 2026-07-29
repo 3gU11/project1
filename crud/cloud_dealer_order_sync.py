@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from crud.dealer_orders import ensure_dealer_order_tables
 from database import get_engine
@@ -799,6 +799,57 @@ def _batch_load_existing(
     return result
 
 
+def _prune_cloud_deleted_local_orders(conn: Any, cloud_order_nos: set[str]) -> dict[str, int]:
+    """Remove local WeChat mirror rows whose cloud-side order now returns 404."""
+    rows = conn.execute(
+        text(
+            """
+            SELECT DISTINCT biz_key
+            FROM cloud_sync_outbox
+            WHERE status = 'failed'
+              AND last_error LIKE 'cloud order not found (404):%'
+            """
+        )
+    ).fetchall()
+    stale_order_nos = [
+        _clean(row[0])
+        for row in rows
+        if _clean(row[0]) and _clean(row[0]) not in cloud_order_nos
+    ]
+    if not stale_order_nos:
+        return {"orders": 0, "lines": 0}
+
+    deleted_lines = conn.execute(
+        text(
+            """
+            DELETE FROM dealer_orders
+            WHERE source = 'wechat'
+              AND status NOT IN ('complete', 'completed')
+              AND order_no IN :order_nos
+            """
+        ).bindparams(bindparam("order_nos", expanding=True)),
+        {"order_nos": stale_order_nos},
+    ).rowcount
+
+    conn.execute(
+        text(
+            """
+            UPDATE cloud_sync_outbox
+            SET status = 'synced',
+                last_error = NULL,
+                next_retry_at = NULL,
+                synced_at = NOW()
+            WHERE status = 'failed'
+              AND last_error LIKE 'cloud order not found (404):%'
+              AND biz_key IN :order_nos
+            """
+        ).bindparams(bindparam("order_nos", expanding=True)),
+        {"order_nos": stale_order_nos},
+    )
+
+    return {"orders": len(stale_order_nos), "lines": int(deleted_lines or 0)}
+
+
 def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_pages: int = 20) -> dict[str, Any]:
     ensure_dealer_order_tables()
     orders = fetch_cloud_dealer_orders(status=status, page_size=page_size, max_pages=max_pages)
@@ -806,7 +857,9 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
     updated = 0
     skipped = 0
     seen_lines: set[tuple[str, int]] = set()
+    seen_order_nos: set[str] = set()
     pending_order_nos: set[str] = set()
+    pruned = {"orders": 0, "lines": 0}
 
     # Phase 1: Build all payloads and collect unique keys
     all_payloads: list[tuple[tuple[str, int], dict[str, Any]]] = []
@@ -823,6 +876,7 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                 skipped += 1
                 continue
             seen_lines.add(key)
+            seen_order_nos.add(order_no)
             all_payloads.append((key, payload))
 
     with get_engine().begin() as conn:
@@ -953,6 +1007,9 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                 {"order_no": order_no},
             )
 
+        if _clean(status).lower() in {"", "all", "*"}:
+            pruned = _prune_cloud_deleted_local_orders(conn, seen_order_nos)
+
     return {
         "message": "cloud dealer orders synced",
         "status": "all" if _clean(status).lower() in {"", "all", "*"} else _normalize_status(status),
@@ -962,6 +1019,8 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
         "updated": updated,
         "skipped": skipped,
         "factory_pending_orders": len(pending_order_nos),
+        "pruned_cloud_deleted_orders": pruned["orders"],
+        "pruned_cloud_deleted_lines": pruned["lines"],
     }
 
 

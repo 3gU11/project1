@@ -86,13 +86,15 @@ func (r *BatchRepo) AssignLine(tx *gorm.DB, batchID string, lineID string) error
 func (r *BatchRepo) DeleteOldPredictedByModel(tx *gorm.DB, modelType string) error {
 	targetBatches := tx.Model(&model.Batch{}).
 		Select("batch_id").
-		Where("model_type = ? AND status = ?", modelType, model.StatusPredicted)
+		Where("model_type = ? AND status = ?", modelType, model.StatusPredicted).
+		Where("COALESCE(source, '') <> ?", "manual")
 
 	if err := tx.Where("batch_id IN (?)", targetBatches).Delete(&model.Unit{}).Error; err != nil {
 		return err
 	}
 
 	return tx.Where("model_type = ? AND status = ?", modelType, model.StatusPredicted).
+		Where("COALESCE(source, '') <> ?", "manual").
 		Delete(&model.Batch{}).Error
 }
 

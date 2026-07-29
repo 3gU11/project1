@@ -24,5 +24,29 @@ export const inventoryApi = {
   },
   deleteMachineArchive(serial_no: string, file_name: string) {
     return request.delete(`/inventory/machine-archive/${serial_no}/files/${file_name}`)
+  },
+  getMachinePhotoProfile(serial_no: string) {
+    return request.get(`/machines/${serial_no}/photo-profile`)
+  },
+  initMachinePhotoTasks(serial_no: string) {
+    return request.post(`/machines/${serial_no}/photo-tasks/init`)
+  },
+  getMachinePhotoTasks(serial_no: string) {
+    return request.get(`/machines/${serial_no}/photo-tasks`)
+  },
+  uploadPhotoTask(task_id: number, formData: FormData) {
+    return request.post(`/photo-tasks/${task_id}/upload`, formData)
+  },
+  deletePhotoTask(task_id: number) {
+    return request.delete(`/photo-tasks/${task_id}/photo`)
+  },
+  runPhotoTaskOcr(task_id: number) {
+    return request.post(`/photo-tasks/${task_id}/ocr`)
+  },
+  confirmPhotoTask(task_id: number, data: any) {
+    return request.post(`/photo-tasks/${task_id}/confirm`, data)
+  },
+  submitMachinePhotos(serial_no: string) {
+    return request.post(`/machines/${serial_no}/photo-submit`)
   }
 }

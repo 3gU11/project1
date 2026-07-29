@@ -314,9 +314,14 @@
         </el-row>
 
         <div class="field-label" style="margin-top: 8px">需求机型 (可修改数量/加高，或增删行)</div>
-        <el-table :data="editModelRows" border stripe size="small">
+        <el-table v-loading="editDetailsLoading" :data="editModelRows" border stripe size="small">
           <el-table-column label="#" width="40">
             <template #default="scope">{{ scope.$index + 1 }}</template>
+          </el-table-column>
+          <el-table-column v-if="editDetailsSource === 'factory_plan'" label="合同号" width="150">
+            <template #default="scope">
+              <el-input v-model="scope.row.contractId" disabled />
+            </template>
           </el-table-column>
           <el-table-column label="机型">
             <template #default="scope">
@@ -342,6 +347,11 @@
           <el-table-column label="单行备注" min-width="160">
             <template #default="scope">
               <el-input v-model="scope.row.rowNote" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="scope">
+              <el-button link type="danger" @click="removeEditRow(scope.$index)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -374,7 +384,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
-import { apiDelete, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
+import { apiDelete, apiGet, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
@@ -396,7 +406,7 @@ const initialTab = String(route.query.tab || '')
 const activeTab = ref<'manual' | 'import' | 'manage'>(
   ['manual', 'import', 'manage'].includes(initialTab)
     ? (initialTab as 'manual' | 'import' | 'manage')
-    : 'manual'
+    : 'import'
 )
 const keyword = ref('')
 const statusFilter = ref<'active' | 'done' | 'deleted'>('active')
@@ -434,7 +444,9 @@ const editingId = ref('')
 const editNeedPack = ref(false)
 const editSourceText = ref('')
 const deleteReason = ref('')
-const editModelRows = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([])
+const editDetailsLoading = ref(false)
+const editDetailsSource = ref<'factory_plan' | 'sales_orders'>('sales_orders')
+const editModelRows = ref<Array<{ contractId: string; model: string; qty: number; high: boolean; rowNote: string }>>([])
 const editForm = reactive({
   客户名: '',
   代理商: '',
@@ -469,6 +481,51 @@ const splitDemandModelTokens = (value: unknown) => {
       const model = matched[1].trim()
       return model || token
     })
+}
+
+const orderLineNoteLabel = String.raw`(?:\[[^\]]+\]\s*)?[A-Za-z0-9][A-Za-z0-9_\-./+]*(?:\([^)]*\))*`
+const orderLineNotePattern = new RegExp(String.raw`(^|\s)${orderLineNoteLabel}\s*[:：]\s*.*?(?=\s+${orderLineNoteLabel}\s*[:：]|$)`, 'g')
+const orderLineNoteCapturePattern = new RegExp(
+  String.raw`(?:^|\s)(?:\[[^\]]+\]\s*)?([A-Za-z0-9][A-Za-z0-9_\-./+]*(?:\([^)]*\))*)\s*[:：]\s*` +
+    String.raw`(.*?)(?=\s+${orderLineNoteLabel}\s*[:：]|$)`,
+  'g',
+)
+
+const stripTotalNote = (value: unknown) => {
+  let note = String(value || '').trim().replace(/^(\[总\]\s*)+/, '').trim()
+  if (!note) return ''
+  note = note.replace(orderLineNotePattern, ' ')
+  return note.replace(/\s+/g, ' ').trim()
+}
+
+const splitHighFromRowNote = (value: unknown) => {
+  const raw = String(value || '').trim()
+  const high = raw.includes('加高')
+  const rowNote = raw
+    .replace(/(^|\s+)加高(?=\s+|$)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return { high, rowNote }
+}
+
+const buildDetailRemark = (high: boolean, rowNote: string) => {
+  return [high ? '加高' : '', String(rowNote || '').trim()].filter(Boolean).join(' ')
+}
+
+const parseLegacyOrderLineNotes = (note: unknown) => {
+  const map = new Map<string, string[]>()
+  const raw = String(note || '').replace(/^(\[总\]\s*)+/, '').trim()
+  if (!raw) return map
+  orderLineNoteCapturePattern.lastIndex = 0
+  let m: RegExpExecArray | null = null
+  while ((m = orderLineNoteCapturePattern.exec(raw)) !== null) {
+    const model = String(m[1] || '').replace('(加高)', '').trim()
+    const rowNote = String(m[2] || '').trim()
+    if (!model || !rowNote) continue
+    if (!map.has(model)) map.set(model, [])
+    map.get(model)?.push(rowNote)
+  }
+  return map
 }
 
 const normalizeQtyValue = (value: unknown) => {
@@ -687,7 +744,7 @@ const createManualOrder = async () => {
   const totalQty = validRows.reduce((sum, r) => sum + Number(r.qty || 0), 0)
   const rowNotes = validRows
     .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
+    .map((r) => `${r.model}: ${buildDetailRemark(Boolean(r.high), String(r.rowNote || ''))}`)
   const noteParts = [manualForm.note.trim() ? `[总]${manualForm.note.trim()}` : '', ...rowNotes]
   const finalNote = noteParts.filter(Boolean).join(' ')
 
@@ -745,10 +802,15 @@ const createOrderFromPlanned = async () => {
     return
   }
 
-  const rowNotes = mergeRows.value
-    .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `[${r.sourceContract}] ${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
-  const mergedNote = [mergeDraft.note.trim() ? `[总]${mergeDraft.note.trim()}` : '', ...rowNotes].filter(Boolean).join(' ')
+  const mergedNote = stripTotalNote(mergeDraft.note)
+  const detailPayload = mergeRows.value
+    .filter((r) => String(r.model || '').trim() && Number(r.qty || 0) > 0)
+    .map((r) => ({
+      合同号: String(r.sourceContract || ''),
+      机型: String(r.model || '').trim(),
+      数量: Number(r.qty || 0),
+      备注: buildDetailRemark(Boolean(r.high), String(r.rowNote || '')),
+    }))
 
   await submitWithLock(saving, async () => {
     await apiPost('/planning/orders', {
@@ -760,6 +822,7 @@ const createOrderFromPlanned = async () => {
       备注: mergedNote || `合同导入: ${selectedImportContractIds.value.join(',')}`,
       包装选项: mergeDraft.needPack ? '需要包装' : '',
       contract_ids: selectedImportContractIds.value,
+      明细: detailPayload,
     })
     ElMessage.success('已转换为订单')
     selectedImportContractIds.value = []
@@ -786,31 +849,20 @@ watch(selectedImportContractIds, () => {
   mergeDraft.customer = String(first['客户名'] || '')
   mergeDraft.agent = String(first['代理商'] || '')
   mergeDraft.deliveryDate = String(first['要求交期'] || '')
-  mergeDraft.note = rows
-    .map((r) => {
-      const cid = String(r['合同号'] || '')
-      const note = String(r['备注'] || '').trim()
-      return note ? `[${cid}] ${note}` : ''
-    })
-    .filter(Boolean)
-    .join(' ')
+  mergeDraft.note = ''
 
   mergeRows.value = rows.map((r) => {
     const rawModel = String(r['机型'] || '').trim()
     const note = String(r['备注'] || '').trim()
-    // 兼容旧数据模型自带(加高)，以及新数据订单备注中包含"加高"
-    const high = rawModel.includes('(加高)') || note.includes('加高')
+    const parsedNote = splitHighFromRowNote(note)
     const model = rawModel.replace('(加高)', '').trim()
-    
-    // 从原始备注中剔除"加高"，避免重复显示
-    const cleanNote = note.split(/[|\[\]]/).map(s => s.trim()).filter(s => s && s !== '加高' && !['备注', '附加', '改数', '总'].includes(s)).join(' ')
     
     return {
       sourceContract: String(r['合同号'] || ''),
       model,
-      high,
+      high: rawModel.includes('(加高)') || parsedNote.high,
       qty: Math.max(1, Number(r['排产数量'] || 1) || 1),
-      rowNote: cleanNote,
+      rowNote: parsedNote.rowNote,
     }
   })
 })
@@ -826,6 +878,59 @@ watch(plannedContractRows, async () => {
   }
 })
 
+const buildFallbackEditRows = (row: RowData) => {
+  const legacyNotes = parseLegacyOrderLineNotes(row['备注'])
+  const parsedRows: Array<{ contractId: string; model: string; qty: number; high: boolean; rowNote: string }> = []
+  const rawModels = String(row['需求机型'] || '')
+    .split(';')
+    .map((x: string) => x.trim())
+    .filter(Boolean)
+  for (const token of rawModels) {
+    const m = token.match(/^(.*?)(?:\s*[x×:：]\s*)(\d+)$/i)
+    const modelRaw = m ? m[1].trim() : token
+    const qty = m ? Number(m[2]) : 1
+    const model = modelRaw.replace('(加高)', '').trim()
+    const noteList = legacyNotes.get(model) || []
+    const legacyNote = noteList.shift() || ''
+    const parsedNote = splitHighFromRowNote(legacyNote)
+    parsedRows.push({
+      contractId: '',
+      model,
+      qty: qty > 0 ? qty : 1,
+      high: modelRaw.includes('(加高)') || parsedNote.high,
+      rowNote: parsedNote.rowNote,
+    })
+  }
+  return parsedRows.length > 0 ? parsedRows : [{ contractId: '', model: '', qty: 1, high: false, rowNote: '' }]
+}
+
+const loadEditDetails = async (orderId: string) => {
+  editDetailsLoading.value = true
+  try {
+    const res: any = await apiGet(`/planning/orders/${encodeURIComponent(orderId)}/details`)
+    if (editingId.value !== orderId) return
+    editDetailsSource.value = res.source === 'factory_plan' ? 'factory_plan' : 'sales_orders'
+    editForm.备注 = String(res.total_note || '')
+    const detailRows = Array.isArray(res.details) ? res.details : []
+    editModelRows.value = detailRows.length > 0
+      ? detailRows.map((item: any) => {
+          const parsedNote = splitHighFromRowNote(item['备注'])
+          return {
+            contractId: String(item['合同号'] || ''),
+            model: String(item['机型'] || ''),
+            qty: Math.max(1, Number(item['数量'] || 1) || 1),
+            high: parsedNote.high,
+            rowNote: parsedNote.rowNote,
+          }
+        })
+      : [{ contractId: '', model: '', qty: 1, high: false, rowNote: '' }]
+  } catch (err: any) {
+    ElMessage.warning(getApiErrorMessage(err) || '订单明细读取失败，已使用订单汇总回填')
+  } finally {
+    if (editingId.value === orderId) editDetailsLoading.value = false
+  }
+}
+
 const openEdit = (row: RowData, syncSelection = true) => {
   const currentId = String(row['订单号'] || '')
   if (syncSelection) selectedManageOrderId.value = currentId
@@ -835,9 +940,10 @@ const openEdit = (row: RowData, syncSelection = true) => {
   editForm.需求机型 = String(row['需求机型'] || '')
   editForm.需求数量 = Number(row['需求数量'] || 1) || 1
   editForm.发货时间 = String(row['发货时间'] || '')
-  editForm.备注 = String(row['备注'] || '')
+  editForm.备注 = stripTotalNote(row['备注'])
   editForm.status = String(row['status'] || 'active')
   editNeedPack.value = String(row['包装选项'] || '').includes('需要')
+  editDetailsSource.value = 'sales_orders'
   const sourceRaw = row['指定批次/来源']
   if (typeof sourceRaw === 'string') {
     const t = sourceRaw.trim()
@@ -849,28 +955,8 @@ const openEdit = (row: RowData, syncSelection = true) => {
     editSourceText.value = ''
   }
   deleteReason.value = ''
-
-  const parsedRows: Array<{ model: string; qty: number; high: boolean; rowNote: string }> = []
-  const rawModels = String(row['需求机型'] || '')
-    .split(';')
-    .map((x: string) => x.trim())
-    .filter(Boolean)
-  for (const token of rawModels) {
-    const m = token.match(/^(.*?)(?:\s*[x×:：]\s*)(\d+)$/i)
-    const modelRaw = m ? m[1].trim() : token
-    const qty = m ? Number(m[2]) : 1
-    const orderNote = String(row['备注'] || '')
-    // 兼容旧数据模型自带(加高)，以及新数据订单备注中包含"加高"
-    const high = modelRaw.includes('(加高)') || orderNote.includes('加高')
-    
-    parsedRows.push({
-      model: modelRaw.replace('(加高)', '').trim(),
-      qty: qty > 0 ? qty : 1,
-      high,
-      rowNote: '', // 备注作为整体显示，行备注留空供用户重新追加
-    })
-  }
-  editModelRows.value = parsedRows.length > 0 ? parsedRows : [{ model: '', qty: 1, high: false, rowNote: '' }]
+  editModelRows.value = buildFallbackEditRows(row)
+  void loadEditDetails(currentId)
 }
 
 const clearEditPanel = () => {
@@ -886,6 +972,8 @@ const clearEditPanel = () => {
   editNeedPack.value = false
   editSourceText.value = ''
   deleteReason.value = ''
+  editDetailsSource.value = 'sales_orders'
+  editDetailsLoading.value = false
   editModelRows.value = []
 }
 
@@ -917,7 +1005,13 @@ const onManagePageChange = (page: number) => {
 }
 
 const addEditRow = () => {
-  editModelRows.value.push({ model: '', qty: 1, high: false, rowNote: '' })
+  const contractId = editDetailsSource.value === 'factory_plan' ? String(editModelRows.value[0]?.contractId || '') : ''
+  editModelRows.value.push({ contractId, model: '', qty: 1, high: false, rowNote: '' })
+}
+
+const removeEditRow = (index: number) => {
+  if (index < 0 || index >= editModelRows.value.length) return
+  editModelRows.value.splice(index, 1)
 }
 
 const saveEdit = async () => {
@@ -938,10 +1032,13 @@ const saveEdit = async () => {
   }
   const modelTokens = validRows.map((r) => `${r.model.trim()}x${r.qty}`)
   const totalQty = validRows.reduce((sum, r) => sum + Number(r.qty || 0), 0)
-  const lineNotes = validRows
-    .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
-  const finalNote = [editForm.备注.trim() ? `[总]${editForm.备注.trim()}` : '', ...lineNotes].filter(Boolean).join(' ')
+  const finalNote = stripTotalNote(editForm.备注)
+  const detailPayload = validRows.map((r) => ({
+    合同号: String(r.contractId || ''),
+    机型: String(r.model || '').trim(),
+    数量: Number(r.qty || 0),
+    备注: buildDetailRemark(Boolean(r.high), String(r.rowNote || '')),
+  }))
 
   await submitWithLock(saving, async () => {
     await apiPut(`/planning/orders/${encodeURIComponent(editingId.value)}`, {
@@ -954,6 +1051,7 @@ const saveEdit = async () => {
       包装选项: editNeedPack.value ? '需要包装' : '',
       '指定批次/来源': editSourceText.value,
       status: editForm.status,
+      明细: detailPayload,
     })
     ElMessage.success('订单已更新')
     await refreshLoadedData()

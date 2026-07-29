@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
+	"smart-scheduling/server/internal/engine"
 	"smart-scheduling/server/internal/model"
 	"smart-scheduling/server/internal/repo"
 	"smart-scheduling/server/internal/ws"
@@ -24,6 +26,18 @@ type BatchSvc struct {
 type FactoryPlanStatusUpdateStats struct {
 	Pairs int `json:"pairs"`
 	Rows  int `json:"rows"`
+}
+
+type AutoCompletedBatch struct {
+	BatchID   string `json:"batch_id"`
+	BatchCode string `json:"batch_code"`
+	LineID    string `json:"line_id"`
+	UnitCount int64  `json:"unit_count"`
+}
+
+type inboundBatchProgress struct {
+	TotalUnits   int64 `gorm:"column:total_units"`
+	InboundUnits int64 `gorm:"column:inbound_units"`
 }
 
 type StockModelTarget struct {
@@ -261,6 +275,11 @@ func (s *BatchSvc) AssignToLine(batchID string, lineID string, actor string) (*F
 	if b.ProductionLineID != nil && strings.TrimSpace(*b.ProductionLineID) != "" {
 		return nil, fmt.Errorf("batch %s is already assigned to line %s", b.BatchID, *b.ProductionLineID)
 	}
+	expectedRegion := engine.ProductionRegionForBatch(b.ModelType, b.Capacity)
+	lineRegion := productionLineRegion(line)
+	if expectedRegion == "" || lineRegion == "" || expectedRegion != lineRegion {
+		return nil, fmt.Errorf("production line region mismatch: batch requires %s, line is %s", expectedRegion, lineRegion)
+	}
 
 	isSpecial := isSpecialBatchModel(b.ModelType)
 	if line.Status != model.LineIdle {
@@ -389,6 +408,28 @@ WHERE batch_id = ?
 	return stats, nil
 }
 
+func productionLineRegion(line model.ProductionLine) string {
+	if line.Region != nil {
+		if region := strings.ToUpper(strings.TrimSpace(*line.Region)); region == "SMALL" || region == "LARGE" || region == "SPECIAL" {
+			return region
+		}
+	}
+	text := strings.ToUpper(strings.TrimSpace(line.LineName))
+	if line.ModelType != nil {
+		text += " " + strings.ToUpper(strings.TrimSpace(*line.ModelType))
+	}
+	switch {
+	case strings.Contains(text, "SPECIAL") || strings.Contains(text, "特殊"):
+		return "SPECIAL"
+	case strings.Contains(text, "LARGE") || strings.Contains(text, "中大型"):
+		return "LARGE"
+	case strings.Contains(text, "SMALL") || strings.Contains(text, "中小型"):
+		return "SMALL"
+	default:
+		return ""
+	}
+}
+
 func (s *BatchSvc) lineHasOnlySpecialBatches(tx *gorm.DB, lineID string) (bool, error) {
 	var batches []model.Batch
 	if err := tx.Where("production_line_id = ? AND status = ?", lineID, model.StatusInProduction).Find(&batches).Error; err != nil {
@@ -463,10 +504,6 @@ WHERE status = 'In_Production' AND unit_id IN ?
 		return fmt.Errorf("update production history ledger to completed: %w", err)
 	}
 
-	if err := SyncFinishedGoodsByUnitIDs(tx, unitIDs); err != nil {
-		return fmt.Errorf("sync finished_goods: %w", err)
-	}
-
 	if err := tx.Commit().Error; err != nil {
 		return err
 	}
@@ -477,6 +514,207 @@ WHERE status = 'In_Production' AND unit_id IN ?
 	return nil
 }
 
+func inboundBatchReady(progress inboundBatchProgress) bool {
+	return progress.TotalUnits > 0 && progress.TotalUnits == progress.InboundUnits
+}
+
+func lineStateAfterBatchCompletion(currentBatchID *string, completedBatchID string, remainingBatchIDs []string) (string, *string) {
+	if len(remainingBatchIDs) == 0 {
+		return model.LineIdle, nil
+	}
+	if currentBatchID != nil {
+		current := strings.TrimSpace(*currentBatchID)
+		if current != "" && current != completedBatchID {
+			for _, batchID := range remainingBatchIDs {
+				if batchID == current {
+					value := current
+					return model.LineBusy, &value
+				}
+			}
+		}
+	}
+	next := remainingBatchIDs[0]
+	return model.LineBusy, &next
+}
+
+// ReconcileInboundBatches completes active batches once every unit has at least
+// one immutable inbound_history event. Passing no serials scans all active batches.
+func (s *BatchSvc) ReconcileInboundBatches(serialNos []string, actor string) ([]AutoCompletedBatch, error) {
+	if !s.db.Migrator().HasTable("inbound_history") {
+		return []AutoCompletedBatch{}, nil
+	}
+
+	serials := make([]string, 0, len(serialNos))
+	seen := make(map[string]bool, len(serialNos))
+	for _, raw := range serialNos {
+		serial := strings.TrimSpace(raw)
+		if serial == "" || seen[serial] {
+			continue
+		}
+		seen[serial] = true
+		serials = append(serials, serial)
+	}
+
+	query := s.db.Table("batches b").
+		Select("DISTINCT b.batch_id").
+		Joins("JOIN units u ON u.batch_id = b.batch_id").
+		Where("b.status = ?", model.StatusInProduction)
+	if len(serialNos) > 0 {
+		if len(serials) == 0 {
+			return []AutoCompletedBatch{}, nil
+		}
+		query = query.Where(`
+COALESCE(NULLIF(TRIM(u.serial_no), ''), NULLIF(TRIM(u.forecast_serial_no), '')) IN ?
+`, serials)
+	}
+
+	var batchIDs []string
+	if err := query.Order("b.batch_id ASC").Pluck("b.batch_id", &batchIDs).Error; err != nil {
+		return nil, err
+	}
+
+	completed := make([]AutoCompletedBatch, 0)
+	for _, batchID := range batchIDs {
+		result, err := s.autoCompleteInboundBatch(batchID, actor)
+		if err != nil {
+			return completed, err
+		}
+		if result != nil {
+			completed = append(completed, *result)
+		}
+	}
+	return completed, nil
+}
+
+func (s *BatchSvc) autoCompleteInboundBatch(batchID string, actor string) (*AutoCompletedBatch, error) {
+	tx := s.db.Begin()
+	defer tx.Rollback()
+
+	var batch model.Batch
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("batch_id = ?", batchID).First(&batch).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if batch.Status != model.StatusInProduction || batch.ProductionLineID == nil || strings.TrimSpace(*batch.ProductionLineID) == "" {
+		return nil, nil
+	}
+	lineID := strings.TrimSpace(*batch.ProductionLineID)
+
+	var line model.ProductionLine
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("line_id = ?", lineID).First(&line).Error; err != nil {
+		return nil, err
+	}
+
+	var progress inboundBatchProgress
+	if err := tx.Raw(`
+SELECT
+    SUM(
+        CASE
+            WHEN COALESCE(NULLIF(TRIM(u.serial_no), ''), NULLIF(TRIM(u.forecast_serial_no), '')) IS NOT NULL
+            THEN 1 ELSE 0
+        END
+    ) AS total_units,
+    SUM(
+        CASE
+            WHEN COALESCE(NULLIF(TRIM(u.serial_no), ''), NULLIF(TRIM(u.forecast_serial_no), '')) IS NOT NULL
+             AND EXISTS (
+                SELECT 1
+                FROM inbound_history ih
+                WHERE TRIM(ih.serial_no) COLLATE utf8mb4_general_ci =
+                      COALESCE(NULLIF(TRIM(u.serial_no), ''), NULLIF(TRIM(u.forecast_serial_no), '')) COLLATE utf8mb4_general_ci
+             )
+            THEN 1 ELSE 0
+        END
+    ) AS inbound_units
+FROM units u
+WHERE u.batch_id = ? AND u.status = ?
+`, batchID, model.StatusInProduction).Scan(&progress).Error; err != nil {
+		return nil, err
+	}
+	if !inboundBatchReady(progress) {
+		return nil, nil
+	}
+
+	var unitIDs []string
+	if err := tx.Model(&model.Unit{}).Where("batch_id = ? AND status = ?", batchID, model.StatusInProduction).Pluck("unit_id", &unitIDs).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Model(&model.Batch{}).Where("batch_id = ? AND status = ?", batchID, model.StatusInProduction).Updates(map[string]interface{}{
+		"status":     model.StatusCompleted,
+		"updated_at": time.Now(),
+	}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Model(&model.Unit{}).Where("unit_id IN ?", unitIDs).Updates(map[string]interface{}{
+		"status":             model.StatusCompleted,
+		"production_line_id": nil,
+		"updated_at":         time.Now(),
+	}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Exec(`
+UPDATE production_history_ledger
+SET status = 'Completed', completed_at = NOW(), updated_at = NOW()
+WHERE status = 'In_Production' AND unit_id IN ?
+`, unitIDs).Error; err != nil {
+		return nil, fmt.Errorf("update production history ledger to completed: %w", err)
+	}
+
+	var remainingBatchIDs []string
+	if err := tx.Model(&model.Batch{}).
+		Where("production_line_id = ? AND status = ?", lineID, model.StatusInProduction).
+		Order("batch_no ASC, batch_id ASC").
+		Pluck("batch_id", &remainingBatchIDs).Error; err != nil {
+		return nil, err
+	}
+	lineStatus, currentBatchID := lineStateAfterBatchCompletion(line.CurrentBatchID, batchID, remainingBatchIDs)
+	if err := tx.Model(&line).Updates(map[string]interface{}{
+		"status":           lineStatus,
+		"current_batch_id": currentBatchID,
+		"updated_at":       time.Now(),
+	}).Error; err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(actor) == "" {
+		actor = "system"
+	}
+	batchCode := batchID
+	if batch.BatchCode != nil && strings.TrimSpace(*batch.BatchCode) != "" {
+		batchCode = strings.TrimSpace(*batch.BatchCode)
+	}
+	detailJSON, _ := json.Marshal(map[string]interface{}{
+		"batch_code": batchCode,
+		"line_id":    lineID,
+		"unit_count": progress.TotalUnits,
+		"reason":     "all_units_have_inbound_history",
+	})
+	if err := tx.Create(&model.OperationLog{
+		Actor:      actor,
+		Action:     "auto_complete_after_inbound",
+		TargetType: "batch",
+		TargetID:   batchID,
+		Detail:     detailJSON,
+		CreatedAt:  time.Now(),
+	}).Error; err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	result := &AutoCompletedBatch{BatchID: batchID, BatchCode: batchCode, LineID: lineID, UnitCount: progress.TotalUnits}
+	s.wsHub.Broadcast("batch:updated", result)
+	s.wsHub.Broadcast("line:completed", map[string]interface{}{
+		"line_id":   lineID,
+		"batch_id":  batchID,
+		"automatic": true,
+	})
+	return result, nil
+}
 
 func (s *BatchSvc) LockLineUnits(lineID string, unitIDs []string, orderRemark string, actor string) (int, error) {
 	uniqueIDs := make([]string, 0, len(unitIDs))

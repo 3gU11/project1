@@ -170,6 +170,9 @@ import { compareModels, getModelOrderList } from '../utils/modelOrder'
 import {
   buildSlotStats,
   defaultSlots,
+  getSlotCapacity,
+  isUnlimitedSlot,
+  prioritizeOldFactorySlots,
   persistLayoutToLocal,
   restoreLayoutFromLocal,
   type WarehouseSlot
@@ -253,8 +256,10 @@ const slotButtons = computed(() => {
     const stats = slotStats.value[s.code]
     return !(stats?.isFull || stats?.isOverflow)
   })
-  if (!kw) return availableSlots
-  return availableSlots.filter((s) => String(s.code || '').toLowerCase().includes(kw))
+  const matchedSlots = kw
+    ? availableSlots.filter((s) => String(s.code || '').toLowerCase().includes(kw))
+    : availableSlots
+  return prioritizeOldFactorySlots(matchedSlots)
 })
 
 const fetchInventory = async () => {
@@ -299,11 +304,6 @@ const fetchImportStaging = async () => {
 }
 
 const loadLayout = async () => {
-  const local = restoreLayoutFromLocal(layoutId)
-  if (local.length > 0) {
-    slots.value = local
-    return
-  }
   try {
     const response = await apiGet<LayoutResponse>(`/inventory/layout/${layoutId}`)
     const remoteSlots = response?.layout_json?.slots
@@ -315,6 +315,13 @@ const loadLayout = async () => {
   } catch (err: any) {
     error.value = getApiErrorMessage(err) || `读取布局失败: ${err.message || err}`
   }
+
+  const local = restoreLayoutFromLocal(layoutId)
+  if (local.length > 0) {
+    slots.value = local
+    return
+  }
+
   slots.value = defaultSlots()
 }
 
@@ -429,9 +436,13 @@ const syncPendingSelectionBySerial = () => {
 const slotButtonText = (slotCode: string) => {
   const stat = slotStats.value[slotCode]
   const count = Number(stat?.count || 0)
+  if (isUnlimitedSlot(slotCode)) {
+    return count <= 0 ? '(不限)' : `(${count}/不限)`
+  }
+  const capacity = getSlotCapacity(slotCode)
   if (count <= 0) return '(空库)'
-  if (count >= 5) return `(${count}/5占用)`
-  return `(${count}/5)`
+  if (count >= capacity) return `(${count}/${capacity}占用)`
+  return `(${count}/${capacity})`
 }
 
 const confirmInboundBySlot = async (slotCode: string) => {
@@ -537,16 +548,23 @@ onMounted(async () => {
 }
 .slot-btn-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(120px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
 }
 .slot-btn {
   background: #ef4444;
   border: none;
   border-radius: var(--radius-md);
   color: white;
-  height: 34px;
+  min-width: 0;
+  height: 42px;
+  padding: 0 18px;
   font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 .slot-btn.full {

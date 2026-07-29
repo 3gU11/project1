@@ -1,7 +1,7 @@
 from functools import lru_cache
 import json
 from datetime import datetime
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from config import (
@@ -261,7 +261,7 @@ def init_mysql_tables():
             `model_family` VARCHAR(32) NULL,
             `sort_order` INT NOT NULL DEFAULT 0,
             `enabled`    TINYINT(1) NOT NULL DEFAULT 1,
-            `remark`     VARCHAR(255) DEFAULT '',
+            `remark`     TEXT NULL,
             `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             UNIQUE KEY `uq_model_dictionary_name` (`model_name`)
@@ -838,7 +838,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 14
 
 
 def _ensure_schema_version_table(conn):
@@ -980,6 +980,46 @@ def _ensure_sales_orders_unique_order_no(conn):
             conn.execute(text(f"ALTER TABLE sales_orders DROP COLUMN `{temp_col}`"))
 
 
+def _ensure_sales_orders_text_columns(conn):
+    """Keep legacy sales_orders imports compatible with long order notes."""
+    _ensure_text_columns(conn, "sales_orders", ["需求机型", "备注", "delete_reason"])
+
+
+def _ensure_text_columns(conn, table_name, column_names):
+    """Expand free-text columns that may be narrow in imported legacy databases."""
+    if not _table_exists(conn, table_name):
+        return
+
+    rows = conn.execute(text(
+        "SELECT COLUMN_NAME, DATA_TYPE "
+        "FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=:db "
+        "AND TABLE_NAME=:table_name "
+        "AND COLUMN_NAME IN :cols"
+    ).bindparams(bindparam("cols", expanding=True)), {
+        "db": MYSQL_DB,
+        "table_name": table_name,
+        "cols": list(column_names),
+    }).mappings().all()
+    data_types = {row["COLUMN_NAME"]: str(row["DATA_TYPE"]).lower() for row in rows}
+
+    for col_name in column_names:
+        if data_types.get(col_name) not in {"text", "mediumtext", "longtext", "json"}:
+            conn.execute(text(
+                f"ALTER TABLE `{table_name}` "
+                f"MODIFY COLUMN `{col_name}` TEXT "
+                f"CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL"
+            ))
+
+
+def _ensure_free_text_columns(conn):
+    """Keep user-entered notes/details from failing at legacy VARCHAR limits."""
+    _ensure_sales_orders_text_columns(conn)
+    _ensure_text_columns(conn, "audit_log", ["details"])
+    _ensure_text_columns(conn, "model_dictionary", ["remark"])
+    _ensure_text_columns(conn, "units", ["order_remark"])
+
+
 def init_mysql_tables_v2():
     """
     优化版数据库初始化：使用 Schema 版本控制，避免每次启动全量迁移
@@ -998,6 +1038,7 @@ def init_mysql_tables_v2():
         if current_version >= CURRENT_SCHEMA_VERSION:
             # 只执行必要的轻量级检查（如默认用户）
             _ensure_sales_orders_unique_order_no(conn)
+            _ensure_free_text_columns(conn)
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             for uid, info in DEFAULT_USERS.items():
                 conn.execute(text(
@@ -1560,6 +1601,14 @@ def init_mysql_tables_v2():
         if current_version < 12:
             _ensure_sales_orders_unique_order_no(conn)
             _record_schema_version(conn, 12, "dedupe sales_orders and enforce unique order number")
+
+        if current_version < 13:
+            _ensure_sales_orders_text_columns(conn)
+            _record_schema_version(conn, 13, "expand sales_orders long text columns")
+
+        if current_version < 14:
+            _ensure_free_text_columns(conn)
+            _record_schema_version(conn, 14, "expand user-entered note columns")
 
         return {
             "initialized": True,

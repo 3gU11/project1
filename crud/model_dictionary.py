@@ -42,7 +42,7 @@ def ensure_model_dictionary_table() -> None:
         `model_family` VARCHAR(32) NULL,
         `sort_order` INT NOT NULL DEFAULT 0,
         `enabled` TINYINT(1) NOT NULL DEFAULT 1,
-        `remark` VARCHAR(255) DEFAULT '',
+        `remark` TEXT NULL,
         `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (`id`),
         UNIQUE KEY `uq_model_dictionary_name` (`model_name`)

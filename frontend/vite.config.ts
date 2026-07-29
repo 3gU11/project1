@@ -5,6 +5,13 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
+const API_TARGET = process.env.VITE_PROXY_TARGET || 'http://localhost:8000'
+const PHOTO_API_TARGET = process.env.VITE_PHOTO_API_TARGET || 'http://localhost:3001'
+const photoApiProxy = {
+  target: PHOTO_API_TARGET,
+  changeOrigin: true,
+}
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -26,8 +33,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      '/api/v1/photo-items': photoApiProxy,
+      '/api/v1/ocr-field-rules': photoApiProxy,
+      '/api/v1/model-dictionary': photoApiProxy,
+      '/api/v1/machines': photoApiProxy,
+      '/api/v1/photo-tasks': photoApiProxy,
+      '/api/v1/photo-files': photoApiProxy,
       '/api': {
-        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8000',
+        target: API_TARGET,
         changeOrigin: true,
         ws: true,
       },

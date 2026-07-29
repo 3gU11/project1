@@ -48,7 +48,8 @@ def get_inbound_report_data(
                     ON fg.`流水号` = tl.`流水号` COLLATE utf8mb4_general_ci
                 LEFT JOIN shipping_history sh
                     ON sh.`流水号` = tl.`流水号` COLLATE utf8mb4_general_ci
-                WHERE tl.`时间` BETWEEN :start_date AND :end_date
+                WHERE tl.`时间` >= :start_date
+                    AND tl.`时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                     AND tl.`流水号` IS NOT NULL
                     AND TRIM(tl.`流水号`) <> ''
                     AND (
@@ -97,7 +98,8 @@ def get_inbound_report_data(
                         ON fg.`流水号` = tl.`流水号` COLLATE utf8mb4_general_ci
                     LEFT JOIN shipping_history sh
                         ON sh.`流水号` = tl.`流水号` COLLATE utf8mb4_general_ci
-                    WHERE tl.`时间` BETWEEN :start_date AND :end_date
+                    WHERE tl.`时间` >= :start_date
+                        AND tl.`时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                         AND tl.`流水号` IS NOT NULL
                         AND TRIM(tl.`流水号`) <> ''
                         AND (
@@ -159,7 +161,8 @@ def get_inbound_report_data(
                 ih.operator AS `操作员`,
                 DATE_FORMAT(ih.inbound_time, '%Y-%m-%d %H:%i') AS `入库时间`
             FROM inbound_history ih
-            WHERE ih.inbound_time BETWEEN :start_date AND :end_date
+            WHERE ih.inbound_time >= :start_date
+                AND ih.inbound_time < DATE_ADD(:end_date, INTERVAL 1 DAY)
                 AND COALESCE(ih.status_after, '') <> '待入库'
                 AND COALESCE(ih.status_after, '') <> ''
                 AND (:model_type = '' OR ih.model = :model_type)
@@ -189,7 +192,8 @@ def get_inbound_report_data(
             FROM inbound_history ih
             LEFT JOIN model_dictionary md
                 ON md.model_name = ih.model COLLATE utf8mb4_general_ci
-            WHERE ih.inbound_time BETWEEN :start_date AND :end_date
+            WHERE ih.inbound_time >= :start_date
+                AND ih.inbound_time < DATE_ADD(:end_date, INTERVAL 1 DAY)
                 AND COALESCE(ih.status_after, '') <> '待入库'
                 AND COALESCE(ih.status_after, '') <> ''
                 AND (:model_type = '' OR ih.model = :model_type)
@@ -220,6 +224,133 @@ def get_inbound_report_data(
     return summary_df, detail_df
 
 
+def get_completion_output_report_data(
+    start_date: str,
+    end_date: str,
+    model_type: str = "",
+    customer: str = ""
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Fetch completion/output report data with filters.
+    Uses finished_goods_data + shipping_history so historical shipped machines
+    that lack inbound_history events are still counted once by serial number.
+    """
+    with get_engine().connect() as conn:
+        base_sql = """
+            WITH combined AS (
+                SELECT
+                    0 AS source_rank,
+                    '成品库' COLLATE utf8mb4_0900_ai_ci AS source_table,
+                    fg.`批次号` COLLATE utf8mb4_0900_ai_ci AS batch_no,
+                    fg.`机型` COLLATE utf8mb4_0900_ai_ci AS model,
+                    fg.`流水号` COLLATE utf8mb4_0900_ai_ci AS serial_no,
+                    fg.`状态` COLLATE utf8mb4_0900_ai_ci AS status,
+                    fg.`预计入库时间` AS completed_at,
+                    fg.`更新时间` AS updated_at,
+                    COALESCE(fg.`占用订单号`, '') COLLATE utf8mb4_0900_ai_ci AS order_no,
+                    COALESCE(fg.`客户`, '') COLLATE utf8mb4_0900_ai_ci AS customer,
+                    COALESCE(fg.`代理商`, '') COLLATE utf8mb4_0900_ai_ci AS dealer,
+                    COALESCE(fg.`合同号`, '') COLLATE utf8mb4_0900_ai_ci AS contract_no,
+                    COALESCE(fg.`合同备注`, '') COLLATE utf8mb4_0900_ai_ci AS remark,
+                    COALESCE(fg.`Location_Code`, '') COLLATE utf8mb4_0900_ai_ci AS slot_code
+                FROM finished_goods_data fg
+                WHERE fg.`预计入库时间` >= :start_date
+                    AND fg.`预计入库时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
+                    AND COALESCE(fg.`状态`, '') <> '待入库'
+                    AND COALESCE(fg.`状态`, '') <> ''
+                    AND (:model_type = '' OR fg.`机型` = :model_type)
+                    AND (:customer = '' OR fg.`客户` = :customer)
+
+                UNION ALL
+
+                SELECT
+                    1 AS source_rank,
+                    '出库历史' COLLATE utf8mb4_0900_ai_ci AS source_table,
+                    sh.`批次号` COLLATE utf8mb4_0900_ai_ci AS batch_no,
+                    sh.`机型` COLLATE utf8mb4_0900_ai_ci AS model,
+                    sh.`流水号` COLLATE utf8mb4_0900_ai_ci AS serial_no,
+                    sh.`状态` COLLATE utf8mb4_0900_ai_ci AS status,
+                    sh.`预计入库时间` AS completed_at,
+                    sh.`更新时间` AS updated_at,
+                    COALESCE(sh.`占用订单号`, '') COLLATE utf8mb4_0900_ai_ci AS order_no,
+                    COALESCE(sh.`客户`, '') COLLATE utf8mb4_0900_ai_ci AS customer,
+                    COALESCE(sh.`代理商`, '') COLLATE utf8mb4_0900_ai_ci AS dealer,
+                    COALESCE(sh.`合同号`, '') COLLATE utf8mb4_0900_ai_ci AS contract_no,
+                    COALESCE(sh.`合同备注`, '') COLLATE utf8mb4_0900_ai_ci AS remark,
+                    '' COLLATE utf8mb4_0900_ai_ci AS slot_code
+                FROM shipping_history sh
+                WHERE sh.`预计入库时间` >= :start_date
+                    AND sh.`预计入库时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
+                    AND COALESCE(sh.`状态`, '') <> '待入库'
+                    AND COALESCE(sh.`状态`, '') <> ''
+                    AND (:model_type = '' OR sh.`机型` = :model_type)
+                    AND (:customer = '' OR sh.`客户` = :customer)
+            ),
+            dedup AS (
+                SELECT
+                    combined.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY serial_no
+                        ORDER BY source_rank ASC, COALESCE(updated_at, completed_at) DESC
+                    ) AS rn
+                FROM combined
+                WHERE COALESCE(TRIM(serial_no), '') <> ''
+            )
+        """
+
+        detail_sql = text(base_sql + """
+            SELECT
+                DATE_FORMAT(completed_at, '%Y-%m-%d') AS `完工日期`,
+                serial_no AS `流水号`,
+                batch_no AS `批次号`,
+                model AS `机型`,
+                status AS `状态`,
+                customer AS `客户`,
+                dealer AS `代理商`,
+                order_no AS `订单号`,
+                contract_no AS `合同号`,
+                slot_code AS `库位`,
+                remark AS `合同备注`,
+                source_table AS `数据来源`,
+                DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i') AS `完工时间`,
+                DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i') AS `更新时间`
+            FROM dedup
+            WHERE rn = 1
+            ORDER BY completed_at ASC, batch_no ASC, serial_no ASC
+        """)
+
+        params = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "model_type": model_type,
+            "customer": customer
+        }
+        detail_df = pd.read_sql(detail_sql, conn, params=params)
+
+        summary_sql = text(base_sql + """
+            SELECT
+                d.model AS `机型`,
+                COUNT(*) AS `数量`,
+                COALESCE(md.sort_order, 9999) AS sort_order
+            FROM dedup d
+            LEFT JOIN model_dictionary md
+                ON md.model_name = d.model COLLATE utf8mb4_general_ci
+            WHERE d.rn = 1
+                AND COALESCE(d.model, '') <> ''
+            GROUP BY d.model, md.sort_order
+            ORDER BY sort_order ASC, d.model
+        """)
+
+        summary_df = pd.read_sql(summary_sql, conn, params=params)
+        if not summary_df.empty:
+            total = summary_df['数量'].sum()
+            summary_df['占比'] = summary_df['数量'].apply(lambda x: f"{(x/total*100):.2f}%")
+            if 'sort_order' in summary_df.columns:
+                summary_df = summary_df.drop(columns=['sort_order'])
+
+    return summary_df, detail_df
+
+
 def get_order_report_data(
     start_date: str,
     end_date: str,
@@ -244,7 +375,8 @@ def get_order_report_data(
                 DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `计划发货日期`,
                 so.`备注`
             FROM sales_orders so
-            WHERE so.`下单时间` BETWEEN :start_date AND :end_date
+            WHERE so.`下单时间` >= :start_date
+                AND so.`下单时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                 AND (:customer = '' OR so.`客户名` = :customer)
                 AND (:dealer = '' OR so.`代理商` = :dealer)
                 AND (:status = '' OR so.`status` = :status)
@@ -296,7 +428,8 @@ def get_shipment_report_data(
                 WHERE COALESCE(`订单号`, '') <> ''
                 GROUP BY `订单号`
             ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-            WHERE sh.`更新时间` BETWEEN :start_date AND :end_date
+            WHERE sh.`更新时间` >= :start_date
+                AND sh.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                 AND sh.`状态` = '已出库'
                 AND (:customer = '' OR sh.`客户` = :customer)
                 AND (:dealer = '' OR sh.`代理商` = :dealer)
@@ -320,7 +453,8 @@ def get_shipment_report_data(
                 WHERE COALESCE(`订单号`, '') <> ''
                 GROUP BY `订单号`
             ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = fg.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-            WHERE fg.`更新时间` BETWEEN :start_date AND :end_date
+            WHERE fg.`更新时间` >= :start_date
+                AND fg.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                 AND fg.`状态` = '已出库'
                 AND (:customer = '' OR fg.`客户` = :customer)
                 AND (:dealer = '' OR fg.`代理商` = :dealer)
@@ -368,7 +502,8 @@ def get_shipment_report_data(
                     WHERE COALESCE(`订单号`, '') <> ''
                     GROUP BY `订单号`
                 ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-                WHERE sh.`更新时间` BETWEEN :start_date AND :end_date
+                WHERE sh.`更新时间` >= :start_date
+                    AND sh.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                     AND sh.`状态` = '已出库'
                     AND (:customer = '' OR sh.`客户` = :customer)
                     AND (:dealer = '' OR sh.`代理商` = :dealer)
@@ -391,7 +526,8 @@ def get_shipment_report_data(
                     WHERE COALESCE(`订单号`, '') <> ''
                     GROUP BY `订单号`
                 ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = fg.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-                WHERE fg.`更新时间` BETWEEN :start_date AND :end_date
+                WHERE fg.`更新时间` >= :start_date
+                    AND fg.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                     AND fg.`状态` = '已出库'
                     AND (:customer = '' OR fg.`客户` = :customer)
                     AND (:dealer = '' OR fg.`代理商` = :dealer)
@@ -444,7 +580,8 @@ def get_completion_report_data(
                 COALESCE(u.serial_no, u.forecast_serial_no) AS `流水号`
             FROM production_history_ledger phl
             LEFT JOIN units u ON u.unit_id = phl.unit_id COLLATE utf8mb4_general_ci
-            WHERE phl.`completed_at` BETWEEN :start_date AND :end_date
+            WHERE phl.`completed_at` >= :start_date
+                AND phl.`completed_at` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                 AND phl.`status` = 'Completed'
                 AND (:model_type = '' OR phl.`model_type` = :model_type)
                 AND (:customer = '' OR phl.`customer` = :customer)
@@ -477,7 +614,8 @@ def get_completion_report_data(
                 phl.`batch_code` AS `批次号`,
                 ROUND(AVG(TIMESTAMPDIFF(HOUR, phl.`scheduled_at`, phl.`completed_at`)), 1) AS `平均生产时长(小时)`
             FROM production_history_ledger phl
-            WHERE phl.`completed_at` BETWEEN :start_date AND :end_date
+            WHERE phl.`completed_at` >= :start_date
+                AND phl.`completed_at` < DATE_ADD(:end_date, INTERVAL 1 DAY)
                 AND phl.`status` = 'Completed'
                 AND (:model_type = '' OR phl.`model_type` = :model_type)
                 AND (:customer = '' OR phl.`customer` = :customer)

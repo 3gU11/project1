@@ -105,6 +105,26 @@ func (h *LineHandler) ManualComplete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+func (h *LineHandler) ReconcileInbound(c *gin.Context) {
+	var req struct {
+		SerialNos []string `json:"serial_nos"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
+	completed, err := h.svc.ReconcileInboundBatches(req.SerialNos, actor)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "completed_batches": completed})
+}
+
 func (h *LineHandler) LockUnits(c *gin.Context) {
 	var req struct {
 		UnitIDs     []string `json:"unit_ids" binding:"required"`

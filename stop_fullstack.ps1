@@ -1,5 +1,6 @@
 param(
   [string]$GoPort = '3001',
+  [string]$OCRPort = '8010',
   [string]$ApiPort = '8000',
   [string]$WebPort = '8888',
   [string]$MobilePort = '5174'
@@ -130,6 +131,7 @@ Log "ROOT: $root"
 Log '========================================'
 
 $null = Test-PortValue -port $GoPort -name 'Go'
+$null = Test-PortValue -port $OCRPort -name 'OCR'
 $null = Test-PortValue -port $ApiPort -name 'API'
 $null = Test-PortValue -port $WebPort -name 'frontend'
 $null = Test-PortValue -port $MobilePort -name 'mobile frontend'
@@ -144,6 +146,7 @@ if (Test-Path $mobileDir) {
 }
 
 Stop-PortOwner $GoPort 'Go backend'
+Stop-PortOwner $OCRPort 'OCR service'
 Stop-PortOwner $ApiPort 'FastAPI'
 Stop-PortOwner $WebPort 'frontend'
 Stop-PortOwner $MobilePort 'mobile frontend'

@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -130,6 +132,141 @@ func (h *BatchHandler) BatchConfirm(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+func (h *BatchHandler) CreateManualPredicted(c *gin.Context) {
+	var req struct {
+		ModelFamily string `json:"model_family" binding:"required"`
+		Quantity    int    `json:"quantity" binding:"required"`
+		Remark      string `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	familyCategory, batchModelType, capacity, err := normalizeManualPredictedFamily(req.ModelFamily)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Quantity <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "quantity must be greater than 0"})
+		return
+	}
+	if req.Quantity > capacity {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("quantity cannot exceed %s capacity %d", familyCategory, capacity)})
+		return
+	}
+
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
+
+	tx := h.db.Begin()
+	defer tx.Rollback()
+
+	var maxBatchNo int
+	if err := tx.Model(&model.Batch{}).
+		Where("status IN ?", []string{model.StatusPredicted, model.StatusConfirmed}).
+		Select("COALESCE(MAX(batch_no), 0)").
+		Scan(&maxBatchNo).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var maxSlotNo int
+	if err := tx.Model(&model.ForecastBatchSlot{}).
+		Select("COALESCE(MAX(slot_no), 0)").
+		Scan(&maxSlotNo).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	now := time.Now()
+	nextNo := max(maxBatchNo, maxSlotNo) + 1
+	batchID := fmt.Sprintf("BATCH-%s-%s-MANUAL-%03d-%06d",
+		now.Format("200601"),
+		strings.ToUpper(batchModelType),
+		nextNo,
+		rand.Intn(1000000),
+	)
+	remark := strings.TrimSpace(req.Remark)
+	batch := model.Batch{
+		BatchID:   batchID,
+		BatchNo:   nextNo,
+		ModelType: batchModelType,
+		Capacity:  capacity,
+		Status:    model.StatusPredicted,
+		Source:    "manual",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := tx.Create(&batch).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	slotBatchID := batch.BatchID
+	slot := model.ForecastBatchSlot{
+		SlotNo:    nextNo,
+		ModelType: batchModelType,
+		Capacity:  capacity,
+		BatchID:   &slotBatchID,
+		Source:    "manual",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := tx.Create(&slot).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	units := make([]model.Unit, 0, req.Quantity)
+	for i := 1; i <= req.Quantity; i++ {
+		unit := model.Unit{
+			UnitID:      fmt.Sprintf("%s-U%02d", batchID, i),
+			BatchID:     batchID,
+			SlotIndex:   i,
+			ModelType:   familyCategory,
+			Status:      "Pending",
+			OrderRemark: stringPtrIfNotEmpty(remark),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		units = append(units, unit)
+	}
+	if err := tx.Create(&units).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	detail, _ := json.Marshal(map[string]interface{}{
+		"model_family": familyCategory,
+		"batch_model":  batchModelType,
+		"quantity":     req.Quantity,
+		"remark":       remark,
+	})
+	_ = tx.Create(&model.OperationLog{
+		Actor:      actor,
+		Action:     "manual_predicted_batch_create",
+		TargetType: "batch",
+		TargetID:   batchID,
+		Detail:     detail,
+		CreatedAt:  now,
+	}).Error
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"batch":        batch,
+		"unit_count":   len(units),
+		"model_family": familyCategory,
+	})
+}
+
 func (h *BatchHandler) SyncStockModels(c *gin.Context) {
 	var req struct {
 		Stocks []service.StockModelTarget `json:"stocks" binding:"required"`
@@ -147,6 +284,46 @@ func (h *BatchHandler) SyncStockModels(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func normalizeManualPredictedFamily(raw string) (string, string, int, error) {
+	family := strings.TrimSpace(raw)
+	aliases := map[string]string{
+		"小机G":     "中小型G",
+		"小机XS":    "中小型XS",
+		"小机/XS":   "中小型XS",
+		"小机AUTO":  "中小型AUTO",
+		"大机XS":    "中大型XS",
+		"大机AUTO":  "中大型AUTO",
+		"SPECIAL": "特殊",
+	}
+	if mapped, ok := aliases[family]; ok {
+		family = mapped
+	}
+	switch family {
+	case "中小型G":
+		return family, "G", 30, nil
+	case "中小型XS":
+		return family, "XS", 30, nil
+	case "中小型AUTO":
+		return family, "AUTO", 27, nil
+	case "中大型XS":
+		return family, "XS", 16, nil
+	case "中大型AUTO":
+		return family, "AUTO", 16, nil
+	case "特殊":
+		return family, "SPECIAL", 15, nil
+	default:
+		return "", "", 0, fmt.Errorf("model_family must be one of 中小型G/中小型XS/中大型XS/中小型AUTO/中大型AUTO/特殊")
+	}
+}
+
+func stringPtrIfNotEmpty(value string) *string {
+	clean := strings.TrimSpace(value)
+	if clean == "" {
+		return nil
+	}
+	return &clean
 }
 
 func (h *BatchHandler) AssignToLine(c *gin.Context) {

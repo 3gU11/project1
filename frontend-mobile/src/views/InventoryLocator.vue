@@ -51,6 +51,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { showFailToast } from 'vant'
 import { useInventoryStore } from '@/store/inventory'
+import { useInventoryAutoRefresh } from '@/utils/useInventoryAutoRefresh'
 
 const inventoryStore = useInventoryStore()
 const keyword = ref('')
@@ -116,6 +117,7 @@ watch(keyword, () => {
 })
 
 onMounted(load)
+useInventoryAutoRefresh(load)
 </script>
 
 <style scoped>

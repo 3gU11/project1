@@ -21,6 +21,9 @@
       <el-button type="primary" @click="handleRecompute" :loading="recomputing">
         {{ recomputeButtonText }}
       </el-button>
+      <el-button type="success" @click="openManualPredictedDrawer">
+        新增预测产线
+      </el-button>
 
       <el-button
         v-if="selectedBatches.length > 0"
@@ -28,13 +31,6 @@
         @click="batchConfirm"
       >
         审核选中列
-      </el-button>
-      <el-button
-        v-if="canRevoke"
-        type="danger"
-        @click="batchRevoke"
-      >
-        撤销审核
       </el-button>
     </div>
 
@@ -291,6 +287,45 @@
       </el-form>
     </el-drawer>
 
+    <el-drawer v-model="manualPredictedVisible" title="新增预测产线" size="420px">
+      <el-form label-width="90px" size="small">
+        <el-form-item label="机型族" required>
+          <el-select v-model="manualPredictedForm.model_family" placeholder="请选择明确机型族" style="width:100%">
+            <el-option
+              v-for="item in manualFamilyOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="数量" required>
+          <el-input-number
+            v-model="manualPredictedForm.quantity"
+            :min="1"
+            :max="manualFamilyCapacity"
+            :step="1"
+            :precision="0"
+            controls-position="right"
+            style="width:100%"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="manualPredictedForm.remark"
+            type="textarea"
+            :rows="3"
+            placeholder="可填写补排原因"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="submitManualPredictedBatch" :loading="manualPredictedSaving">
+            保存
+          </el-button>
+        </el-form-item>
+      </el-form>
+    </el-drawer>
+
     <div
       v-if="contextMenu.visible"
       :style="{ position: 'fixed', left: contextMenu.x + 'px', top: contextMenu.y + 'px', zIndex: 9999 }"
@@ -317,7 +352,7 @@ import { getApiErrorMessage } from '../../utils/request'
 import UnitCard from '../../components/sandbox/UnitCard.vue'
 import CapacityRatioEditor from '../../components/sandbox/CapacityRatioEditor.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
-import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
+import { categoryOfModel, normalizeMajorFamily, productionGroupOfCategory } from '../../utils/sandboxCategory'
 import { compareModels } from '../../utils/modelOrder'
 
 const batchStore = useBatchStore()
@@ -387,6 +422,8 @@ const saving = ref(false)
 const specialAddVisible = ref(false)
 const specialAddSaving = ref(false)
 const specialAddBatch = ref<any>(null)
+const manualPredictedVisible = ref(false)
+const manualPredictedSaving = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; unit: any }>({ visible: false, x: 0, y: 0, unit: null })
 const dragging = ref(false)
 const moving = ref(false)
@@ -410,8 +447,22 @@ const topScrollWidth = ref(1200)
 
 const editForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', order_remark: '' })
 const specialAddForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', due_date: '', order_remark: '' })
-const SANDBOX_STATUS = 'Predicted,Confirmed'
+const manualPredictedForm = ref({ model_family: '中大型XS', quantity: 10, remark: '' })
+const SANDBOX_STATUS = 'Predicted'
 const SANDBOX_STATUS_SET = new Set(SANDBOX_STATUS.split(','))
+
+const manualFamilyOptions = [
+  { label: '中小型G', value: '中小型G', capacity: 30 },
+  { label: '中小型XS', value: '中小型XS', capacity: 30 },
+  { label: '中大型XS', value: '中大型XS', capacity: 16 },
+  { label: '中小型AUTO', value: '中小型AUTO', capacity: 27 },
+  { label: '中大型AUTO', value: '中大型AUTO', capacity: 16 },
+  { label: '特殊', value: '特殊', capacity: 15 },
+]
+
+const manualFamilyCapacity = computed(() => {
+  return manualFamilyOptions.find((item) => item.value === manualPredictedForm.value.model_family)?.capacity || 30
+})
 
 const filteredBatches = computed(() => {
   let batches = [...batchStore.filteredBatches].filter((b: any) => SANDBOX_STATUS_SET.has(String(b?.status || '')))
@@ -680,8 +731,10 @@ function getStockPlaceholderStackInfo(unit: any, batch: any) {
     return { isStacked: false, count: 1, show: true };
   }
   
-  const isStock = isStockUnit(unit) && !isSpecialPlaceholder(unit);
-  if (!isStock) {
+  const hasBoundContract = (u: any) => Boolean(String(u?.contract_no || '').trim())
+  const currentModel = String(unit.model_type || '').trim().toUpperCase();
+  const isStackableStock = isStockUnit(unit) && !hasBoundContract(unit) && !isSpecialPlaceholder(unit) && !!currentModel;
+  if (!isStackableStock) {
     return { isStacked: false, count: 1, show: true };
   }
   
@@ -690,21 +743,26 @@ function getStockPlaceholderStackInfo(unit: any, batch: any) {
   if (idx === -1) {
     return { isStacked: false, count: 1, show: true };
   }
-  
-  const currentModel = String(unit.model_type || '').trim().toUpperCase();
-  
-  const firstIdx = units.findIndex((u: any) => {
-    return isStockUnit(u) && !isSpecialPlaceholder(u) && String(u.model_type || '').trim().toUpperCase() === currentModel;
-  });
-  if (idx > firstIdx) {
+
+  const sameStackableModel = (u: any) => {
+    return isStockUnit(u)
+      && !hasBoundContract(u)
+      && !isSpecialPlaceholder(u)
+      && String(u.model_type || '').trim().toUpperCase() === currentModel
+  }
+
+  const prev = idx > 0 ? units[idx - 1] : null
+  if (prev && sameStackableModel(prev)) {
     return { isStacked: true, count: 0, show: false };
   }
   
   let count = 0;
-  for (let i = 0; i < units.length; i++) {
+  for (let i = idx; i < units.length; i++) {
     const u = units[i];
-    if (isStockUnit(u) && !isSpecialPlaceholder(u) && String(u.model_type || '').trim().toUpperCase() === currentModel) {
+    if (sameStackableModel(u)) {
       count++;
+    } else {
+      break;
     }
   }
   
@@ -917,18 +975,17 @@ function isSpecialBatch(batch: any) {
 }
 
 function isLargeMachineBatch(batch: any) {
-  const category = displayBatchCategory(batch)
-  return category === '中大型XS' || category === '中大型AUTO'
+  return productionGroupOfCategory(displayBatchCategory(batch)) === 'LARGE'
 }
 
 function laneKeyOfBatch(batch: any) {
   if (!batch) return ''
   if (isSpecialBatch(batch)) return 'SPECIAL'
+  if (isLargeMachineBatch(batch)) return 'LARGE'
   const family = majorFamilyOfModel(batch?.model_type || '')
   if (!family) return ''
   if (family === 'G') return 'G-SMALL'
-  const size = isLargeMachineBatch(batch) ? 'LARGE' : 'SMALL'
-  return `${family}-${size}`
+  return `${family}-SMALL`
 }
 
 function canMoveAcrossLanes(sourceBatch: any, targetBatch: any, unit: any) {
@@ -940,22 +997,17 @@ function canMoveAcrossLanes(sourceBatch: any, targetBatch: any, unit: any) {
   if (!sourceSpecial && !isLargeMachineBatch(sourceBatch)) return false
   if (!targetSpecial && !isLargeMachineBatch(targetBatch)) return false
   if (isStockUnit(unit) || isSpecialPlaceholder(unit)) return false
-  const uf = majorFamilyOfModel(String(unit?.model_type || ''))
-  if (!uf || (uf !== 'XS' && uf !== 'AUTO')) return false
-  const anchorFamily = sourceSpecial
-    ? majorFamilyOfModel(String(targetBatch?.model_type || ''))
-    : majorFamilyOfModel(String(sourceBatch?.model_type || ''))
-  return uf === anchorFamily
+  return ownershipLaneKeyOfUnit(unit) === 'LARGE'
 }
 
 function isUnitFamilyMismatch(unit: any, batch: any) {
   if (!unit || !batch) return false
   if (isSpecialPlaceholder(unit)) return false
   if (isCrossLanePlacement(unit, batch)) return false
-  const uf = majorFamilyOfModel(String(unit?.model_type || ''))
-  const bf = majorFamilyOfModel(String(batch?.model_type || ''))
-  if (!uf || !bf) return false
-  return uf !== bf
+  const ownerLane = ownershipLaneKeyOfUnit(unit)
+  const batchLane = laneKeyOfBatch(batch)
+  if (!ownerLane || !batchLane) return false
+  return ownerLane !== batchLane
 }
 
 function hasUnboundPlaceholder(batch: any) {
@@ -977,9 +1029,9 @@ function ownershipLaneKeyOfUnit(unit: any) {
   if (!model) return ''
   const category = categoryOfModel(model, modelFamilyMap.value[model.toUpperCase()] || '')
   if (category === '特殊') return 'SPECIAL'
-  if (category === '中大型XS') return 'XS-LARGE'
+  if (category === '中大型XS') return 'LARGE'
   if (category === '中小型XS') return 'XS-SMALL'
-  if (category === '中大型AUTO') return 'AUTO-LARGE'
+  if (category === '中大型AUTO') return 'LARGE'
   if (category === '中小型AUTO') return 'AUTO-SMALL'
   if (category === '中小型G') return 'G-SMALL'
   const family = majorFamilyOfModel(model)
@@ -999,7 +1051,7 @@ function isCrossLanePlacement(unit: any, batch: any) {
   const placedIsSpecial = placed === 'SPECIAL'
   if (ownerIsSpecial === placedIsSpecial) return false
   const otherLane = ownerIsSpecial ? placed : owner
-  return otherLane === 'XS-LARGE' || otherLane === 'AUTO-LARGE'
+  return otherLane === 'LARGE'
 }
 
 function canAddSpecialCard(batch: any) {
@@ -1050,34 +1102,6 @@ function formatBatchCode(batchNo: any) {
     }
   }
   return `第 ${String(whole).padStart(2, '0')} 批`
-}
-
-const canRevoke = computed(() => {
-  if (selectedBatches.value.length !== 1) return false
-  const selectedBatchId = selectedBatches.value[0]
-  const batch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
-  return batch?.status === 'Confirmed'
-})
-
-async function batchRevoke() {
-  if (selectedBatches.value.length !== 1) return
-  const selectedBatchId = selectedBatches.value[0]
-  const batch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
-  if (!batch) return
-  const selectedId = batch.batch_id
-  try {
-    await ElMessageBox.confirm('撤销审核将删除 plan_import 中该批次的记录并恢复批次状态，确认？', '撤销审核', {
-      confirmButtonText: '确认撤销',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    await sandboxApi.revokeBatch(selectedId)
-    ElMessage.success('已撤销审核，批次恢复为待确认')
-    selectedBatches.value = []
-    await refresh()
-  } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '撤销失败')
-  }
 }
 
 function displayBatchCode(batch: any) {
@@ -1144,6 +1168,53 @@ async function handleManualRefresh() {
   suspendAutoSort.value = false
   pinnedBatchOrder.value = []
   await refresh()
+}
+
+function openManualPredictedDrawer() {
+  manualPredictedForm.value = { model_family: '中大型XS', quantity: 10, remark: '' }
+  manualPredictedVisible.value = true
+}
+
+async function submitManualPredictedBatch() {
+  const family = String(manualPredictedForm.value.model_family || '').trim()
+  const option = manualFamilyOptions.find((item) => item.value === family)
+  if (!option) {
+    ElMessage.warning('请选择明确机型族')
+    return
+  }
+
+  const quantity = Number(manualPredictedForm.value.quantity)
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    ElMessage.warning('数量必须是大于 0 的整数')
+    return
+  }
+  if (quantity > option.capacity) {
+    ElMessage.warning(`${option.label} 单条产线最多 ${option.capacity} 台`)
+    return
+  }
+
+  manualPredictedSaving.value = true
+  try {
+    const res = await sandboxApi.createManualPredictedBatch({
+      model_family: option.value,
+      quantity,
+      remark: String(manualPredictedForm.value.remark || '').trim(),
+    }) as any
+    ElMessage.success('新增预测产线已保存，可直接审核或挂起等待审核')
+    manualPredictedVisible.value = false
+    if (selectedSeriesFilters.value && selectedSeriesFilters.value !== option.value) {
+      selectedSeriesFilters.value = option.value
+    }
+    await refresh()
+    const batchId = String(res?.batch?.batch_id || '')
+    if (batchId) {
+      selectedBatches.value = [batchId]
+    }
+  } catch (e: any) {
+    ElMessage.error(getApiErrorMessage(e) || e.message || '新增预测产线失败')
+  } finally {
+    manualPredictedSaving.value = false
+  }
 }
 
 async function forceRefresh() {
@@ -1346,14 +1417,14 @@ async function onUnitMoved(evt: any, targetBatch: any) {
   if (isUnitFamilyMismatch(unit, targetBatch)) {
     const canContractFirstOccupy = sourceBatchId && sourceBatchId !== targetBatch.batch_id && hasUnboundPlaceholder(targetBatch)
     if (!canContractFirstOccupy) {
-      ElMessage.warning('仅允许同系列机型在同系列批次内移动')
+      ElMessage.warning('仅允许同生产组机型在兼容批次内移动')
       await forceRefresh()
       return
     }
   }
   const sourceBatch = batchStore.batches.find((b: any) => b.batch_id === sourceBatchId)
   if (sourceBatch && laneKeyOfBatch(sourceBatch) !== laneKeyOfBatch(targetBatch) && !canMoveAcrossLanes(sourceBatch, targetBatch, unit)) {
-    ElMessage.warning('仅允许在同列（同系列且同大类）内拖拽')
+    ElMessage.warning('仅允许在同生产组列内拖拽')
     await forceRefresh()
     return
   }

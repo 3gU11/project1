@@ -7,9 +7,9 @@ import pandas as pd
 from sqlalchemy import text, bindparam
 from sqlalchemy.exc import OperationalError
 
-from crud.inventory import get_data, save_data
+from crud.inventory import clear_inventory_data_caches, get_data
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
-from crud.inbound_history import record_inbound_history
+from crud.inbound_history import notify_inbound_completion, record_inbound_history
 from crud.logs import append_log
 from database import get_engine
 from utils.cache import fetch_data_with_cache
@@ -255,7 +255,7 @@ def create_sales_order(customer, agent, model_data, note, pack_option="", delive
 
 
 def _build_model_note_map(order_id):
-    """根据订单号从 factory_plan 构建机型→备注的映射"""
+    """根据订单号从 factory_plan 构建逐台机型备注需求。"""
     from crud.planning import get_factory_plan_v2
     plan_df = get_factory_plan_v2()
     if plan_df.empty:
@@ -263,17 +263,44 @@ def _build_model_note_map(order_id):
     matched = plan_df[plan_df['订单号'].astype(str).str.strip() == str(order_id).strip()]
     if matched.empty:
         return []
+    order_context = {}
+    try:
+        orders = get_orders()
+        order_hit = orders[orders['订单号'].astype(str).str.strip() == str(order_id).strip()]
+        if not order_hit.empty:
+            order_context = order_hit.iloc[0].to_dict()
+    except Exception:
+        order_context = {}
+    try:
+        from api.routes.planning import _split_factory_plan_detail_rows
+        plan_rows = _split_factory_plan_detail_rows(matched.to_dict(orient="records"), order_context)
+    except Exception:
+        plan_rows = matched.to_dict(orient="records")
     note_map = []
-    for _, row in matched.iterrows():
+    for row in plan_rows:
         model = str(row.get('机型', '')).strip()
         note = _normalize_order_note(row.get('备注', ''))
-        if model and note:
-            note_map.append({
-                "model": _normalize_allocation_model(model),
-                "high": _is_high_model_hint(model, note),
-                "note": note,
-            })
+        qty = _to_int_qty(row.get('数量', row.get('排产数量', 0)))
+        if qty <= 0:
+            qty = 1
+        if model:
+            clean_model = _normalize_allocation_model(model)
+            high = _is_high_model_hint(model, note)
+            for _ in range(qty):
+                note_map.append({
+                    "model": clean_model,
+                    "high": high,
+                    "note": note,
+                })
     return note_map
+
+
+def _remaining_model_note_counts(model_note_map):
+    counts = {}
+    for item in model_note_map:
+        key = (item["model"], bool(item["high"]), str(item.get("note") or ""))
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _find_model_note(model_note_map, model, row_note=""):
@@ -291,6 +318,7 @@ def _find_model_note(model_note_map, model, row_note=""):
 def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     df = get_data()
     model_note_map = _build_model_note_map(order_id)
+    remaining_note_counts = _remaining_model_note_counts(model_note_map)
 
     # 记录原先是 待入库 的机台（用于日志）
     current_status_df = df[df['流水号'].isin(selected_sns)]
@@ -317,23 +345,37 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                             客户 = :customer,
                             代理商 = :agent,
                             更新时间 = :now
-                        WHERE 流水号 IN :sns AND 状态 != '已出库'
+                        WHERE 流水号 IN :sns AND 状态 != '已出库' AND 状态 != '报废'
                     """).bindparams(bindparam("sns", expanding=True)),
                     {"order_id": order_id, "customer": customer, "agent": agent,
                      "now": now_str, "sns": sns_list}
                 )
-                # 按机型写入合同备注（如果有对应备注）
+                # 按机型 + 加高属性写入合同备注；没有备注的普通需求要清空旧误写备注。
                 if model_note_map:
                     for sn in selected_sns:
                         row = df[df['流水号'] == sn]
                         if row.empty:
                             continue
                         model = str(row.iloc[0].get('机型', '')).strip()
-                        note = _find_model_note(model_note_map, model, row.iloc[0].get('合同备注', ''))
-                        if note:
+                        current_note = _normalize_order_note(row.iloc[0].get('合同备注', ''))
+                        clean_model = _normalize_allocation_model(model)
+                        high = _is_high_model_hint(model, current_note)
+                        matched_key = None
+                        if current_note:
+                            exact_key = (clean_model, high, current_note)
+                            if remaining_note_counts.get(exact_key, 0) > 0:
+                                matched_key = exact_key
+                        if matched_key is None:
+                            for key, count in remaining_note_counts.items():
+                                if count > 0 and key[0] == clean_model and key[1] == high:
+                                    matched_key = key
+                                    break
+                        if matched_key is not None:
+                            remaining_note_counts[matched_key] -= 1
+                            note = matched_key[2]
                             conn.execute(
                                 text("UPDATE finished_goods_data SET 合同备注 = :note WHERE 流水号 = :sn"),
-                                {"note": note, "sn": sn}
+                                {"note": note or None, "sn": sn}
                             )
                 if pending_inbound_sns:
                     record_inbound_history(
@@ -349,9 +391,7 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
             raise RuntimeError(f"配货写入失败: {e}") from e
 
         # 清除缓存，确保后续读取到最新状态
-        import crud.inventory
-        if hasattr(crud.inventory.get_data, "cache_clear"):
-            crud.inventory.get_data.cache_clear()
+        clear_inventory_data_caches()
         enqueue_wechat_batch_summary_sync("orders_allocate_inventory")
 
     # 同步客户/代理商信息到沙盘 units 表，并绑定实物流水号（serial_no）
@@ -382,53 +422,64 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
         except Exception as e:
             print(f"Warning: Failed to sync units table on allocate_inventory: {e}")
 
+    if pending_inbound_sns:
+        notify_inbound_completion(pending_inbound_sns, operator=operator or "")
+
     append_log(f"配货锁定-{order_id}", selected_sns, operator=operator)
 
 
 def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
-    df = get_data()
-    mask = df['流水号'].isin(selected_sns)
-    def _restore_status(row):
-        slot = str(row.get("Location_Code", "") or "").strip()
-        if slot:
-            return f"库存中（{slot}）"
-        return "待入库"
+    serial_nos = list(dict.fromkeys(
+        str(sn).strip() for sn in (selected_sns or []) if str(sn).strip()
+    ))
+    if not serial_nos:
+        return
 
-    if mask.any():
-        df.loc[mask, '状态'] = df.loc[mask].apply(_restore_status, axis=1)
-    df.loc[mask, '占用订单号'] = ""
-    df.loc[mask, '客户'] = ""
-    df.loc[mask, '代理商'] = ""
-    df.loc[mask, '合同号'] = ""
-    df.loc[mask, '更新时间'] = datetime.now()
-    save_data(df)
+    sns_param = bindparam("sns", expanding=True)
+    with get_engine().begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE finished_goods_data
+                SET `状态` = CASE
+                        WHEN TRIM(COALESCE(`Location_Code`, '')) <> ''
+                            THEN CONCAT('库存中（', TRIM(`Location_Code`), '）')
+                        ELSE '待入库'
+                    END,
+                    `占用订单号` = NULL,
+                    `客户` = '',
+                    `代理商` = '',
+                    `合同号` = '',
+                    `更新时间` = NOW()
+                WHERE `流水号` IN :sns
+            """).bindparams(sns_param),
+            {"sns": serial_nos},
+        )
+        conn.execute(
+            text("""
+                UPDATE units
+                SET contract_no = NULL,
+                    customer = NULL,
+                    dealer_name = NULL,
+                    sales_id = NULL,
+                    due_date = NULL,
+                    is_locked = 0
+                WHERE serial_no IN :sns OR forecast_serial_no IN :sns
+            """).bindparams(sns_param),
+            {"sns": serial_nos},
+        )
 
-    # 同步抹除沙盘中的相关订单/合同信息，彻底变为现货
-    if selected_sns:
-        try:
-            with get_engine().begin() as conn:
-                conn.execute(
-                    text("""
-                        UPDATE units
-                        SET contract_no = NULL,
-                            customer = NULL,
-                            dealer_name = NULL,
-                            sales_id = NULL,
-                            due_date = NULL,
-                            is_locked = 0
-                        WHERE serial_no IN :sns OR forecast_serial_no IN :sns
-                    """).bindparams(bindparam("sns", expanding=True)),
-                    {"sns": list(selected_sns)}
-                )
-        except Exception as e:
-            print(f"Warning: Failed to clear units table on revert_to_inbound: {e}")
-
-    append_log(f"{reason}-退回待入库", selected_sns, operator=operator)
+    clear_inventory_data_caches()
+    enqueue_wechat_batch_summary_sync("orders_revert_to_inbound")
+    append_log(f"{reason}-退回待入库", serial_nos, operator=operator)
 
 
 def update_sales_order(order_id, new_data, force_unbind=False):
     df = get_data()
-    mask_alloc = (df['占用订单号'] == order_id) & (df['状态'] != '已出库')
+    mask_alloc = (
+        (df['占用订单号'] == order_id)
+        & (df['状态'] != '已出库')
+        & (df['状态'].astype(str).str.strip() != '报废')
+    )
     sns_to_unbind = df.loc[mask_alloc, '流水号'].tolist()
     has_allocation = len(sns_to_unbind) > 0
 

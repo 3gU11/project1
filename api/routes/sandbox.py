@@ -19,7 +19,7 @@ import websockets
 from fastapi import APIRouter, Request, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from api.routes.auth import get_current_user_token, get_current_user_context
 from crud.roles import get_role_permissions
@@ -196,7 +196,54 @@ async def proxy_ws(websocket: WebSocket):
 
 
 from crud.inventory import append_import_staging_transactional
+from crud.model_dictionary import get_model_dictionary
+from crud.audit_logs import append_operation_logs
 from utils.parsers import execute_import_transaction_payload
+
+
+def _normalize_model_name(model: object) -> str:
+    return str(model or "").replace("(加高)", "").strip()
+
+
+def _model_sort_key(model: object, order_map: dict[str, int]) -> tuple[int, str, int, str]:
+    clean = _normalize_model_name(model)
+    upper = clean.upper()
+    no_space = re.sub(r"\s+", "", upper)
+    no_hyphen = upper.replace("-", "")
+    rank = order_map.get(clean)
+    if rank is None:
+        rank = order_map.get(upper)
+    if rank is None:
+        rank = order_map.get(no_space)
+    if rank is None:
+        rank = order_map.get(no_hyphen)
+    high = 1 if "加高" in str(model or "") else 0
+    return (rank if rank is not None else 9999, clean, high, str(model or ""))
+
+
+def _enabled_model_order_map() -> dict[str, int]:
+    order_map: dict[str, int] = {}
+    try:
+        rows = get_model_dictionary()
+    except Exception as e:
+        logger.warning("load model dictionary order failed: %s", e)
+        rows = []
+
+    for idx, row in enumerate(rows):
+        if not bool(row.get("enabled", True)):
+            continue
+        clean = _normalize_model_name(row.get("model_name"))
+        if not clean:
+            continue
+        keys = {
+            clean,
+            clean.upper(),
+            re.sub(r"\s+", "", clean).upper(),
+            clean.replace("-", "").upper(),
+        }
+        for key in keys:
+            order_map.setdefault(key, idx)
+    return order_map
 
 
 def _model_category(model_type: str, family_map: dict) -> str:
@@ -204,6 +251,9 @@ def _model_category(model_type: str, family_map: dict) -> str:
     v = model_type.strip().upper()
     if not v:
         return ""
+    direct_family = _normalize_model_family(model_type)
+    if direct_family:
+        return direct_family
     family = _normalize_model_family(family_map.get(v, ""))
     if family:
         return family
@@ -273,6 +323,69 @@ def _to_date(v: object) -> Optional[date]:
         return datetime.strptime(s[:10], "%Y-%m-%d").date()
     except Exception:
         return None
+
+
+def _json_default(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
+
+
+def _operator_name(user_ctx: dict) -> str:
+    return str(user_ctx.get("name") or user_ctx.get("username") or "System")
+
+
+def _record_line_assignment_trace(user_ctx: dict, line_id: str, batch_id: str) -> None:
+    line_id = str(line_id or "").strip()
+    batch_id = str(batch_id or "").strip()
+    if not line_id or not batch_id:
+        return
+    try:
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT
+                        COALESCE(NULLIF(u.serial_no, ''), NULLIF(u.forecast_serial_no, ''), u.unit_id) AS serial_no,
+                        u.unit_id,
+                        u.model_type,
+                        u.contract_no,
+                        u.customer,
+                        u.dealer_name,
+                        u.order_remark,
+                        b.batch_code,
+                        pl.line_name
+                    FROM units u
+                    LEFT JOIN batches b ON b.batch_id = u.batch_id
+                    LEFT JOIN production_lines pl ON pl.line_id = :line_id
+                    WHERE u.batch_id = :batch_id
+                    ORDER BY u.slot_index ASC, u.unit_id ASC
+                """),
+                {"line_id": line_id, "batch_id": batch_id},
+            ).mappings().all()
+    except Exception:
+        return
+
+    operator_id = str(user_ctx.get("username") or "")
+    operator_name = _operator_name(user_ctx)
+    append_operation_logs([
+        {
+            "user_id": operator_id,
+            "username": operator_name,
+            "module": "生产看板",
+            "action_type": "进入产线",
+            "biz_type": "机台",
+            "serial_no": str(row.get("serial_no") or ""),
+            "contract_no": str(row.get("contract_no") or ""),
+            "content": (
+                f"待排产队列进入生产看板产线；流水号：{row.get('serial_no') or ''}；"
+                f"批次号：{row.get('batch_code') or batch_id}；产线：{row.get('line_name') or line_id}；"
+                f"机型：{row.get('model_type') or ''}；合同号：{row.get('contract_no') or ''}；"
+                f"客户：{row.get('customer') or ''}"
+            ),
+        }
+        for row in rows
+        if str(row.get("serial_no") or "").strip()
+    ])
 
 
 def _find_slot_for_displaced(conn, displaced: dict, exclude_ids: set, due_buffer_days: int = 0):
@@ -935,7 +1048,7 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
 
         unit_rows = conn.execute(
             text(
-                "SELECT unit_id, model_type, contract_no, customer, dealer_name, due_date, order_remark, forecast_serial_no "
+                "SELECT unit_id, model_type, contract_no, customer, dealer_name, due_date, order_remark, forecast_serial_no, slot_index "
                 "FROM units WHERE batch_id = :bid ORDER BY slot_index ASC"
             ),
             {"bid": batch_id},
@@ -952,9 +1065,48 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
         if name:
             family_map[name] = family
 
+    model_order_map = _enabled_model_order_map()
+    ordered_unit_rows = sorted(
+        unit_rows,
+        key=lambda row: (
+            _model_sort_key(row[1], model_order_map),
+            int(row[8] or 0),
+            str(row[0] or ""),
+        ),
+    )
+
+    # Keep persisted slots aligned with the serial generation order, so the
+    # kanban queue reads the same grouped order after confirmation.
+    if ordered_unit_rows:
+        with engine.begin() as conn:
+            max_slot = int(
+                conn.execute(
+                    text("SELECT COALESCE(MAX(slot_index), 0) FROM units WHERE batch_id = :bid"),
+                    {"bid": batch_id},
+                ).scalar()
+                or 0
+            )
+            temp_base = max(max_slot, len(ordered_unit_rows)) + 10000
+            for idx, row in enumerate(ordered_unit_rows, start=1):
+                unit_id = str(row[0] or "").strip()
+                if not unit_id:
+                    continue
+                conn.execute(
+                    text("UPDATE units SET slot_index = :slot WHERE batch_id = :bid AND unit_id = :uid"),
+                    {"slot": temp_base + idx, "bid": batch_id, "uid": unit_id},
+                )
+            for idx, row in enumerate(ordered_unit_rows, start=1):
+                unit_id = str(row[0] or "").strip()
+                if not unit_id:
+                    continue
+                conn.execute(
+                    text("UPDATE units SET slot_index = :slot WHERE batch_id = :bid AND unit_id = :uid"),
+                    {"slot": idx, "bid": batch_id, "uid": unit_id},
+                )
+
     # Filter: skip uncategorized models only
     filtered = []
-    for row in unit_rows:
+    for row in ordered_unit_rows:
         mt = str(row[1] or "").strip()
         cat = _model_category(mt, family_map)
         if cat == "":
@@ -1053,6 +1205,27 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
                 )
                 units_written += int(updated.rowcount or 0)
 
+    operator_id = str(user_ctx.get("username") or "")
+    operator_name = _operator_name(user_ctx)
+    append_operation_logs([
+        {
+            "user_id": operator_id,
+            "username": operator_name,
+            "module": "预测沙盘",
+            "action_type": "同步待入库",
+            "biz_type": "待入库数据",
+            "serial_no": str(record.get("流水号") or ""),
+            "contract_no": str(record.get("合同号") or ""),
+            "content": (
+                f"预测沙盘自动生成流水号并同步待入库；流水号：{record.get('流水号') or ''}；"
+                f"批次号：{batch_code}；机型：{record.get('机型') or ''}；"
+                f"预计入库日期：{record.get('预计入库时间') or ''}；合同号：{record.get('合同号') or ''}"
+            ),
+        }
+        for record in records
+        if str(record.get("流水号") or "").strip()
+    ])
+
     inserted = result.get("inserted", len(records))
     return JSONResponse(content={"success": True, "count": inserted, "units_written": units_written})
 
@@ -1130,6 +1303,41 @@ async def import_batch_to_finished_goods(request: Request, batch_id: str):
     result = execute_import_transaction_payload(payload, retry_times=1)
     success_count = len(result.get("success", []))
     failed_count = len(result.get("failed", []))
+    success_sns = {
+        str(item.get("trackNo") or "").strip()
+        for item in result.get("success", [])
+        if str(item.get("trackNo") or "").strip()
+    }
+    if success_sns:
+        with engine.connect() as conn:
+            imported_rows = conn.execute(
+                text("""
+                    SELECT `流水号`, `批次号`, `机型`, `预计入库时间`, `合同号`, `占用订单号`
+                    FROM finished_goods_data
+                    WHERE TRIM(`流水号`) IN :sns
+                """).bindparams(bindparam("sns", expanding=True)),
+                {"sns": sorted(success_sns)},
+            ).mappings().all()
+        operator_id = str(user_ctx.get("username") or "")
+        operator_name = _operator_name(user_ctx)
+        append_operation_logs([
+            {
+                "user_id": operator_id,
+                "username": operator_name,
+                "module": "生产看板",
+                "action_type": "待入库转库存",
+                "biz_type": "机台",
+                "serial_no": str(row.get("流水号") or ""),
+                "order_no": str(row.get("占用订单号") or ""),
+                "contract_no": str(row.get("合同号") or ""),
+                "content": (
+                    f"待排产批次进入生产看板后同步库存；流水号：{row.get('流水号') or ''}；"
+                    f"批次号：{row.get('批次号') or batch_code}；机型：{row.get('机型') or ''}；"
+                    f"预计入库日期：{row.get('预计入库时间') or fallback_date}"
+                ),
+            }
+            for row in imported_rows
+        ])
 
     return JSONResponse(content={
         "success": True,
@@ -1670,17 +1878,38 @@ async def proxy_capacity_ratio(request: Request):
 
 @router.api_route("/production-lines{path:path}", methods=["GET", "POST"])
 async def proxy_production_lines(request: Request, path: str):
-    return await _forward(request, f"/api/production-lines{path}")
+    go_path = f"/api/production-lines{path}"
+    body = b""
+    payload = {}
+    if request.method == "POST":
+        body = await request.body()
+        if body:
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                payload = {}
+
+    response = await _forward(request, go_path, body_override=body if body else None)
+    if (
+        request.method == "POST"
+        and response.status_code < 400
+        and re.fullmatch(r"/[^/]+/assign", path or "")
+    ):
+        line_id = str((path or "").strip("/").split("/", 1)[0] or "").strip()
+        batch_id = str(payload.get("batch_id") or "").strip()
+        user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+        _record_line_assignment_trace(user_ctx, line_id, batch_id)
+    return response
 
 
-async def _forward(request: Request, go_path: str):
+async def _forward(request: Request, go_path: str, body_override: bytes | None = None):
     user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
     _ensure_permission(user_ctx, request.method, go_path)
     go_headers = _build_go_headers(user_ctx)
 
     body = None
     if request.method in ("POST", "PATCH", "PUT"):
-        body = await request.body()
+        body = body_override if body_override is not None else await request.body()
         if body:
             ct = request.headers.get("content-type", "")
             if "application/json" in ct or "json" in ct:
