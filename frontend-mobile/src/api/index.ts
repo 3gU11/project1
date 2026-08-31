@@ -30,8 +30,9 @@ request.interceptors.response.use(
     if (error?.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('userInfo')
-      if (location.pathname !== '/login') {
-        location.href = '/login'
+      if (window.location.pathname !== '/login') {
+        // Reload the app so Pinia cannot keep an expired in-memory token.
+        window.location.replace('/login')
       }
     } else {
       showToast(error?.response?.data?.detail || error.message || '请求失败')

@@ -214,6 +214,34 @@
               撤销审核
             </el-button>
           </div>
+          <div class="queue-split-toolbar">
+            <span class="queue-split-hint">选择机台分线投放</span>
+            <el-select
+              v-model="queueAssignLineId"
+              size="small"
+              placeholder="选择目标产线"
+              style="width:220px"
+              :disabled="selectedQueueUnitIds.length === 0"
+            >
+              <el-option
+                v-for="line in assignableLinesForBatch(selectedQueueBatch)"
+                :key="line.production_line_id"
+                :label="assignableLineLabel(line)"
+                :value="line.production_line_id"
+              />
+            </el-select>
+            <el-button
+              size="small"
+              type="success"
+              :disabled="selectedQueueUnitIds.length === 0 || !queueAssignLineId"
+              :loading="assigningUnits"
+              @click="assignSelectedQueueUnits"
+            >
+              投放选中 ({{ selectedQueueUnitIds.length }})
+            </el-button>
+            <el-button size="small" link @click="selectAllQueueUnits">全选待排</el-button>
+            <el-button size="small" link @click="clearQueueUnitSelection">清空</el-button>
+          </div>
           <div class="queue-preview-body">
             <VueDraggable
               :model-value="sortedQueuePreviewUnits"
@@ -226,13 +254,22 @@
               class="line-units queue-dialog-units"
             >
               <template v-for="u in sortedQueuePreviewUnits" :key="u.unit_id">
-                <UnitCard
-                  :unit="{ ...u, model_family: u.model_family || modelFamilyMap[String(u.model_type || '').toUpperCase()] || '' }"
-                  :force-show-serial-no="true"
-                  :selected="false"
-                  @edit="openQueueEditDrawer"
-                  @select="() => {}"
-                />
+                <div class="queue-unit-select-wrap" :class="{ assigned: u.status === 'In_Production' }">
+                  <el-checkbox
+                    v-if="u.status !== 'In_Production'"
+                    class="queue-unit-checkbox"
+                    :model-value="selectedQueueUnitIds.includes(String(u.unit_id))"
+                    @change="toggleQueueUnitSelection(u)"
+                  />
+                  <span v-else class="queue-unit-assigned">已投产</span>
+                  <UnitCard
+                    :unit="{ ...u, model_family: u.model_family || modelFamilyMap[String(u.model_type || '').toUpperCase()] || '' }"
+                    :force-show-serial-no="true"
+                    :selected="selectedQueueUnitIds.includes(String(u.unit_id))"
+                    @edit="openQueueEditDrawer"
+                    @select="() => toggleQueueUnitSelection(u)"
+                  />
+                </div>
               </template>
             </VueDraggable>
             <div v-if="!sortedQueuePreviewUnits.length" class="queue-empty">
@@ -401,6 +438,9 @@ const transferStore = useTransferStore()
 const queueFilter = ref('')
 const selectedQueueBatchId = ref('')
 const queueBatchDialogVisible = ref(false)
+const selectedQueueUnitIds = ref<string[]>([])
+const queueAssignLineId = ref<string | null>(null)
+const assigningUnits = ref(false)
 const statsPanelOpen = ref(true)
 const assignVisible = ref(false)
 const assigningBatch = ref<any>(null)
@@ -570,6 +610,27 @@ const sortedQueuePreviewUnits = computed(() => {
   const units = Array.isArray(selectedQueueBatch.value?.units) ? selectedQueueBatch.value.units : []
   return sortUnitsBySerial(units)
 })
+
+function toggleQueueUnitSelection(unit: any) {
+  if (!unit || String(unit.status || '') === 'In_Production') return
+  const id = String(unit.unit_id || '')
+  if (!id) return
+  selectedQueueUnitIds.value = selectedQueueUnitIds.value.includes(id)
+    ? selectedQueueUnitIds.value.filter((item) => item !== id)
+    : [...selectedQueueUnitIds.value, id]
+}
+
+function selectAllQueueUnits() {
+  selectedQueueUnitIds.value = sortedQueuePreviewUnits.value
+    .filter((unit: any) => String(unit.status || '') !== 'In_Production')
+    .map((unit: any) => String(unit.unit_id || ''))
+    .filter(Boolean)
+}
+
+function clearQueueUnitSelection() {
+  selectedQueueUnitIds.value = []
+  queueAssignLineId.value = null
+}
 
 function sortUnitsBySerial(units: any) {
   return Array.isArray(units) ? [...units].sort(compareUnitsBySerial) : []
@@ -827,13 +888,47 @@ function showQueueBatchPreview(batch: any) {
   const batchId = String(batch?.batch_id || '')
   if (!batchId) return
   selectedQueueBatchId.value = batchId
+  clearQueueUnitSelection()
+  const candidates = assignableLinesForBatch(batch)
+  queueAssignLineId.value = candidates.length ? candidates[0].production_line_id : null
   queueBatchDialogVisible.value = true
   statsPanelOpen.value = false
 }
 
 function closeQueueBatchPreview() {
+  clearQueueUnitSelection()
   selectedQueueBatchId.value = ''
   queueBatchDialogVisible.value = false
+}
+
+async function assignSelectedQueueUnits() {
+  const batch = selectedQueueBatch.value
+  const lineId = String(queueAssignLineId.value || '')
+  const unitIds = selectedQueueUnitIds.value.filter(Boolean)
+  if (!batch || !lineId || !unitIds.length) return
+  assigningUnits.value = true
+  try {
+    await sandboxApi.assignLineUnits(lineId, String(batch.batch_id), unitIds)
+    try {
+      await sandboxApi.importBatchToFinishedGoods(String(batch.batch_id))
+    } catch (e: any) {
+      console.warn('自动导入成品库存失败:', e?.message || e)
+    }
+    ElMessage.success(`已将 ${unitIds.length} 台机台投放到目标产线`)
+    clearQueueUnitSelection()
+    await forceRefreshAll()
+    const refreshed = queueBatches.value.find((item: any) => String(item.batch_id) === String(batch.batch_id))
+    if (refreshed) {
+      selectedQueueBatchId.value = String(refreshed.batch_id)
+      queueAssignLineId.value = assignableLinesForBatch(refreshed)[0]?.production_line_id || null
+    } else {
+      closeQueueBatchPreview()
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || e?.message || '分线投放失败')
+  } finally {
+    assigningUnits.value = false
+  }
 }
 
 async function revokeQueueBatch(batch: any) {
@@ -1739,6 +1834,40 @@ onUnmounted(() => {
   min-height: 0;
   overflow-y: auto;
   padding-top: 8px;
+}
+.queue-split-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fafbfc;
+}
+.queue-split-hint {
+  color: #606266;
+  font-size: 13px;
+  margin-right: auto;
+}
+.queue-unit-select-wrap { position: relative; }
+.queue-unit-checkbox {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  left: 8px;
+}
+.queue-unit-select-wrap :deep(.unit-card) { cursor: pointer; }
+.queue-unit-select-wrap.assigned { opacity: 0.72; }
+.queue-unit-assigned {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  left: 8px;
+  padding: 2px 5px;
+  color: #67c23a;
+  background: #f0f9eb;
+  border: 1px solid #b3e19d;
+  border-radius: 3px;
+  font-size: 11px;
 }
 .queue-dialog-units {
   min-height: 100%;

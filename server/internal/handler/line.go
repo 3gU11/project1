@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -91,6 +92,30 @@ func (h *LineHandler) Assign(c *gin.Context) {
 			"rows":  stats.Rows,
 		},
 	})
+}
+
+func (h *LineHandler) AssignUnits(c *gin.Context) {
+	var req struct {
+		BatchID string   `json:"batch_id" binding:"required"`
+		UnitIDs []string `json:"unit_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.UnitIDs) == 0 {
+		if err == nil {
+			err = fmt.Errorf("unit_ids is required")
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
+	stats, err := h.svc.AssignUnitsToLine(req.BatchID, c.Param("id"), req.UnitIDs, actor)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "factory_plan_status_update": gin.H{"pairs": stats.Pairs, "rows": stats.Rows}})
 }
 
 func (h *LineHandler) ManualComplete(c *gin.Context) {

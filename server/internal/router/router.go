@@ -112,6 +112,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		api.GET("/production-lines", lh.List)
 		api.POST("/production-lines/reconcile-inbound", lh.ReconcileInbound)
 		api.POST("/production-lines/:id/assign", lh.Assign)
+		api.POST("/production-lines/:id/assign-units", lh.AssignUnits)
 		api.POST("/production-lines/:id/manual-complete", lh.ManualComplete)
 		api.POST("/production-lines/:id/lock-units", lh.LockUnits)
 	}
