@@ -12,7 +12,23 @@ export type MobileSlot = {
   code: string
   status: string
   current: number
-  max: number
+  max: number | null
+  unlimited: boolean
+}
+
+const normalizeSlotIdentity = (value: unknown) => String(value ?? '').replace(/\s+/g, '').trim()
+
+export const prioritizeOldFactorySlots = <T extends { code: string }>(slots: T[]): T[] => {
+  const oldFactory: T[] = []
+  const other: T[] = []
+  for (const slot of slots) {
+    if (normalizeSlotIdentity(slot.code).startsWith('老厂')) {
+      oldFactory.push(slot)
+    } else {
+      other.push(slot)
+    }
+  }
+  return [...oldFactory, ...other]
 }
 
 export const mapMachine = (raw: Record<string, unknown>, index = 0): MobileMachine => {
@@ -34,36 +50,30 @@ export const mapMachine = (raw: Record<string, unknown>, index = 0): MobileMachi
 }
 
 export const mapLayoutSlots = (raw: any, inventoryRows: Record<string, unknown>[] = []): MobileSlot[] => {
-  const maxCapacity = 5
   const inventoryCountMap = inventoryRows.reduce<Record<string, number>>((acc, row) => {
     const slotCode = String(row.Location_Code ?? row['Location_Code'] ?? '').trim()
     const status = String(row.status ?? row['状态'] ?? '').trim()
     if (slotCode && status.includes('库存中')) {
-      acc[slotCode] = (acc[slotCode] || 0) + 1
+      const identity = normalizeSlotIdentity(slotCode)
+      acc[identity] = (acc[identity] || 0) + 1
     }
     return acc
   }, {})
 
   const slots = raw?.layout_json?.slots
-  if (Array.isArray(slots) && slots.length > 0) {
-    return slots.map((s: any) => ({
-      code: String(s.code ?? s.slotCode ?? ''),
+  if (Array.isArray(slots)) {
+    return slots.map((s: any) => {
+      const code = String(s.code ?? s.slotCode ?? '').trim()
+      const unlimited = Boolean(s.unlimited)
+      const rawCapacity = Number(s.capacity)
+      return {
+      code,
       status: String(s.status ?? '正常'),
-      current: inventoryCountMap[String(s.code ?? s.slotCode ?? '')] || 0,
-      max: maxCapacity,
-    }))
-  }
-  const defaults: MobileSlot[] = []
-  for (let row = 1; row <= 3; row += 1) {
-    for (let col = 1; col <= 6; col += 1) {
-      const code = `A-${row}-${String(col).padStart(2, '0')}`
-      defaults.push({
-        code,
-        status: '正常',
-        current: inventoryCountMap[code] || 0,
-        max: maxCapacity,
-      })
+      current: inventoryCountMap[normalizeSlotIdentity(code)] || 0,
+      max: unlimited ? null : (Number.isFinite(rawCapacity) && rawCapacity > 0 ? rawCapacity : 5),
+      unlimited,
     }
+    }).filter((slot: MobileSlot) => Boolean(slot.code))
   }
-  return defaults
+  return []
 }

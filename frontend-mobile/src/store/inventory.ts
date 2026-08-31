@@ -27,8 +27,7 @@ export const useInventoryStore = defineStore('inventory', {
             (x) =>
               x.batchNo.toLowerCase().includes(q) ||
               x.serialNo.toLowerCase().includes(q) ||
-              x.model.toLowerCase().includes(q) ||
-              x.slotCode.toLowerCase().includes(q)
+              x.model.toLowerCase().includes(q)
           )
         }
         this.list = mapped

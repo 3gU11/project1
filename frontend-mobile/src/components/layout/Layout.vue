@@ -18,8 +18,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useUserStore } from '@/store/user'
+import { startInventorySync, stopInventorySync } from '@/utils/inventorySync'
 
 const userStore = useUserStore()
 
@@ -38,12 +39,14 @@ const tabbarItems = computed(() => {
   if (userStore.userInfo?.role === 'Prod') {
     return [
       { title: '查询', to: '/query', icon: 'search' },
+      { title: '找货', to: '/locator', icon: 'location-o' },
       { title: '我的', to: '/profile', icon: 'user-o' },
     ]
   }
 
   const items = [
     { title: '入库', to: '/query', icon: 'scan' },
+    { title: '找货', to: '/locator', icon: 'location-o' },
     { title: '看板', to: '/dashboard', icon: 'chart-trending-o' },
   ]
   if (canViewProduction.value) {
@@ -52,6 +55,9 @@ const tabbarItems = computed(() => {
   items.push({ title: '我的', to: '/profile', icon: 'user-o' })
   return items
 })
+
+onMounted(() => startInventorySync(userStore.token))
+onBeforeUnmount(stopInventorySync)
 </script>
 
 <style scoped>

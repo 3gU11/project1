@@ -11,6 +11,16 @@ request.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  const rawUserInfo = localStorage.getItem('userInfo')
+  if (rawUserInfo) {
+    try {
+      const userInfo = JSON.parse(rawUserInfo)
+      if (userInfo?.username) config.headers['X-Username'] = userInfo.username
+      if (userInfo?.role) config.headers['X-Role'] = userInfo.role
+    } catch {
+      // ignore broken cached user info
+    }
+  }
   return config
 })
 

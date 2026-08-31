@@ -3,7 +3,7 @@
     <van-nav-bar :title="pageTitle" fixed placeholder />
 
     <div class="card search-card">
-      <van-search v-model="keyword" placeholder="搜索批次号/流水号/机型/库位" @search="load" />
+      <van-search v-model="keyword" placeholder="搜索流水号/批次号/机型" @search="load" />
       
       <!-- 库管角色：增加快捷过滤器 -->
       <div v-if="isProd" class="filter-bar">
@@ -136,7 +136,7 @@
               <template #text>
                 <div class="slot-item-text" :class="{ 'active-text': selectedSlotCode === slot.code }">
                   {{ slot.code }}
-                  <div class="slot-capacity">{{ slot.current }}/{{ slot.max }}</div>
+                  <div class="slot-capacity">{{ slot.current }}/{{ slot.unlimited || slot.max === null ? '不限' : slot.max }}</div>
                 </div>
               </template>
             </van-grid-item>
@@ -155,6 +155,9 @@ import { showToast, showSuccessToast, showFailToast } from 'vant'
 import { useInventoryStore } from '@/store/inventory'
 import { useUserStore } from '@/store/user'
 import { inventoryApi } from '@/api/inventory'
+import { summarizeBatchResults } from '@/utils/batchResults'
+import { useInventoryAutoRefresh } from '@/utils/useInventoryAutoRefresh'
+import { prioritizeOldFactorySlots } from '@/utils/mapper'
 
 const router = useRouter()
 const inventoryStore = useInventoryStore()
@@ -191,12 +194,14 @@ const countValue = computed(() => {
   return visibleList.value.length
 })
 const filteredSlots = computed(() => {
-  const availableSlots = inventoryStore.slots.filter((slot) => slot.current < slot.max)
+  const availableSlots = inventoryStore.slots.filter(
+    (slot) => slot.unlimited || slot.max === null || slot.current < slot.max,
+  )
   const query = slotKeyword.value.trim().toLowerCase()
-  if (!query) {
-    return availableSlots
-  }
-  return availableSlots.filter((slot) => slot.code.toLowerCase().includes(query))
+  const matchedSlots = query
+    ? availableSlots.filter((slot) => slot.code.toLowerCase().includes(query))
+    : availableSlots
+  return prioritizeOldFactorySlots(matchedSlots)
 })
 
 const load = async () => {
@@ -269,28 +274,36 @@ const confirmInbound = async (slotCode?: string) => {
   
   submitting.value = true
   try {
-    const promises = selectedSerialNos.value.map(sn => 
+    const serialNos = [...selectedSerialNos.value]
+    const promises = serialNos.map(sn =>
       inventoryApi.inboundToSlot({
         serial_no: sn,
         slot_code: finalSlotCode
       })
     )
-    await Promise.all(promises)
-    
-    showSuccessToast('入库成功')
-    showInboundPopup.value = false
-    selectedSerialNos.value = []
-    slotKeyword.value = ''
-    selectedSlotCode.value = ''
+    const results = await Promise.allSettled(promises)
+    const summary = summarizeBatchResults(serialNos, results)
     await load()
+    selectedSerialNos.value = summary.failedSerialNos
+
+    if (summary.failedSerialNos.length === 0) {
+      showSuccessToast(`入库成功，共 ${summary.successCount} 台`)
+      showInboundPopup.value = false
+      slotKeyword.value = ''
+      selectedSlotCode.value = ''
+    } else {
+      showFailToast(`成功 ${summary.successCount} 台，失败 ${summary.failedSerialNos.length} 台：${summary.failureMessages[0]}`)
+    }
   } catch (error: any) {
     showFailToast(error.message || '入库失败')
+    await load()
   } finally {
     submitting.value = false
   }
 }
 
 onMounted(load)
+useInventoryAutoRefresh(load)
 </script>
 
 <style scoped>
