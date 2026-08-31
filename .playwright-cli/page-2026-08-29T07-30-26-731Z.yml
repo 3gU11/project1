@@ -1,0 +1,27 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e31]:
+    - generic [ref=e33]:
+      - generic [ref=e34]: 机台入库
+      - generic [ref=e41]:
+        - generic [ref=e42]: 
+        - searchbox "搜索流水号/批次号/机型" [ref=e46]
+      - generic [ref=e48]:
+        - generic [ref=e49]: 待入库数量
+        - generic [ref=e50]: "498"
+      - feed [ref=e54]:
+        - generic [ref=e55]: 没有更多了
+    - tablist [ref=e56]:
+      - tab " 入库" [selected] [ref=e57] [cursor=pointer]:
+        - generic [ref=e58]: 
+        - generic [ref=e60]: 入库
+      - tab " 找货" [ref=e61] [cursor=pointer]:
+        - generic [ref=e62]: 
+        - generic [ref=e64]: 找货
+      - tab " 看板" [ref=e65] [cursor=pointer]:
+        - generic [ref=e66]: 
+        - generic [ref=e68]: 看板
+      - tab " 我的" [ref=e69] [cursor=pointer]:
+        - generic [ref=e70]: 
+        - generic [ref=e72]: 我的
+  - dialog [ref=e73]:
+    - generic [ref=e74]: 登录成功

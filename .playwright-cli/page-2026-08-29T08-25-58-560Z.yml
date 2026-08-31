@@ -1,0 +1,17 @@
+- generic [ref=e4]:
+  - heading "V8betaVer1.0 仓储移动端" [level=2] [ref=e5]
+  - generic [ref=e6]:
+    - tablist [ref=e8]:
+      - tab "登录" [selected] [ref=e9] [cursor=pointer]
+      - tab "注册" [ref=e11] [cursor=pointer]
+    - tabpanel "登录" [ref=e15]:
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - generic [ref=e18]: 账号
+          - textbox "账号" [ref=e21]:
+            - /placeholder: 请输入账号
+        - generic [ref=e22]:
+          - generic [ref=e23]: 密码
+          - textbox "密码" [ref=e26]:
+            - /placeholder: 请输入密码
+        - button "登录" [ref=e28] [cursor=pointer]

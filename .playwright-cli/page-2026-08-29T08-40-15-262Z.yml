@@ -1,0 +1,32 @@
+- generic [ref=f8e3]:
+  - generic [ref=f8e6]:
+    - generic [ref=f8e7] [cursor=pointer]: 
+    - generic [ref=f8e9]: 机台档案
+  - generic [ref=f8e10]: 基础信息
+  - generic [ref=f8e11]:
+    - generic [ref=f8e12]:
+      - generic [ref=f8e13]: 流水号
+      - generic [ref=f8e14]: 96-06-818
+    - generic [ref=f8e15]:
+      - generic [ref=f8e16]: 机型
+      - generic [ref=f8e17]: "-"
+    - generic [ref=f8e18]:
+      - generic [ref=f8e19]: 状态
+      - generic [ref=f8e20]: "-"
+    - generic [ref=f8e21]:
+      - generic [ref=f8e22]: 所在库位
+      - generic [ref=f8e23]: "-"
+  - generic [ref=f8e24]: 结构化拍照任务
+  - generic [ref=f8e25]:
+    - generic [ref=f8e26]:
+      - generic [ref=f8e27]:
+        - strong [ref=f8e28]: 0/0
+        - text: 已拍
+        - generic [ref=f8e29]: 必拍 0/0 · 编号确认 0/0
+      - button "生成/刷新任务" [ref=f8e30] [cursor=pointer]
+    - paragraph [ref=f8e53]: 该机型暂无拍照任务配置
+    - button "提交当前拍照档案" [disabled] [ref=f8e55]
+  - generic [ref=f8e58]: 历史图片/其他图片
+  - generic [ref=f8e63]:
+    - generic [ref=f8e64]: 
+    - button "Choose File" [ref=f8e65] [cursor=pointer]

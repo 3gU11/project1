@@ -1,0 +1,7 @@
+﻿excel_row,delivery_date,excel_model,qty,customer_D_E_F,customer_inherited_from_above,excel_dealer,remark_H_I,sql_contract,sql_delivery_date,sql_model,sql_qty,sql_customer,sql_dealer,sql_status,abnormal_type,note
+21,2026-06-02,FR-500XS(AUTO),1,黄林英 玉杨路,no,王晓枫,,HT202604225354,2026-06-02,FR-500AUTO,1,昆山市玉杨路中国节能（黄林英）,陈利春,已转订单,agent_mismatch,agent differs: Excel=王晓枫 SQL=陈利春
+79,2026-06-06,FL-8560XS(PRO),1,武汉百则(河南均美) 河南省登封市,no,王晓枫,Z轴加高至1100,HT202606023936,2026-06-06,FL-8560XS(PRO),1,河南省登封市(武汉百则-河南均美）,王晓枫,已取消,sql_status_cancelled,已取消
+330,2026-06-26,FR-600XS(AUTO),1,昆山浩硕精密 昆山中国节能,no,王晓枫,,HT202605283901,2026-06-26,FR-600AUTO,1,昆山中国节能（昆山浩硕精密）,王晓丰枫,已转订单,agent_mismatch,agent differs: Excel=王晓枫 SQL=王晓丰枫
+373,2026-06-30,FR-600XS(PRO),2,东莞宏轩(仓库) 东莞南城,no,卢振彪,,HT202607020047,2026-06-30,FR-600XS(PRO),1,郭瑞峰（东莞市宏轩机械设备有限公司）,卢振彪,已取消,split_quantity_possible,same date+model+customer qty sum=2
+380,2026-07-01,FR-400XS(PRO),10,东莞宏轩(仓库) 东莞市虎门镇,no,卢振彪,不配水箱,HT202607020054,2026-07-01,FR-400XS(PRO),10,东莞宏轩机械设备有限公司,卢振彪,已取消,sql_status_cancelled,已取消
+405,2026-07-03,FR-400XS(PRO),10,东莞宏轩(仓库) 东莞南城,no,卢振彪,,HT202607020088,2026-07-03,FR-400XS(PRO),10,东莞宏轩机械设备有限公司,卢振彪,已取消,sql_status_cancelled,已取消

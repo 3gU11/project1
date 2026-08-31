@@ -1,0 +1,153 @@
+- generic [ref=f6e3]:
+  - generic [ref=f6e6]:
+    - generic [ref=f6e7] [cursor=pointer]: 
+    - generic [ref=f6e9]: 机台档案
+  - generic [ref=f6e10]: 基础信息
+  - generic [ref=f6e11]:
+    - generic [ref=f6e12]:
+      - generic [ref=f6e13]: 流水号
+      - generic [ref=f6e14]: 96-06-818
+    - generic [ref=f6e15]:
+      - generic [ref=f6e16]: 机型
+      - generic [ref=f6e17]: FR-400G
+    - generic [ref=f6e18]:
+      - generic [ref=f6e19]: 状态
+      - generic [ref=f6e20]: 已出库
+    - generic [ref=f6e21]:
+      - generic [ref=f6e22]: 所在库位
+      - generic [ref=f6e23]: 新厂2楼仓库门口存放区
+  - generic [ref=f6e24]: 结构化拍照任务
+  - generic [ref=f6e25]:
+    - generic [ref=f6e26]:
+      - generic [ref=f6e27]:
+        - strong [ref=f6e28]: 0/12
+        - text: 已拍
+        - generic [ref=f6e29]: 必拍 0/11 · 编号确认 0/12
+      - button "生成/刷新任务" [ref=f6e30] [cursor=pointer]
+    - generic [ref=f6e33]:
+      - generic [ref=f6e35]:
+        - generic [ref=f6e36]: SN-CPU CPU板编号
+        - generic [ref=f6e37]:
+          - generic [ref=f6e38]: 必拍
+          - generic [ref=f6e39]: QR/OCR
+          - generic [ref=f6e40]: 待拍
+      - generic [ref=f6e44]:
+        - button [ref=f6e240]
+        - button "Choose File" [active] [ref=f6e48] [cursor=pointer]
+    - generic [ref=f6e49]:
+      - generic [ref=f6e51]:
+        - generic [ref=f6e52]: SN-HF 高频板编号
+        - generic [ref=f6e53]:
+          - generic [ref=f6e54]: 必拍
+          - generic [ref=f6e55]: QR/OCR
+          - generic [ref=f6e56]: 待拍
+      - generic [ref=f6e60]:
+        - button "拍照/上传" [ref=f6e61] [cursor=pointer]
+        - button "Choose File" [ref=f6e64] [cursor=pointer]
+    - generic [ref=f6e65]:
+      - generic [ref=f6e67]:
+        - generic [ref=f6e68]: SN-LASER 手脉激光编号
+        - generic [ref=f6e69]:
+          - generic [ref=f6e70]: 必拍
+          - generic [ref=f6e71]: QR/OCR
+          - generic [ref=f6e72]: 待拍
+      - generic [ref=f6e76]:
+        - button "拍照/上传" [ref=f6e77] [cursor=pointer]
+        - button "Choose File" [ref=f6e80] [cursor=pointer]
+    - generic [ref=f6e81]:
+      - generic [ref=f6e83]:
+        - generic [ref=f6e84]: SN-GCP G系列电脑
+        - generic [ref=f6e85]:
+          - generic [ref=f6e86]: 必拍
+          - generic [ref=f6e87]: QR/OCR
+          - generic [ref=f6e88]: 待拍
+      - generic [ref=f6e92]:
+        - button "拍照/上传" [ref=f6e93] [cursor=pointer]
+        - button "Choose File" [ref=f6e96] [cursor=pointer]
+    - generic [ref=f6e97]:
+      - generic [ref=f6e99]:
+        - generic [ref=f6e100]: SN-MOTOR 三相异步电机产品序号
+        - generic [ref=f6e101]:
+          - generic [ref=f6e102]: 选拍
+          - generic [ref=f6e103]: QR/OCR
+          - generic [ref=f6e104]: 待拍
+      - generic [ref=f6e105]:
+        - generic [ref=f6e108]:
+          - button "拍照/上传" [ref=f6e109] [cursor=pointer]
+          - button "Choose File" [ref=f6e112] [cursor=pointer]
+        - button "跳过" [ref=f6e113] [cursor=pointer]
+    - generic [ref=f6e116]:
+      - generic [ref=f6e118]:
+        - generic [ref=f6e119]: SN-DISPLAY 显示器产品序号
+        - generic [ref=f6e120]:
+          - generic [ref=f6e121]: 必拍
+          - generic [ref=f6e122]: QR/OCR
+          - generic [ref=f6e123]: 待拍
+      - generic [ref=f6e127]:
+        - button "拍照/上传" [ref=f6e128] [cursor=pointer]
+        - button "Choose File" [ref=f6e131] [cursor=pointer]
+    - generic [ref=f6e132]:
+      - generic [ref=f6e134]:
+        - generic [ref=f6e135]: SN-HFS 高频小板
+        - generic [ref=f6e136]:
+          - generic [ref=f6e137]: 必拍
+          - generic [ref=f6e138]: QR/OCR
+          - generic [ref=f6e139]: 待拍
+      - generic [ref=f6e143]:
+        - button "拍照/上传" [ref=f6e144] [cursor=pointer]
+        - button "Choose File" [ref=f6e147] [cursor=pointer]
+    - generic [ref=f6e148]:
+      - generic [ref=f6e150]:
+        - generic [ref=f6e151]: SN-SWITCH 开关电源
+        - generic [ref=f6e152]:
+          - generic [ref=f6e153]: 必拍
+          - generic [ref=f6e154]: QR/OCR
+          - generic [ref=f6e155]: 待拍
+      - generic [ref=f6e159]:
+        - button "拍照/上传" [ref=f6e160] [cursor=pointer]
+        - button "Choose File" [ref=f6e163] [cursor=pointer]
+    - generic [ref=f6e164]:
+      - generic [ref=f6e166]:
+        - generic [ref=f6e167]: SN-CAP 大电容
+        - generic [ref=f6e168]:
+          - generic [ref=f6e169]: 必拍
+          - generic [ref=f6e170]: QR/OCR
+          - generic [ref=f6e171]: 待拍
+      - generic [ref=f6e175]:
+        - button "拍照/上传" [ref=f6e176] [cursor=pointer]
+        - button "Choose File" [ref=f6e179] [cursor=pointer]
+    - generic [ref=f6e180]:
+      - generic [ref=f6e182]:
+        - generic [ref=f6e183]: SN-DRIVER 电机驱动器
+        - generic [ref=f6e184]:
+          - generic [ref=f6e185]: 必拍
+          - generic [ref=f6e186]: QR/OCR
+          - generic [ref=f6e187]: 待拍
+      - generic [ref=f6e191]:
+        - button "拍照/上传" [ref=f6e192] [cursor=pointer]
+        - button "Choose File" [ref=f6e195] [cursor=pointer]
+    - generic [ref=f6e196]:
+      - generic [ref=f6e198]:
+        - generic [ref=f6e199]: SN-FILTER EMI滤波器
+        - generic [ref=f6e200]:
+          - generic [ref=f6e201]: 必拍
+          - generic [ref=f6e202]: QR/OCR
+          - generic [ref=f6e203]: 待拍
+      - generic [ref=f6e207]:
+        - button "拍照/上传" [ref=f6e208] [cursor=pointer]
+        - button "Choose File" [ref=f6e211] [cursor=pointer]
+    - generic [ref=f6e212]:
+      - generic [ref=f6e214]:
+        - generic [ref=f6e215]: SN-AUTOCARD AUTOCUT图形卡
+        - generic [ref=f6e216]:
+          - generic [ref=f6e217]: 必拍
+          - generic [ref=f6e218]: QR/OCR
+          - generic [ref=f6e219]: 待拍
+      - generic [ref=f6e223]:
+        - button "拍照/上传" [ref=f6e224] [cursor=pointer]
+        - button "Choose File" [ref=f6e227] [cursor=pointer]
+    - button "提交当前拍照档案" [disabled] [ref=f6e229]
+  - generic [ref=f6e232]: 历史图片/其他图片
+  - generic [ref=f6e237]:
+    - generic [ref=f6e238]: 
+    - button "Choose File" [ref=f6e239] [cursor=pointer]
