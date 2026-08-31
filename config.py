@@ -15,6 +15,8 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "888")
 # Go Sandbox Service Configuration
 GO_SANDBOX_URL = os.environ.get("GO_SANDBOX_URL", "http://127.0.0.1:3001")
 GO_INTERNAL_TOKEN = os.environ.get("GO_INTERNAL_TOKEN", "")
+# Shared only with the Caigou backend. An empty value keeps the repair identity API disabled.
+REPAIR_IDENTITY_API_KEY = os.environ.get("REPAIR_IDENTITY_API_KEY", "")
 
 # Performance Optimization Feature Flags
 # 使用 TTL 缓存替代 lru_cache(maxsize=1)

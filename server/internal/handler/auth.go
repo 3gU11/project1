@@ -41,7 +41,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			password,
 			COALESCE(role, 'viewer') AS role,
 			COALESCE(name, username) AS name,
-			COALESCE(region, '') AS region
+			'' AS region
 		FROM users
 		WHERE username = ?
 		  AND (status IS NULL OR status = '' OR status = 'active')

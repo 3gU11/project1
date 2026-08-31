@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -53,9 +54,11 @@ func main() {
 	ah := handler.NewAuthHandler(db)
 	mh := handler.NewMetaHandler(db)
 	qh := handler.NewQueueHandler(db)
+	qrServiceURL := strings.TrimRight(cfg.PythonURL, "/") + "/internal/qr/decode"
+	ph := handler.NewPhotoHandler(db, cfg.OCREnabled, cfg.OCRServiceURL, qrServiceURL, cfg.InternalToken, cfg.OCRTimeoutMS)
 
 	r := gin.Default()
-	router.Setup(r, db, hub, bh, uh, fh, lh, ch, ah, mh, qh, cfg.AllowOrigins)
+	router.Setup(r, db, hub, bh, uh, fh, lh, ch, ah, mh, qh, ph, cfg.AllowOrigins)
 
 	log.Printf("Listening on %s", cfg.HTTPAddr)
 	if err := r.Run(cfg.HTTPAddr); err != nil {
