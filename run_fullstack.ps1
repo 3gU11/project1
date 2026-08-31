@@ -1,6 +1,7 @@
 param(
   [switch]$DryRun,
   [switch]$NoMobile,
+  [switch]$RebuildGo,
   [string]$GoPort = '3001',
   [string]$ApiPort = '8000',
   [string]$WebPort = '3000',
@@ -48,6 +49,7 @@ $serverDir = Join-Path $root 'server'
 $frontendDir = Join-Path $root 'frontend'
 $mobileDir = Join-Path $root 'frontend-mobile'
 $goExe = Join-Path $serverDir 'smart-scheduling-server-go.exe'
+$goBuildExe = Join-Path $serverDir 'smart-scheduling-server-go.build.exe'
 
 Log '========================================'
 Log 'V8betaVer1.0 Fullstack Launcher (PowerShell)'
@@ -78,20 +80,27 @@ if (-not $goCmd) {
 }
 
 $goCache = Join-Path $serverDir '.gocache-build'
-$goModCache = Join-Path $serverDir '.gomodcache-build'
 if (!(Test-Path $goCache)) { New-Item -ItemType Directory -Force -Path $goCache | Out-Null }
-if (!(Test-Path $goModCache)) { New-Item -ItemType Directory -Force -Path $goModCache | Out-Null }
 
-Log '[1/4] Building Go sandbox binary...'
-if ($DryRun) {
-  Log "[DRY-RUN] & '$($goCmd.Source)' build -o '$goExe' .\cmd\main.go"
+$needsGoBuild = $RebuildGo -or !(Test-Path $goExe)
+$goBuildReady = $false
+if ($needsGoBuild) {
+  Log '[1/4] Building Go sandbox binary...'
+  if ($DryRun) {
+    Log "[DRY-RUN] & '$($goCmd.Source)' build -o '$goBuildExe' .\cmd\main.go"
+  } else {
+    Push-Location $serverDir
+    $env:GOCACHE = $goCache
+    Remove-Item Env:GOMODCACHE -ErrorAction SilentlyContinue
+    & $goCmd.Source build -o $goBuildExe .\cmd\main.go
+    if ($LASTEXITCODE -ne 0) { Pop-Location; Fail 'Go build failed' 2 }
+    Pop-Location
+    $goBuildReady = $true
+  }
 } else {
-  Push-Location $serverDir
-  $env:GOCACHE = $goCache
-  $env:GOMODCACHE = $goModCache
-  & $goCmd.Source build -o $goExe .\cmd\main.go
-  if ($LASTEXITCODE -ne 0) { Pop-Location; Fail 'Go build failed' 2 }
-  Pop-Location
+  $goExeInfo = Get-Item -LiteralPath $goExe
+  Log "[1/4] Using existing Go binary: $goExe (built $($goExeInfo.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')))"
+  Log '      Use -RebuildGo when Go source changes must be compiled.'
 }
 
 $goOut = Join-Path $serverDir 'go-launcher.out.log'
@@ -109,6 +118,11 @@ if (-not $DryRun) {
   Stop-PortOwner $ApiPort
   Stop-PortOwner $WebPort
   if (-not $NoMobile) { Stop-PortOwner $MobilePort }
+
+  if ($goBuildReady) {
+    Move-Item -LiteralPath $goBuildExe -Destination $goExe -Force
+    Log "Installed rebuilt Go binary: $goExe"
+  }
 
   Remove-Item -LiteralPath $goOut,$goErr,$apiOut,$apiErr,$webOut,$webErr -ErrorAction SilentlyContinue
   if (Test-Path $mobileDir) { Remove-Item -LiteralPath $mobileOut,$mobileErr -ErrorAction SilentlyContinue }
@@ -166,7 +180,7 @@ if ($DryRun) {
   if (-not $npmCmd) { Fail 'npm not found in PATH' 1 }
   $env:VITE_API_BASE_URL = '/api/v1'
   $env:VITE_PROXY_TARGET = "http://127.0.0.1:$ApiPort"
-  $webProc = Start-Process -FilePath $npmCmd.Source -ArgumentList @('run','dev','--','--host','0.0.0.0','--port',$WebPort,'--strictPort') -WorkingDirectory $frontendDir -RedirectStandardOutput $webOut -RedirectStandardError $webErr -PassThru -WindowStyle Hidden
+  $webProc = Start-Process -FilePath $npmCmd.Source -ArgumentList @('run','dev','--','--host','0.0.0.0','--port',$WebPort,'--strictPort','--force') -WorkingDirectory $frontendDir -RedirectStandardOutput $webOut -RedirectStandardError $webErr -PassThru -WindowStyle Hidden
   Log "Frontend PID=$($webProc.Id)"
 }
 
@@ -180,7 +194,7 @@ if ($NoMobile) {
     $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npmCmd) { $npmCmd = Get-Command npm -ErrorAction SilentlyContinue }
     if (-not $npmCmd) { Fail 'npm not found in PATH' 1 }
-    $mobileProc = Start-Process -FilePath $npmCmd.Source -ArgumentList @('run','dev','--','--host','0.0.0.0','--port',$MobilePort,'--strictPort') -WorkingDirectory $mobileDir -RedirectStandardOutput $mobileOut -RedirectStandardError $mobileErr -PassThru -WindowStyle Hidden
+    $mobileProc = Start-Process -FilePath $npmCmd.Source -ArgumentList @('run','dev','--','--host','0.0.0.0','--port',$MobilePort,'--strictPort','--force') -WorkingDirectory $mobileDir -RedirectStandardOutput $mobileOut -RedirectStandardError $mobileErr -PassThru -WindowStyle Hidden
     Log "Mobile PID=$($mobileProc.Id)"
   }
 } else {

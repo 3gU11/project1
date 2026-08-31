@@ -2,11 +2,225 @@
 CRUD operations for report generation
 Provides data fetching and aggregation logic for all report types
 """
+import re
+
 import pandas as pd
 from sqlalchemy import text
 from database import get_engine
 from crud.inbound_history import ensure_inbound_history_table
 from typing import Dict, Any
+
+
+REPORT_FAMILY_ORDER = [
+    "中小型XS",
+    "中小型AUTO",
+    "中小型G",
+    "中大型AUTO",
+    "中大型XS",
+    "特殊",
+    "未匹配",
+]
+SCREW_REFERENCE_FAMILIES = {
+    "XS": {"中小型XS", "中大型XS"},
+    "AUTO": {"中小型AUTO", "中大型AUTO"},
+    "G": {"中小型G"},
+}
+
+
+def _format_ratio(value: float, total: int | float) -> str:
+    return f"{(value / total * 100):.2f}%" if total else "0.00%"
+
+
+def _normalize_report_model(value: object) -> str:
+    """Normalize the order token format to the model dictionary key."""
+    return str(value or "").strip().replace("(加高)", "").replace("（加高）", "").strip()
+
+
+def _get_model_dictionary_frame() -> pd.DataFrame:
+    with get_engine().connect() as conn:
+        return pd.read_sql(
+            text(
+                "SELECT model_name, model_family, sort_order "
+                "FROM model_dictionary "
+                "ORDER BY sort_order ASC, id ASC"
+            ),
+            conn,
+        )
+
+
+def get_order_model_quantities(order_df: pd.DataFrame) -> pd.DataFrame:
+    """Expand one or more `机型 x 数量` tokens from each sales order."""
+    rows: list[dict[str, object]] = []
+    for _, order in order_df.iterrows():
+        raw = str(order.get("需求机型", "") or "")
+        parsed = False
+        for token_raw in raw.split(";"):
+            token = token_raw.strip()
+            if not token:
+                continue
+            match = re.search(r"(?:[x×:：]\s*)(\d+)\s*$", token, flags=re.IGNORECASE)
+            if not match:
+                continue
+            model = _normalize_report_model(re.sub(r"(?:[x×:：]\s*)\d+\s*$", "", token, flags=re.IGNORECASE))
+            quantity = int(match.group(1))
+            if model and quantity > 0:
+                rows.append({"机型": model, "数量": quantity})
+                parsed = True
+
+        # Compatibility with legacy single-model orders that did not store x quantity.
+        if not parsed:
+            model = _normalize_report_model(raw)
+            quantity = pd.to_numeric(pd.Series([order.get("需求数量", 0)]), errors="coerce").fillna(0).iloc[0]
+            if model and quantity > 0:
+                rows.append({"机型": model, "数量": int(quantity)})
+
+    return pd.DataFrame(rows, columns=["机型", "数量"])
+
+
+def get_dealer_sales_summary(order_df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate the filtered order report by dealer without dropping blank dealers."""
+    if order_df.empty:
+        return pd.DataFrame(columns=["代理商", "所售数量", "总销售占比"])
+
+    work = order_df.copy()
+    work["代理商"] = work["代理商"].fillna("").astype(str).str.strip().replace("", "未填写")
+    work["需求数量"] = pd.to_numeric(work["需求数量"], errors="coerce").fillna(0).astype(int)
+    result = work.groupby("代理商", as_index=False)["需求数量"].sum()
+    result.columns = ["代理商", "所售数量"]
+    result = result.sort_values(["所售数量", "代理商"], ascending=[False, True], kind="stable")
+    total = int(result["所售数量"].sum())
+    result["总销售占比"] = result["所售数量"].map(lambda qty: _format_ratio(int(qty), total))
+    result.loc[len(result)] = ["合计", total, "100.00%"]
+    return result
+
+
+def build_model_report_appendices(
+    model_quantities: pd.DataFrame,
+    model_dictionary: pd.DataFrame | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Build the family, screw-reference, and all-model appendices for Excel exports."""
+    empty = pd.DataFrame(columns=["机型", "数量"])
+    source = model_quantities.copy() if model_quantities is not None else empty
+    if source.empty or "机型" not in source or "数量" not in source:
+        return {
+            "总族类比例": pd.DataFrame(columns=["总族类", "累计出货", "总族类比例", "机型数"]),
+            "丝杆订货需求比例": pd.DataFrame(),
+            "机型累计占比": pd.DataFrame(columns=["排名", "机型", "总族类", "累计出货", "累计占比", "字典状态"]),
+        }
+
+    source["机型"] = source["机型"].map(_normalize_report_model)
+    source["数量"] = pd.to_numeric(source["数量"], errors="coerce").fillna(0).astype(int)
+    source = source[(source["机型"] != "") & (source["数量"] > 0)]
+    if source.empty:
+        return build_model_report_appendices(empty, model_dictionary)
+
+    dictionary = model_dictionary.copy() if model_dictionary is not None else _get_model_dictionary_frame()
+    if dictionary.empty:
+        dictionary = pd.DataFrame(columns=["model_name", "model_family", "sort_order"])
+    for column, default in (("model_name", ""), ("model_family", ""), ("sort_order", 9999)):
+        if column not in dictionary:
+            dictionary[column] = default
+    dictionary["model_key"] = dictionary["model_name"].map(_normalize_report_model).str.casefold()
+    dictionary["sort_order"] = pd.to_numeric(dictionary["sort_order"], errors="coerce").fillna(9999)
+    dictionary = dictionary.drop_duplicates("model_key", keep="first")
+    family_map = dictionary.set_index("model_key")["model_family"].fillna("").to_dict()
+    sort_map = dictionary.set_index("model_key")["sort_order"].to_dict()
+
+    model_summary = source.groupby("机型", as_index=False)["数量"].sum()
+    model_summary["_key"] = model_summary["机型"].str.casefold()
+    model_summary["总族类"] = model_summary["_key"].map(family_map).fillna("").astype(str).str.strip()
+    model_summary.loc[~model_summary["总族类"].isin(REPORT_FAMILY_ORDER[:-1]), "总族类"] = "未匹配"
+    model_summary["字典状态"] = model_summary["总族类"].map(lambda family: "待维护" if family == "未匹配" else "已匹配")
+    model_summary["_sort_order"] = model_summary["_key"].map(sort_map).fillna(9999)
+
+    total_quantity = int(model_summary["数量"].sum())
+    family_rows: list[dict[str, object]] = []
+    for family in REPORT_FAMILY_ORDER:
+        group = model_summary[model_summary["总族类"] == family]
+        if group.empty:
+            continue
+        quantity = int(group["数量"].sum())
+        family_rows.append(
+            {
+                "总族类": family,
+                "累计出货": quantity,
+                "总族类比例": _format_ratio(quantity, total_quantity),
+                "机型数": int(group["机型"].nunique()),
+            }
+        )
+    family_rows.append({"总族类": "全部总族类", "累计出货": total_quantity, "总族类比例": "100.00%", "机型数": int(model_summary["机型"].nunique())})
+    family_summary = pd.DataFrame(family_rows)
+
+    all_models = model_summary.sort_values(["数量", "_sort_order", "机型"], ascending=[False, True, True], kind="stable").reset_index(drop=True)
+    all_models.insert(0, "排名", all_models.index + 1)
+    all_models["累计出货"] = all_models["数量"]
+    all_models["累计占比"] = all_models["累计出货"].map(lambda qty: _format_ratio(int(qty), total_quantity))
+    all_models = all_models[["排名", "机型", "总族类", "累计出货", "累计占比", "字典状态"]]
+    all_models.loc[len(all_models)] = ["全部机型", "", "", total_quantity, "100.00%", ""]
+
+    reference_columns = [
+        "XS 名称", "数量", "订货参考占比",
+        "AUTO 名称", "数量", "订货参考占比",
+        "G 名称", "数量", "订货参考占比",
+    ]
+    reference_groups: dict[str, pd.DataFrame] = {}
+    for label, families in SCREW_REFERENCE_FAMILIES.items():
+        group = model_summary[model_summary["总族类"].isin(families)].sort_values(
+            ["_sort_order", "机型"], ascending=[True, True], kind="stable"
+        )
+        reference_groups[label] = group
+
+    max_rows = max((len(group) for group in reference_groups.values()), default=0)
+    reference_rows: list[list[object]] = []
+    for index in range(max_rows):
+        row: list[object] = []
+        for label in ("XS", "AUTO", "G"):
+            group = reference_groups[label]
+            if index < len(group):
+                item = group.iloc[index]
+                group_total = int(group["数量"].sum())
+                row.extend([item["机型"], int(item["数量"]), _format_ratio(int(item["数量"]), group_total)])
+            else:
+                row.extend(["", "", ""])
+        reference_rows.append(row)
+
+    total_row: list[object] = []
+    for label in ("XS", "AUTO", "G"):
+        group = reference_groups[label]
+        total_row.extend([f"{label} 合计", int(group["数量"].sum()), "100.00%" if not group.empty else "0.00%"])
+    reference_rows.append(total_row)
+    screw_reference = pd.DataFrame(reference_rows, columns=reference_columns)
+
+    return {
+        "总族类比例": family_summary,
+        "丝杆订货需求比例": screw_reference,
+        "机型累计占比": all_models,
+    }
+
+
+def serialize_model_report_appendices(appendices: dict[str, pd.DataFrame]) -> dict[str, list[dict[str, object]]]:
+    """Serialize appendices for JSON while retaining all three repeated screw columns."""
+    screw = appendices.get("丝杆订货需求比例", pd.DataFrame())
+    screw_records: list[dict[str, object]] = []
+    for _, row in screw.iterrows():
+        screw_records.append(
+            {
+                "xs_name": row.iloc[0] if len(row) > 0 else "",
+                "xs_quantity": row.iloc[1] if len(row) > 1 else "",
+                "xs_ratio": row.iloc[2] if len(row) > 2 else "",
+                "auto_name": row.iloc[3] if len(row) > 3 else "",
+                "auto_quantity": row.iloc[4] if len(row) > 4 else "",
+                "auto_ratio": row.iloc[5] if len(row) > 5 else "",
+                "g_name": row.iloc[6] if len(row) > 6 else "",
+                "g_quantity": row.iloc[7] if len(row) > 7 else "",
+                "g_ratio": row.iloc[8] if len(row) > 8 else "",
+            }
+        )
+    return {
+        "总族类比例": appendices.get("总族类比例", pd.DataFrame()).to_dict("records"),
+        "丝杆订货需求比例": screw_records,
+        "机型累计占比": appendices.get("机型累计占比", pd.DataFrame()).to_dict("records"),
+    }
 
 
 def get_inbound_report_data(

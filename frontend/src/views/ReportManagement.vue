@@ -180,6 +180,7 @@
               <el-table-column prop="需求数量" label="需求数量" width="100" align="center" />
               <el-table-column prop="订单状态" label="订单状态" width="100" />
             </el-table>
+            <ReportAppendices :appendices="orderAppendices" :dealer-summary="orderDealerSummary" />
           </div>
         </div>
       </el-tab-pane>
@@ -265,6 +266,7 @@
               <el-table-column prop="合同号" label="合同号" min-width="150" />
               <el-table-column prop="批次号" label="批次号" width="150" />
             </el-table>
+            <ReportAppendices :appendices="shipmentAppendices" />
           </div>
         </div>
       </el-tab-pane>
@@ -302,6 +304,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiDownloadBlob } from '../utils/request'
+import ReportAppendices from '../components/ReportAppendices.vue'
 
 // Active tab
 const activeTab = ref('completion')
@@ -354,6 +357,9 @@ const inboundData = ref<any[]>([])
 const orderData = ref<any[]>([])
 const shipmentData = ref<any[]>([])
 const completionData = ref<any[]>([])
+const orderAppendices = ref<Record<string, any[]>>({})
+const shipmentAppendices = ref<Record<string, any[]>>({})
+const orderDealerSummary = ref<any[]>([])
 
 // Computed total quantity for completion report
 const totalQuantity = computed(() => {
@@ -537,12 +543,16 @@ const queryOrderReport = async () => {
       format: 'json'
     })
 
-    const res = await apiGet<{data: any[], total: number}>(`/reports/orders?${params.toString()}`)
+    const res = await apiGet<{data: any[], total: number, appendices?: Record<string, any[]>, dealer_summary?: any[]}>(`/reports/orders?${params.toString()}`)
     orderData.value = res.data || []
+    orderAppendices.value = res.appendices || {}
+    orderDealerSummary.value = res.dealer_summary || []
     ElMessage.success(`查询成功，共 ${res.total} 条数据`)
   } catch (error) {
     ElMessage.error('查询失败')
     orderData.value = []
+    orderAppendices.value = {}
+    orderDealerSummary.value = []
   } finally {
     orderLoading.value = false
   }
@@ -567,12 +577,14 @@ const queryShipmentReport = async () => {
       format: 'json'
     })
 
-    const res = await apiGet<{data: any[], total: number}>(`/reports/shipments?${params.toString()}`)
+    const res = await apiGet<{data: any[], total: number, appendices?: Record<string, any[]>}>(`/reports/shipments?${params.toString()}`)
     shipmentData.value = res.data || []
+    shipmentAppendices.value = res.appendices || {}
     ElMessage.success(`查询成功，共 ${res.total} 条数据`)
   } catch (error) {
     ElMessage.error('查询失败')
     shipmentData.value = []
+    shipmentAppendices.value = {}
   } finally {
     shipmentLoading.value = false
   }
