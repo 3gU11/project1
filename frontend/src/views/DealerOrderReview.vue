@@ -9,13 +9,13 @@
       </template>
     </PageHeader>
 
-    <div class="cloud-sync-strip">
+    <div v-if="cloudSyncStatus.pending || cloudSyncStatus.failed" class="cloud-sync-strip">
       <span>Cloud pending: <strong>{{ cloudSyncStatus.pending }}</strong></span>
       <span>Failed: <strong :class="{ danger: cloudSyncStatus.failed > 0 }">{{ cloudSyncStatus.failed }}</strong></span>
       <span v-if="cloudSyncStatus.recent_failed?.length" class="last-error">
-        Last: {{ cloudSyncStatus.recent_failed[0].biz_key }} {{ cloudSyncStatus.recent_failed[0].last_error }}
+        <span :title="cloudSyncLastError">Last failed: {{ cloudSyncLastSummary }}</span>
       </span>
-      <el-button size="small" :loading="retryingCloudSync" @click="retryCloudSync">Retry</el-button>
+      <el-button v-if="cloudSyncStatus.failed > 0" size="small" :loading="retryingCloudSync" @click="retryCloudSync">Retry</el-button>
     </div>
 
     <div class="filters">
@@ -397,6 +397,20 @@ const todoStats = reactive({
   pending: 0,
 })
 
+const cloudSyncLastError = computed(() => {
+  const item = cloudSyncStatus.value.recent_failed?.[0]
+  if (!item) return ''
+  return [item.biz_key, item.last_error].filter(Boolean).join(' ')
+})
+
+const cloudSyncLastSummary = computed(() => {
+  const item = cloudSyncStatus.value.recent_failed?.[0]
+  if (!item) return '-'
+  const orderNo = String(item.biz_key || '').trim()
+  const eventType = String(item.event_type || '').replace(/^dealer_order_/, '')
+  return [orderNo, eventType || 'sync'].filter(Boolean).join(' / ')
+})
+
 const selectedOrder = computed(() => orders.value.find((row) => row.order_no === selectedOrderNo.value) || null)
 const detailItems = computed(() => preview.value?.items || selectedOrder.value?.items || (selectedOrder.value ? [selectedOrder.value] : []))
 const statusRank = (status: string) => ({
@@ -523,13 +537,9 @@ const onConvertFileRemove = (uploadFile: any) => {
 }
 
 const todayYmd = () => new Date().toISOString().slice(0, 10)
-const genContractId = () => {
-  const now = new Date()
-  const y = now.getFullYear().toString()
-  const m = `${now.getMonth() + 1}`.padStart(2, '0')
-  const d = `${now.getDate()}`.padStart(2, '0')
-  const rnd = Math.floor(Math.random() * 9000 + 1000)
-  return `HT${y}${m}${d}${rnd}`
+const fetchNextContractId = async () => {
+  const res = await apiGet<{ contract_no: string }>('/planning/contracts/next-id')
+  return String(res.contract_no || '').trim()
 }
 
 const isRushHint = (order: DealerOrder) => {
@@ -561,7 +571,7 @@ const normalizeDealerOrderItems = (order: DealerOrder) => {
     .filter((item) => item.model)
 }
 
-const openConvertDialog = (order: DealerOrder) => {
+const openConvertDialog = async (order: DealerOrder) => {
   if (!canConvertDealerOrder(order)) {
     ElMessage.warning('只有待审核或已通过的经销商订单可以转合同')
     return
@@ -571,7 +581,7 @@ const openConvertDialog = (order: DealerOrder) => {
     ElMessage.warning('该经销商订单没有可转合同的机型明细')
     return
   }
-  convertForm.contractNo = genContractId()
+  convertForm.contractNo = ''
   convertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   convertForm.customer = String(order.customer_name || '').trim()
   convertForm.agent = String(order.contact_name || '').trim()
@@ -581,6 +591,12 @@ const openConvertDialog = (order: DealerOrder) => {
   convertForm.sourceOrderNo = String(order.order_no || '').trim()
   convertCanUseSpot.value = true
   convertSpotBlockReason.value = ''
+  try {
+    convertForm.contractNo = await fetchNextContractId()
+  } catch (err) {
+    ElMessage.error(getApiErrorMessage(err) || '生成合同号失败')
+    return
+  }
   
   // 重置上传的文件
   convertPickedFiles.value = []
@@ -756,16 +772,19 @@ const syncCloudOrders = async () => {
       updated?: number
       skipped?: number
       factory_pending_orders?: number
+      pruned_cloud_deleted_orders?: number
     }>('/dealer-orders/sync-cloud', {
       status: 'all',
       page_size: 100,
       max_pages: 20,
     }, { timeout: 120_000 })
-    ElMessage.success(`同步完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}`)
+    const prunedText = Number(res.pruned_cloud_deleted_orders || 0) > 0 ? `，清理 ${res.pruned_cloud_deleted_orders}` : ''
+    ElMessage.success(`同步完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}${prunedText}`)
     if (Number(res.factory_pending_orders || 0) > 0) filters.status = 'todo'
     page.value = 1
     selectedOrderNo.value = ''
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+    await loadCloudSyncStatus()
     await loadOrders()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '同步云端失败')

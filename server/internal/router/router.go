@@ -75,6 +75,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		api.GET("/batches", bh.List)
 		api.GET("/batches/:id", bh.GetByID)
 		api.GET("/batches/:id/units", bh.GetBatchUnits)
+		api.POST("/batches/manual-predicted", bh.CreateManualPredicted)
 		api.POST("/batches/:id/confirm", bh.Confirm)
 		api.POST("/batches/:id/revoke", bh.Revoke)
 		api.POST("/batches/batch-confirm", bh.BatchConfirm)
@@ -109,6 +110,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 
 		// Production lines
 		api.GET("/production-lines", lh.List)
+		api.POST("/production-lines/reconcile-inbound", lh.ReconcileInbound)
 		api.POST("/production-lines/:id/assign", lh.Assign)
 		api.POST("/production-lines/:id/manual-complete", lh.ManualComplete)
 		api.POST("/production-lines/:id/lock-units", lh.LockUnits)

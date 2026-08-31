@@ -19,6 +19,8 @@ SYNC_EVENT_TYPES = {
     "dealer_order_allocated",
     "dealer_order_completed",
     "wechat_batch_summary_sync",
+    "repair_snapshot_sync",
+    "repair_delta_event_sync",
 }
 
 POLL_INTERVAL_SECONDS = 5
@@ -106,9 +108,9 @@ def insert_cloud_sync_event(conn: Any, event_id: str, event_type: str, biz_key: 
             VALUES
               (:event_id, :event_type, :biz_key, :payload_json, 'pending', 0, NULL)
             ON DUPLICATE KEY UPDATE
-              event_type=VALUES(event_type),
-              biz_key=VALUES(biz_key),
-              payload_json=VALUES(payload_json),
+              event_type=IF(status='synced', event_type, VALUES(event_type)),
+              biz_key=IF(status='synced', biz_key, VALUES(biz_key)),
+              payload_json=IF(status='synced', payload_json, VALUES(payload_json)),
               status=IF(status='synced', status, 'pending'),
               last_error=NULL,
               next_retry_at=NULL
@@ -131,7 +133,17 @@ def enqueue_wechat_batch_summary_sync(reason: str = "") -> str:
     )
 
 
-def _retry_delay_sql(next_retry_number: int) -> str:
+def _retry_delay_sql(next_retry_number: int, *, repair: bool = False) -> str:
+    if repair:
+        if next_retry_number <= 1:
+            return "DATE_ADD(NOW(), INTERVAL 1 MINUTE)"
+        if next_retry_number == 2:
+            return "DATE_ADD(NOW(), INTERVAL 5 MINUTE)"
+        if next_retry_number == 3:
+            return "DATE_ADD(NOW(), INTERVAL 15 MINUTE)"
+        if next_retry_number == 4:
+            return "DATE_ADD(NOW(), INTERVAL 30 MINUTE)"
+        return "DATE_ADD(NOW(), INTERVAL 60 MINUTE)"
     if next_retry_number <= 1:
         return "DATE_ADD(NOW(), INTERVAL 30 SECOND)"
     if next_retry_number == 2:
@@ -196,24 +208,26 @@ def _mark_synced(event_id: str) -> None:
         )
 
 
-def _mark_failed(event_id: str, error: str) -> None:
+def _mark_failed(event_id: str, error: Exception | str) -> None:
     with get_engine().begin() as conn:
-        retry_count = int(
-            conn.execute(
-                text("SELECT retry_count FROM cloud_sync_outbox WHERE event_id=:event_id"),
-                {"event_id": event_id},
-            ).scalar()
-            or 0
-        )
+        row = conn.execute(
+            text("SELECT retry_count, event_type FROM cloud_sync_outbox WHERE event_id=:event_id"),
+            {"event_id": event_id},
+        ).mappings().first() or {}
+        retry_count = int(row.get("retry_count") or 0)
+        repair = str(row.get("event_type") or "").startswith("repair_")
         next_retry = retry_count + 1
+        retryable = bool(getattr(error, "retryable", True))
+        status = "failed" if retryable else "rejected"
+        next_retry_sql = _retry_delay_sql(next_retry, repair=repair) if retryable else "NULL"
         conn.execute(
             text(
                 f"""
                 UPDATE cloud_sync_outbox
-                SET status='failed',
+                SET status='{status}',
                     retry_count=retry_count+1,
                     last_error=:last_error,
-                    next_retry_at={_retry_delay_sql(next_retry)}
+                    next_retry_at={next_retry_sql}
                 WHERE event_id=:event_id
                 """
             ),
@@ -231,7 +245,7 @@ def process_next_cloud_sync_event() -> dict[str, Any] | None:
         _mark_synced(event_id)
         return {"event_id": event_id, "status": "synced"}
     except Exception as exc:
-        _mark_failed(event_id, str(exc))
+        _mark_failed(event_id, exc)
         logger.warning("cloud sync event failed: %s %s", event_id, exc)
         return {"event_id": event_id, "status": "failed", "error": str(exc)}
 
@@ -266,7 +280,60 @@ def _dispatch_event(event: dict[str, Any]) -> None:
     payload = event.get("payload") or {}
     event_id = str(event.get("event_id") or "")
     event_type = str(event.get("event_type") or "")
+
+    if event_type == "repair_snapshot_sync":
+        from repair_sync.client import NonRetryableSyncError, upload_snapshot
+        from repair_sync.config import get_config
+        from repair_sync.snapshot_store import (
+            get_snapshot,
+            mark_snapshot_error,
+            mark_snapshot_rejected,
+            mark_snapshot_uploaded,
+        )
+
+        snapshot_id = str(payload.get("snapshot_id") or "").strip()
+        if not snapshot_id:
+            raise ValueError("repair snapshot event missing snapshot_id")
+        snapshot_row = get_snapshot(snapshot_id=snapshot_id)
+        if not snapshot_row:
+            raise ValueError(f"repair snapshot not found: {snapshot_id}")
+        expected_sha = str(payload.get("payload_sha256") or "")
+        actual_sha = str(snapshot_row.get("payload_sha256") or "")
+        if expected_sha and expected_sha != actual_sha:
+            raise ValueError(f"repair snapshot digest mismatch: {snapshot_id}")
+        try:
+            upload_snapshot(
+                snapshot_row["payload"],
+                idempotency_key=event_id,
+                config=get_config(),
+            )
+        except Exception as exc:
+            if isinstance(exc, NonRetryableSyncError):
+                mark_snapshot_rejected(snapshot_id, str(exc))
+            else:
+                mark_snapshot_error(snapshot_id, str(exc))
+            raise
+        mark_snapshot_uploaded(snapshot_id)
+        return
+
+    if event_type == "repair_delta_event_sync":
+        from repair_sync.client import NonRetryableSyncError
+
+        raise NonRetryableSyncError("repair delta event upload is reserved for the realtime sync phase")
     order_no = str(payload.get("order_no") or event.get("biz_key") or "").strip()
+
+    if event_type.startswith("dealer_order_") and order_no:
+        with get_engine().begin() as conn:
+            exists = int(
+                conn.execute(
+                    text("SELECT COUNT(*) FROM dealer_orders WHERE order_no=:order_no"),
+                    {"order_no": order_no},
+                ).scalar()
+                or 0
+            )
+        if exists <= 0:
+            logger.info("Skipping cloud sync event %s because local dealer order %s no longer exists", event_id, order_no)
+            return
 
     if event_type == "dealer_order_reviewed":
         push_cloud_review(

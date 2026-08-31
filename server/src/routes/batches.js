@@ -94,11 +94,13 @@ router.get('/:id', async (req, res) => {
 // POST /api/batches/:id/confirm 鈥?approve batch, release slot, pull from queue
 router.post('/:id/confirm', adminOnly, async (req, res) => {
   const batchCode = String(req.body?.batch_code || '').trim();
-  let assignedBatchNo = null;
   if (batchCode) {
-    const m = batchCode.match(/^(\d{2})-(\d{2})$/);
-    if (!m) return res.status(400).json({ error: 'batch_code format must be MM-SS' });
-    assignedBatchNo = Number(m[1]) * 100 + Number(m[2]);
+    if ([...batchCode].length > 64) {
+      return res.status(400).json({ error: 'batch_code must be 64 characters or fewer' });
+    }
+    if (/[\u0000-\u001F\u007F]/.test(batchCode)) {
+      return res.status(400).json({ error: 'batch_code contains invalid characters' });
+    }
   }
 
   const lockToken = await acquireLock('batch:slot', 30);
@@ -122,10 +124,20 @@ router.post('/:id/confirm', adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Only Predicted batches can be confirmed' });
     }
 
-    if (assignedBatchNo !== null) {
+    if (batchCode) {
+      const [duplicates] = await conn.query(
+        'SELECT batch_id FROM batches WHERE batch_id <> ? AND batch_code = ? LIMIT 1',
+        [req.params.id, batchCode]
+      );
+      if (duplicates.length) {
+        await conn.rollback();
+        conn.release();
+        await releaseLock('batch:slot', lockToken);
+        return res.status(400).json({ error: `batch_code ${batchCode} already exists` });
+      }
       await conn.query(
-        `UPDATE batches SET status = 'Confirmed', batch_no = ?, updated_at = NOW() WHERE batch_id = ?`,
-        [assignedBatchNo, req.params.id]
+        `UPDATE batches SET status = 'Confirmed', batch_code = ?, updated_at = NOW() WHERE batch_id = ?`,
+        [batchCode, req.params.id]
       );
     } else {
       await conn.query(

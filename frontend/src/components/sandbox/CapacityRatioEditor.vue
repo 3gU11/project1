@@ -346,7 +346,7 @@ function normalizeCategory(v: string) {
 
 function categoryOfModel(modelType: string, modelFamily?: string) {
   const mf = normalizeCategory(String(modelFamily || '').trim())
-  if (mf) return mf
+  if (mf && !['G', 'XS', 'AUTO'].includes(mf.toUpperCase())) return mf
   const mt = String(modelType || '').toUpperCase()
   if (mt === 'FH-300C') return '中小型G'
   if (mt.includes('AUTO')) return mt.includes('7055') || mt.includes('8055') || mt.includes('8060') ? '中大型AUTO' : '中小型AUTO'

@@ -78,19 +78,20 @@
             空闲 - 可分配待排产批次
           </div>
         </div>
+
       </div>
     </div>
 
     <div class="kanban-right">
-      <div class="sidebar-panel" style="flex: 3">
+      <div class="sidebar-panel sidebar-panel-rush">
         <RushOrderEntry @auto-inserted="() => refreshAll({ silent: true })" />
       </div>
 
-      <div class="sidebar-panel" style="flex: 2">
+      <div class="sidebar-panel sidebar-panel-transfer">
         <TransferSwapPanel />
       </div>
 
-      <div class="sidebar-panel" style="flex: 1">
+      <div class="sidebar-panel sidebar-panel-queue">
         <div class="queue-section">
           <h3 class="queue-title">
             待排产队列
@@ -105,22 +106,32 @@
           </h3>
           <div class="queue-scroll">
             <div v-for="batch in queueBatches" :key="batch.batch_id" class="queue-batch-item">
-              <div class="queue-batch-card">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                  <span class="queue-batch-label">
-                    <strong>[{{ displayBatchCategory(batch) }}] {{ displayBatchCode(batch) }}</strong>
-                    ({{ batch.units?.length || 0 }}/{{ batch.capacity }})
-                  </span>
-                  <el-button
-                    size="small" type="primary"
-                    @click="showAssignDialog(batch)"
-                    :disabled="assignableLinesForBatch(batch).length === 0"
-                  >
-                    整批分配
-                  </el-button>
+              <div
+                class="queue-batch-card"
+                :class="{ active: selectedQueueBatchId === batch.batch_id }"
+                @click="showQueueBatchPreview(batch)"
+              >
+                <div class="queue-batch-main-row">
+                  <div class="queue-batch-label">
+                    <strong class="queue-batch-code">{{ displayBatchCode(batch) }}</strong>
+                    <span class="queue-batch-count">{{ batch.units?.length || 0 }}/{{ batch.capacity || '-' }} 张</span>
+                    <span class="queue-batch-family">{{ displayBatchCategory(batch) || '-' }}</span>
+                  </div>
+                  <div class="queue-batch-actions">
+                    <el-button size="small" :icon="FullScreen" @click.stop="showQueueBatchPreview(batch)">
+                      展开
+                    </el-button>
+                    <el-button
+                      size="small" type="primary"
+                      @click.stop="showAssignDialog(batch)"
+                      :disabled="assignableLinesForBatch(batch).length === 0"
+                    >
+                      整批分配
+                    </el-button>
+                  </div>
                 </div>
-                <div style="font-size:11px;color:#999;">
-                  {{ fmtDate(batch.due_date_start) }} ~ {{ fmtDate(batch.due_date_end) }}
+                <div class="queue-batch-inbound">
+                  预计入库: {{ queueBatchExpectedInbound(batch) }}
                 </div>
               </div>
             </div>
@@ -133,6 +144,110 @@
       </div>
     </div>
   </div>
+
+  <el-dialog
+    v-model="queueBatchDialogVisible"
+    class="queue-batch-dialog"
+    width="min(1480px, 96vw)"
+    top="5vh"
+    destroy-on-close
+    :close-on-click-modal="false"
+    @closed="closeQueueBatchPreview"
+  >
+    <template #header>
+      <div v-if="selectedQueueBatch" class="queue-dialog-title">
+        <div class="queue-dialog-title-main">
+          <span class="line-name">待排产批次</span>
+          <span class="line-status queue-preview-status">待排产</span>
+          <span class="queue-preview-category">{{ displayBatchCategory(selectedQueueBatch) }}</span>
+          <strong>批次: {{ displayBatchCode(selectedQueueBatch) }}</strong>
+          <span class="line-inbound-date">
+            预计入库: {{ queueBatchExpectedInbound(selectedQueueBatch) }}
+          </span>
+        </div>
+        <div class="queue-dialog-title-meta">
+          <span>卡片 {{ selectedQueueBatch.units?.length || 0 }} / {{ selectedQueueBatch.capacity || '-' }}</span>
+          <span>把右侧急单拖到左侧目标卡片即可插入</span>
+        </div>
+      </div>
+    </template>
+
+    <div v-if="selectedQueueBatch" class="queue-dialog-layout">
+      <section class="queue-dialog-main">
+        <div class="queue-dialog-summary">
+          <div>
+            <span class="summary-label">批次类型</span>
+            <strong>{{ displayBatchCategory(selectedQueueBatch) }}</strong>
+          </div>
+          <div>
+            <span class="summary-label">容量</span>
+            <strong>{{ selectedQueueBatch.units?.length || 0 }} / {{ selectedQueueBatch.capacity || '-' }}</strong>
+          </div>
+          <div>
+            <span class="summary-label">预计入库时间</span>
+            <strong>{{ queueBatchExpectedInbound(selectedQueueBatch) }}</strong>
+          </div>
+        </div>
+
+        <div
+          class="production-line queue-dialog-line"
+          :data-queue-batch-id="selectedQueueBatch.batch_id"
+        >
+          <div class="line-header queue-preview-header">
+            <span class="line-name">批次全部卡片</span>
+            <span class="line-status queue-preview-status">可插入急单</span>
+            <span class="queue-preview-category">{{ displayBatchCategory(selectedQueueBatch) }}</span>
+            <span style="flex:1;"></span>
+            <el-button
+              size="small"
+              type="primary"
+              @click="showAssignDialog(selectedQueueBatch)"
+              :disabled="assignableLinesForBatch(selectedQueueBatch).length === 0"
+            >
+              整批分配
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              @click="revokeQueueBatch(selectedQueueBatch)"
+            >
+              撤销审核
+            </el-button>
+          </div>
+          <div class="queue-preview-body">
+            <VueDraggable
+              :model-value="sortedQueuePreviewUnits"
+              :group="{ name: 'line-units', pull: false, put: ['rush-orders'] }"
+              item-key="unit_id"
+              :sort="false"
+              @start="onDragStart"
+              @add="(evt: any) => onQueuePreviewDrop(evt, selectedQueueBatch)"
+              @end="onDragEnd"
+              class="line-units queue-dialog-units"
+            >
+              <template v-for="u in sortedQueuePreviewUnits" :key="u.unit_id">
+                <UnitCard
+                  :unit="{ ...u, model_family: u.model_family || modelFamilyMap[String(u.model_type || '').toUpperCase()] || '' }"
+                  :force-show-serial-no="true"
+                  :selected="false"
+                  @edit="openQueueEditDrawer"
+                  @select="() => {}"
+                />
+              </template>
+            </VueDraggable>
+            <div v-if="!sortedQueuePreviewUnits.length" class="queue-empty">
+              暂无卡片
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <aside class="queue-dialog-rush">
+        <RushOrderEntry @auto-inserted="() => refreshAll({ silent: true })" />
+      </aside>
+    </div>
+  </el-dialog>
 
   <el-button
     class="stats-floating-toggle"
@@ -228,7 +343,19 @@
         <el-form-item label="合同号"><el-input v-model="editForm.contract_no" disabled /></el-form-item>
         <el-form-item label="客户"><el-input v-model="editForm.customer" /></el-form-item>
         <el-form-item label="经销商"><el-input v-model="editForm.dealer_name" /></el-form-item>
-        <el-form-item label="机型"><el-input v-model="editForm.model_type" disabled /></el-form-item>
+        <el-form-item label="机型">
+          <el-select
+            v-if="canEditModelInKanban"
+            v-model="editForm.model_type"
+            filterable
+            :allow-create="!isEditingSpecialBatch"
+            default-first-option
+            style="width:100%"
+          >
+            <el-option v-for="m in editModelTypes" :key="m" :label="m" :value="m" />
+          </el-select>
+          <el-input v-else v-model="editForm.model_type" disabled placeholder="上线卡片请到机台编辑修改机型" />
+        </el-form-item>
         <el-form-item label="备注"><el-input v-model="editForm.order_remark" type="textarea" /></el-form-item>
         <el-form-item>
           <el-button type="primary" @click="saveEdit" :loading="saving">保存并锁定</el-button>
@@ -250,7 +377,7 @@
 
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useBatchStore } from '../../stores/useSandboxBatchStore'
@@ -262,9 +389,9 @@ import UnitCard from '../../components/sandbox/UnitCard.vue'
 import RushOrderEntry from '../../components/sandbox/RushOrderEntry.vue'
 import TransferSwapPanel from '../../components/sandbox/TransferSwapPanel.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
-import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
+import { categoryOfModel, normalizeMajorFamily, productionGroupOfCategory, productionRegionOfCategory } from '../../utils/sandboxCategory'
 import { apiDownloadBlob, apiDownloadBlobPost } from '../../utils/request'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, FullScreen } from '@element-plus/icons-vue'
 
 const batchStore = useBatchStore()
 const lineStore = useLineStore()
@@ -272,13 +399,16 @@ const rushStore = useRushStore()
 const transferStore = useTransferStore()
 
 const queueFilter = ref('')
-const statsPanelOpen = ref(false)
+const selectedQueueBatchId = ref('')
+const queueBatchDialogVisible = ref(false)
+const statsPanelOpen = ref(true)
 const assignVisible = ref(false)
 const assigningBatch = ref<any>(null)
 const selectedLineId = ref<string | null>(null)
 const assigning2 = ref(false)
 const editVisible = ref(false)
 const editingUnit = ref<any>(null)
+const editingFromQueue = ref(false)
 const saving = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; unit: any }>({ visible: false, x: 0, y: 0, unit: null })
 const selectedByLine = ref<Record<string, string[]>>({})
@@ -288,6 +418,7 @@ const lockRemark = ref('')
 const locking = ref(false)
 const dragging = ref(false)
 const pendingRefresh = ref(false)
+const modelTypes = ref<string[]>([])
 const modelFamilyMap = ref<Record<string, string>>({})
 let refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -378,10 +509,125 @@ function batchExpectedInboundLabel(batch: any, units: any[]) {
   return dates.join(', ')
 }
 
+function queueBatchExpectedInbound(batch: any) {
+  const units = Array.isArray(batch?.units) ? batch.units : []
+  const label = batchExpectedInboundLabel(batch, units)
+  if (label) return label
+  const fallback = fmtDate(batch?.due_date_end)
+  return fallback && fallback !== '-' ? fallback : '-'
+}
+
 const queueBatches = computed(() => {
   let batches = batchStore.batches.filter((b: any) => b.status === 'Confirmed')
   if (queueFilter.value) batches = batches.filter((b: any) => displayBatchCategory(b) === queueFilter.value)
   return batches
+})
+
+const selectedQueueBatch = computed(() => {
+  const id = String(selectedQueueBatchId.value || '')
+  if (!id) return null
+  return queueBatches.value.find((batch: any) => String(batch?.batch_id || '') === id) || null
+})
+
+function serialSortParts(unit: any) {
+  const raw = String(unit?.serial_no || unit?.forecast_serial_no || '').trim()
+  const match = raw.match(/^(\D*?)(\d+)-(\d+)-(\d+)$/)
+  if (match) {
+    return {
+      hasSerial: 0,
+      prefix: match[1],
+      year: Number(match[2]),
+      month: Number(match[3]),
+      seq: Number(match[4]),
+      raw
+    }
+  }
+  const tail = raw.match(/(\d+)$/)
+  return {
+    hasSerial: raw ? 0 : 1,
+    prefix: raw.replace(/\d+$/, ''),
+    year: 0,
+    month: 0,
+    seq: tail ? Number(tail[1]) : Number.MAX_SAFE_INTEGER,
+    raw
+  }
+}
+
+function compareUnitsBySerial(a: any, b: any) {
+  const sa = serialSortParts(a)
+  const sb = serialSortParts(b)
+  return sa.hasSerial - sb.hasSerial
+    || sa.prefix.localeCompare(sb.prefix, 'zh-Hans-CN', { numeric: true })
+    || sa.year - sb.year
+    || sa.month - sb.month
+    || sa.seq - sb.seq
+    || sa.raw.localeCompare(sb.raw, 'zh-Hans-CN', { numeric: true })
+    || Number(a?.slot_index || 0) - Number(b?.slot_index || 0)
+    || String(a?.unit_id || '').localeCompare(String(b?.unit_id || ''), 'zh-Hans-CN', { numeric: true })
+}
+
+const sortedQueuePreviewUnits = computed(() => {
+  const units = Array.isArray(selectedQueueBatch.value?.units) ? selectedQueueBatch.value.units : []
+  return sortUnitsBySerial(units)
+})
+
+function sortUnitsBySerial(units: any) {
+  return Array.isArray(units) ? [...units].sort(compareUnitsBySerial) : []
+}
+
+const editingBatch = computed(() => {
+  if (!editingUnit.value) return null
+  const batchId = String(editingUnit.value?.batch_id || '')
+  if (!batchId) return null
+  return batchStore.batches.find((b: any) => String(b?.batch_id || '') === batchId) || null
+})
+
+const editingBatchFamily = computed(() => {
+  if (!editingBatch.value) return ''
+  return majorFamilyOfModel(editingBatch.value?.model_type || '')
+})
+
+const editingBatchCategory = computed(() => {
+  if (!editingBatch.value) return ''
+  return displayBatchCategory(editingBatch.value)
+})
+
+const isEditingSpecialBatch = computed(() => {
+  const batch = editingBatch.value
+  if (!batch) return false
+  return String(batch?.model_type || '').trim().toUpperCase() === 'SPECIAL' || displayBatchCategory(batch) === '特殊'
+})
+
+const canEditModelInKanban = computed(() => {
+  if (!editingUnit.value) return false
+  const status = String(editingUnit.value?.status || '').trim()
+  return editingFromQueue.value && status !== 'In_Production'
+})
+
+const editModelTypes = computed(() => {
+  const family = editingBatchFamily.value
+  const category = editingBatchCategory.value
+  const merged = new Set<string>([...modelTypes.value, ...batchStore.modelTypes])
+  const all = [...merged]
+    .map((m) => String(m || '').trim())
+    .filter(Boolean)
+    .filter((m) => !isFamilyToken(m))
+    .sort()
+  if (category === '特殊') {
+    return all.filter((m: string) => {
+      const mf = String(modelFamilyMap.value[m.toUpperCase()] || '')
+      return normalizeMajorFamily(mf) === 'SPECIAL' || mf.includes('特殊') || mf.includes('鐗规畩')
+    })
+  }
+  if (!family) return all
+  if (category) {
+    const productionGroup = productionGroupOfCategory(category)
+    return all.filter((m: string) => {
+      const modelCategory = categoryOfModel(m, modelFamilyMap.value[m.toUpperCase()] || '')
+      return productionGroupOfCategory(modelCategory) === productionGroup
+    })
+  }
+  return all.filter((m: string) => majorFamilyOfModel(m) === family)
 })
 
 const kanbanStatsRows = computed<KanbanStatRow[]>(() => {
@@ -498,6 +744,21 @@ function isSpecialBatch(batch: any) {
   return String(batch?.model_type || '').trim().toUpperCase() === 'SPECIAL'
 }
 
+function isFamilyToken(modelType: string) {
+  const upper = String(modelType || '').trim().toUpperCase()
+  return upper === 'G' || upper === 'XS' || upper === 'AUTO' || upper === 'SPECIAL'
+}
+
+function isUnitFamilyMismatch(unit: any, batch: any) {
+  if (!unit || !batch) return false
+  const modelType = String(unit?.model_type || '')
+  const unitCategory = categoryOfModel(modelType, modelFamilyMap.value[modelType.toUpperCase()] || '')
+  const unitGroup = productionGroupOfCategory(unitCategory)
+  const batchGroup = productionGroupOfCategory(displayBatchCategory(batch))
+  if (!unitGroup || !batchGroup) return false
+  return unitGroup !== batchGroup
+}
+
 function isSpecialLine(line: any) {
   const batches = Array.isArray(line?.batches) ? line.batches : []
   if (!batches.length) return false
@@ -533,7 +794,10 @@ function lineExpectedInboundLabels(line: any) {
 function assignableLinesForBatch(batch: any) {
   if (!batch) return []
   const special = isSpecialBatch(batch)
+  const batchRegion = productionRegionOfCategory(displayBatchCategory(batch))
   return lineStore.lines.filter((line: any) => {
+    const lineRegion = String(line?.region || '').trim().toUpperCase()
+    if (!batchRegion || lineRegion !== batchRegion) return false
     if (line.status === 'Idle') return true
     if (!special) return false
     return isSpecialLine(line)
@@ -557,6 +821,37 @@ function scrollToLine(lineId: string | null | undefined) {
 function navigateToLine(lineId: string | null | undefined) {
   scrollToLine(lineId)
   statsPanelOpen.value = false
+}
+
+function showQueueBatchPreview(batch: any) {
+  const batchId = String(batch?.batch_id || '')
+  if (!batchId) return
+  selectedQueueBatchId.value = batchId
+  queueBatchDialogVisible.value = true
+  statsPanelOpen.value = false
+}
+
+function closeQueueBatchPreview() {
+  selectedQueueBatchId.value = ''
+  queueBatchDialogVisible.value = false
+}
+
+async function revokeQueueBatch(batch: any) {
+  const batchId = String(batch?.batch_id || '')
+  if (!batchId) return
+  try {
+    await ElMessageBox.confirm('撤销审核将删除 plan_import 中该批次的记录，并把批次退回预测沙盘待确认，确认？', '撤销审核', {
+      confirmButtonText: '确认撤销',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await sandboxApi.revokeBatch(batchId)
+    ElMessage.success('已撤销审核，批次恢复为待确认')
+    closeQueueBatchPreview()
+    await forceRefreshAll()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e.message || '撤销失败')
+  }
 }
 
 function fmtDate(d: string | null | undefined) {
@@ -633,17 +928,25 @@ async function loadModelTypes() {
     const res = await sandboxApi.getModelTypes() as any
     const list = Array.isArray(res) ? res : (res?.model_types || res?.types || [])
     const nextMap: Record<string, string> = {}
+    const nextTypes: string[] = []
     if (Array.isArray(list)) {
       for (const item of list) {
-        if (typeof item === 'string') continue
+        if (typeof item === 'string') {
+          const mt = item.trim()
+          if (mt) nextTypes.push(mt)
+          continue
+        }
         if (!item || typeof item !== 'object') continue
         const mt = String(item.model_type || '').trim()
         const mf = String(item.model_family || '').trim()
+        if (mt) nextTypes.push(mt)
         if (mt && mf) nextMap[mt.toUpperCase()] = mf
       }
     }
+    modelTypes.value = Array.from(new Set(nextTypes)).sort()
     modelFamilyMap.value = nextMap
   } catch {
+    modelTypes.value = []
     modelFamilyMap.value = {}
   }
 }
@@ -822,6 +1125,22 @@ async function onKanbanDrop(evt: any, line: any) {
   await handleRushDrop(rushOrder, targetUnit)
 }
 
+async function onQueuePreviewDrop(evt: any, batch: any) {
+  const rushOrder = getDroppedData(evt)
+  const targetUnit = resolveTargetUnit(evt, { ...batch, units: sortUnitsBySerial(batch?.units) })
+  cleanupDroppedClone(batch)
+  if (!isRushOrder(rushOrder)) {
+    debouncedRefresh()
+    return
+  }
+  if (!targetUnit) {
+    ElMessage.error('未识别目标机台')
+    debouncedRefresh()
+    return
+  }
+  await handleRushDrop(rushOrder, targetUnit)
+}
+
 function getDroppedData(evt: any) {
   return evt?.data || evt?.clonedData || evt?.item?.__draggable_context?.element
 }
@@ -910,6 +1229,7 @@ async function doDirectRushInsert(rushOrder: any, targetUnit: any) {
 }
 
 function openEditDrawer(unit: any) {
+  editingFromQueue.value = false
   editingUnit.value = unit
   editForm.value = {
     contract_no: unit.contract_no || '',
@@ -921,12 +1241,38 @@ function openEditDrawer(unit: any) {
   editVisible.value = true
 }
 
+function openQueueEditDrawer(unit: any) {
+  editingFromQueue.value = true
+  editingUnit.value = unit
+  editForm.value = {
+    contract_no: unit.contract_no || '',
+    customer: unit.customer || '',
+    dealer_name: unit.dealer_name || '',
+    model_type: unit.model_type || '',
+    order_remark: unit.order_remark || ''
+  }
+  if (isEditingSpecialBatch.value && isFamilyToken(editForm.value.model_type)) {
+    editForm.value.model_type = ''
+  }
+  editVisible.value = true
+}
+
 async function saveEdit() {
   if (!editingUnit.value) return
   saving.value = true
   try {
-    const { model_type, contract_no, ...editableFields } = editForm.value
-    await sandboxApi.updateUnit(editingUnit.value.unit_id, editableFields)
+    if (canEditModelInKanban.value) {
+      const batch = editingBatch.value
+      if (batch && isUnitFamilyMismatch({ ...editingUnit.value, model_type: editForm.value.model_type }, batch)) {
+        ElMessage.warning('机型与批次生产组不匹配，请选择兼容机型')
+        return
+      }
+      const { contract_no: _, ...data } = editForm.value as any
+      await sandboxApi.updateUnit(editingUnit.value.unit_id, data)
+    } else {
+      const { model_type, contract_no, ...editableFields } = editForm.value
+      await sandboxApi.updateUnit(editingUnit.value.unit_id, editableFields)
+    }
     ElMessage.success('已保存并锁定')
     editVisible.value = false
     await forceRefreshAll()
@@ -1049,6 +1395,10 @@ onMounted(async () => {
   cleanupFns.push(onEvent('batch:confirmed', () => refreshAll({ silent: true })))
   cleanupFns.push(onEvent('line:updated', () => refreshAll({ silent: true })))
   cleanupFns.push(onEvent('line:completed', () => refreshAll({ silent: true })))
+})
+
+onActivated(() => {
+  statsPanelOpen.value = true
 })
 
 onUnmounted(() => {
@@ -1178,9 +1528,23 @@ onUnmounted(() => {
 }
 .ctx-item-primary:hover { background: #fef9f0; }
 
+.sidebar-panel-rush {
+  flex: 0 0 24%;
+  min-height: 150px;
+}
+.sidebar-panel-transfer {
+  flex: 0 0 18%;
+  min-height: 118px;
+}
+.sidebar-panel-queue {
+  flex: 1 1 58%;
+  min-height: 260px;
+}
+
 .queue-section {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
 }
 .queue-section.in-production-section {
@@ -1203,16 +1567,75 @@ onUnmounted(() => {
 }
 .queue-batch-card {
   font-size: 12px;
-  padding: 6px 10px;
+  padding: 7px 10px;
   background: #fafafa;
   border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
+}
+.queue-batch-card:hover {
+  background: #f5f9ff;
+  border-color: #91caff;
+}
+.queue-batch-card.active {
+  background: #e6f4ff;
+  border-color: #1677ff;
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.12);
 }
 .queue-batch-card.in-production-card {
   background: #e6f7ff;
   border-left: 3px solid #1890ff;
 }
+.queue-batch-main-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
 .queue-batch-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.queue-batch-code {
+  color: #1f2d3d;
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-batch-count {
+  margin-top: 3px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-batch-family {
+  margin-top: 2px;
+  color: #8c8c8c;
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-batch-inbound {
+  margin-top: 6px;
+  color: #d4380d;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.queue-batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .queue-empty {
   color: #ccc;
@@ -1229,6 +1652,108 @@ onUnmounted(() => {
   font-size: 15px;
   font-weight: bold;
   margin-left: 8px;
+}
+
+.queue-batch-dialog :deep(.el-dialog__body) {
+  padding-top: 0;
+}
+.queue-dialog-title {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.queue-dialog-title-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-right: 32px;
+}
+.queue-dialog-title-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+.queue-dialog-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  height: min(760px, calc(90vh - 116px));
+  min-height: 520px;
+}
+.queue-dialog-main,
+.queue-dialog-rush {
+  min-height: 0;
+}
+.queue-dialog-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.queue-dialog-rush {
+  overflow-y: auto;
+}
+.queue-dialog-rush :deep(.rush-entry) {
+  height: 100%;
+  box-sizing: border-box;
+}
+.queue-dialog-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  flex-shrink: 0;
+}
+.queue-dialog-summary > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.summary-label {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.queue-dialog-line {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #91caff;
+  box-shadow: none;
+}
+.queue-preview-header {
+  flex-shrink: 0;
+  padding-bottom: 8px;
+  background: #fff;
+  border-bottom: 1px solid #e6f4ff;
+}
+.queue-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 8px;
+}
+.queue-dialog-units {
+  min-height: 100%;
+}
+.queue-preview-status {
+  background: #e6f4ff;
+  color: #0958d9;
+}
+.queue-preview-category {
+  font-size: 12px;
+  color: #0958d9;
+  background: #f0f7ff;
+  border: 1px solid #bae0ff;
+  border-radius: 10px;
+  padding: 1px 8px;
 }
 
 .selecting-banner {
@@ -1251,6 +1776,24 @@ onUnmounted(() => {
 }
 
 @media (max-width: 1280px) {
+  .queue-dialog-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+  }
+
+  .queue-dialog-main {
+    min-height: 460px;
+  }
+
+  .queue-dialog-rush {
+    max-height: 320px;
+  }
+
+  .queue-dialog-summary {
+    grid-template-columns: 1fr;
+  }
+
   .stats-floating-toggle {
     right: 24px;
   }

@@ -43,6 +43,53 @@ def _extract_log_identifier(content: str, labels: list[str], patterns: list[str]
     return ""
 
 
+def _build_operation_log_row(
+    module: object,
+    action_type: object,
+    biz_type: object = "",
+    content: object = "",
+    *,
+    user_id: object = "",
+    username: object = "",
+    operate_time: datetime | None = None,
+    serial_no: str = "",
+    order_no: str = "",
+    contract_no: str = "",
+) -> dict | None:
+    module_text = _normalize_text(module)
+    action_text = _normalize_text(action_type)
+    if not module_text and not action_text:
+        return None
+
+    display_name = _normalize_text(username, "System")
+    operator_id = _normalize_text(user_id, display_name)
+    content_text = _normalize_text(content)
+
+    if not serial_no:
+        serial_no = _extract_log_identifier(
+            content_text,
+            ["流水号", "机台流水号"],
+            [r"\b(\d{2,}-\d{1,2}-[A-Za-z0-9]+)\b"],
+        )
+    if not order_no:
+        order_no = _extract_log_identifier(content_text, ["订单号", "创建订单", "订单"], [r"\b(SO[-A-Za-z0-9]+)\b"])
+    if not contract_no:
+        contract_no = _extract_log_identifier(content_text, ["合同号", "合同"], [r"\b([A-Za-z]*C[A-Za-z0-9-]+)\b"])
+
+    return {
+        "user_id": operator_id,
+        "username": display_name,
+        "operate_time": operate_time or datetime.now(),
+        "module": module_text,
+        "action_type": action_text,
+        "biz_type": _normalize_text(biz_type) or _infer_biz_type(module_text, action_text, content_text),
+        "serial_no": _normalize_text(serial_no),
+        "order_no": _normalize_text(order_no),
+        "contract_no": _normalize_text(contract_no),
+        "content": content_text,
+    }
+
+
 def _ensure_operation_log_table() -> None:
     ddl = """
     CREATE TABLE IF NOT EXISTS sys_operation_log (
@@ -115,39 +162,51 @@ def append_operation_log(
     order_no: str = "",
     contract_no: str = "",
 ) -> None:
-    module_text = _normalize_text(module)
-    action_text = _normalize_text(action_type)
-    if not module_text and not action_text:
+    row = _build_operation_log_row(
+        module=module,
+        action_type=action_type,
+        biz_type=biz_type,
+        content=content,
+        user_id=user_id,
+        username=username,
+        operate_time=operate_time,
+        serial_no=serial_no,
+        order_no=order_no,
+        contract_no=contract_no,
+    )
+    if row is None:
         return
-
-    display_name = _normalize_text(username, "System")
-    operator_id = _normalize_text(user_id, display_name)
-    content_text = _normalize_text(content)
-    
-    if not serial_no:
-        serial_no = _extract_log_identifier(content_text, ["流水号", "机台流水号"], [r"\b([A-Za-z0-9]+-[A-Za-z0-9-]+)\b"])
-    if not order_no:
-        order_no = _extract_log_identifier(content_text, ["订单号", "创建订单", "订单"], [r"\b(SO[-A-Za-z0-9]+)\b"])
-    if not contract_no:
-        contract_no = _extract_log_identifier(content_text, ["合同号", "合同"], [r"\b([A-Za-z]*C[A-Za-z0-9-]+)\b"])
-
-    row = {
-        "user_id": operator_id,
-        "username": display_name,
-        "operate_time": operate_time or datetime.now(),
-        "module": module_text,
-        "action_type": action_text,
-        "biz_type": _normalize_text(biz_type) or _infer_biz_type(module_text, action_text, content_text),
-        "serial_no": serial_no,
-        "order_no": order_no,
-        "contract_no": contract_no,
-        "content": content_text,
-    }
     try:
         _ensure_operation_log_table()
         pd.DataFrame([row]).to_sql("sys_operation_log", get_engine(), if_exists="append", index=False, method="multi")
     except (OperationalError, Exception):
         # Never block the main business flow because of operation logging failures.
+        pass
+
+
+def append_operation_logs(rows: list[dict]) -> None:
+    prepared = []
+    for row in rows or []:
+        item = _build_operation_log_row(
+            module=row.get("module", ""),
+            action_type=row.get("action_type", ""),
+            biz_type=row.get("biz_type", ""),
+            content=row.get("content", ""),
+            user_id=row.get("user_id", ""),
+            username=row.get("username", ""),
+            operate_time=row.get("operate_time"),
+            serial_no=row.get("serial_no", ""),
+            order_no=row.get("order_no", ""),
+            contract_no=row.get("contract_no", ""),
+        )
+        if item is not None:
+            prepared.append(item)
+    if not prepared:
+        return
+    try:
+        _ensure_operation_log_table()
+        pd.DataFrame(prepared).to_sql("sys_operation_log", get_engine(), if_exists="append", index=False, method="multi")
+    except (OperationalError, Exception):
         pass
 
 
@@ -163,6 +222,9 @@ def append_audit_log(
     content: object | None = None,
     user_id: object | None = None,
     username: object | None = None,
+    serial_no: object = "",
+    order_no: object = "",
+    contract_no: object = "",
 ) -> None:
     del ip  # 保留参数仅用于兼容旧调用。
 
@@ -174,6 +236,9 @@ def append_audit_log(
             content=details if content is None else content,
             user_id=user if user_id is None else user_id,
             username=user if username is None else username,
+            serial_no=str(serial_no or ""),
+            order_no=str(order_no or ""),
+            contract_no=str(contract_no or ""),
         )
         return
 
@@ -185,6 +250,9 @@ def append_audit_log(
         content=details,
         user_id=user,
         username=user,
+        serial_no=str(serial_no or ""),
+        order_no=str(order_no or ""),
+        contract_no=str(contract_no or ""),
     )
 
 

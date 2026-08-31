@@ -364,14 +364,13 @@ def convert_to_contract(
 
         # 2. Determine contract_no
         contract_no = str(payload.contract_no or "").strip()
-        if not contract_no:
-            from datetime import datetime
-            now = datetime.now()
-            y = now.strftime("%Y")
-            m = now.strftime("%m")
-            d = now.strftime("%d")
-            rnd = str(now.microsecond % 9000 + 1000)
-            contract_no = f"HT{y}{m}{d}{rnd}"
+        from database import get_engine
+        from utils.contract_ids import contract_no_exists, next_contract_no
+        with get_engine().connect() as conn:
+            if not contract_no:
+                contract_no = next_contract_no(conn)
+            elif contract_no_exists(conn, contract_no):
+                raise HTTPException(status_code=422, detail=f"合同号已存在，请刷新后重新生成: {contract_no}")
 
         customer = str(payload.customer_name or "").strip() or str(items[0].get("customer_name") or "").strip()
         agent = str(payload.agent_name or "").strip() or str(items[0].get("contact_name") or "").strip()
