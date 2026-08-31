@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/xuri/excelize/v2"
@@ -95,6 +96,7 @@ type machinePhotoTaskRow struct {
 	FileID       *int64         `json:"file_id" gorm:"column:file_id"`
 	FileName     string         `json:"file_name" gorm:"column:file_name"`
 	UploadedAt   string         `json:"uploaded_at" gorm:"column:uploaded_at"`
+	BarcodeValue string         `json:"barcode_value" gorm:"column:barcode_value"`
 	OCRIssues    int            `json:"ocr_issues" gorm:"column:ocr_issues"`
 	OCRResults   []ocrResultRow `json:"ocr_results" gorm:"-"`
 }
@@ -505,8 +507,14 @@ func (h *PhotoHandler) UploadTaskPhoto(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	var barcodeCount int64
+	_ = h.db.Table("machine_component_bindings").
+		Where("source_task_id = ? AND source = ? AND active = 1", taskID, "V8_QR").
+		Count(&barcodeCount).Error
 	nextStatus := "completed"
-	if task.OCREnabled {
+	if barcodeCount > 0 {
+		nextStatus = "manual_passed"
+	} else if task.OCREnabled {
 		nextStatus = "uploaded"
 	}
 	if err := h.db.Exec("DELETE FROM machine_photo_ocr_results WHERE task_id = ?", taskID).Error; err != nil {
@@ -514,7 +522,7 @@ func (h *PhotoHandler) UploadTaskPhoto(c *gin.Context) {
 		return
 	}
 	if err := h.db.Table("machine_component_bindings").
-		Where("source_task_id = ?", taskID).
+		Where("source_task_id = ? AND source = ?", taskID, "V8_OCR").
 		Updates(map[string]interface{}{"active": false}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -564,8 +572,16 @@ func (h *PhotoHandler) DeleteTaskPhoto(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	var barcodeCount int64
+	_ = tx.Table("machine_component_bindings").
+		Where("source_task_id = ? AND source = ? AND active = 1", taskID, "V8_QR").
+		Count(&barcodeCount).Error
+	nextStatus := "pending"
+	if barcodeCount > 0 {
+		nextStatus = "manual_passed"
+	}
 	if err := tx.Table("machine_photo_tasks").Where("id = ?", taskID).Updates(map[string]interface{}{
-		"status":       "pending",
+		"status":       nextStatus,
 		"skip_reason":  nil,
 		"submit_batch": nil,
 	}).Error; err != nil {
@@ -574,7 +590,7 @@ func (h *PhotoHandler) DeleteTaskPhoto(c *gin.Context) {
 		return
 	}
 	if err := tx.Table("machine_component_bindings").
-		Where("source_task_id = ?", taskID).
+		Where("source_task_id = ? AND source = ?", taskID, "V8_OCR").
 		Updates(map[string]interface{}{"active": false}).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -595,7 +611,75 @@ func (h *PhotoHandler) DeleteTaskPhoto(c *gin.Context) {
 			_ = removeLocalTaskFile(path)
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "status": "pending"})
+	c.JSON(http.StatusOK, gin.H{"success": true, "status": nextStatus})
+}
+
+func (h *PhotoHandler) ScanTaskQRCode(c *gin.Context) {
+	taskID, err := strconv.ParseInt(c.Param("taskId"), 10, 64)
+	if err != nil || taskID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task id"})
+		return
+	}
+	var req struct {
+		BarcodeValue string `json:"barcode_value"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON body required"})
+		return
+	}
+	barcodeValue := strings.TrimSpace(req.BarcodeValue)
+	if barcodeValue == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "二维码内容不能为空"})
+		return
+	}
+	if utf8.RuneCountInString(barcodeValue) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "二维码内容不能超过100个字符"})
+		return
+	}
+
+	var task machinePhotoTaskRow
+	if err := h.db.Table("machine_photo_tasks").Where("id = ?", taskID).First(&task).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "拍照任务不存在"})
+		return
+	}
+	if !task.Enabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "拍照项已不在当前机型配置中，请刷新任务"})
+		return
+	}
+
+	tx := h.db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
+	if err := tx.Exec("DELETE FROM machine_photo_ocr_results WHERE task_id = ?", taskID).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := tx.Table("machine_photo_tasks").Where("id = ?", taskID).Updates(map[string]interface{}{
+		"status":       "manual_passed",
+		"skip_reason":  nil,
+		"submit_batch": nil,
+	}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.upsertQRCodeBinding(tx, taskID, barcodeValue, c.GetString("username")); err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"status":        "manual_passed",
+		"barcode_value": barcodeValue,
+	})
 }
 
 func (h *PhotoHandler) RunTaskOCR(c *gin.Context) {
@@ -1462,12 +1546,14 @@ SELECT
   f.id AS file_id,
   COALESCE(f.file_name, '') AS file_name,
   COALESCE(DATE_FORMAT(f.uploaded_at, '%Y-%m-%d %H:%i:%s'), '') AS uploaded_at,
+  COALESCE(MAX(CASE WHEN b.active = 1 AND b.source = 'V8_QR' THEN b.component_serial_no ELSE '' END), '') AS barcode_value,
   COALESCE(SUM(CASE WHEN r.check_status IN ('low_confidence','empty','pattern_failed','manual_rejected') THEN 1 ELSE 0 END), 0) AS ocr_issues
 FROM machine_photo_tasks t
 LEFT JOIN machine_photo_files f ON f.id = (
   SELECT mf.id FROM machine_photo_files mf WHERE mf.task_id = t.id ORDER BY mf.id DESC LIMIT 1
 )
 LEFT JOIN machine_photo_ocr_results r ON r.task_id = t.id
+LEFT JOIN machine_component_bindings b ON b.source_task_id = t.id
 	WHERE t.serial_no = ?
 	  AND t.enabled = 1
 	GROUP BY t.id, f.id
@@ -1485,13 +1571,13 @@ func buildMachinePhotoSummary(rows []machinePhotoTaskRow) gin.H {
 	requiredDone := 0
 	requiredPhotoDone := 0
 	photoDone := 0
-	ocrTotal := 0
-	ocrConfirmed := 0
-	ocrPending := 0
+	barcodeTotal := 0
+	barcodeConfirmed := 0
+	barcodePending := 0
 	retakeRequired := 0
 	for _, row := range rows {
 		hasPhoto := taskHasPhoto(row)
-		confirmed := taskHasConfirmedOCR(row)
+		confirmed := strings.TrimSpace(row.BarcodeValue) != "" || taskHasConfirmedOCR(row)
 		if hasPhoto {
 			photoDone++
 		}
@@ -1505,11 +1591,11 @@ func buildMachinePhotoSummary(rows []machinePhotoTaskRow) gin.H {
 			}
 		}
 		if row.OCREnabled {
-			ocrTotal++
+			barcodeTotal++
 			if confirmed {
-				ocrConfirmed++
+				barcodeConfirmed++
 			} else if hasPhoto || strings.TrimSpace(row.Status) != "pending" {
-				ocrPending++
+				barcodePending++
 			}
 		}
 		if row.Status == "retake_required" {
@@ -1522,9 +1608,12 @@ func buildMachinePhotoSummary(rows []machinePhotoTaskRow) gin.H {
 		"required_done":       requiredDone,
 		"required_photo_done": requiredPhotoDone,
 		"photo_done":          photoDone,
-		"ocr_total":           ocrTotal,
-		"ocr_confirmed":       ocrConfirmed,
-		"ocr_pending":         ocrPending,
+		"barcode_total":       barcodeTotal,
+		"barcode_confirmed":   barcodeConfirmed,
+		"barcode_pending":     barcodePending,
+		"ocr_total":           barcodeTotal,
+		"ocr_confirmed":       barcodeConfirmed,
+		"ocr_pending":         barcodePending,
 		"missing_required":    maxInt(requiredTotal-requiredPhotoDone, 0),
 		"retake_required":     retakeRequired,
 		"can_submit":          len(rows) > 0 && photoDone > 0,
@@ -1797,6 +1886,101 @@ VALUES (?, ?, ?, ?, '', 0, ?, ?)`,
 		}
 	}
 	return nil
+}
+
+func (h *PhotoHandler) upsertQRCodeBinding(tx *gorm.DB, taskID int64, barcodeValue string, actor string) error {
+	return tx.Exec(`
+INSERT INTO machine_component_bindings
+  (binding_key, machine_no, machine_batch_no, model_name, customer, agent, machine_status, location_code,
+   delivery_date, outbound_at, material_code, material_name, material_type, material_spec, component_serial_no, instance_batch_no,
+   instance_flow_no, position_code, position_name, bound_at, active, source, source_task_id, source_file_id,
+   source_ocr_result_id, file_name, recognized_value, manual_value, confidence, check_status, reviewed_by, reviewed_at)
+SELECT
+  CONCAT('V8-', t.serial_no, '-', t.position_code) AS binding_key,
+  t.serial_no AS machine_no,
+  COALESCE(fg.`+"`批次号`"+`, '') AS machine_batch_no,
+  t.model_name,
+  COALESCE(fg.`+"`客户`"+`, '') AS customer,
+  COALESCE(fg.`+"`代理商`"+`, '') AS agent,
+  COALESCE(fg.`+"`状态`"+`, '') AS machine_status,
+  COALESCE(fg.`+"`Location_Code`"+`, '') AS location_code,
+  CASE
+    WHEN sh.outbound_at IS NOT NULL THEN DATE(sh.outbound_at)
+    WHEN TRIM(COALESCE(fg.`+"`状态`"+`, '')) LIKE '已出库%' THEN DATE(fg.`+"`更新时间`"+`)
+    ELSE NULL
+  END AS delivery_date,
+  CASE
+    WHEN sh.outbound_at IS NOT NULL THEN sh.outbound_at
+    WHEN TRIM(COALESCE(fg.`+"`状态`"+`, '')) LIKE '已出库%' THEN fg.`+"`更新时间`"+`
+    ELSE NULL
+  END AS outbound_at,
+  CONCAT('V8-', t.position_code) AS material_code,
+  t.item_name AS material_name,
+  COALESCE(NULLIF(pil.item_category, ''), '编号') AS material_type,
+  t.position_code AS material_spec,
+  LEFT(?, 100) AS component_serial_no,
+  '' AS instance_batch_no,
+  '' AS instance_flow_no,
+  t.position_code,
+  t.item_name AS position_name,
+  DATE(NOW()) AS bound_at,
+  1 AS active,
+  'V8_QR' AS source,
+  t.id AS source_task_id,
+  f.id AS source_file_id,
+  NULL AS source_ocr_result_id,
+  COALESCE(f.file_name, '') AS file_name,
+  ? AS recognized_value,
+  ? AS manual_value,
+  1 AS confidence,
+  'scanned' AS check_status,
+  ? AS reviewed_by,
+  NOW() AS reviewed_at
+FROM machine_photo_tasks t
+LEFT JOIN machine_photo_files f ON f.id = (
+  SELECT mf.id FROM machine_photo_files mf WHERE mf.task_id = t.id ORDER BY mf.id DESC LIMIT 1
+)
+LEFT JOIN photo_item_library pil ON pil.position_code = t.position_code
+LEFT JOIN finished_goods_data fg ON TRIM(fg.`+"`流水号`"+`) = t.serial_no
+LEFT JOIN (
+  SELECT TRIM(`+"`流水号`"+`) AS serial_no, MAX(`+"`更新时间`"+`) AS outbound_at
+  FROM shipping_history
+  WHERE TRIM(COALESCE(`+"`状态`"+`, '')) LIKE '已出库%'
+  GROUP BY TRIM(`+"`流水号`"+`)
+) sh ON sh.serial_no = t.serial_no
+WHERE t.id = ?
+  AND t.enabled = 1
+ON DUPLICATE KEY UPDATE
+  machine_batch_no = VALUES(machine_batch_no),
+  model_name = VALUES(model_name),
+  customer = VALUES(customer),
+  agent = VALUES(agent),
+  machine_status = VALUES(machine_status),
+  location_code = VALUES(location_code),
+  delivery_date = VALUES(delivery_date),
+  outbound_at = VALUES(outbound_at),
+  material_code = VALUES(material_code),
+  material_name = VALUES(material_name),
+  material_type = VALUES(material_type),
+  material_spec = VALUES(material_spec),
+  component_serial_no = VALUES(component_serial_no),
+  instance_batch_no = VALUES(instance_batch_no),
+  instance_flow_no = VALUES(instance_flow_no),
+  position_name = VALUES(position_name),
+  bound_at = VALUES(bound_at),
+  active = VALUES(active),
+  source = VALUES(source),
+  source_task_id = VALUES(source_task_id),
+  source_file_id = VALUES(source_file_id),
+  source_ocr_result_id = NULL,
+  file_name = VALUES(file_name),
+  recognized_value = VALUES(recognized_value),
+  manual_value = VALUES(manual_value),
+  confidence = VALUES(confidence),
+  check_status = VALUES(check_status),
+  reviewed_by = VALUES(reviewed_by),
+  reviewed_at = VALUES(reviewed_at),
+  updated_at = CURRENT_TIMESTAMP`, barcodeValue, barcodeValue, barcodeValue, actor, taskID).Error
 }
 
 func (h *PhotoHandler) syncComponentBindingFromTaskID(taskID int64) error {

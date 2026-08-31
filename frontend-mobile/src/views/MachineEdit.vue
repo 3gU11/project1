@@ -16,8 +16,8 @@
           <span> 已拍</span>
           <div class="summary-sub">
             必拍 {{ summary.required_photo_done }}/{{ summary.required_total }}
-            · 编号确认 {{ summary.ocr_confirmed }}/{{ summary.ocr_total }}
-            <span v-if="summary.ocr_pending"> · 待确认 {{ summary.ocr_pending }}</span>
+            · 扫码确认 {{ summary.barcode_confirmed }}/{{ summary.barcode_total }}
+            <span v-if="summary.barcode_pending"> · 待扫码 {{ summary.barcode_pending }}</span>
           </div>
         </div>
         <van-button size="small" type="primary" :loading="taskLoading" @click="initTasks">生成/刷新任务</van-button>
@@ -32,7 +32,7 @@
             <div class="task-meta">
               <van-tag v-if="task.required" type="danger">必拍</van-tag>
               <van-tag v-else>选拍</van-tag>
-              <van-tag v-if="task.ocr_enabled" type="primary">OCR</van-tag>
+              <van-tag v-if="task.ocr_enabled" type="primary">扫码</van-tag>
               <van-tag :type="statusType(task.status)">{{ statusText(task.status) }}</van-tag>
             </div>
           </div>
@@ -48,6 +48,12 @@
           >
             <van-button size="small" type="primary" :loading="uploadingTaskId === task.id">{{ taskUploadText(task) }}</van-button>
           </van-uploader>
+          <ScanButton
+            v-if="task.ocr_enabled"
+            button-text="扫码绑定"
+            :loading="scanningTaskId === task.id"
+            @success="(value) => bindTaskQRCode(task, value)"
+          />
           <van-button
             v-if="canResetTaskPhoto(task)"
             size="small"
@@ -58,35 +64,13 @@
           >
             清空重拍
           </van-button>
-          <van-button v-if="task.status === 'manual_review' && !shouldShowOcrPanel(task)" size="small" type="success" @click="confirmTask(task, 'manual_passed')">人工通过</van-button>
           <van-button v-if="task.status === 'manual_review'" size="small" type="warning" @click="confirmTask(task, 'retake_required')">需补拍</van-button>
           <van-button v-if="!task.required && task.status === 'pending'" size="small" @click="confirmTask(task, 'skipped')">跳过</van-button>
         </div>
 
-        <div v-if="shouldShowOcrPanel(task)" class="ocr-panel">
-          <div class="ocr-title">OCR识别结果</div>
-          <div v-for="field in task.ocr_results" :key="field.id || field.field_code" class="ocr-field">
-            <van-field
-              v-model="field.display_value"
-              :label="field.field_name || '识别文本'"
-              placeholder="未识别到，可手工输入"
-              clearable
-            />
-            <div class="ocr-meta">
-              <span>{{ checkStatusText(field.check_status) }}</span>
-              <span v-if="field.confidence">置信度 {{ confidenceText(field.confidence) }}</span>
-            </div>
-          </div>
-          <van-button
-            v-if="task.ocr_results?.length && ['manual_review', 'ocr_passed', 'uploaded', 'manual_passed', 'completed'].includes(task.status)"
-            block
-            size="small"
-            type="success"
-            class="ocr-confirm"
-            @click="confirmTask(task, 'manual_passed')"
-          >
-            确认并绑定编号
-          </van-button>
+        <div v-if="task.barcode_value" class="barcode-result">
+          <span>已扫码</span>
+          <strong>{{ task.barcode_value }}</strong>
         </div>
       </div>
 
@@ -120,6 +104,7 @@ import { showConfirmDialog, showFailToast, showImagePreview, showSuccessToast, s
 import type { UploaderFileListItem } from 'vant'
 import request from '@/api/index'
 import { inventoryApi } from '@/api/inventory'
+import ScanButton from '@/components/common/ScanButton.vue'
 import { useInventoryStore } from '@/store/inventory'
 import { mapMachine } from '@/utils/mapper'
 import { useInventoryAutoRefresh } from '@/utils/useInventoryAutoRefresh'
@@ -148,6 +133,7 @@ type PhotoTask = {
   file_id?: number
   file_name?: string
   uploaded_at?: string
+  barcode_value?: string
   ocr_issues?: number
   ocr_results?: OcrResult[]
 }
@@ -170,6 +156,9 @@ type PhotoSummary = {
   required_done: number
   required_photo_done: number
   photo_done: number
+  barcode_total: number
+  barcode_confirmed: number
+  barcode_pending: number
   ocr_total: number
   ocr_confirmed: number
   ocr_pending: number
@@ -184,6 +173,9 @@ const defaultSummary = (): PhotoSummary => ({
   required_done: 0,
   required_photo_done: 0,
   photo_done: 0,
+  barcode_total: 0,
+  barcode_confirmed: 0,
+  barcode_pending: 0,
   ocr_total: 0,
   ocr_confirmed: 0,
   ocr_pending: 0,
@@ -253,6 +245,7 @@ const summary = ref<PhotoSummary>(defaultSummary())
 const taskLoading = ref(false)
 const uploadingTaskId = ref<number | null>(null)
 const deletingTaskId = ref<number | null>(null)
+const scanningTaskId = ref<number | null>(null)
 const submitting = ref(false)
 
 const canSubmit = computed(() => tasks.value.length > 0 && (summary.value.can_submit || summary.value.photo_done > 0))
@@ -260,9 +253,9 @@ const canSubmit = computed(() => tasks.value.length > 0 && (summary.value.can_su
 const statusText = (status: string) => {
   const map: Record<string, string> = {
     pending: '待拍',
-    uploaded: '已拍待OCR',
+    uploaded: '已拍待扫码',
     ocr_processing: '识别中',
-    ocr_passed: 'OCR待确认',
+    ocr_passed: '待扫码确认',
     manual_review: '待确认',
     retake_required: '需补拍',
     completed: '已拍',
@@ -280,31 +273,6 @@ const statusType = (status: string) => {
   return 'primary'
 }
 
-const checkStatusText = (status = '') => {
-  const map: Record<string, string> = {
-    passed: 'OCR已识别，待确认',
-    manual_review: '待确认',
-    manual_passed: '已确认',
-    manual_rejected: '未通过',
-    low_confidence: '置信度低',
-    empty: '未识别到',
-    pattern_failed: '格式不符',
-  }
-  return map[status] || status || '待确认'
-}
-
-const confidenceText = (confidence?: number) => {
-  const value = Number(confidence || 0)
-  if (!Number.isFinite(value) || value <= 0) return '-'
-  return `${Math.round(value * 100)}%`
-}
-
-const shouldShowOcrPanel = (task: PhotoTask) => {
-  if (!task.ocr_enabled) return false
-  if (task.ocr_results?.length) return true
-  return !!task.file_name || task.status !== 'pending'
-}
-
 const taskUploadText = (task: PhotoTask) => {
   if (task.status === 'retake_required') return '补拍/重拍'
   if (task.file_name || task.status === 'manual_review' || task.status === 'ocr_passed' || task.status === 'manual_passed') return '重拍/上传'
@@ -317,28 +285,9 @@ const canResetTaskPhoto = (task: PhotoTask) => (
   ['uploaded', 'ocr_processing', 'ocr_passed', 'manual_review', 'manual_passed', 'completed', 'retake_required'].includes(task.status)
 )
 
-const defaultOcrResult = (task: PhotoTask): OcrResult => ({
-  field_code: 'recognized_text',
-  field_name: task.item_name || '识别文本',
-  recognized_value: '',
-  manual_value: '',
-  display_value: '',
-  confidence: 0,
-  check_status: task.file_name ? 'manual_review' : 'empty',
-})
-
 const normalizePhotoTasks = (rows: PhotoTask[] = []) => rows.map((task) => ({
   ...task,
-  ocr_results: (() => {
-    const fields = (task.ocr_results || []).map((field) => ({
-      ...field,
-      display_value: String(field.display_value || field.manual_value || field.recognized_value || ''),
-    }))
-    if (fields.length === 0 && task.ocr_enabled && (task.file_name || task.status !== 'pending')) {
-      fields.push(defaultOcrResult(task))
-    }
-    return fields
-  })(),
+  barcode_value: String(task.barcode_value || '').trim(),
 }))
 
 const revokeObjectUrls = () => {
@@ -447,22 +396,40 @@ const afterTaskRead = async (task: PhotoTask, item: UploaderFileListItem | Uploa
     const formData = new FormData()
     formData.append('file', file, fileName)
     await inventoryApi.uploadPhotoTask(task.id, formData)
-    if (task.ocr_enabled) {
-      const ocrRes = await inventoryApi.runPhotoTaskOcr(task.id) as any
-      if (ocrRes?.status === 'manual_review') {
-        showToast('OCR待人工确认')
-      } else {
-        showSuccessToast('上传并识别完成')
-      }
-    } else {
-      showSuccessToast('上传完成')
-    }
+    showSuccessToast(task.ocr_enabled ? '上传完成，请扫码绑定' : '上传完成')
     await loadTasks()
   } catch (error: any) {
     showFailToast(error?.response?.data?.error || error.message || '上传失败')
     await loadTasks()
   } finally {
     uploadingTaskId.value = null
+  }
+}
+
+const bindTaskQRCode = async (task: PhotoTask, barcodeValue: string) => {
+  const value = barcodeValue.trim()
+  if (!value) return
+  if (task.barcode_value && task.barcode_value !== value) {
+    try {
+      await showConfirmDialog({
+        title: '替换已扫码内容？',
+        message: `当前内容：${task.barcode_value}`,
+        confirmButtonText: '替换',
+        cancelButtonText: '取消',
+      })
+    } catch {
+      return
+    }
+  }
+  scanningTaskId.value = task.id
+  try {
+    await inventoryApi.scanPhotoTaskQRCode(task.id, value)
+    showSuccessToast('二维码已绑定')
+    await loadTasks()
+  } catch (error: any) {
+    showFailToast(error?.response?.data?.error || error.message || '扫码绑定失败')
+  } finally {
+    scanningTaskId.value = null
   }
 }
 
@@ -489,7 +456,7 @@ const deleteTaskPhoto = async (task: PhotoTask) => {
   try {
     await showConfirmDialog({
       title: '清空这个拍照项？',
-      message: '会删除当前照片和OCR结果，并取消该位置已确认的编号绑定。清空后可重新拍照。',
+      message: '会删除当前照片和历史OCR结果；已扫码的物料码会保留。清空后可重新拍照。',
       confirmButtonText: '清空重拍',
       cancelButtonText: '取消',
     })
@@ -513,8 +480,8 @@ const submitWarningLines = () => {
   if (summary.value.missing_required > 0) {
     lines.push(`还有 ${summary.value.missing_required} 个必拍项未拍`)
   }
-  if (summary.value.ocr_pending > 0) {
-    lines.push(`还有 ${summary.value.ocr_pending} 个OCR结果待人工确认`)
+  if (summary.value.barcode_pending > 0) {
+    lines.push(`还有 ${summary.value.barcode_pending} 个位置待扫码`)
   }
   if (summary.value.retake_required > 0) {
     lines.push(`还有 ${summary.value.retake_required} 个项目标记为需补拍`)
@@ -707,40 +674,22 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   margin-top: 12px;
 }
-.ocr-panel {
-  margin-top: 12px;
-  padding: 10px;
-  border-radius: 8px;
-  background: var(--van-background-2);
-}
-.ocr-title {
-  margin-bottom: 8px;
-  color: var(--van-text-color);
-  font-size: 13px;
-  font-weight: 600;
-}
-.ocr-field {
-  overflow: hidden;
-  border: 1px solid var(--van-border-color);
-  border-radius: 8px;
-  background: var(--van-background);
-}
-.ocr-field + .ocr-field {
-  margin-top: 8px;
-}
-.ocr-field :deep(.van-cell) {
-  padding: 8px 10px;
-}
-.ocr-meta {
+.barcode-result {
   display: flex;
-  justify-content: space-between;
+  align-items: baseline;
   gap: 8px;
-  padding: 0 10px 8px;
-  color: var(--van-text-color-2);
-  font-size: 12px;
-}
-.ocr-confirm {
   margin-top: 10px;
+  padding: 8px 10px;
+  color: var(--van-success-color);
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--van-background-2);
+  border-radius: 6px;
+  word-break: break-all;
+}
+.barcode-result strong {
+  color: var(--van-text-color);
+  font-weight: 600;
 }
 .submit-row {
   padding: 12px 16px 16px;

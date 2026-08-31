@@ -48,6 +48,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		v1Auth.POST("/photo-tasks/:taskId/upload", ph.UploadTaskPhoto)
 		v1Auth.DELETE("/photo-tasks/:taskId/photo", ph.DeleteTaskPhoto)
 		v1Auth.POST("/photo-tasks/:taskId/ocr", ph.RunTaskOCR)
+		v1Auth.POST("/photo-tasks/:taskId/qrcode", ph.ScanTaskQRCode)
 		v1Auth.POST("/photo-tasks/:taskId/confirm", ph.ConfirmTaskOCR)
 		v1Auth.POST("/machines/:serialNo/photo-submit", ph.SubmitMachinePhotos)
 		v1Auth.GET("/model-dictionary/", ph.ListModelDictionary)
@@ -110,6 +111,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		api.GET("/production-lines", lh.List)
 		api.POST("/production-lines/reconcile-inbound", lh.ReconcileInbound)
 		api.POST("/production-lines/:id/assign", lh.Assign)
+		api.POST("/production-lines/:id/assign-units", lh.AssignUnits)
 		api.POST("/production-lines/:id/manual-complete", lh.ManualComplete)
 		api.POST("/production-lines/:id/lock-units", lh.LockUnits)
 	}

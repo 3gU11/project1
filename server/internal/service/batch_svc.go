@@ -275,6 +275,13 @@ func (s *BatchSvc) AssignToLine(batchID string, lineID string, actor string) (*F
 	if b.ProductionLineID != nil && strings.TrimSpace(*b.ProductionLineID) != "" {
 		return nil, fmt.Errorf("batch %s is already assigned to line %s", b.BatchID, *b.ProductionLineID)
 	}
+	var batchUnitCount int64
+	if err := tx.Model(&model.Unit{}).Where("batch_id = ?", batchID).Count(&batchUnitCount).Error; err != nil {
+		return nil, err
+	}
+	if batchUnitCount == 0 {
+		return nil, fmt.Errorf("batch %s has no machines to assign", batchID)
+	}
 	expectedRegion := engine.ProductionRegionForBatch(b.ModelType, b.Capacity)
 	lineRegion := productionLineRegion(line)
 	if expectedRegion == "" || lineRegion == "" || expectedRegion != lineRegion {
@@ -406,6 +413,110 @@ WHERE batch_id = ?
 	})
 	s.wsHub.Broadcast("line:updated", map[string]string{"line_id": lineID, "batch_id": batchID, "status": model.LineBusy})
 	return stats, nil
+}
+
+// AssignUnitsToLine splits selected cards from a confirmed batch and sends the
+// resulting child batch through the existing batch-to-line workflow. This keeps
+// production history and completion logic batch-scoped while allowing one source
+// batch to be distributed across multiple lines.
+func (s *BatchSvc) AssignUnitsToLine(batchID string, lineID string, unitIDs []string, actor string) (*FactoryPlanStatusUpdateStats, error) {
+	unique := make([]string, 0, len(unitIDs))
+	seen := map[string]bool{}
+	for _, id := range unitIDs {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	if len(unique) == 0 {
+		return nil, fmt.Errorf("unit_ids is required")
+	}
+
+	tx := s.db.Begin()
+	defer tx.Rollback()
+	var source model.Batch
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("batch_id = ?", batchID).First(&source).Error; err != nil {
+		return nil, fmt.Errorf("batch not found: %w", err)
+	}
+	if source.Status != model.StatusConfirmed {
+		return nil, fmt.Errorf("batch %s is no longer waiting for production", batchID)
+	}
+	var line model.ProductionLine
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("line_id = ?", lineID).First(&line).Error; err != nil {
+		return nil, fmt.Errorf("production line not found: %w", err)
+	}
+	expectedRegion := engine.ProductionRegionForBatch(source.ModelType, source.Capacity)
+	actualRegion := productionLineRegion(line)
+	if expectedRegion == "" || actualRegion != expectedRegion {
+		return nil, fmt.Errorf("production line region mismatch: batch requires %s, line is %s", expectedRegion, actualRegion)
+	}
+	if line.Status != model.LineIdle {
+		if !isSpecialBatchModel(source.ModelType) {
+			return nil, fmt.Errorf("line %s is not idle", lineID)
+		}
+		ok, err := s.lineHasOnlySpecialBatches(tx, lineID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("line %s is not available for this batch", lineID)
+		}
+	}
+	var units []model.Unit
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("batch_id = ? AND unit_id IN ?", batchID, unique).Order("slot_index ASC").Find(&units).Error; err != nil {
+		return nil, err
+	}
+	if len(units) != len(unique) {
+		return nil, fmt.Errorf("some selected machines do not belong to batch %s", batchID)
+	}
+	for _, unit := range units {
+		// Confirmed batches created by the legacy importer keep unit status
+		// as Pending until the line assignment. Accept both representations.
+		if unit.ProductionLineID != nil || (unit.Status != model.StatusConfirmed && unit.Status != "Pending") {
+			return nil, fmt.Errorf("machine %s is already assigned or unavailable", unit.UnitID)
+		}
+	}
+
+	childID := fmt.Sprintf("%s-line-%d", batchID, time.Now().UnixNano())
+	child := source
+	child.BatchID = childID
+	child.Capacity = source.Capacity // preserve the source size class for region checks
+	child.Status = model.StatusConfirmed
+	child.ProductionLineID = nil
+	child.ForecastSlotNo = nil
+	child.Units = nil
+	child.CreatedAt = time.Now()
+	child.UpdatedAt = time.Now()
+	if err := tx.Create(&child).Error; err != nil {
+		return nil, fmt.Errorf("create split batch: %w", err)
+	}
+	for index, unit := range units {
+		if err := tx.Model(&model.Unit{}).Where("unit_id = ?", unit.UnitID).Updates(map[string]interface{}{
+			"batch_id":   childID,
+			"slot_index": index + 1,
+		}).Error; err != nil {
+			return nil, err
+		}
+	}
+	var remaining int64
+	if err := tx.Model(&model.Unit{}).Where("batch_id = ?", batchID).Count(&remaining).Error; err != nil {
+		return nil, err
+	}
+	if remaining == 0 {
+		// The confirmed source is now only an aggregate parent; hide it from the
+		// waiting queue so it cannot be assigned as an empty batch.
+		if err := tx.Model(&model.Batch{}).Where("batch_id = ?", batchID).Updates(map[string]interface{}{
+			"status":     model.StatusCompleted,
+			"updated_at": time.Now(),
+		}).Error; err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+	return s.AssignToLine(childID, lineID, actor)
 }
 
 func productionLineRegion(line model.ProductionLine) string {

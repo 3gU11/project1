@@ -43,6 +43,9 @@ export const inventoryApi = {
   runPhotoTaskOcr(task_id: number) {
     return request.post(`/photo-tasks/${task_id}/ocr`)
   },
+  scanPhotoTaskQRCode(task_id: number, barcode_value: string) {
+    return request.post(`/photo-tasks/${task_id}/qrcode`, { barcode_value })
+  },
   confirmPhotoTask(task_id: number, data: any) {
     return request.post(`/photo-tasks/${task_id}/confirm`, data)
   },
