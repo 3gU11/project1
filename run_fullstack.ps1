@@ -338,7 +338,7 @@ if (-not $DryRun) {
 $null = Start-LoggedProcess `
   -name 'frontend' `
   -filePath $npmCmd `
-  -argumentList @('run','dev','--','--host','0.0.0.0','--port',$WebPort,'--strictPort') `
+  -argumentList @('run','dev','--','--host','0.0.0.0','--port',$WebPort,'--strictPort','--force') `
   -workingDirectory $frontendDir `
   -stdoutPath $webOut `
   -stderrPath $webErr
@@ -354,7 +354,7 @@ if ($NoMobile) {
   $null = Start-LoggedProcess `
     -name 'mobile frontend' `
     -filePath $npmCmd `
-    -argumentList @('run','dev','--','--host','0.0.0.0','--port',$MobilePort,'--strictPort') `
+    -argumentList @('run','dev','--','--host','0.0.0.0','--port',$MobilePort,'--strictPort','--force') `
     -workingDirectory $mobileDir `
     -stdoutPath $mobileOut `
     -stderrPath $mobileErr

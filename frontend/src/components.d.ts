@@ -60,6 +60,7 @@ declare module 'vue' {
     Layout: typeof import('./components/Layout.vue')['default']
     PageHeader: typeof import('./components/PageHeader.vue')['default']
     PageSkeleton: typeof import('./components/PageSkeleton.vue')['default']
+    ReportAppendices: typeof import('./components/ReportAppendices.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     RushOrderEntry: typeof import('./components/sandbox/RushOrderEntry.vue')['default']

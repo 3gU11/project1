@@ -12,12 +12,16 @@ from sqlalchemy import text
 
 from api.routes.auth import get_current_user_token, get_current_operator_name
 from crud.reports import (
+    build_model_report_appendices,
+    get_dealer_sales_summary,
     get_inbound_report_data,
+    get_order_model_quantities,
     get_order_report_data,
     get_shipment_report_data,
     get_completion_report_data,
     get_completion_output_report_data,
-    get_available_filters
+    get_available_filters,
+    serialize_model_report_appendices,
 )
 from crud.inbound_history import backfill_inbound_history_from_logs
 from database import get_engine
@@ -237,15 +241,24 @@ def generate_order_report(
                 return {"data": [], "total": 0}
             raise HTTPException(status_code=404, detail="未找到符合条件的数据")
 
+        appendices = build_model_report_appendices(get_order_model_quantities(df))
+        dealer_summary = get_dealer_sales_summary(df)
+
         # Return JSON format for preview
         if format == "json":
             return {
                 "data": df.to_dict('records'),
-                "total": len(df)
+                "total": len(df),
+                "appendices": serialize_model_report_appendices(appendices),
+                "dealer_summary": dealer_summary.to_dict("records"),
             }
 
-        # Return Excel format for download
-        sheets = {"订单报表": df}
+        # Keep the business detail first, then append the analysis tables.
+        sheets = {
+            "订单报表": df,
+            "代理商统计": dealer_summary,
+            **appendices,
+        }
 
         return _generate_excel_response(sheets, f"订单报表_{start_date}_{end_date}")
 
@@ -283,17 +296,25 @@ def generate_shipment_report(
                 return {"data": [], "total": 0}
             raise HTTPException(status_code=404, detail="未找到符合条件的数据")
 
+        appendices = build_model_report_appendices(
+            summary_df.rename(columns={"出货数量": "数量"})[["机型", "数量"]]
+            if not summary_df.empty
+            else pd.DataFrame(columns=["机型", "数量"])
+        )
+
         # Return JSON format for preview
         if format == "json":
             return {
                 "data": summary_df.to_dict('records'),
-                "total": len(summary_df)
+                "total": len(summary_df),
+                "appendices": serialize_model_report_appendices(appendices),
             }
 
         # Return Excel format for download
         sheets = {
             "汇总": summary_df,
-            "明细": detail_df
+            "明细": detail_df,
+            **appendices,
         }
 
         return _generate_excel_response(sheets, f"出货报表_{start_date}_{end_date}")
