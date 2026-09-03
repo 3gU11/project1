@@ -124,11 +124,16 @@ def get_inventory(
     status: str = Query("", description="按状态过滤"),
     model: str = Query("", description="按机型过滤"),
     order_id: str = Query("", description="按占用订单号过滤"),
+    keyword: str = Query("", description="按流水号/订单号/批次号过滤"),
+    exclude_shipped: bool = Query(False, description="排除已出库"),
 ):
     """分页获取库存数据。"""
     try:
         where_clauses = []
         params: Dict[str, Any] = {"skip": skip, "limit": limit}
+
+        if exclude_shipped:
+            where_clauses.append("COALESCE(`状态`, '') <> '已出库'")
 
         if str(status).strip():
             where_clauses.append("`状态` = :status")
@@ -139,6 +144,9 @@ def get_inventory(
         if str(order_id).strip():
             where_clauses.append("`占用订单号` = :order_id")
             params["order_id"] = str(order_id).strip()
+        if str(keyword).strip():
+            params["keyword"] = f"%{str(keyword).strip()}%"
+            where_clauses.append("(`流水号` LIKE :keyword OR `占用订单号` LIKE :keyword OR `批次号` LIKE :keyword)")
 
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         count_sql = f"SELECT COUNT(*) AS total FROM finished_goods_data{where_sql}"

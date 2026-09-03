@@ -435,8 +435,8 @@ def get_inbound_report_data(
 
 
 def get_order_report_data(
-    start_date: str,
-    end_date: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
     customer: str = "",
     dealer: str = "",
     status: str = ""
@@ -458,7 +458,8 @@ def get_order_report_data(
                 DATE_FORMAT(so.`发货时间`, '%Y-%m-%d') AS `计划发货日期`,
                 so.`备注`
             FROM sales_orders so
-            WHERE so.`下单时间` BETWEEN :start_date AND :end_date
+            WHERE (:start_date IS NULL OR so.`下单时间` >= :start_date)
+                AND (:end_date IS NULL OR so.`下单时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
                 AND (:customer = '' OR so.`客户名` = :customer)
                 AND (:dealer = '' OR so.`代理商` = :dealer)
                 AND (:status = '' OR so.`status` = :status)
@@ -481,8 +482,8 @@ def get_order_report_data(
 
 
 def get_shipment_report_data(
-    start_date: str,
-    end_date: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
     customer: str = "",
     dealer: str = "",
     model_type: str = ""
@@ -510,7 +511,8 @@ def get_shipment_report_data(
                 WHERE COALESCE(`订单号`, '') <> ''
                 GROUP BY `订单号`
             ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-            WHERE sh.`更新时间` BETWEEN :start_date AND :end_date
+            WHERE (:start_date IS NULL OR sh.`更新时间` >= :start_date)
+                AND (:end_date IS NULL OR sh.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
                 AND sh.`状态` = '已出库'
                 AND (:customer = '' OR sh.`客户` = :customer)
                 AND (:dealer = '' OR sh.`代理商` = :dealer)
@@ -534,7 +536,8 @@ def get_shipment_report_data(
                 WHERE COALESCE(`订单号`, '') <> ''
                 GROUP BY `订单号`
             ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = fg.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-            WHERE fg.`更新时间` BETWEEN :start_date AND :end_date
+            WHERE (:start_date IS NULL OR fg.`更新时间` >= :start_date)
+                AND (:end_date IS NULL OR fg.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
                 AND fg.`状态` = '已出库'
                 AND (:customer = '' OR fg.`客户` = :customer)
                 AND (:dealer = '' OR fg.`代理商` = :dealer)
@@ -582,7 +585,8 @@ def get_shipment_report_data(
                     WHERE COALESCE(`订单号`, '') <> ''
                     GROUP BY `订单号`
                 ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-                WHERE sh.`更新时间` BETWEEN :start_date AND :end_date
+                WHERE (:start_date IS NULL OR sh.`更新时间` >= :start_date)
+                    AND (:end_date IS NULL OR sh.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
                     AND sh.`状态` = '已出库'
                     AND (:customer = '' OR sh.`客户` = :customer)
                     AND (:dealer = '' OR sh.`代理商` = :dealer)
@@ -605,7 +609,8 @@ def get_shipment_report_data(
                     WHERE COALESCE(`订单号`, '') <> ''
                     GROUP BY `订单号`
                 ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = fg.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-                WHERE fg.`更新时间` BETWEEN :start_date AND :end_date
+                WHERE (:start_date IS NULL OR fg.`更新时间` >= :start_date)
+                    AND (:end_date IS NULL OR fg.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
                     AND fg.`状态` = '已出库'
                     AND (:customer = '' OR fg.`客户` = :customer)
                     AND (:dealer = '' OR fg.`代理商` = :dealer)

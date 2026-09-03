@@ -212,8 +212,8 @@ def generate_inbound_report(
 
 @router.get("/orders")
 def generate_order_report(
-    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
-    end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD，可为空表示不限日期"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD，可为空表示不限日期"),
     customer: str = Query("", description="客户筛选"),
     dealer: str = Query("", description="代理商筛选"),
     status: str = Query("", description="订单状态: active/done/deleted"),
@@ -226,7 +226,7 @@ def generate_order_report(
     """
     try:
         # Validate date range
-        if start_date > end_date:
+        if start_date and end_date and start_date > end_date:
             raise HTTPException(status_code=400, detail="结束日期必须大于或等于开始日期")
 
         # Validate status
@@ -259,7 +259,7 @@ def generate_order_report(
             **appendices,
         }
 
-        return _generate_excel_response(sheets, f"订单报表_{start_date}_{end_date}")
+        return _generate_excel_response(sheets, f"订单报表_{start_date or '历史起始'}_{end_date or '至今'}")
 
     except HTTPException:
         raise
@@ -269,8 +269,8 @@ def generate_order_report(
 
 @router.get("/shipments")
 def generate_shipment_report(
-    start_date: str = Query(..., description="开始日期 YYYY-MM-DD"),
-    end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD，可为空表示不限日期"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD，可为空表示不限日期"),
     customer: str = Query("", description="客户筛选"),
     dealer: str = Query("", description="代理商筛选"),
     model_type: str = Query("", description="机型筛选"),
@@ -283,7 +283,7 @@ def generate_shipment_report(
     """
     try:
         # Validate date range
-        if start_date > end_date:
+        if start_date and end_date and start_date > end_date:
             raise HTTPException(status_code=400, detail="结束日期必须大于或等于开始日期")
 
         summary_df, detail_df = get_shipment_report_data(
@@ -316,7 +316,7 @@ def generate_shipment_report(
             **appendices,
         }
 
-        return _generate_excel_response(sheets, f"出货报表_{start_date}_{end_date}")
+        return _generate_excel_response(sheets, f"出货报表_{start_date or '历史起始'}_{end_date or '至今'}")
 
     except HTTPException:
         raise

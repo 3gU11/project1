@@ -1,4 +1,4 @@
-import { onMounted, watch, type Ref } from 'vue'
+import { onMounted, shallowRef, watch, type Ref } from 'vue'
 
 type DraftOptions<T extends object> = {
   omitKeys?: string[]
@@ -56,6 +56,7 @@ export const useReactiveFormDraft = <T extends object>(
   target: T,
   options: DraftOptions<T> = {},
 ) => {
-  const wrapper = { value: target } as Ref<T>
+  // Keep the reactive form object as the ref value so deep watch tracks its fields.
+  const wrapper = shallowRef(target) as Ref<T>
   return useRefFormDraft(key, wrapper, options)
 }

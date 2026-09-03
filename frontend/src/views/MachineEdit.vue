@@ -15,9 +15,9 @@
       <el-checkbox
         :model-value="allVisibleSelected"
         :indeterminate="isVisibleIndeterminate"
-        @change="(v: any) => toggleAllVisible(Boolean(v))"
+        @change="toggleAllVisible"
       >
-        全选当前筛选结果
+        全选当前页
       </el-checkbox>
       <span>已勾选 {{ selectedSerials.length }} 台</span>
     </div>
@@ -51,6 +51,7 @@
         </template>
       </VirtualScrollList>
     </div>
+    <el-pagination v-model:current-page="currentPage" v-model:page-size="pageSize" :total="totalRows" :page-sizes="[50, 100, 200]" layout="total, sizes, prev, pager, next" class="pager" @current-change="loadData" @size-change="reloadFirstPage" />
 
     <el-divider />
     <h3>批量修改</h3>
@@ -74,7 +75,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type MessageResponse = { message?: string }
 
@@ -82,6 +83,9 @@ type Row = Record<string, any>
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<Row[]>([])
+const totalRows = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(100)
 const keyword = ref('')
 const keywordDebounced = ref('')
 let keywordTimer: number | null = null
@@ -91,42 +95,41 @@ const batchNote = ref('')
 const optXsAuto = ref(false)
 const optBackCond = ref(false)
 
-const filteredRows = computed(() => {
-  const term = keywordDebounced.value.trim().toLowerCase()
-  return rows.value
-    .filter((r) => String(r['状态'] || '') !== '已出库')
-    .filter((r) => {
-      if (!term) return true
-      return String(r.__searchText || '').includes(term)
-    })
-})
+const filteredRows = computed(() => rows.value.filter((r) => String(r['状态'] || '') !== '已出库'))
 
 watch(keyword, (v) => {
   if (keywordTimer) window.clearTimeout(keywordTimer)
   keywordTimer = window.setTimeout(() => {
     keywordDebounced.value = v
+    currentPage.value = 1
+    loadData()
   }, 180)
 })
 
 const loadData = async () => {
   loading.value = true
   try {
-    const list = await apiGetAll<Row>('/inventory/')
+    const res = await apiGet<{ data?: Row[]; total?: number }>('/inventory/', {
+      params: { skip: (currentPage.value - 1) * pageSize.value, limit: pageSize.value, keyword: keywordDebounced.value.trim(), exclude_shipped: true },
+    })
+    const list = res?.data || []
+    totalRows.value = Number(res?.total || 0)
     rows.value = list.map((x: Row) => ({
       ...x,
       __draftModel: String(x['机型'] || ''),
       __draftNote: String(x['合同备注'] || ''),
       __searchText: `${String(x['流水号'] || '')} ${String(x['占用订单号'] || '')} ${String(x['批次号'] || '')}`.toLowerCase(),
     }))
-    const valid = new Set(rows.value.map((r) => String(r['流水号'] || '')).filter(Boolean))
-    const next = new Set(Array.from(selectedSet.value).filter((sn) => valid.has(sn)))
-    selectedSet.value = next
-    selectedSerials.value = Array.from(next)
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取数据失败')
   } finally {
     loading.value = false
   }
+}
+
+const reloadFirstPage = () => {
+  currentPage.value = 1
+  loadData()
 }
 
 const isSelected = (row: Row) => selectedSet.value.has(String(row['流水号'] || ''))
@@ -145,16 +148,21 @@ const isVisibleIndeterminate = computed(() => {
   const hit = filteredRows.value.filter((r) => isSelected(r)).length
   return hit > 0 && hit < filteredRows.value.length
 })
-const toggleAllVisible = (checked: boolean) => {
+const toggleAllVisible = () => {
   const next = new Set(selectedSet.value)
-  if (checked) {
+  const visibleSerials = filteredRows.value
+    .map((r) => String(r['流水号'] || ''))
+    .filter(Boolean)
+  const hasVisibleSelection = visibleSerials.some((sn) => next.has(sn))
+  // Current-page toggle semantics: any existing selection means clear this
+  // page; only an entirely clear page selects all visible rows.
+  if (!hasVisibleSelection) {
     for (const r of filteredRows.value) {
       const sn = String(r['流水号'] || '')
       if (sn) next.add(sn)
     }
   } else {
-    for (const r of filteredRows.value) {
-      const sn = String(r['流水号'] || '')
+    for (const sn of visibleSerials) {
       if (sn) next.delete(sn)
     }
   }
@@ -176,6 +184,7 @@ const saveBatch = async () => {
       back_cond: optBackCond.value,
     })
     ElMessage.success(res.message || '批量更新成功')
+    batchNote.value = ''
     await loadData()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '批量更新失败')
@@ -208,6 +217,7 @@ onMounted(() => {
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
+.pager { margin-top: 12px; justify-content: flex-end; }
 .vhead, .vrow {
   display: grid;
   grid-template-columns: 42px 120px 170px 150px 90px 90px 170px 1fr 150px;

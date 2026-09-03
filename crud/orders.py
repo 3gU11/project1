@@ -218,6 +218,24 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
     df = get_data()
     model_note_map = _build_model_note_map(order_id)
 
+    # A stock unit can be selected before it has a contract number.  Resolve
+    # only unambiguous order+model matches; never guess between split contracts.
+    contract_by_model = {}
+    with get_engine().connect() as conn:
+        plan_rows = conn.execute(
+            text("SELECT `合同号`, `机型` FROM factory_plan WHERE TRIM(COALESCE(`订单号`, '')) = :order_id"),
+            {"order_id": str(order_id).strip()},
+        ).fetchall()
+    candidates_by_model = {}
+    for contract_no, model in plan_rows:
+        contract_no = str(contract_no or "").strip()
+        model = str(model or "").strip()
+        if contract_no and model:
+            candidates_by_model.setdefault(model, set()).add(contract_no)
+    for model, contract_ids in candidates_by_model.items():
+        if len(contract_ids) == 1:
+            contract_by_model[model] = next(iter(contract_ids))
+
     # 记录原先是 待入库 的机台（用于日志）
     current_status_df = df[df['流水号'].isin(selected_sns)]
     pending_inbound_sns = current_status_df[current_status_df['状态'] == '待入库']['流水号'].tolist()
@@ -248,6 +266,31 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                     {"order_id": order_id, "customer": customer, "agent": agent,
                      "now": now_str, "sns": sns_list}
                 )
+                for sn in selected_sns:
+                    row = df[df['流水号'] == sn]
+                    if row.empty:
+                        continue
+                    contract_no = contract_by_model.get(str(row.iloc[0].get('机型', '') or '').strip())
+                    if not contract_no:
+                        continue
+                    conn.execute(
+                        text("""
+                            UPDATE finished_goods_data
+                            SET 合同号 = :contract_no
+                            WHERE 流水号 = :sn
+                              AND (合同号 IS NULL OR TRIM(合同号) = '' OR TRIM(合同号) = :contract_no)
+                        """),
+                        {"contract_no": contract_no, "sn": sn},
+                    )
+                    conn.execute(
+                        text("""
+                            UPDATE inbound_history
+                            SET contract_no = :contract_no, order_no = :order_id
+                            WHERE serial_no = :sn
+                              AND (contract_no IS NULL OR TRIM(contract_no) = '' OR TRIM(contract_no) = :contract_no)
+                        """),
+                        {"contract_no": contract_no, "order_id": order_id, "sn": sn},
+                    )
                 # 按机型写入合同备注（如果有对应备注）
                 if model_note_map:
                     for sn in selected_sns:
@@ -289,11 +332,29 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                     text("""
                         UPDATE units
                         SET customer = :customer,
-                            dealer_name = :agent
+                            dealer_name = :agent,
+                            sales_id = :order_id,
+                            updated_at = NOW()
                         WHERE serial_no IN :sns OR forecast_serial_no IN :sns
                     """).bindparams(bindparam("sns", expanding=True)),
-                    {"customer": customer, "agent": agent, "sns": list(selected_sns)}
+                    {"customer": customer, "agent": agent, "order_id": order_id,
+                     "sns": list(selected_sns)}
                 )
+                for sn in selected_sns:
+                    row = df[df['流水号'] == sn]
+                    if row.empty:
+                        continue
+                    contract_no = contract_by_model.get(str(row.iloc[0].get('机型', '') or '').strip())
+                    if contract_no:
+                        conn.execute(
+                            text("""
+                                UPDATE units
+                                SET contract_no = :contract_no, sales_id = :order_id, updated_at = NOW()
+                                WHERE (serial_no = :sn OR forecast_serial_no = :sn)
+                                  AND (contract_no IS NULL OR TRIM(contract_no) = '' OR TRIM(contract_no) = :contract_no)
+                            """),
+                            {"contract_no": contract_no, "order_id": order_id, "sn": sn},
+                        )
                 # 【缺口5补全】逐台将 forecast_serial_no → serial_no，让看板卡片显示实物流水号
                 for sn in selected_sns:
                     conn.execute(

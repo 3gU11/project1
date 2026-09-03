@@ -69,19 +69,44 @@
           <el-input v-model="scope.row.remark" placeholder="可选备注" />
         </template>
       </el-table-column>
+      <el-table-column label="拍照配置" width="130" align="center">
+        <template #default="scope">
+          <el-button size="small" type="primary" link :disabled="!scope.row.id" @click="openPhotoConfig(scope.row)">配置</el-button>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="210">
         <template #default="scope">
           <el-button size="small" type="danger" @click="removeRow(scope.$index)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <el-drawer v-model="photoVisible" :title="`拍照配置 - ${photoModel?.model_name || ''}`" size="760px">
+      <div class="photo-toolbar">
+        <el-button size="small" @click="loadPhotoConfig" :loading="photoLoading">刷新</el-button>
+        <span>配置项 {{ photoRows.length }} 条</span>
+      </div>
+      <el-table :data="photoRows" border stripe size="small" v-loading="photoLoading">
+        <el-table-column prop="position_code" label="位置编码" width="130" />
+        <el-table-column prop="item_name" label="拍照项目" min-width="150" />
+        <el-table-column prop="shooting_requirement" label="拍摄要求" min-width="180" />
+        <el-table-column label="必拍" width="80" align="center"><template #default="{ row }"><el-switch v-model="row.required" /></template></el-table-column>
+        <el-table-column label="OCR" width="80" align="center"><template #default="{ row }"><el-switch v-model="row.ocr_enabled" /></template></el-table-column>
+        <el-table-column prop="ocr_profile" label="OCR配置" width="140"><template #default="{ row }"><el-input v-model="row.ocr_profile" size="small" /></template></el-table-column>
+        <el-table-column label="启用" width="80" align="center"><template #default="{ row }"><el-switch v-model="row.enabled" /></template></el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="photoVisible = false">取消</el-button>
+        <el-button type="primary" :loading="photoSaving" @click="savePhotoConfig">保存配置</el-button>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getApiErrorMessage } from '../utils/request'
+import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
 import { useModelDictionaryStore, type ModelDictionaryRow } from '../store/modelDictionary'
 import { onBeforeRouteLeave } from 'vue-router'
 
@@ -92,6 +117,11 @@ const localRows = ref<ModelDictionaryRow[]>([])
 const baselineRows = ref<ModelDictionaryRow[]>([])
 const draggingKey = ref('')
 const dragOverKey = ref('')
+const photoVisible = ref(false)
+const photoLoading = ref(false)
+const photoSaving = ref(false)
+const photoModel = ref<ModelDictionaryRow | null>(null)
+const photoRows = ref<any[]>([])
 const familyAliases: Record<string, string> = {
   小机G: '中小型G',
   小机XS: '中小型XS',
@@ -152,6 +182,40 @@ const load = async () => {
     ElMessage.error(getApiErrorMessage(err) || '读取机型字典失败')
   } finally {
     loading.value = false
+  }
+}
+
+const loadPhotoConfig = async () => {
+  if (!photoModel.value?.id) return
+  photoLoading.value = true
+  try {
+    const res = await apiGet<{ data?: any[] }>(`/sandbox/model-dictionary/${photoModel.value.id}/photo-config`)
+    photoRows.value = (res?.data || []).map((row: any, idx: number) => ({ ...row, sort_order: Number(row.sort_order ?? idx), required: Boolean(row.required), ocr_enabled: Boolean(row.ocr_enabled), enabled: Boolean(row.enabled) }))
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '读取拍照配置失败')
+  } finally {
+    photoLoading.value = false
+  }
+}
+
+const openPhotoConfig = async (row: ModelDictionaryRow) => {
+  photoModel.value = row
+  photoRows.value = []
+  photoVisible.value = true
+  await loadPhotoConfig()
+}
+
+const savePhotoConfig = async () => {
+  if (!photoModel.value?.id) return
+  photoSaving.value = true
+  try {
+    await apiPost(`/sandbox/model-dictionary/${photoModel.value.id}/photo-config/save`, { rows: photoRows.value.map((row, idx) => ({ ...row, model_id: photoModel.value?.id, sort_order: idx })) })
+    ElMessage.success('拍照配置已保存')
+    await loadPhotoConfig()
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '保存拍照配置失败')
+  } finally {
+    photoSaving.value = false
   }
 }
 
@@ -299,6 +363,14 @@ onBeforeRouteLeave(() => {
   align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-2);
+}
+.photo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--color-gray-500);
+  font-size: 13px;
 }
 .dirty {
   color: var(--color-warning, #d97706);

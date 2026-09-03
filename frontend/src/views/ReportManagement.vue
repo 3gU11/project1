@@ -4,6 +4,28 @@
 
     <!-- Tab Navigation -->
     <el-tabs v-model="activeTab" type="card" class="report-tabs">
+      <!-- Tab 0: 往期数据 -->
+      <el-tab-pane label="🕘 往期数据" name="historical">
+        <div class="report-content">
+          <p class="report-desc">订单与出货附表分析；默认统计全部历史数据，可按日期缩小统计范围。</p>
+          <el-form :model="historicalForm" label-width="100px" class="report-form">
+            <el-row :gutter="20">
+              <el-col :span="7">
+                <el-form-item label="日期范围">
+                  <el-date-picker v-model="historicalForm.dateRange" type="daterange" range-separator="至" start-placeholder="不限开始日期" end-placeholder="不限结束日期" value-format="YYYY-MM-DD" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="4"><el-form-item label="客户"><el-select v-model="historicalForm.customer" clearable filterable placeholder="全部客户" style="width:100%"><el-option v-for="c in availableCustomers" :key="c" :label="c" :value="c" /></el-select></el-form-item></el-col>
+              <el-col :span="4"><el-form-item label="代理商"><el-select v-model="historicalForm.dealer" clearable filterable placeholder="全部代理商" style="width:100%"><el-option v-for="d in availableDealers" :key="d" :label="d" :value="d" /></el-select></el-form-item></el-col>
+              <el-col :span="4"><el-form-item label="订单状态"><el-select v-model="historicalForm.status" clearable placeholder="全部状态" style="width:100%"><el-option label="进行中" value="active" /><el-option label="已完结" value="done" /><el-option label="已删除" value="deleted" /></el-select></el-form-item></el-col>
+            </el-row>
+            <el-form-item>
+              <el-button type="primary" @click="queryHistoricalData" :loading="historicalLoading">查询往期数据</el-button>
+            </el-form-item>
+          </el-form>
+          <div class="data-preview"><ReportAppendices :appendices="historicalOrderAppendices" :dealer-summary="historicalDealerSummary" :show-title="false" prioritize-core-tables /></div>
+        </div>
+      </el-tab-pane>
       <!-- Tab 1: 完工报表（产出统计） -->
       <el-tab-pane label="✅ 完工报表" name="completion">
         <div class="report-content">
@@ -301,13 +323,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiGet, apiDownloadBlob } from '../utils/request'
 import ReportAppendices from '../components/ReportAppendices.vue'
 
 // Active tab
-const activeTab = ref('completion')
+const activeTab = ref('historical')
+
+const historicalForm = ref({ dateRange: [] as string[], customer: '', dealer: '', status: '' })
+const historicalLoading = ref(false)
+const historicalOrderAppendices = ref<Record<string, any[]>>({})
+const historicalDealerSummary = ref<any[]>([])
 
 // Form data
 const inboundForm = ref({
@@ -590,6 +617,25 @@ const queryShipmentReport = async () => {
   }
 }
 
+const queryHistoricalData = async () => {
+  historicalLoading.value = true
+  try {
+    const [startDate, endDate] = historicalForm.value.dateRange || []
+    const common = { ...(startDate ? { start_date: startDate } : {}), ...(endDate ? { end_date: endDate } : {}) }
+    const orderParams = new URLSearchParams({ ...common, customer: historicalForm.value.customer || '', dealer: historicalForm.value.dealer || '', status: historicalForm.value.status || '', format: 'json' })
+    const orders = await apiGet<{data: any[], appendices?: Record<string, any[]>, dealer_summary?: any[]}>(`/reports/orders?${orderParams.toString()}`)
+    historicalOrderAppendices.value = orders.appendices || {}
+    historicalDealerSummary.value = orders.dealer_summary || []
+    ElMessage.success(`往期数据附表已更新：基于 ${orders.data?.length || 0} 条订单`)
+  } catch (error) {
+    ElMessage.error('往期数据查询失败')
+    historicalOrderAppendices.value = {}
+    historicalDealerSummary.value = []
+  } finally {
+    historicalLoading.value = false
+  }
+}
+
 const queryCompletionReport = async () => {
   const dateRange = getDateRange(completionForm.value.queryType, completionForm.value.dateRange, completionForm.value.month)
   if (!dateRange) {
@@ -758,6 +804,7 @@ const generateProductionReport = async () => {
 onMounted(() => {
   loadFilterOptions()
   loadModelDictionary()
+  queryHistoricalData()
 })
 </script>
 

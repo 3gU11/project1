@@ -63,3 +63,28 @@ def find_repair_identity(board_no: str) -> dict | None:
     with get_engine().connect() as connection:
         row = connection.execute(statement, {"board_no": normalized}).mappings().first()
     return to_repair_identity(dict(row)) if row else None
+
+
+def find_repair_machine_identity(machine_no: str) -> dict | None:
+    normalized = str(machine_no or "").strip()
+    if not normalized:
+        return None
+    statement = text("""
+        SELECT machine_no, model_name, customer, agent, delivery_date, updated_at
+        FROM machine_component_bindings
+        WHERE active = 1 AND machine_no = :machine_no
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+    """)
+    with get_engine().connect() as connection:
+        row = connection.execute(statement, {"machine_no": normalized}).mappings().first()
+    if not row:
+        return None
+    return {
+        "machineNo": row.get("machine_no") or normalized,
+        "modelName": row.get("model_name") or "",
+        "customerName": row.get("customer") or "",
+        "agent": row.get("agent") or "",
+        "deliveryDate": row.get("delivery_date").isoformat() if row.get("delivery_date") else "",
+        "sourceVersion": f"V8_MACHINE:{row.get('updated_at').isoformat()}" if row.get("updated_at") else "V8_MACHINE",
+    }

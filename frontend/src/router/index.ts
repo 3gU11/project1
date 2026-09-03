@@ -35,7 +35,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/inbound', name: 'Inbound', label: '⬇️ 成品入库', title: '成品入库', permission: 'INBOUND', component: () => import('../views/Inbound.vue') },
   { path: '/traceability', name: 'Traceability', label: '🔍 汇总与追溯', title: '汇总与追溯', permission: 'TRACEABILITY', isManagement: true, component: () => import('../views/Traceability.vue') },
   { path: '/production-kanban', name: 'ProductionKanban', label: '🏭 生产看板', title: '生产看板', permission: 'KANBAN_VIEW', isManagement: true, component: () => import('../views/sandbox/ProductionKanban.vue') },
-  { path: '/prediction-sandbox', name: 'PredictionSandbox', label: '👑 预测沙盘', title: '预测沙盘', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/PredictionSandbox.vue') },
+  { path: '/prediction-sandbox', name: 'PredictionSandbox', label: '👑 预测沙盘', title: '预测沙盘', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/BossPlan.vue') },
   { path: '/reports', name: 'Reports', label: '📊 报表管理', title: '报表管理', permission: 'REPORT_VIEW', isManagement: true, component: () => import('../views/ReportManagement.vue') },
 ]
 
@@ -46,7 +46,7 @@ export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({
   isManagement: r.isManagement,
 }))
 
-const appChildRoutes: RouteRecordRaw[] = appRouteDefs.map((r) => ({
+const appChildRoutes: RouteRecordRaw[] = appRouteDefs.filter((r) => r.name !== 'Reports').map((r) => ({
   path: r.path.slice(1),
   name: r.name,
   component: r.component,
@@ -126,6 +126,12 @@ const routes: Array<RouteRecordRaw> = [
         name: 'Home',
         component: () => import('../views/Home.vue'),
         meta: { title: '首页' }
+      },
+      {
+        path: 'reports',
+        name: 'Reports',
+        component: () => import('../views/ReportManagement.vue'),
+        meta: { title: '报表管理', permission: 'REPORT_VIEW', requiresAuth: true }
       },
     ]
   }

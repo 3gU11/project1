@@ -9,13 +9,13 @@
       <div v-show="expanded" class="ratio-collapse-body">
         <div class="ratio-config-panel">
             <div class="section-block">
-              <strong>大类目标比例（用于沙盘达成目标库存结构）</strong>
+              <strong>机型族目标比例（G、XS、AUTO 合计 100%）</strong>
               <div class="ratio-row">
-                <div class="ratio-item" v-for="group in firstLayerVisibleGroups" :key="`l1-${group.category}`">
-                  <label>{{ group.category }}:</label>
+                <div class="ratio-item" v-for="group in familyRatioGroups" :key="`l1-${group.family}`">
+                  <label>{{ group.label }}:</label>
                   <el-input-number
-                    :model-value="getGlobalCategoryValue(group.category)"
-                    @update:model-value="(v:number | undefined) => setGlobalCategoryValue(group.category, v)"
+                    :model-value="getFamilyValue(group.family)"
+                    @update:model-value="(v:number | undefined) => setFamilyValue(group.family, v)"
                     :min="0"
                     :max="100"
                     :controls="false"
@@ -24,20 +24,23 @@
                   />%
                 </div>
                 <span :class="['sum-badge', sumLevel1NoSpecial === 100 ? 'is-valid' : 'is-invalid']">
-                  目标合计(不含特殊): {{ sumLevel1NoSpecial }}%
+                  目标合计: {{ sumLevel1NoSpecial }}%
                   <span class="status-icon">{{ sumLevel1NoSpecial === 100 ? '✓' : '⚠' }}</span>
                 </span>
               </div>
             </div>
 
-            <div v-for="group in secondLayerGroups" :key="`l2-${group.category}`" class="section-block">
-              <strong>{{ group.category }} 机型目标比例</strong>
+            <div v-for="group in familyModelGroups" :key="`l2-${group.family}`" class="section-block">
+              <strong>
+                {{ group.label }}机型目标比例
+                <span v-if="group.family !== 'G'">（中小型与中大型合计 100%）</span>
+              </strong>
               <div class="ratio-row">
-                <div class="ratio-item" v-for="m in group.models" :key="`${group.category}-${m}`">
-                  <label>{{ m }}:</label>
+                <div class="ratio-item" v-for="item in group.models" :key="`${group.family}-${item.model}`">
+                  <label>{{ item.model }}:</label>
                   <el-input-number
-                    :model-value="getLevel3Value(group.category, m)"
-                    @update:model-value="(v:number | undefined) => setLevel3Value(group.category, m, v)"
+                    :model-value="getFamilyModelValue(group.family, item.model)"
+                    @update:model-value="(v:number | undefined) => setFamilyModelValue(group.family, item.model, v)"
                     :min="0"
                     :max="100"
                     :controls="false"
@@ -45,14 +48,15 @@
                     style="width:60px"
                   />%
                 </div>
-                <span :class="['sum-badge', sumLevel3(group.category) === 100 ? 'is-valid' : 'is-invalid']">
-                  目标合计: {{ sumLevel3(group.category) }}% / 100%
-                  <span class="status-icon">{{ sumLevel3(group.category) === 100 ? '✓' : '⚠' }}</span>
+                <span :class="['sum-badge', sumFamilyModels(group.family) === 100 ? 'is-valid' : 'is-invalid']">
+                  目标合计: {{ sumFamilyModels(group.family) }}% / 100%
+                  <span class="status-icon">{{ sumFamilyModels(group.family) === 100 ? '✓' : '⚠' }}</span>
                 </span>
               </div>
             </div>
 
             <div class="panel-actions">
+              <el-button @click="fillFromHistoricalData" :loading="autoFilling">按往期数据自动填入</el-button>
               <el-button type="primary" @click="save" :loading="saving">保存目标比例</el-button>
               <transition name="fade">
                 <span v-if="msg" class="message-bubble" :style="{ backgroundColor: msgBgColor, borderColor: msgBorderColor, color: msgColor }">
@@ -69,7 +73,7 @@
       <div class="inventory-ratio-header">
         <div class="header-title-area">
           <strong>库存机型分布</strong>
-          <span>库存中 + 待入库，共 {{ inventoryTotal }} 台</span>
+          <span>G / XS / AUTO 库存，共 {{ inventoryTotal }} 台</span>
         </div>
         <button class="header-zoom-button" type="button" @click.stop="isZoomed = !isZoomed">
           <svg v-if="!isZoomed" class="zoom-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
@@ -78,34 +82,41 @@
         </button>
       </div>
       <div class="inventory-table-shell">
-        <el-table
-          :data="inventoryRatioRows"
-          size="small"
-          :height="isZoomed ? undefined : (expanded ? 300 : 180)"
-          stripe
-          v-loading="inventoryLoading"
-          empty-text="暂无库存数据"
-        >
-          <el-table-column prop="name" label="机型" min-width="120" show-overflow-tooltip />
-          <el-table-column label="数量" width="56" align="center">
-            <template #default="{ row }">
-              <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
-              <span v-else style="color: #dcdfe6;">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="加高" width="56" align="center">
-            <template #default="{ row }">
-              <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
-              <span v-else style="color: #dcdfe6;">-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="占比" width="66" align="center">
-            <template #default="{ row }">
-              <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
-              <span v-else style="color: #dcdfe6;">-</span>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div v-loading="inventoryLoading" class="inventory-family-groups">
+          <section v-for="group in inventoryFamilyGroups" :key="group.family" class="inventory-family-group">
+            <div class="inventory-family-title">
+              <strong>{{ group.label }}</strong>
+              <span>族内库存 {{ group.total }} 台</span>
+            </div>
+            <el-table
+              :data="group.rows"
+              size="small"
+              :height="isZoomed ? undefined : undefined"
+              stripe
+              empty-text="暂无该族库存"
+            >
+              <el-table-column prop="name" label="机型" min-width="120" show-overflow-tooltip />
+              <el-table-column label="数量" width="56" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.current_qty > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.current_qty }}</span>
+                  <span v-else style="color: #dcdfe6;">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="加高" width="56" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.high_qty > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; display: inline-block;">{{ row.high_qty }}</span>
+                  <span v-else style="color: #dcdfe6;">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="同族占比" width="78" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.current_pct > 0" style="font-weight: 800; color: #475569; background: #f8fafc; padding: 2px 4px; border-radius: 4px; display: inline-block; font-size: 11px;">{{ formatPct(row.current_pct) }}</span>
+                  <span v-else style="color: #dcdfe6;">-</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </section>
+        </div>
         <button v-if="!isZoomed" class="inventory-zoom-overlay" type="button" @click="isZoomed = true">
           <span class="inventory-zoom-icon"></span>
           <span>放大查看</span>
@@ -117,10 +128,12 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import * as sandboxApi from '../../services/sandboxApi'
 import { useInventoryStore } from '../../store/inventory'
 import { buildModelInventoryRatios, getActiveInventoryRows } from '../../utils/inventoryStats'
 import { compareModels } from '../../utils/modelOrder'
+import { apiGet } from '../../utils/request'
 
 type MajorFamily = 'G' | 'XS' | 'AUTO' | 'SPECIAL'
 const majorFamilies: MajorFamily[] = ['G', 'XS', 'AUTO', 'SPECIAL']
@@ -154,8 +167,13 @@ const globalLevel2 = reactive<Record<string, number>>({
   中大型AUTO: 0,
   特殊: 0
 })
+const familyLevel1 = reactive<Record<MajorFamily, number>>({ G: 24, XS: 76, AUTO: 0, SPECIAL: 0 })
+const familyModelRatios = reactive<Record<MajorFamily, Record<string, number>>>({
+  G: {}, XS: {}, AUTO: {}, SPECIAL: {}
+})
 
 const saving = ref(false)
+const autoFilling = ref(false)
 const msg = ref('')
 const msgColor = ref('#67c23a')
 const msgBgColor = computed(() => {
@@ -200,22 +218,32 @@ function handleDragStart(e: MouseEvent) {
 }
 const inventoryLoading = ref(false)
 const inventoryTotal = ref(0)
-const inventoryRatioRows = ref<Array<{ name: string; current_qty: number; current_pct: number }>>([])
+const inventoryRatioRows = ref<Array<{ name: string; current_qty: number; high_qty: number; current_pct: number }>>([])
 const specialModelSet = ref<Set<string>>(new Set())
 const inventoryStore = useInventoryStore()
+const inventoryFamilyGroups = computed(() => {
+  const labels: Record<string, string> = { AUTO: 'AUTO 族', G: 'G 族', XS: 'XS 族' }
+  return (['AUTO', 'G', 'XS'] as MajorFamily[]).map((family) => {
+    const rows = inventoryRatioRows.value.filter((row) => row.family === family)
+    return { family, label: labels[family], total: rows.reduce((sum, row) => sum + row.current_qty, 0), rows }
+  })
+})
 
 const sumLevel1NoSpecial = computed(
-  () => Number(globalLevel2['中小型G'] || 0) + Number(globalLevel2['中小型XS'] || 0) + Number(globalLevel2['中大型XS'] || 0) + Number(globalLevel2['中小型AUTO'] || 0) + Number(globalLevel2['中大型AUTO'] || 0)
+  () => Number(familyLevel1.G || 0) + Number(familyLevel1.XS || 0) + Number(familyLevel1.AUTO || 0)
 )
-const firstLayerGroups = computed(() => {
-  const out: Array<{ family: MajorFamily; category: string; models: string[] }> = []
-  for (const family of majorFamilies) {
-    for (const g of groupsByFamily.value[family] || []) out.push({ family, category: g.category, models: g.models || [] })
-  }
-  return out
-})
-const firstLayerVisibleGroups = computed(() => firstLayerGroups.value.filter((g) => g.category !== SPECIAL))
-const secondLayerGroups = computed(() => firstLayerGroups.value.filter((g) => g.category !== SPECIAL))
+const familyRatioGroups = [
+  { family: 'G' as MajorFamily, label: 'G 族' },
+  { family: 'XS' as MajorFamily, label: 'XS 族' },
+  { family: 'AUTO' as MajorFamily, label: 'AUTO 族' }
+]
+const familyModelGroups = computed(() => familyRatioGroups.map(({ family, label }) => ({
+  family,
+  label,
+  models: (groupsByFamily.value[family] || []).flatMap((group) =>
+    (group.models || []).map((model) => ({ model, category: group.category }))
+  )
+})))
 
 function ensureShape() {
   for (const f of majorFamilies) {
@@ -225,6 +253,7 @@ function ensureShape() {
       if (!form.level3[g.category]) form.level3[g.category] = {}
       for (const m of g.models) {
         if (form.level3[g.category][m] === undefined) form.level3[g.category][m] = Math.floor(100 / Math.max(1, g.models.length))
+        if (familyModelRatios[f][m] === undefined) familyModelRatios[f][m] = 0
       }
     }
   }
@@ -234,31 +263,29 @@ function ensureShape() {
   form.level3[SPECIAL][SPECIAL] = 0
 }
 
-function getGlobalCategoryValue(category: string) {
-  return Number(globalLevel2[category] || 0)
+function getFamilyValue(family: MajorFamily) {
+  return Number(familyLevel1[family] || 0)
 }
 
-function setGlobalCategoryValue(category: string, value: number | undefined) {
-  globalLevel2[category] = Number(value || 0)
+function setFamilyValue(family: MajorFamily, value: number | undefined) {
+  familyLevel1[family] = Number(value || 0)
 }
 
-function sumLevel3(category: string) {
-  return Object.values(form.level3[category] || {}).reduce((s, v) => s + Number(v || 0), 0)
+function sumFamilyModels(family: MajorFamily) {
+  return Object.values(familyModelRatios[family] || {}).reduce((s, v) => s + Number(v || 0), 0)
 }
 
 function formatPct(v: number) {
   return `${Number(v || 0).toFixed(1)}%`
 }
 
-function getLevel3Value(category: string, model: string) {
-  if (!form.level3[category]) form.level3[category] = {}
-  if (form.level3[category][model] === undefined) form.level3[category][model] = 0
-  return Number(form.level3[category][model] || 0)
+function getFamilyModelValue(family: MajorFamily, model: string) {
+  if (familyModelRatios[family][model] === undefined) familyModelRatios[family][model] = 0
+  return Number(familyModelRatios[family][model] || 0)
 }
 
-function setLevel3Value(category: string, model: string, value: number | undefined) {
-  if (!form.level3[category]) form.level3[category] = {}
-  form.level3[category][model] = Number(value || 0)
+function setFamilyModelValue(family: MajorFamily, model: string, value: number | undefined) {
+  familyModelRatios[family][model] = Number(value || 0)
 }
 
 function apportionToTarget(keys: string[], source: Record<string, number>, target: number) {
@@ -304,28 +331,27 @@ function buildBackendPayload() {
     level2: Record<string, Record<string, number>>
     level3: Record<string, Record<string, number>>
   }
-  payload.level2_global = {
-    中小型G: Number(globalLevel2['中小型G'] || 0),
-    中小型XS: Number(globalLevel2['中小型XS'] || 0),
-    中大型XS: Number(globalLevel2['中大型XS'] || 0),
-    中小型AUTO: Number(globalLevel2['中小型AUTO'] || 0),
-    中大型AUTO: Number(globalLevel2['中大型AUTO'] || 0),
-    特殊: 0
-  }
+  const categoryGlobalWeights: Record<string, number> = {}
   for (const family of ['G', 'XS', 'AUTO'] as MajorFamily[]) {
     const groups = groupsByFamily.value[family] || []
     const groupKeys = groups.map((g) => g.category)
-    const globalGroups: Record<string, number> = {}
-    for (const k of groupKeys) globalGroups[k] = Number(globalLevel2[k] || 0)
-    const level2Local = apportionToTarget(groupKeys, globalGroups, 100)
+    const categoryModelWeights: Record<string, number> = {}
+    for (const group of groups) {
+      categoryModelWeights[group.category] = (group.models || []).reduce(
+        (sum, model) => sum + Number(familyModelRatios[family]?.[model] || 0),
+        0
+      )
+      categoryGlobalWeights[group.category] = Number(familyLevel1[family] || 0) * categoryModelWeights[group.category] / 100
+    }
+    const level2Local = apportionToTarget(groupKeys, categoryModelWeights, 100)
     payload.level2[family] = level2Local
     for (const g of groups) {
       const modelKeys = g.models || []
-      const globalModels: Record<string, number> = {}
-      for (const m of modelKeys) globalModels[m] = Number(form.level3[g.category]?.[m] || 0)
-      payload.level3[g.category] = apportionToTarget(modelKeys, globalModels, 100)
+      payload.level3[g.category] = apportionToTarget(modelKeys, familyModelRatios[family] || {}, 100)
     }
   }
+  const categoryKeys = ['中小型G', '中小型XS', '中大型XS', '中小型AUTO', '中大型AUTO']
+  payload.level2_global = { ...apportionToTarget(categoryKeys, categoryGlobalWeights, 100), 特殊: 0 }
   payload.level2.SPECIAL = { [SPECIAL]: 0 }
   payload.level3[SPECIAL] = { [SPECIAL]: 0 }
   return payload
@@ -452,6 +478,27 @@ function loadFromRatio(ratio: any) {
   const fixed = apportionToTarget(['中小型G', '中小型XS', '中大型XS', '中小型AUTO', '中大型AUTO'], globalLevel2, 100)
   for (const k of Object.keys(fixed)) globalLevel2[k] = fixed[k]
   globalLevel2[SPECIAL] = 0
+
+  for (const family of ['G', 'XS', 'AUTO'] as MajorFamily[]) {
+    const groups = groupsByFamily.value[family] || []
+    const familyTotal = groups.reduce((sum, group) => sum + Number(globalLevel2[group.category] || 0), 0)
+    familyLevel1[family] = familyTotal
+    const source: Record<string, number> = {}
+    const localCategories = form.level2[family] || {}
+    for (const group of groups) {
+      const categoryBasis = familyTotal > 0
+        ? Number(globalLevel2[group.category] || 0)
+        : Number(localCategories[group.category] || 0)
+      for (const model of group.models || []) {
+        source[model] = categoryBasis * Number(form.level3[group.category]?.[model] || 0) / 100
+      }
+    }
+    const models = groups.flatMap((group) => group.models || [])
+    const merged = apportionToTarget(models, source, 100)
+    for (const key of Object.keys(familyModelRatios[family])) delete familyModelRatios[family][key]
+    Object.assign(familyModelRatios[family], merged)
+  }
+  familyLevel1.SPECIAL = 0
 }
 
 function normalizeRatioPayload(ratio: any) {
@@ -485,11 +532,102 @@ function normalizeRatioPayload(ratio: any) {
   return out
 }
 
+type HistoricalAppendices = {
+  '总族类比例'?: Array<Record<string, unknown>>
+  '丝杆订货需求比例'?: Array<Record<string, unknown>>
+}
+
+function historicalNumber(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+function historicalModelKey(value: unknown) {
+  return String(value || '').trim().replace(/\s+/g, '').toUpperCase()
+}
+
+function collectHistoricalScrewDemand(rows: Array<Record<string, unknown>>, family: MajorFamily) {
+  const column = family === 'G' ? 'g' : family.toLowerCase()
+  const demand: Record<string, number> = {}
+  for (const row of rows) {
+    const name = String(row[`${column}_name`] || '').trim()
+    if (!name || name.endsWith('合计')) continue
+    const key = historicalModelKey(name)
+    if (!key) continue
+    demand[key] = Number(demand[key] || 0) + historicalNumber(row[`${column}_quantity`])
+  }
+  return demand
+}
+
+async function fillFromHistoricalData() {
+  try {
+    await ElMessageBox.confirm(
+      '将以不限日期的历史订单统计覆盖当前未保存比例；完成后仍需点击“保存目标比例”才会生效。是否继续？',
+      '按往期数据自动填入',
+      { type: 'warning', confirmButtonText: '自动填入', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  autoFilling.value = true
+  try {
+    const result = await apiGet<{ appendices?: HistoricalAppendices }>('/reports/orders?format=json')
+    const appendices = result.appendices || {}
+    const familyQuantities: Record<MajorFamily, number> = { G: 0, XS: 0, AUTO: 0, SPECIAL: 0 }
+    const categoryFamily: Record<string, MajorFamily> = {
+      中小型G: 'G',
+      中小型XS: 'XS',
+      中大型XS: 'XS',
+      中小型AUTO: 'AUTO',
+      中大型AUTO: 'AUTO',
+    }
+    for (const row of appendices['总族类比例'] || []) {
+      const family = categoryFamily[String(row['总族类'] || '').trim()]
+      if (family) familyQuantities[family] += historicalNumber(row['累计出货'])
+    }
+    const historicalTotal = familyQuantities.G + familyQuantities.XS + familyQuantities.AUTO
+    if (historicalTotal <= 0) {
+      throw new Error('历史订单中没有可用于 G、XS、AUTO 族的统计数据')
+    }
+
+    const familyValues = apportionToTarget(['G', 'XS', 'AUTO'], familyQuantities, 100)
+    familyLevel1.G = familyValues.G
+    familyLevel1.XS = familyValues.XS
+    familyLevel1.AUTO = familyValues.AUTO
+
+    const missingFamilies: string[] = []
+    const screwRows = appendices['丝杆订货需求比例'] || []
+    for (const family of ['G', 'XS', 'AUTO'] as MajorFamily[]) {
+      const models = (groupsByFamily.value[family] || []).flatMap((group) => group.models || [])
+      const demand = collectHistoricalScrewDemand(screwRows, family)
+      const source: Record<string, number> = {}
+      for (const model of models) source[model] = Number(demand[historicalModelKey(model)] || 0)
+
+      if (Object.values(source).some((value) => value > 0)) {
+        for (const key of Object.keys(familyModelRatios[family])) delete familyModelRatios[family][key]
+        Object.assign(familyModelRatios[family], apportionToTarget(models, source, 100))
+      } else {
+        missingFamilies.push(family)
+      }
+    }
+
+    const suffix = missingFamilies.length
+      ? `；${missingFamilies.join('、')} 族没有匹配的历史丝杆需求，保留原机型分配`
+      : ''
+    ElMessage.success(`已按不限日期的往期订单数据填入${suffix}`)
+  } catch (error: any) {
+    ElMessage.error(error?.message || '自动填入失败')
+  } finally {
+    autoFilling.value = false
+  }
+}
+
 function validate() {
   if (sumLevel1NoSpecial.value !== 100) return `大类比例合计必须等于 100，当前为 ${sumLevel1NoSpecial.value}`
-  for (const g of secondLayerGroups.value) {
-    const s3 = sumLevel3(g.category)
-    if (s3 !== 100) return `${g.category} 的第二层合计必须等于 100，当前为 ${s3}`
+  for (const group of familyModelGroups.value) {
+    const sum = sumFamilyModels(group.family)
+    if (sum !== 100) return `${group.label}机型比例合计必须等于 100，当前为 ${sum}`
   }
   return null
 }
@@ -511,24 +649,48 @@ async function loadInventoryRatios() {
   inventoryLoading.value = true
   try {
     const inventoryRows = await inventoryStore.fetchInventory()
-    const ratioRows = buildModelInventoryRatios(getActiveInventoryRows(inventoryRows))
-    const filteredRows = ratioRows
-      .map((row) => ({
+    const activeRows = getActiveInventoryRows(inventoryRows)
+    const ratioRows = buildModelInventoryRatios(activeRows)
+    const highCounts = new Map<string, number>()
+    for (const item of activeRows) {
+      const model = String(item['机型'] || '').trim()
+      const status = String(item['状态'] || '')
+      const highHint = `${model}|${String(item['合同备注'] || '')}`
+      if (model && (status.startsWith('库存中') || status === '待入库') && highHint.includes('加高')) {
+        const key = model.toUpperCase()
+        highCounts.set(key, (highCounts.get(key) || 0) + 1)
+      }
+    }
+    const modelFamilyMap = new Map<string, MajorFamily>()
+    for (const group of groupsByFamily.value.G.concat(groupsByFamily.value.XS, groupsByFamily.value.AUTO)) {
+      const family = CAT_TO_MAJOR[group.category]
+      if (!family) continue
+      for (const model of group.models || []) modelFamilyMap.set(String(model).trim().toUpperCase(), family)
+    }
+    const modelRows: Array<{ name: string; family: MajorFamily; current_qty: number; high_qty: number }> = []
+    for (const row of ratioRows) {
+      if (!row.model || isSpecialInventoryModel(row.model)) continue
+      const category = categoryOfModel(row.model)
+      const family = modelFamilyMap.get(String(row.model).trim().toUpperCase()) || CAT_TO_MAJOR[category]
+      if (!family || family === 'SPECIAL') continue
+      const currentQty = row.inStock + row.pending
+      if (currentQty <= 0) continue
+      modelRows.push({
         name: row.model,
-        current_qty: row.count,
-        high_qty: row.highCount
-      }))
-      .filter((row) => row.name && row.current_qty > 0 && !isSpecialInventoryModel(row.name))
-    const total = filteredRows.reduce((sum, row) => sum + row.current_qty, 0)
-    inventoryTotal.value = total
-    inventoryRatioRows.value = filteredRows
+        family,
+        current_qty: currentQty,
+        high_qty: highCounts.get(String(row.model).trim().toUpperCase()) || 0
+      })
+    }
+    const familyTotals: Record<string, number> = {}
+    for (const row of modelRows) familyTotals[row.family] = (familyTotals[row.family] || 0) + row.current_qty
+    inventoryTotal.value = Object.values(familyTotals).reduce((sum, count) => sum + count, 0)
+    inventoryRatioRows.value = modelRows
       .map((row) => ({
         ...row,
-        current_pct: total > 0 ? (row.current_qty / total) * 100 : 0
+        current_pct: familyTotals[row.family] > 0 ? (row.current_qty / familyTotals[row.family]) * 100 : 0
       }))
-      .sort((a, b) => {
-        return compareModels(a.name, b.name)
-      })
+      .sort((a, b) => a.family.localeCompare(b.family) || compareModels(a.name, b.name))
   } catch {
     inventoryTotal.value = 0
     inventoryRatioRows.value = []
@@ -804,6 +966,38 @@ onMounted(async () => {
   position: relative;
   border-radius: 6px;
   overflow: hidden;
+}
+.inventory-family-groups {
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fff;
+}
+.inventory-family-group + .inventory-family-group {
+  margin-top: 10px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+}
+.inventory-family-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 6px;
+}
+.inventory-family-title strong {
+  color: #1f2937;
+  font-size: 12px;
+}
+.inventory-family-title span {
+  color: #6b7280;
+  font-size: 10px;
+}
+.inventory-family-group :deep(.el-table__header-wrapper th) {
+  background: #f8fafc;
+}
+.inventory-ratio-panel.is-zoomed .inventory-family-groups {
+  max-height: none;
+  overflow: visible;
 }
 .inventory-zoom-overlay {
   position: absolute;

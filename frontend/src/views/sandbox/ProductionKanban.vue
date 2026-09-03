@@ -264,15 +264,19 @@ import TransferSwapPanel from '../../components/sandbox/TransferSwapPanel.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
 import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
 import { apiDownloadBlob, apiDownloadBlobPost } from '../../utils/request'
+import { compareModels } from '../../utils/modelOrder'
 import { ArrowDown } from '@element-plus/icons-vue'
+import { useModelDictionaryStore } from '../../store/modelDictionary'
 
 const batchStore = useBatchStore()
 const lineStore = useLineStore()
 const rushStore = useRushStore()
 const transferStore = useTransferStore()
+const modelDictionaryStore = useModelDictionaryStore()
 
 const queueFilter = ref('')
-const statsPanelOpen = ref(false)
+// 默认进入生产看板时展开排产汇总列表，便于先查看整体排产状态。
+const statsPanelOpen = ref(true)
 const assignVisible = ref(false)
 const assigningBatch = ref<any>(null)
 const selectedLineId = ref<string | null>(null)
@@ -359,7 +363,9 @@ function buildStatRows(
       stock: counts.stock,
       total: counts.ordered + counts.stock
     }))
-    .sort((a, b) => b.total - a.total || a.modelType.localeCompare(b.modelType, 'zh-Hans-CN'))
+    // The model dictionary is the sole source of display order. Quantity must
+    // never reorder models inside a batch/group.
+    .sort((a, b) => compareModels(a.modelType, b.modelType))
 }
 
 function batchIdentity(batch: any, fallback: string) {
@@ -1039,6 +1045,7 @@ const exportSummaryToExcel = async () => {
 let cleanupFns: (() => void)[] = []
 
 onMounted(async () => {
+  await modelDictionaryStore.ensureLoaded()
   await loadModelTypes()
   await safeFetchRushOrders()
   await refreshAll({ silent: true })

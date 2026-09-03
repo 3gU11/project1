@@ -95,6 +95,11 @@ def _ensure_permission(user_ctx: dict, method: str, go_path: str = "") -> None:
     method_upper = method.upper()
     path = str(go_path or "").strip()
 
+    if path.startswith("/api/v1/model-dictionary/"):
+        if "MODEL_DICTIONARY" in perms:
+            return
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+
     if method_upper == "GET" and path in {"/api/production-lines", "/api/batches"}:
         if _has_any(perms, {"SANDBOX_VIEW", "MOBILE_KANBAN_VIEW"}) or _is_line_operator(role):
             return
@@ -1242,6 +1247,17 @@ async def proxy_model_types(request: Request):
         except Exception as e:
             logger.warning(f"model-types local fallback failed: {e}")
     return resp
+
+
+@router.api_route("/model-dictionary/{path:path}", methods=["GET", "POST"])
+async def proxy_model_dictionary_photo_config(request: Request, path: str):
+    """Proxy Go's photo configuration management endpoints to the PC API."""
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    # This is model-dictionary administration, not sandbox operation. Keep
+    # access aligned with the existing MODEL_DICTIONARY menu permission.
+    if "MODEL_DICTIONARY" not in set(get_role_permissions(str(user_ctx.get("role") or ""))):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+    return await _forward(request, f"/api/v1/model-dictionary/{path}")
 
 
 @router.api_route("/units/empty-containers", methods=["GET"])

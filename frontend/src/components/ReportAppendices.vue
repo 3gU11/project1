@@ -1,8 +1,8 @@
 <template>
   <section v-if="hasAppendixData" class="report-appendices">
-    <h3 class="appendix-title">附表分析</h3>
+    <h3 v-if="showTitle" class="appendix-title">附表分析</h3>
 
-    <template v-if="dealerSummary.length">
+    <template v-if="!prioritizeCoreTables && dealerSummary.length">
       <h4>代理商统计</h4>
       <el-table :data="dealerSummary" border stripe size="small" max-height="360">
         <el-table-column prop="代理商" label="代理商" min-width="180" />
@@ -11,6 +11,7 @@
       </el-table>
     </template>
 
+    <template v-if="showCoreTables">
     <h4>总族类比例</h4>
     <el-table :data="familyRows" border stripe size="small" max-height="360">
       <el-table-column prop="总族类" label="总族类" min-width="160" />
@@ -31,6 +32,16 @@
       <el-table-column prop="g_quantity" label="数量" width="82" align="right" />
       <el-table-column prop="g_ratio" label="订货参考占比" width="120" align="right" />
     </el-table>
+    </template>
+
+    <template v-if="prioritizeCoreTables && dealerSummary.length">
+      <h4>代理商统计</h4>
+      <el-table :data="dealerSummary" border stripe size="small" max-height="360">
+        <el-table-column prop="代理商" label="代理商" min-width="180" />
+        <el-table-column prop="所售数量" label="所售数量" width="120" align="right" />
+        <el-table-column prop="总销售占比" label="总销售占比" width="140" align="right" />
+      </el-table>
+    </template>
 
     <h4>机型累计占比（全部机型）</h4>
     <el-table :data="modelRows" border stripe size="small" max-height="500">
@@ -56,9 +67,15 @@ type AppendixRows = {
 const props = withDefaults(defineProps<{
   appendices?: AppendixRows
   dealerSummary?: Record<string, unknown>[]
+  showTitle?: boolean
+  prioritizeCoreTables?: boolean
+  showCoreTables?: boolean
 }>(), {
   appendices: () => ({}),
   dealerSummary: () => [],
+  showTitle: true,
+  prioritizeCoreTables: false,
+  showCoreTables: true,
 })
 
 const familyRows = computed(() => props.appendices['总族类比例'] || [])

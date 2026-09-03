@@ -1,25 +1,43 @@
 <template>
   <div class="sandbox-layout">
-    <div class="sandbox-header">
-      <CapacityRatioEditor />
+    <div class="sandbox-intro">
+      <div>
+        <div class="sandbox-eyebrow">沙盘操作</div>
+        <h3>调整未来队列</h3>
+        <p>先设置机型比例并重算方案，再拖拽调整未确认队列，最后确认预测批次。</p>
+      </div>
+      <div class="sandbox-next-step"><span>当前操作顺序</span><strong>比例 → 重算 → 调整 → 确认</strong><small>比例和重算只影响未确认批次</small></div>
     </div>
-
+    <div class="sandbox-summary" aria-label="预测方案摘要">
+      <div><span>当前预测批次</span><strong>{{ predictedBatchCount }}</strong></div>
+      <div>
+        <span>已确认批次</span>
+        <strong>{{ confirmedBatchCount }}</strong>
+      </div>
+      <div><span>合同台数</span><strong>{{ contractUnitCount }}</strong></div>
+      <div><span>备货台数</span><strong>{{ stockUnitCount }}</strong></div>
+    </div>
+    <details class="sandbox-settings">
+      <summary>方案参数：机型比例</summary>
+      <div class="sandbox-header"><CapacityRatioEditor /></div>
+    </details>
     <div class="sandbox-filters">
+      <span class="toolbar-label">预测方案</span>
       <el-radio-group
         v-model="selectedSeriesFilters"
         @change="onSeriesFilterChange"
         class="series-tabs"
       >
-        <el-radio-button label="">全部</el-radio-button>
+        <el-radio-button value="">全部</el-radio-button>
         <el-radio-button
           v-for="series in seriesFilterOptions"
           :key="series"
-          :label="series"
-        />
+          :value="series"
+        >{{ series }}</el-radio-button>
       </el-radio-group>
-      <el-button @click="handleManualRefresh" :loading="batchStore.loading">刷新</el-button>
+      <el-button text @click="handleManualRefresh" :loading="batchStore.loading">刷新数据</el-button>
       <el-button type="primary" @click="handleRecompute" :loading="recomputing">
-        {{ recomputeButtonText }}
+        {{ recomputeButtonText }}方案
       </el-button>
 
       <el-button
@@ -27,14 +45,14 @@
         type="warning"
         @click="batchConfirm"
       >
-        审核选中列
+        确认预测批次
       </el-button>
       <el-button
         v-if="canRevoke"
         type="danger"
         @click="batchRevoke"
       >
-        撤销审核
+        撤销确认
       </el-button>
     </div>
 
@@ -411,6 +429,10 @@ const editForm = ref({ contract_no: '', customer: '', dealer_name: '', model_typ
 const specialAddForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', due_date: '', order_remark: '' })
 const SANDBOX_STATUS = 'Predicted,Confirmed'
 const SANDBOX_STATUS_SET = new Set(SANDBOX_STATUS.split(','))
+const predictedBatchCount = computed(() => filteredBatches.value.filter((b: any) => b.status === 'Predicted').length)
+const confirmedBatchCount = computed(() => filteredBatches.value.filter((b: any) => b.status === 'Confirmed').length)
+const contractUnitCount = computed(() => filteredBatches.value.reduce((sum: number, b: any) => sum + (Array.isArray(b.units) ? b.units.filter((u: any) => String(u?.contract_no || '').trim()).length : 0), 0))
+const stockUnitCount = computed(() => filteredBatches.value.reduce((sum: number, b: any) => sum + (Array.isArray(b.units) ? b.units.filter((u: any) => !String(u?.contract_no || '').trim()).length : 0), 0))
 
 const filteredBatches = computed(() => {
   let batches = [...batchStore.filteredBatches].filter((b: any) => SANDBOX_STATUS_SET.has(String(b?.status || '')))
@@ -1046,13 +1068,13 @@ async function batchRevoke() {
   if (!batch) return
   const selectedId = batch.batch_id
   try {
-    await ElMessageBox.confirm('撤销审核将删除 plan_import 中该批次的记录并恢复批次状态，确认？', '撤销审核', {
+    await ElMessageBox.confirm('撤销确认将删除 plan_import 中该批次的记录并恢复为待确认状态，确认？', '撤销确认', {
       confirmButtonText: '确认撤销',
       cancelButtonText: '取消',
       type: 'warning'
     })
     await sandboxApi.revokeBatch(selectedId)
-    ElMessage.success('已撤销审核，批次恢复为待确认')
+    ElMessage.success('已撤销确认，批次恢复为待确认')
     selectedBatches.value = []
     await refresh()
   } catch (e: any) {
@@ -1221,7 +1243,7 @@ async function handleRecompute() {
 
 async function batchConfirm() {
   if (selectedBatches.value.length !== 1) {
-    ElMessage.warning('审核前请勾选 1 个待审批次')
+    ElMessage.warning('确认前请勾选 1 个待确认批次')
     return
   }
   const selectedBatchId = selectedBatches.value[0]
@@ -1262,22 +1284,22 @@ async function batchConfirm() {
 
   try {
     await ElMessageBox.confirm(
-      `确认审核批次 ${batchCode}？\n预计入库时间: ${inboundDate}${previewMsg}`,
+      `确认预测批次 ${batchCode}？\n预计入库时间: ${inboundDate}${previewMsg}`,
       '最终确认',
-      { confirmButtonText: '确认审核', cancelButtonText: '取消', type: 'warning' }
+      { confirmButtonText: '确认预测批次', cancelButtonText: '取消', type: 'warning' }
     )
 
     await batchStore.confirmBatch(selectedId, batchCode, inboundDate)
     try {
       const syncResult = await sandboxApi.syncBatchToPlan(selectedId, batchCode)
-      ElMessage.success(`审核通过，已同步 ${syncResult.count} 条至待排产`)
+      ElMessage.success(`预测批次已确认，已同步 ${syncResult.count} 条至生产看板待排产队列`)
     } catch (syncErr: any) {
-      ElMessage.warning('审核通过，但同步待排产失败: ' + (getApiErrorMessage(syncErr) || syncErr?.message || '未知错误'))
+      ElMessage.warning('预测批次已确认，但同步生产看板失败: ' + (getApiErrorMessage(syncErr) || syncErr?.message || '未知错误'))
     }
     selectedBatches.value = []
     await refresh()
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '审核失败')
+    if (e !== 'cancel') ElMessage.error(e.message || '确认预测批次失败')
   }
 }
 
@@ -1608,6 +1630,24 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.sandbox-intro { display: flex; justify-content: space-between; gap: 20px; padding: 20px 24px 14px; background: #fff; border-bottom: 1px solid #e8edf2; }
+.sandbox-eyebrow { color: #1677c8; font-size: 12px; font-weight: 700; }
+.sandbox-intro h3 { margin: 5px 0 3px; color: #1d2939; font-size: 21px; }
+.sandbox-intro p { margin: 0; color: #667085; font-size: 13px; }
+.sandbox-next-step { min-width: 220px; padding: 10px 14px; background: #f5faff; border-left: 3px solid #1677c8; }
+.sandbox-next-step span, .sandbox-next-step strong, .sandbox-next-step small { display: block; }
+.sandbox-next-step span, .sandbox-next-step small { color: #667085; font-size: 12px; }
+.sandbox-next-step strong { margin: 2px 0; color: #1464a5; font-size: 14px; }
+.sandbox-summary { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 1px; background: #e8edf2; border-bottom: 1px solid #e8edf2; }
+.sandbox-summary > div { padding: 12px 18px; background: #fff; }
+.sandbox-summary span, .sandbox-summary strong { display: block; }
+.sandbox-summary span { color: #667085; font-size: 12px; }
+.sandbox-summary strong { margin-top: 4px; color: #1d2939; font-size: 22px; }
+.sandbox-settings { background: #fff; border-bottom: 1px solid #e8edf2; }
+.sandbox-settings summary { padding: 10px 24px; color: #475467; font-size: 13px; font-weight: 600; cursor: pointer; }
+.sandbox-settings .sandbox-header { padding: 0 24px 14px; }
+.toolbar-label { margin-right: auto; color: #344054; font-weight: 700; }
+@media (max-width: 700px) { .sandbox-intro { flex-direction: column; padding: 16px; } .sandbox-next-step { min-width: 0; } .sandbox-summary { grid-template-columns: repeat(2, minmax(120px, 1fr)); } .sandbox-summary > div { padding: 10px 14px; } .sandbox-settings summary { padding-inline: 16px; } .sandbox-settings .sandbox-header { padding-inline: 16px; } }
 .top-scroll {
   overflow-x: auto;
   overflow-y: hidden;
