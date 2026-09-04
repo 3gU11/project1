@@ -568,6 +568,8 @@ def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str
     
     _sync_order_to_units_and_import(contract_ids, str(order_id))
     _occupy_inventory_for_order(contract_ids, str(order_id))
+    for cid in contract_ids:
+        _backfill_contract_to_unbound_units(cid)
     return updated_count
 
 
@@ -900,6 +902,87 @@ def _sync_contract_fields_to_units(
             )
     except Exception as e:
         print(f"Warning: _sync_contract_fields_to_units failed for contract {contract_id}: {e}")
+
+
+def _backfill_contract_to_unbound_units(contract_id: str) -> dict[str, int]:
+    """回溯补录合同：只在候选机台唯一且数量不超排产数量时绑定。"""
+    contract_id = str(contract_id or "").strip()
+    if not contract_id:
+        return {"bound": 0, "ambiguous": 0}
+    try:
+        with get_engine().begin() as conn:
+            plan_rows = conn.execute(text("""
+                SELECT `合同号`, `机型`, CAST(`排产数量` AS UNSIGNED) AS qty,
+                       `客户名`, `代理商`, `要求交期`, `备注`, `订单号`
+                FROM factory_plan
+                WHERE TRIM(`合同号`) = :cid
+            """), {"cid": contract_id}).mappings().all()
+            bound = 0
+            ambiguous = 0
+            for plan in plan_rows:
+                model = str(plan.get("机型") or "").strip()
+                qty = int(plan.get("qty") or 0)
+                if not model or qty <= 0:
+                    continue
+                customer = str(plan.get("客户名") or "").strip()
+                order_id = str(plan.get("订单号") or "").strip()
+                params = {"model": model, "customer": customer, "order_id": order_id}
+                rows = conn.execute(text("""
+                    SELECT u.unit_id
+                    FROM units u JOIN batches b ON b.batch_id = u.batch_id
+                    WHERE (u.contract_no IS NULL OR TRIM(u.contract_no) = '')
+                      AND TRIM(COALESCE(u.model_type, '')) = :model
+                      AND b.status IN ('Predicted', 'Confirmed', 'In_Production')
+                      AND u.production_line_id IS NOT NULL
+                      AND TRIM(COALESCE(u.production_line_id, '')) <> ''
+                      AND (:customer = '' OR TRIM(COALESCE(u.customer, '')) IN ('', :customer))
+                    ORDER BY
+                      CASE WHEN :order_id <> '' AND TRIM(COALESCE(u.sales_id, '')) = :order_id THEN 0 ELSE 1 END,
+                      CASE WHEN :customer <> '' AND TRIM(COALESCE(u.customer, '')) = :customer THEN 0 ELSE 1 END,
+                      u.updated_at ASC, u.unit_id ASC
+                    LIMIT :qty_plus_one
+                """), {**params, "qty_plus_one": qty + 1}).mappings().all()
+                if len(rows) == 0:
+                    continue
+                if len(rows) > qty:
+                    ambiguous += 1
+                    continue
+                unit_ids = [str(r["unit_id"]) for r in rows]
+                conn.execute(text("""
+                    UPDATE units
+                    SET contract_no=:cid, customer=:customer, dealer_name=:dealer,
+                        due_date=:due_date, sales_id=NULLIF(:order_id, ''),
+                        order_remark=:remark, updated_at=NOW()
+                    WHERE unit_id IN :unit_ids
+                """).bindparams(bindparam("unit_ids", expanding=True)), {
+                    "cid": contract_id, "customer": customer or None,
+                    "dealer": str(plan.get("代理商") or "").strip() or None,
+                    "due_date": str(plan.get("要求交期") or "").strip() or None,
+                    "order_id": order_id, "remark": str(plan.get("备注") or "").strip() or None,
+                    "unit_ids": unit_ids,
+                })
+                serials = conn.execute(text("""
+                    SELECT DISTINCT COALESCE(NULLIF(TRIM(serial_no), ''), NULLIF(TRIM(forecast_serial_no), ''), unit_id) AS sn
+                    FROM units WHERE unit_id IN :unit_ids
+                """).bindparams(bindparam("unit_ids", expanding=True)), {"unit_ids": unit_ids}).scalars().all()
+                if serials:
+                    conn.execute(text("""
+                        UPDATE finished_goods_data
+                        SET `合同号`=:cid, `客户`=:customer, `代理商`=:dealer,
+                            `合同备注`=:remark, `占用订单号`=NULLIF(:order_id, ''),
+                            `状态`='已绑定', `更新时间`=NOW()
+                        WHERE TRIM(`流水号`) IN :serials
+                    """).bindparams(bindparam("serials", expanding=True)), {
+                        "cid": contract_id, "customer": customer,
+                        "dealer": str(plan.get("代理商") or "").strip(),
+                        "remark": str(plan.get("备注") or "").strip(),
+                        "order_id": order_id, "serials": [str(s) for s in serials if s],
+                    })
+                bound += len(unit_ids)
+            return {"bound": bound, "ambiguous": ambiguous}
+    except Exception as e:
+        print(f"Warning: contract backfill failed for {contract_id}: {e}")
+        return {"bound": 0, "ambiguous": 0}
 
 
 
@@ -1439,6 +1522,12 @@ def _process_contracts_batch(
     df_plan = pd.concat([df_plan, pd.DataFrame(clean_add_list)], ignore_index=True)
     save_factory_plan(df_plan)
 
+    backfill = {"bound": 0, "ambiguous": 0}
+    for cid in sorted({str(item["合同号"]).strip() for item in clean_add_list}):
+        result = _backfill_contract_to_unbound_units(cid)
+        backfill["bound"] += result["bound"]
+        backfill["ambiguous"] += result["ambiguous"]
+
     if save_mode == "sandbox" and not is_rush and background_tasks:
         background_tasks.add_task(_trigger_sandbox_recompute_sync, user_ctx)
 
@@ -1482,6 +1571,8 @@ def _process_contracts_batch(
         "rush_auto_inserted": rush_auto_inserted,
         "save_mode": save_mode,
         "contract_ids": added_contract_ids,
+        "backfilled_units": backfill["bound"],
+        "backfill_ambiguous": backfill["ambiguous"],
     }
 
 
@@ -1626,6 +1717,8 @@ def edit_contract(
         df_plan = pd.concat([df_plan, pd.DataFrame(new_rows)], ignore_index=True)
         save_factory_plan(df_plan)
 
+        backfill = _backfill_contract_to_unbound_units(str(contract_id))
+
         # 【缺口3补全】合同编辑后，局部同步沙盘中对应卡片的字段（交期/客户/代理商/备注）
         # 只更新 Predicted 批次中的卡片，不触碰已下达/生产中的卡片
         _sync_contract_fields_to_units(
@@ -1645,7 +1738,7 @@ def edit_contract(
             user_id=current_user.get("username"),
             username=current_operator,
         )
-        return {"message": "合同修改已保存"}
+        return {"message": "合同修改已保存", "backfilled_units": backfill["bound"], "backfill_ambiguous": backfill["ambiguous"]}
     except HTTPException:
         raise
     except Exception as e:
