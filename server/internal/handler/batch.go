@@ -3,12 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -40,8 +39,115 @@ func (h *BatchHandler) List(c *gin.Context) {
 	if batches == nil {
 		batches = []model.Batch{}
 	}
+	var baselineIDs []string
+	if err := h.db.Table("sandbox_batch_baselines").Pluck("batch_id", &baselineIDs).Error; err == nil {
+		manual := make(map[string]bool, len(baselineIDs))
+		for _, id := range baselineIDs {
+			manual[id] = true
+		}
+		for i := range batches {
+			batches[i].IsManuallyAdjusted = manual[batches[i].BatchID]
+		}
+	}
+	// updated_at is a data-change timestamp, not evidence that the predictor ran.
+	// Use the persisted asynchronous job completion time; leave it zero so the UI
+	// can display "unknown" on older data where no job record exists.
+	var lastRecomputeAt *time.Time
+	_ = h.db.Table("sandbox_recompute_jobs").
+		Select("completed_at").
+		Where("status = ? AND completed_at IS NOT NULL", "succeeded").
+		Order("completed_at DESC").
+		Limit(1).
+		Scan(&lastRecomputeAt).Error
+	for i := range batches {
+		populatePredictionSummary(&batches[i])
+		if lastRecomputeAt != nil && batches[i].Status == model.StatusPredicted {
+			batches[i].LastRecomputeAt = *lastRecomputeAt
+		}
+	}
 	sanitizeBatchesRemarkForResponse(batches)
 	c.JSON(http.StatusOK, gin.H{"batches": batches})
+}
+
+func populatePredictionSummary(batch *model.Batch) {
+	if batch == nil {
+		return
+	}
+	batch.AlgorithmVersion = "heuristic-edd-v1"
+	// The sandbox has no execution schedule from which an inbound date can be
+	// predicted. Only a user-saved value is exposed; the due window must never
+	// be presented as an estimated inbound date.
+	if batch.ExpectedInboundDate == nil {
+		batch.ExpectedInboundSource = "待人工填写"
+	} else {
+		batch.ExpectedInboundSource = "人工填写"
+	}
+	batch.LastRecomputeAt = time.Time{}
+	// List and impact paths may both enrich the same loaded entity. Reset every
+	// derived value so a second enrichment remains a read-only operation.
+	batch.OrderedCount = 0
+	batch.StockCount = 0
+	batch.EmptyCount = 0
+	batch.EarliestDueDate = nil
+	batch.DueGapDays = nil
+	batch.RiskCount = 0
+	batch.Risks = []model.BatchRisk{}
+	capacityOverflowIDs := make(map[string]struct{})
+	for _, unit := range batch.Units {
+		if unit.ContractNo != nil && strings.TrimSpace(*unit.ContractNo) != "" {
+			batch.OrderedCount++
+			if unit.DueDate != nil && (batch.EarliestDueDate == nil || unit.DueDate.Before(*batch.EarliestDueDate)) {
+				due := *unit.DueDate
+				batch.EarliestDueDate = &due
+			}
+		} else {
+			batch.StockCount++
+		}
+	}
+	batch.EmptyCount = batch.Capacity - len(batch.Units)
+	if batch.EmptyCount < 0 {
+		batch.EmptyCount = 0
+		ids := make([]string, 0, len(batch.Units)-batch.Capacity)
+		for _, unit := range batch.Units[batch.Capacity:] {
+			ids = append(ids, unit.UnitID)
+			capacityOverflowIDs[unit.UnitID] = struct{}{}
+		}
+		batch.Risks = append(batch.Risks, model.BatchRisk{Code: "capacity_overflow", Severity: "error", Blocking: true, Message: fmt.Sprintf("卡片数超出容量 %d 台", len(batch.Units)-batch.Capacity), UnitIDs: ids})
+	}
+	// A locked card is not itself a risk. It becomes a blocking conflict only
+	// when that lock prevents resolving an actual capacity violation.
+	lockedConflictIDs := make([]string, 0)
+	for _, unit := range batch.Units {
+		if !unit.IsLocked {
+			continue
+		}
+		if _, overflow := capacityOverflowIDs[unit.UnitID]; overflow {
+			lockedConflictIDs = append(lockedConflictIDs, unit.UnitID)
+			continue
+		}
+	}
+	if len(lockedConflictIDs) > 0 {
+		batch.Risks = append(batch.Risks, model.BatchRisk{Code: "locked_constraint_conflict", Severity: "error", Blocking: true, Message: fmt.Sprintf("锁定卡片与当前约束冲突 %d 台，需先解锁或调整", len(lockedConflictIDs)), UnitIDs: lockedConflictIDs})
+	}
+	// ExpectedInboundDate is manually entered by planning staff. It is retained
+	// as a display/audit field, but it is not a predictor output and therefore
+	// must not produce an inferred due-date risk or gap metric.
+	batch.DueGapDays = nil
+	batch.RiskCount = len(batch.Risks)
+}
+
+func predictionFamily(modelType string) string {
+	v := strings.ToUpper(strings.TrimSpace(modelType))
+	switch {
+	case strings.Contains(v, "AUTO"):
+		return "AUTO"
+	case strings.Contains(v, "XS"):
+		return "XS"
+	case v == "G" || strings.HasSuffix(v, "G"):
+		return "G"
+	default:
+		return ""
+	}
 }
 
 func (h *BatchHandler) GetByID(c *gin.Context) {
@@ -52,6 +158,133 @@ func (h *BatchHandler) GetByID(c *gin.Context) {
 	}
 	sanitizeBatchRemarkForResponse(batch)
 	c.JSON(http.StatusOK, gin.H{"batch": batch})
+}
+
+type batchAuditUnit struct {
+	UnitID      string     `json:"unit_id"`
+	BatchID     string     `json:"batch_id"`
+	SlotIndex   int        `json:"slot_index"`
+	ModelType   string     `json:"model_type"`
+	ContractNo  *string    `json:"contract_no"`
+	Customer    *string    `json:"customer"`
+	DealerName  *string    `json:"dealer_name"`
+	DueDate     *time.Time `json:"due_date"`
+	OrderRemark *string    `json:"order_remark"`
+	IsLocked    bool       `json:"is_locked"`
+}
+
+func batchAuditSnapshot(unit model.Unit) batchAuditUnit {
+	return batchAuditUnit{UnitID: unit.UnitID, BatchID: unit.BatchID, SlotIndex: unit.SlotIndex,
+		ModelType: unit.ModelType, ContractNo: unit.ContractNo, Customer: unit.Customer,
+		DealerName: unit.DealerName, DueDate: unit.DueDate, OrderRemark: unit.OrderRemark, IsLocked: unit.IsLocked}
+}
+
+// Audit returns the persistent first-manual-change baseline and an explicit
+// difference summary for the prediction-column drawer.
+func (h *BatchHandler) Audit(c *gin.Context) {
+	batchID := c.Param("id")
+	var baselineRow struct {
+		BaselineJSON []byte     `gorm:"column:baseline_json"`
+		CapturedBy   *string    `gorm:"column:captured_by"`
+		CapturedAt   *time.Time `gorm:"column:captured_at"`
+	}
+	err := h.db.Table("sandbox_batch_baselines").Where("batch_id = ?", batchID).First(&baselineRow).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err == gorm.ErrRecordNotFound {
+		c.JSON(http.StatusOK, gin.H{"is_manually_adjusted": false, "baseline": nil, "changes": []interface{}{}, "difference_summary": nil})
+		return
+	}
+	var units []model.Unit
+	if err := h.db.Where("batch_id = ?", batchID).Order("slot_index ASC").Find(&units).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var baseline []batchAuditUnit
+	if len(baselineRow.BaselineJSON) > 0 {
+		if parseErr := json.Unmarshal(baselineRow.BaselineJSON, &baseline); parseErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid sandbox baseline: " + parseErr.Error()})
+			return
+		}
+	}
+	current := make([]batchAuditUnit, 0, len(units))
+	for _, unit := range units {
+		current = append(current, batchAuditSnapshot(unit))
+	}
+	baselineByID := make(map[string]batchAuditUnit, len(baseline))
+	for _, unit := range baseline {
+		baselineByID[unit.UnitID] = unit
+	}
+	currentByID := make(map[string]batchAuditUnit, len(current))
+	for _, unit := range current {
+		currentByID[unit.UnitID] = unit
+	}
+	added, removed, changed := 0, 0, 0
+	for id, unit := range currentByID {
+		before, exists := baselineByID[id]
+		if !exists {
+			added++
+			continue
+		}
+		beforeJSON, _ := json.Marshal(before)
+		afterJSON, _ := json.Marshal(unit)
+		if string(beforeJSON) != string(afterJSON) {
+			changed++
+		}
+	}
+	for id := range baselineByID {
+		if _, exists := currentByID[id]; !exists {
+			removed++
+		}
+	}
+	unitIDs := make([]string, 0, len(baselineByID)+len(currentByID))
+	seenUnitIDs := make(map[string]struct{}, len(baselineByID)+len(currentByID))
+	for id := range baselineByID {
+		seenUnitIDs[id] = struct{}{}
+	}
+	for id := range currentByID {
+		seenUnitIDs[id] = struct{}{}
+	}
+	for id := range seenUnitIDs {
+		unitIDs = append(unitIDs, id)
+	}
+	sort.Strings(unitIDs)
+
+	type auditLogRow struct {
+		LogID      uint64    `gorm:"column:log_id"`
+		Actor      string    `gorm:"column:actor"`
+		Action     string    `gorm:"column:action"`
+		TargetType string    `gorm:"column:target_type"`
+		TargetID   string    `gorm:"column:target_id"`
+		Detail     []byte    `gorm:"column:detail"`
+		CreatedAt  time.Time `gorm:"column:created_at"`
+	}
+	var auditRows []auditLogRow
+	logQuery := h.db.Table("operation_log").Where("(target_type = ? AND target_id = ?)", "batch", batchID)
+	if len(unitIDs) > 0 {
+		logQuery = logQuery.Or("(target_type = ? AND target_id IN ?)", "unit", unitIDs)
+	}
+	if err := logQuery.Order("created_at DESC").Limit(200).Find(&auditRows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	changes := make([]gin.H, 0, len(auditRows))
+	for _, row := range auditRows {
+		changes = append(changes, gin.H{
+			"id": row.LogID, "operated_at": row.CreatedAt, "operated_by": row.Actor,
+			"action_type": row.Action, "target_type": row.TargetType, "target_id": row.TargetID,
+			"detail": json.RawMessage(row.Detail),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"is_manually_adjusted": true,
+		"baseline":             gin.H{"units": baseline, "captured_by": baselineRow.CapturedBy, "captured_at": baselineRow.CapturedAt},
+		"changes":              changes,
+		"difference_summary":   gin.H{"baseline_count": len(baseline), "current_count": len(current), "added_count": added, "removed_count": removed, "changed_count": changed},
+	})
 }
 
 func (h *BatchHandler) Confirm(c *gin.Context) {
@@ -67,15 +300,13 @@ func (h *BatchHandler) Confirm(c *gin.Context) {
 	var batchCode *string
 	code := strings.TrimSpace(req.BatchCode)
 	if code != "" {
-		if utf8.RuneCountInString(code) > 64 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code must be 64 characters or fewer"})
+		if !regexp.MustCompile(`^(0[1-9]|1[0-2])-\d{2}[\x{4e00}-\x{9fa5}A-Za-z0-9_-]{0,20}$`).MatchString(code) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code format must be MM-SS with an optional suffix of up to 20 characters"})
 			return
 		}
-		for _, r := range code {
-			if unicode.IsControl(r) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code contains invalid characters"})
-				return
-			}
+		if strings.HasSuffix(code, "-00") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "batch_code out of range"})
+			return
 		}
 		batchCode = &code
 	}
@@ -132,141 +363,6 @@ func (h *BatchHandler) BatchConfirm(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-func (h *BatchHandler) CreateManualPredicted(c *gin.Context) {
-	var req struct {
-		ModelFamily string `json:"model_family" binding:"required"`
-		Quantity    int    `json:"quantity" binding:"required"`
-		Remark      string `json:"remark"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	familyCategory, batchModelType, capacity, err := normalizeManualPredictedFamily(req.ModelFamily)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if req.Quantity <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "quantity must be greater than 0"})
-		return
-	}
-	if req.Quantity > capacity {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("quantity cannot exceed %s capacity %d", familyCategory, capacity)})
-		return
-	}
-
-	actor := c.GetString("username")
-	if actor == "" {
-		actor = "system"
-	}
-
-	tx := h.db.Begin()
-	defer tx.Rollback()
-
-	var maxBatchNo int
-	if err := tx.Model(&model.Batch{}).
-		Where("status IN ?", []string{model.StatusPredicted, model.StatusConfirmed}).
-		Select("COALESCE(MAX(batch_no), 0)").
-		Scan(&maxBatchNo).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	var maxSlotNo int
-	if err := tx.Model(&model.ForecastBatchSlot{}).
-		Select("COALESCE(MAX(slot_no), 0)").
-		Scan(&maxSlotNo).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	now := time.Now()
-	nextNo := max(maxBatchNo, maxSlotNo) + 1
-	batchID := fmt.Sprintf("BATCH-%s-%s-MANUAL-%03d-%06d",
-		now.Format("200601"),
-		strings.ToUpper(batchModelType),
-		nextNo,
-		rand.Intn(1000000),
-	)
-	remark := strings.TrimSpace(req.Remark)
-	batch := model.Batch{
-		BatchID:   batchID,
-		BatchNo:   nextNo,
-		ModelType: batchModelType,
-		Capacity:  capacity,
-		Status:    model.StatusPredicted,
-		Source:    "manual",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	if err := tx.Create(&batch).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	slotBatchID := batch.BatchID
-	slot := model.ForecastBatchSlot{
-		SlotNo:    nextNo,
-		ModelType: batchModelType,
-		Capacity:  capacity,
-		BatchID:   &slotBatchID,
-		Source:    "manual",
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	if err := tx.Create(&slot).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	units := make([]model.Unit, 0, req.Quantity)
-	for i := 1; i <= req.Quantity; i++ {
-		unit := model.Unit{
-			UnitID:      fmt.Sprintf("%s-U%02d", batchID, i),
-			BatchID:     batchID,
-			SlotIndex:   i,
-			ModelType:   familyCategory,
-			Status:      "Pending",
-			OrderRemark: stringPtrIfNotEmpty(remark),
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		units = append(units, unit)
-	}
-	if err := tx.Create(&units).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	detail, _ := json.Marshal(map[string]interface{}{
-		"model_family": familyCategory,
-		"batch_model":  batchModelType,
-		"quantity":     req.Quantity,
-		"remark":       remark,
-	})
-	_ = tx.Create(&model.OperationLog{
-		Actor:      actor,
-		Action:     "manual_predicted_batch_create",
-		TargetType: "batch",
-		TargetID:   batchID,
-		Detail:     detail,
-		CreatedAt:  now,
-	}).Error
-
-	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success":      true,
-		"batch":        batch,
-		"unit_count":   len(units),
-		"model_family": familyCategory,
-	})
-}
-
 func (h *BatchHandler) SyncStockModels(c *gin.Context) {
 	var req struct {
 		Stocks []service.StockModelTarget `json:"stocks" binding:"required"`
@@ -284,46 +380,6 @@ func (h *BatchHandler) SyncStockModels(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-func normalizeManualPredictedFamily(raw string) (string, string, int, error) {
-	family := strings.TrimSpace(raw)
-	aliases := map[string]string{
-		"小机G":     "中小型G",
-		"小机XS":    "中小型XS",
-		"小机/XS":   "中小型XS",
-		"小机AUTO":  "中小型AUTO",
-		"大机XS":    "中大型XS",
-		"大机AUTO":  "中大型AUTO",
-		"SPECIAL": "特殊",
-	}
-	if mapped, ok := aliases[family]; ok {
-		family = mapped
-	}
-	switch family {
-	case "中小型G":
-		return family, "G", 30, nil
-	case "中小型XS":
-		return family, "XS", 30, nil
-	case "中小型AUTO":
-		return family, "AUTO", 27, nil
-	case "中大型XS":
-		return family, "XS", 16, nil
-	case "中大型AUTO":
-		return family, "AUTO", 16, nil
-	case "特殊":
-		return family, "SPECIAL", 15, nil
-	default:
-		return "", "", 0, fmt.Errorf("model_family must be one of 中小型G/中小型XS/中大型XS/中小型AUTO/中大型AUTO/特殊")
-	}
-}
-
-func stringPtrIfNotEmpty(value string) *string {
-	clean := strings.TrimSpace(value)
-	if clean == "" {
-		return nil
-	}
-	return &clean
 }
 
 func (h *BatchHandler) AssignToLine(c *gin.Context) {
@@ -377,6 +433,10 @@ func (h *BatchHandler) InsertEmptySlot(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "before_slot_index must be >= 1"})
 		return
 	}
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
 
 	tx := h.db.Begin()
 	defer tx.Rollback()
@@ -395,6 +455,10 @@ func (h *BatchHandler) InsertEmptySlot(c *gin.Context) {
 	}
 	if int(count) >= batch.Capacity {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "batch is full"})
+		return
+	}
+	if err := service.CaptureSandboxBaselines(tx, actor, batch.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -442,6 +506,23 @@ func (h *BatchHandler) InsertEmptySlot(c *gin.Context) {
 		ordered = append(ordered, unitID)
 	}
 	if err := h.unitRepo.RewriteBatchAssignments(tx, map[string][]string{batch.BatchID: ordered}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	detail, _ := json.Marshal(map[string]interface{}{
+		"unit_id":           unitID,
+		"before_slot_index": req.BeforeSlotIndex,
+		"size_key":          req.SizeKey,
+	})
+	if err := tx.Create(&model.OperationLog{
+		Actor:      actor,
+		Action:     "insert_empty_slot",
+		TargetType: "batch",
+		TargetID:   batch.BatchID,
+		Detail:     detail,
+		CreatedAt:  time.Now(),
+	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

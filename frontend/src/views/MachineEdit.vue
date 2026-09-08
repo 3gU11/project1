@@ -118,7 +118,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { normalizeModelName } from '../utils/modelOrder'
-import { productionGroupOfCategory } from '../utils/sandboxCategory'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type MessageResponse = { message?: string }
 
@@ -240,12 +239,6 @@ const selectedRows = computed(() =>
 
 const isBoundRow = (row: Row) => {
   return Boolean(String(row['占用订单号'] || '').trim() || String(row['合同号'] || '').trim())
-}
-
-const formatMachineBrief = (row: Row) => {
-  const sn = String(row['流水号'] || '').trim() || '-'
-  const model = String(row['机型'] || '').trim() || '-'
-  return `${sn}(${model})`
 }
 
 const formatBoundMachine = (row: Row) => {
@@ -403,8 +396,7 @@ const toggleAllVisible = (checked: boolean) => {
 
 const confirmBatchModelChange = async (targetModel: string) => {
   const targetFamily = modelFamilyOf(targetModel)
-  const targetGroup = productionGroupOfCategory(targetFamily)
-  if (!targetFamily || !targetGroup) {
+  if (!targetFamily) {
     ElMessage.error(`目标机型未配置族类，无法改型：${targetModel}`)
     return false
   }
@@ -413,20 +405,10 @@ const confirmBatchModelChange = async (targetModel: string) => {
     return false
   }
 
-  const invalidRows = selectedRows.value.filter(
-    (row) => productionGroupOfCategory(modelFamilyOf(row['机型'])) !== targetGroup
-  )
-  if (invalidRows.length > 0) {
-    const preview = invalidRows.slice(0, 8).map(formatMachineBrief).join('、')
-    const targetGroupLabel = targetGroup === 'LARGE' ? '中大型' : targetFamily
-    ElMessage.error(`仅允许同生产组改型；目标生产组为 ${targetGroupLabel}，请先剔除不兼容机台：${preview}${invalidRows.length > 8 ? '等' : ''}`)
-    return false
-  }
-
   try {
     await ElMessageBox.confirm(
-      `确认按流水号将 ${selectedRows.value.length} 台${targetFamily}机台机型改为 ${targetModel}？批次号、流水号、预计入库时间保持不变。`,
-      '同族类改型确认',
+      `确认按流水号将 ${selectedRows.value.length} 台机台机型改为 ${targetModel}？批次号、流水号、预计入库时间保持不变。`,
+      '改型确认',
       {
         confirmButtonText: '确认修改',
         cancelButtonText: '取消',

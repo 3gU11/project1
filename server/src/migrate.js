@@ -104,6 +104,56 @@ const migrations = [
     INDEX idx_queue_model_due (model_type, due_date)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+  `CREATE TABLE IF NOT EXISTS sandbox_batch_baselines (
+    batch_id VARCHAR(64) NOT NULL,
+    baseline_json JSON NOT NULL,
+    captured_by VARCHAR(100) NULL,
+    captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (batch_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS sandbox_batch_changes (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    batch_id VARCHAR(64) NOT NULL,
+    unit_id VARCHAR(64) NULL,
+    action_type VARCHAR(32) NOT NULL,
+    before_json JSON NULL,
+    after_json JSON NULL,
+    operated_by VARCHAR(100) NULL,
+    operated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_sandbox_batch_changes_batch_time (batch_id, operated_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS sandbox_batch_sync_status (
+    batch_id VARCHAR(64) NOT NULL,
+    batch_code VARCHAR(100) NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'pending',
+    attempts INT NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    last_count INT NULL,
+    started_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (batch_id),
+    INDEX idx_sandbox_sync_status (status, updated_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS sandbox_recompute_jobs (
+    job_id VARCHAR(64) NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'queued',
+    requested_by VARCHAR(100) NULL,
+    parameters_json JSON NULL,
+    result_json JSON NULL,
+    error_message TEXT NULL,
+    started_at DATETIME NULL,
+    completed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (job_id),
+    INDEX idx_sandbox_recompute_jobs_status_time (status, updated_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
   // ALTER users table
   `ALTER TABLE users
     ADD COLUMN IF NOT EXISTS region VARCHAR(50) NULL DEFAULT NULL

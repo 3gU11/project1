@@ -16,6 +16,9 @@ export const getBatch = (id: string) =>
 export const getBatchUnits = (id: string) =>
   apiGet(`${P}/batches/${id}/units`)
 
+export const getBatchAudit = (id: string) =>
+  apiGet(`${P}/batches/${id}/audit`)
+
 export const confirmBatch = (id: string, batchCode?: string, expectedInboundDate?: string) =>
   apiPost(`${P}/batches/${id}/confirm`, {
     ...(batchCode ? { batch_code: batchCode } : {}),
@@ -109,6 +112,12 @@ export const recompute = (targetSlotNo?: number, isClicked?: boolean) =>
     { timeout: 130000 }
   )
 
+export const getRecomputeJob = (jobId: string) =>
+  apiGet(`${P}/forecast/recompute/${jobId}`)
+
+export const getLatestRecomputeJob = () =>
+  apiGet(`${P}/forecast/recompute/latest`)
+
 export const getForecastAchievement = () =>
   apiGet(`${P}/forecast/achievement`)
 
@@ -154,8 +163,14 @@ export const previewSyncToPlan = (batchId: string, batchCode: string, expectedIn
     },
   })
 
+export const previewBatchImpact = (batchId: string, expectedInboundDate: string) =>
+  apiGet(`${P}/batches/${batchId}/impact-preview`, { params: { expected_inbound_date: expectedInboundDate } })
+
 export const syncBatchToPlan = (batchId: string, batchCode: string) =>
   apiPost(`${P}/batches/${batchId}/sync-to-plan`, { batch_code: batchCode })
+
+export const getBatchSyncStatus = (batchId: string) =>
+  apiGet(`${P}/batches/${batchId}/sync-status`)
 
 export const getLastBatchCode = () =>
   apiGet(`${P}/batches/last-batch-code`)

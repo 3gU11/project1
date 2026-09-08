@@ -968,7 +968,7 @@ async function getPredictedAchievement(windowSize = 20) {
   );
   const batchIds = recent.map((r) => r.batch_id);
   if (!batchIds.length) {
-    return { window_size: windowSize, actual: {}, target: {}, delta: {} };
+    return { window_size: windowSize, actual: {}, target: {}, delta: {}, categories: [] };
   }
   const [rows] = await db.query(
     `SELECT model_type, COUNT(*) AS cnt
@@ -989,7 +989,44 @@ async function getPredictedAchievement(windowSize = 20) {
     target[m] = t;
     actual[m] = a;
   }
-  return { window_size: windowSize, actual, target, delta };
+  const [dictionaryRows] = await db.query(
+    `SELECT model_name, model_family FROM model_dictionary
+     WHERE enabled = 1 AND UPPER(TRIM(model_name)) NOT IN ('G', 'XS', 'AUTO')`
+  );
+  const familyByModel = new Map(dictionaryRows.map((row) => [
+    String(row.model_name || '').trim().toUpperCase(), String(row.model_family || '').trim()
+  ]));
+  const categoryOf = (model) => {
+    const value = String(model || '').trim().toUpperCase();
+    const family = String(familyByModel.get(value) || '').toUpperCase();
+    if (family.includes('特殊') || family === 'SPECIAL') return '特殊';
+    const large = value.includes('8055') || value.includes('7055') || value.includes('8060') || family.includes('大型');
+    if (family.includes('AUTO') || value.includes('AUTO')) return large ? '中大型AUTO' : '中小型AUTO';
+    if (family.includes('XS') || value.includes('XS')) return large ? '中大型XS' : '中小型XS';
+    return '中小型G';
+  };
+  const totals = new Map();
+  for (const model of enabledModels) {
+    const name = categoryOf(model);
+    if (name === '特殊') continue;
+    const current = totals.get(name) || { name, current_pct: 0, target_pct: 0 };
+    current.current_pct += Number(actual[model] || 0);
+    current.target_pct += Number(target[model] || 0);
+    totals.set(name, current);
+  }
+  const categories = [...totals.values()].map((item) => {
+    const current_pct = Number(item.current_pct.toFixed(2));
+    const target_pct = Number(item.target_pct.toFixed(2));
+    const gap_pct = Number((current_pct - target_pct).toFixed(2));
+    return {
+      name: item.name,
+      current_pct,
+      target_pct,
+      gap_pct,
+      suggested_stock_count: gap_pct < 0 ? Math.ceil((-gap_pct * total) / 100) : 0,
+    };
+  }).sort((a, b) => a.gap_pct - b.gap_pct || a.name.localeCompare(b.name));
+  return { window_size: windowSize, actual, target, delta, categories };
 }
 
 // ============================================================

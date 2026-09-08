@@ -199,6 +199,9 @@ func (s *RushSvc) rushInsertAuto(req RushInsertReq, actor string) error {
 		if len(chain2) == 0 {
 			return fmt.Errorf("no available empty slot on the board to absorb rush order")
 		}
+		if err := CaptureSandboxBaselines(tx, actor, batchIDsOfUnits(chain2)...); err != nil {
+			return fmt.Errorf("capture sandbox baseline: %w", err)
+		}
 		c2 := *overflow
 		for i := range chain2 {
 			u := chain2[i]
@@ -329,12 +332,11 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 
 	var chain []model.Unit
 	start := -1
-	chainModel := targetModel
 	if !isHigh {
 		// Build the chain using the TARGET unit's own model_type so we can locate it.
 		// (The rush order's model_type may differ within the same family, e.g. FR-400XS vs FR-500XS.)
 		// The carry's ModelType (rush order model) will still be written into the target slot.
-		chainModel = strings.TrimSpace(target.ModelType)
+		chainModel := strings.TrimSpace(target.ModelType)
 		if chainModel == "" {
 			chainModel = targetModel
 		}
@@ -353,7 +355,7 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 	var chain2 []model.Unit
 	start2 := -1
 	if start < 0 {
-		chain2, err = s.loadSandboxModelChain(tx, family, chainModel, "")
+		chain2, err = s.loadSandboxModelChain(tx, family, targetModel, "")
 		if err != nil {
 			return fmt.Errorf("load sandbox chain: %w", err)
 		}
@@ -451,6 +453,9 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 				return fmt.Errorf("enqueue overflow: %w", err)
 			}
 		} else {
+			if err := CaptureSandboxBaselines(tx, actor, batchIDsOfUnits(chain2)...); err != nil {
+				return fmt.Errorf("capture sandbox baseline: %w", err)
+			}
 			c2 := *overflow
 			startIndex := 0
 			if start2 >= 0 {
@@ -698,6 +703,9 @@ func (s *RushSvc) SwapContent(req SwapContentReq, actor string) error {
 	if sourceMT != targetMT || targetMT != fallbackMT {
 		return fmt.Errorf("model type mismatch")
 	}
+	if err := CaptureSandboxBaselines(tx, actor, batchIDsOfUnits(units)...); err != nil {
+		return fmt.Errorf("capture sandbox baseline: %w", err)
+	}
 
 	// Move target order to fallback first
 	if target.ContractNo != nil && *target.ContractNo != "" {
@@ -766,6 +774,16 @@ func mapKeys(m map[string]struct{}) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func batchIDsOfUnits(units []model.Unit) []string {
+	ids := make([]string, 0, len(units))
+	for _, unit := range units {
+		if strings.TrimSpace(unit.BatchID) != "" {
+			ids = append(ids, unit.BatchID)
+		}
+	}
+	return ids
 }
 
 func (s *RushSvc) markRushContractPlanned(tx *gorm.DB, contractNo string, modelType string) error {

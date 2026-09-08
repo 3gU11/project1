@@ -1,8 +1,9 @@
 ﻿const router = require('express').Router();
 const db = require('../db');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
-const { pullFromQueue, refillEmptySlots } = require('../engine/predictor');
+const { pullFromQueue, refillEmptySlots, normalizeModelFamily } = require('../engine/predictor');
 const { acquireLock, releaseLock } = require('../redis');
+const { getBatchAudit, appendChange } = require('../services/sandboxAudit');
 
 router.use(authMiddleware);
 
@@ -12,7 +13,12 @@ router.get('/', async (req, res) => {
   let sql = `
     SELECT b.*,
       (SELECT COUNT(*) FROM units u WHERE u.batch_id = b.batch_id) as unit_count,
-      (SELECT COUNT(*) FROM units u WHERE u.batch_id = b.batch_id AND u.contract_no IS NOT NULL) as contract_count
+      (SELECT COUNT(*) FROM units u WHERE u.batch_id = b.batch_id AND u.contract_no IS NOT NULL) as contract_count,
+      (SELECT COUNT(*) FROM units u WHERE u.batch_id = b.batch_id AND (u.contract_no IS NULL OR u.contract_no = '')) as stock_count,
+      (SELECT MIN(u.due_date) FROM units u WHERE u.batch_id = b.batch_id AND u.contract_no IS NOT NULL) as earliest_due_date,
+      EXISTS(SELECT 1 FROM sandbox_batch_baselines sb WHERE sb.batch_id = b.batch_id) as is_manually_adjusted,
+      b.updated_at as last_recompute_at,
+      'heuristic-edd-v1' as algorithm_version
     FROM batches b WHERE 1=1
   `;
   const params = [];
@@ -75,7 +81,33 @@ router.get('/', async (req, res) => {
   }
 
   res.json({
-    batches: batches.map((b) => ({ ...b, units: unitsByBatch[b.batch_id] || [] }))
+    batches: batches.map((b) => {
+      const units = unitsByBatch[b.batch_id] || [];
+      const ordered_count = Number(b.contract_count || 0);
+      const stock_count = Number(b.stock_count || 0);
+      return {
+        ...b,
+        units,
+        ordered_count,
+        stock_count,
+        empty_count: Math.max(0, Number(b.capacity || 0) - ordered_count - stock_count),
+        ...(() => {
+          const risks = [];
+          const capacity = Number(b.capacity || 0);
+          if (capacity > 0 && units.length > capacity) risks.push({ code: 'capacity_overflow', severity: 'error', blocking: true, message: `卡片数超出容量 ${units.length - capacity} 台`, unit_ids: units.slice(capacity).map((u) => String(u.unit_id)) });
+          const batchFamily = normalizeModelFamily(b.model_type);
+          const mismatched = units.filter((u) => batchFamily && normalizeModelFamily(u.model_type) && normalizeModelFamily(u.model_type) !== batchFamily);
+          if (mismatched.length) risks.push({ code: 'model_family_mismatch', severity: 'error', blocking: true, message: `机型大类不匹配 ${mismatched.length} 台`, unit_ids: mismatched.map((u) => String(u.unit_id)) });
+          const inbound = b.expected_inbound_date || b.due_date_end;
+          const earliest = b.earliest_due_date;
+          if (inbound && earliest) {
+            const days = Math.ceil((new Date(inbound).getTime() - new Date(earliest).getTime()) / 86400000);
+            if (days > 0) risks.push({ code: 'due_risk', severity: 'error', blocking: true, message: `预计入库晚于最早交期 ${days} 天`, unit_ids: units.filter((u) => String(u.due_date || '').slice(0, 10) === String(earliest).slice(0, 10)).map((u) => String(u.unit_id)) });
+          }
+          return { risk_count: risks.length, risks };
+        })(),
+      };
+    })
   });
 });
 
@@ -91,16 +123,29 @@ router.get('/:id', async (req, res) => {
   res.json({ batch: batches[0], units });
 });
 
+// GET /api/batches/:id/audit - baseline and manual changes for the prediction-column drawer.
+router.get('/:id/audit', async (req, res) => {
+  try {
+    const [batches] = await db.query('SELECT batch_id FROM batches WHERE batch_id = ?', [req.params.id]);
+    if (!batches.length) return res.status(404).json({ error: 'Batch not found' });
+    res.json(await getBatchAudit(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/batches/:id/confirm 鈥?approve batch, release slot, pull from queue
 router.post('/:id/confirm', adminOnly, async (req, res) => {
   const batchCode = String(req.body?.batch_code || '').trim();
+  const expectedInboundDate = String(req.body?.expected_inbound_date || '').trim();
+  if (expectedInboundDate && !/^\d{4}-\d{2}-\d{2}$/.test(expectedInboundDate)) {
+    return res.status(400).json({ error: 'expected_inbound_date format must be YYYY-MM-DD' });
+  }
+  let assignedBatchNo = null;
   if (batchCode) {
-    if ([...batchCode].length > 64) {
-      return res.status(400).json({ error: 'batch_code must be 64 characters or fewer' });
-    }
-    if (/[\u0000-\u001F\u007F]/.test(batchCode)) {
-      return res.status(400).json({ error: 'batch_code contains invalid characters' });
-    }
+    const m = batchCode.match(/^(\d{2})-(\d{2})(?:[\u4e00-\u9fa5A-Za-z0-9_-]{0,20})$/);
+    if (!m) return res.status(400).json({ error: 'batch_code format must start with MM-SS' });
+    assignedBatchNo = Number(m[1]) * 100 + Number(m[2]);
   }
 
   const lockToken = await acquireLock('batch:slot', 30);
@@ -124,27 +169,32 @@ router.post('/:id/confirm', adminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Only Predicted batches can be confirmed' });
     }
 
-    if (batchCode) {
-      const [duplicates] = await conn.query(
-        'SELECT batch_id FROM batches WHERE batch_id <> ? AND batch_code = ? LIMIT 1',
-        [req.params.id, batchCode]
-      );
-      if (duplicates.length) {
-        await conn.rollback();
-        conn.release();
-        await releaseLock('batch:slot', lockToken);
-        return res.status(400).json({ error: `batch_code ${batchCode} already exists` });
-      }
+    const [unitCounts] = await conn.query(
+      'SELECT COUNT(*) AS count FROM units WHERE batch_id = ?', [req.params.id]
+    );
+    if (Number(unitCounts[0]?.count || 0) > Number(batch.capacity || 0)) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Batch exceeds capacity and cannot be confirmed' });
+    }
+
+    if (assignedBatchNo !== null) {
       await conn.query(
-        `UPDATE batches SET status = 'Confirmed', batch_code = ?, updated_at = NOW() WHERE batch_id = ?`,
-        [batchCode, req.params.id]
+        `UPDATE batches SET status = 'Confirmed', batch_no = ?, expected_inbound_date = COALESCE(?, expected_inbound_date), updated_at = NOW() WHERE batch_id = ?`,
+        [assignedBatchNo, expectedInboundDate || null, req.params.id]
       );
     } else {
       await conn.query(
-        `UPDATE batches SET status = 'Confirmed', updated_at = NOW() WHERE batch_id = ?`,
-        [req.params.id]
+        `UPDATE batches SET status = 'Confirmed', expected_inbound_date = COALESCE(?, expected_inbound_date), updated_at = NOW() WHERE batch_id = ?`,
+        [expectedInboundDate || null, req.params.id]
       );
     }
+    await appendChange(conn, {
+      batchId: batch.batch_id,
+      action: 'confirm',
+      before: { ...batch, status: 'Predicted' },
+      after: { ...batch, status: 'Confirmed', expected_inbound_date: expectedInboundDate || batch.expected_inbound_date },
+      username: req.user.username,
+    });
 
     // Audit log
     await conn.query(
@@ -177,6 +227,50 @@ router.post('/:id/confirm', adminOnly, async (req, res) => {
     conn.release();
     await releaseLock('batch:slot', lockToken);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/batches/:id/revoke - restore a confirmed batch after its plan sync is reversed.
+// Queue refill triggered by the original confirmation is asynchronous and is deliberately
+// not reversed here; a cross-service transaction is required for that broader guarantee.
+router.post('/:id/revoke', adminOnly, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [batches] = await conn.query(
+      'SELECT batch_id, status FROM batches WHERE batch_id = ? FOR UPDATE', [req.params.id]
+    );
+    if (!batches.length) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Batch not found' });
+    }
+    if (batches[0].status !== 'Confirmed') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Only Confirmed batches can be revoked' });
+    }
+    await conn.query(
+      "UPDATE batches SET status = 'Predicted', updated_at = NOW() WHERE batch_id = ?",
+      [req.params.id]
+    );
+    await appendChange(conn, {
+      batchId: batches[0].batch_id,
+      action: 'revoke',
+      before: { ...batches[0], status: 'Confirmed' },
+      after: { ...batches[0], status: 'Predicted' },
+      username: req.user.username,
+    });
+    await conn.query(
+      `INSERT INTO sys_operation_log (user_id, username, operate_time, module, action_type, biz_type, content)
+       VALUES (?, ?, NOW(), 'batch', 'revoke', 'batch', ?)`,
+      [req.user.username, req.user.username, `Revoked batch ${batches[0].batch_id}`]
+    );
+    await conn.commit();
+    res.json({ success: true, batch_id: req.params.id });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
   }
 });
 

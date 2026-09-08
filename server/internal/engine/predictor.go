@@ -243,61 +243,6 @@ func rehomeLevel3ModelsByDictionary(level3 map[string]map[string]int, dictCatByM
 	}
 }
 
-func normalizeLevel3RatioSums(level3 map[string]map[string]int) {
-	for _, category := range productionCategories {
-		ratios := level3[category]
-		if len(ratios) == 0 {
-			continue
-		}
-		sum := 0
-		for _, value := range ratios {
-			if value > 0 {
-				sum += value
-			}
-		}
-		if sum == 100 {
-			continue
-		}
-		keys := make([]string, 0, len(ratios))
-		for key := range ratios {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		if sum <= 0 {
-			for _, key := range keys {
-				ratios[key] = 0
-			}
-			if len(keys) > 0 {
-				ratios[keys[0]] = 100
-			}
-			continue
-		}
-		type remainder struct {
-			key string
-			rem float64
-		}
-		used := 0
-		remainders := make([]remainder, 0, len(keys))
-		for _, key := range keys {
-			exact := float64(ratios[key]) * 100.0 / float64(sum)
-			base := int(math.Floor(exact))
-			ratios[key] = base
-			used += base
-			remainders = append(remainders, remainder{key: key, rem: exact - float64(base)})
-		}
-		sort.SliceStable(remainders, func(i, j int) bool {
-			if remainders[i].rem != remainders[j].rem {
-				return remainders[i].rem > remainders[j].rem
-			}
-			return remainders[i].key < remainders[j].key
-		})
-		for i := 0; used < 100 && i < len(remainders); i++ {
-			ratios[remainders[i].key]++
-			used++
-		}
-	}
-}
-
 func (p *Predictor) getRatioConfig() RatioConfig {
 	var cfg RatioConfig
 	fallback := RatioConfig{
@@ -473,10 +418,9 @@ func generateUnitID(batchID string, slot int) string {
 }
 
 // FullRecompute runs the complete prediction pipeline within a transaction.
-// preservedUnitSnapshot holds the contract data of a Predicted-batch unit that
-// should survive a full rebuild, such as a locked card or a planned contract
-// that has already been synced into the sandbox.
-type preservedUnitSnapshot struct {
+// lockedUnitSnapshot holds the contract data of a locked unit that was sitting
+// in a Predicted batch before the recompute wipes it. We restore it afterwards.
+type lockedUnitSnapshot struct {
 	ContractNo  string     `gorm:"column:contract_no"`
 	Customer    string     `gorm:"column:customer"`
 	DealerName  string     `gorm:"column:dealer_name"`
@@ -485,7 +429,6 @@ type preservedUnitSnapshot struct {
 	DueDate     *time.Time `gorm:"column:due_date"`
 	SalesID     string     `gorm:"column:sales_id"`
 	OrderRemark string     `gorm:"column:order_remark"`
-	IsLocked    bool       `gorm:"column:is_locked"`
 	LockedBy    *string    `gorm:"column:locked_by"`
 	LockedAt    *time.Time `gorm:"column:locked_at"`
 }
@@ -494,37 +437,25 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 	if targetSlotNo <= 0 {
 		targetSlotNo = 1
 	}
-	// Clear old waiting queue entries before recompute
-	p.db.Where("status = ?", model.QueueWaiting).Delete(&model.ProductionQueue{})
-
-	// ── Pre-step: snapshot every preserved unit sitting in a Predicted batch. ───
+	// ── Pre-step: snapshot every locked unit sitting in a Predicted batch. ──────
 	// These will be re-planted into the freshly-generated Predicted batches after
-	// the recompute so that locked cards and already-planned sandbox cards are
-	// never silently discarded by the full rebuild.
-	var preservedSnapshots []preservedUnitSnapshot
+	// the recompute so that manually-locked (or rush-inserted) cards are never
+	// silently discarded by the full rebuild.
+	var lockedSnapshots []lockedUnitSnapshot
 	if snapErr := p.db.Raw(`
 		SELECT
 		  u.contract_no, u.customer, u.dealer_name, u.model_type,
 		  b.model_type AS family,
-		  u.due_date, u.sales_id, u.order_remark, u.is_locked, u.locked_by, u.locked_at
+		  u.due_date, u.sales_id, u.order_remark, u.locked_by, u.locked_at
 		FROM units u
 		JOIN batches b ON b.batch_id = u.batch_id
 		WHERE b.status = ?
-		  AND COALESCE(b.source, '') <> 'manual'
+		  AND u.is_locked = 1
 		  AND u.contract_no IS NOT NULL
-		  AND TRIM(u.contract_no) != ''
-		  AND (
-		    u.is_locked = 1
-		    OR EXISTS (
-		      SELECT 1
-		      FROM factory_plan fp
-		      WHERE TRIM(COALESCE(fp.合同号, '')) COLLATE utf8mb4_general_ci = TRIM(u.contract_no) COLLATE utf8mb4_general_ci
-		        AND TRIM(COALESCE(fp.状态, '')) = '已规划'
-		    )
-		  )`,
+		  AND TRIM(u.contract_no) != ''`,
 		model.StatusPredicted,
-	).Scan(&preservedSnapshots).Error; snapErr != nil {
-		return nil, fmt.Errorf("snapshot preserved predicted units: %w", snapErr)
+	).Scan(&lockedSnapshots).Error; snapErr != nil {
+		return nil, fmt.Errorf("snapshot locked predicted units: %w", snapErr)
 	}
 
 	contractRepo := repo.NewContractRepo(p.db)
@@ -569,6 +500,19 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 	}
 
 	batchesByCategory := map[string][]model.Batch{}
+	// Queue cleanup and overflow inserts must be part of the same transaction as
+	// replacing predicted batches. Otherwise a failed recompute (for example, a
+	// locked card with no safe replacement slot) would lose the old waiting queue
+	// even though the batch replacement is rolled back.
+	tx := p.db.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("begin recompute transaction: %w", tx.Error)
+	}
+	defer tx.Rollback()
+	if err := tx.Where("status = ?", model.QueueWaiting).Delete(&model.ProductionQueue{}).Error; err != nil {
+		return nil, fmt.Errorf("clear waiting queue: %w", err)
+	}
+
 	for _, cat := range productionCategories {
 		contracts := grouped[cat]
 		if len(contracts) == 0 {
@@ -640,36 +584,35 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 			used = len(batchesByCategory[cat])
 		}
 		for _, rb := range batchesByCategory[cat][used:] {
-			saveToWaitingQueue(p.db, extractContracts(rb.Units, family), family)
+			saveToWaitingQueue(tx, extractContracts(rb.Units, family), family)
 		}
 	}
 
-	tx := p.db.Begin()
-	defer tx.Rollback()
+	// A full recompute replaces every predicted batch with newly generated IDs.
+	// Its first-change baseline therefore cannot describe the new proposal and
+	// must be removed in the same transaction as the old batches. Keeping it
+	// would only accumulate unreachable audit rows after each recompute.
+	var oldPredictedBatchIDs []string
+	if err := tx.Model(&model.Batch{}).
+		Where("status = ?", model.StatusPredicted).
+		Pluck("batch_id", &oldPredictedBatchIDs).Error; err != nil {
+		return nil, fmt.Errorf("list old predicted batches for baseline cleanup: %w", err)
+	}
+	if len(oldPredictedBatchIDs) > 0 {
+		if err := tx.Table("sandbox_batch_baselines").
+			Where("batch_id IN ?", oldPredictedBatchIDs).
+			Delete(nil).Error; err != nil {
+			return nil, fmt.Errorf("clear old predicted baselines: %w", err)
+		}
+	}
 
 	for _, mt := range []string{"G", "XS", "AUTO", "SPECIAL"} {
 		if err := p.batchRepo.DeleteOldPredictedByModel(tx, mt); err != nil {
 			return nil, fmt.Errorf("delete old %s: %w", mt, err)
 		}
 	}
-	if err := tx.Exec("DELETE FROM forecast_batch_slots WHERE COALESCE(source, '') <> ?", "manual").Error; err != nil {
+	if err := tx.Exec("DELETE FROM forecast_batch_slots").Error; err != nil {
 		return nil, fmt.Errorf("delete forecast batch slots: %w", err)
-	}
-	if err := tx.Exec(`
-		DELETE FROM forecast_batch_slots
-		WHERE source = ?
-		  AND (
-		    batch_id IS NULL
-		    OR batch_id NOT IN (
-		      SELECT batch_id FROM batches WHERE status = ?
-		    )
-		  )`,
-		"manual", model.StatusPredicted,
-	).Error; err != nil {
-		return nil, fmt.Errorf("delete stale manual forecast slots: %w", err)
-	}
-	if err := shiftManualPredictedSlots(tx, len(allBatches)); err != nil {
-		return nil, fmt.Errorf("shift manual forecast slots: %w", err)
 	}
 
 	now := time.Now()
@@ -721,13 +664,13 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 		}
 	}
 
-	// ── Post-step: re-plant preserved unit snapshots into the new Predicted batches.
+	// ── Post-step: re-plant locked unit snapshots into the new Predicted batches. ─
 	// For each snapshot we first try to find an empty slot whose model_type exactly
 	// matches the locked unit's specific model (e.g. "FR-400G加高"). If none is
 	// available we fall back to any empty slot in the same batch-level family. The
 	// slot's contract fields and is_locked flag are then overwritten so the card
 	// survives on the kanban board as before.
-	for _, snap := range preservedSnapshots {
+	for _, snap := range lockedSnapshots {
 		if strings.TrimSpace(snap.ContractNo) == "" || strings.TrimSpace(snap.Family) == "" {
 			continue
 		}
@@ -762,8 +705,11 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 			).Scan(&targetID)
 		}
 		if targetID.UnitID == "" {
-			// No suitable empty slot – skip; the rush-insert overflow queue handles this.
-			continue
+			// A normal recompute must never silently discard a locked card. There is
+			// no safe implicit overflow placement here because it would change the
+			// frozen manual decision. Failing rolls the transaction back, including
+			// deletion of the old predicted columns.
+			return nil, fmt.Errorf("cannot preserve locked unit for contract %s: no empty %s slot is available; unlock or add capacity before recomputing", snap.ContractNo, snap.Family)
 		}
 		updates := map[string]interface{}{
 			"contract_no":  snap.ContractNo,
@@ -773,13 +719,13 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 			"sales_id":     snap.SalesID,
 			"order_remark": snap.OrderRemark,
 			"model_type":   strings.TrimSpace(snap.ModelType),
-			"is_locked":    snap.IsLocked,
+			"is_locked":    true,
 			"locked_by":    snap.LockedBy,
 			"locked_at":    snap.LockedAt,
 			"updated_at":   time.Now(),
 		}
 		if updateErr := tx.Table("units").Where("unit_id = ?", targetID.UnitID).Updates(updates).Error; updateErr != nil {
-			return nil, fmt.Errorf("replant preserved unit (contract=%s): %w", snap.ContractNo, updateErr)
+			return nil, fmt.Errorf("replant locked unit (contract=%s): %w", snap.ContractNo, updateErr)
 		}
 	}
 
@@ -787,61 +733,6 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return allBatches, nil
-}
-
-func shiftManualPredictedSlots(tx *gorm.DB, startAfter int) error {
-	var manualSlots []model.ForecastBatchSlot
-	if err := tx.Model(&model.ForecastBatchSlot{}).
-		Joins("JOIN batches b ON b.batch_id = forecast_batch_slots.batch_id").
-		Where("forecast_batch_slots.source = ?", "manual").
-		Where("b.status = ?", model.StatusPredicted).
-		Order("forecast_batch_slots.slot_no ASC").
-		Find(&manualSlots).Error; err != nil {
-		return err
-	}
-	if len(manualSlots) == 0 {
-		return nil
-	}
-
-	now := time.Now()
-	var maxSlotNo int
-	if err := tx.Model(&model.ForecastBatchSlot{}).
-		Select("COALESCE(MAX(slot_no), 0)").
-		Scan(&maxSlotNo).Error; err != nil {
-		return err
-	}
-	tempOffset := max(maxSlotNo, startAfter+len(manualSlots)) + 10000
-	for i, slot := range manualSlots {
-		if err := tx.Model(&model.ForecastBatchSlot{}).
-			Where("slot_no = ?", slot.SlotNo).
-			Updates(map[string]interface{}{
-				"slot_no":    tempOffset + i + 1,
-				"updated_at": now,
-			}).Error; err != nil {
-			return err
-		}
-	}
-	for i, slot := range manualSlots {
-		if slot.BatchID == nil || strings.TrimSpace(*slot.BatchID) == "" {
-			continue
-		}
-		newSlotNo := startAfter + i + 1
-		tempSlotNo := tempOffset + i + 1
-		if err := tx.Model(&model.Batch{}).
-			Where("batch_id = ?", *slot.BatchID).
-			Update("batch_no", newSlotNo).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&model.ForecastBatchSlot{}).
-			Where("slot_no = ?", tempSlotNo).
-			Updates(map[string]interface{}{
-				"slot_no":    newSlotNo,
-				"updated_at": now,
-			}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (p *Predictor) loadModelSortOrderMap() (map[string]int, error) {

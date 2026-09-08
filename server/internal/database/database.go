@@ -78,6 +78,52 @@ CREATE TABLE IF NOT EXISTS forecast_batch_slots (
 )`).Error; err != nil {
 		return err
 	}
+	if err := db.Exec(`
+CREATE TABLE IF NOT EXISTS sandbox_recompute_jobs (
+  job_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  status VARCHAR(24) NOT NULL DEFAULT 'queued',
+  requested_by VARCHAR(100) NULL,
+  parameters_json JSON NULL,
+  result_json JSON NULL,
+  error_message TEXT NULL,
+  started_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_sandbox_recompute_jobs_status_time (status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`
+CREATE TABLE IF NOT EXISTS sandbox_batch_baselines (
+  batch_id VARCHAR(64) NOT NULL,
+  baseline_json JSON NOT NULL,
+  captured_by VARCHAR(100) NULL,
+  captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (batch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`
+CREATE TABLE IF NOT EXISTS sandbox_batch_sync_status (
+  batch_id VARCHAR(64) NOT NULL PRIMARY KEY,
+  batch_code VARCHAR(100) NULL,
+  requested_by VARCHAR(100) NULL,
+  status VARCHAR(24) NOT NULL DEFAULT 'pending',
+  attempts INT NOT NULL DEFAULT 0,
+  last_error TEXT NULL,
+  last_count INT NULL,
+  started_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_sandbox_batch_sync_status_updated (status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`).Error; err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "sandbox_batch_sync_status", "requested_by", "ALTER TABLE sandbox_batch_sync_status ADD COLUMN requested_by VARCHAR(100) NULL AFTER batch_code"); err != nil {
+		return err
+	}
 	if err := alignForecastSlotCollation(db); err != nil {
 		return err
 	}

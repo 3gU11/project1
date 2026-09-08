@@ -74,6 +74,7 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		// Batches
 		api.GET("/batches", bh.List)
 		api.GET("/batches/:id", bh.GetByID)
+		api.GET("/batches/:id/audit", bh.Audit)
 		api.GET("/batches/:id/units", bh.GetBatchUnits)
 		api.POST("/batches/manual-predicted", bh.CreateManualPredicted)
 		api.POST("/batches/:id/confirm", bh.Confirm)
@@ -102,6 +103,8 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 
 		// Forecast
 		api.POST("/forecast/recompute", fh.Recompute)
+		api.GET("/forecast/recompute/latest", fh.LatestRecomputeJob)
+		api.GET("/forecast/recompute/:job_id", fh.RecomputeJob)
 		api.GET("/forecast/achievement", fh.Achievement)
 
 		// Capacity config

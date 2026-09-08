@@ -123,23 +123,11 @@ def _validate_compatible_model_change(
 ) -> None:
     family_lookup = _load_model_family_lookup_for_edit_rule()
     target_family = _model_family_for_edit_rule(target_model, family_lookup)
-    target_group = production_group_for_family(target_family)
-    if not target_family or not target_group:
+    if not target_family:
         raise HTTPException(status_code=422, detail=f"目标机型未配置族类，无法改型: {target_model}")
 
-    invalid_rows = [
-        row
-        for row in machine_rows
-        if production_group_for_family(_model_family_for_edit_rule(row.get("机型"), family_lookup)) != target_group
-    ]
-    if invalid_rows:
-        preview = "、".join(_format_machine_row_brief(row) for row in invalid_rows[:8])
-        suffix = "等" if len(invalid_rows) > 8 else ""
-        target_group_label = "中大型" if target_group == "LARGE" else target_family
-        raise HTTPException(
-            status_code=422,
-            detail=f"仅允许同生产组改型；目标生产组为 {target_group_label}，请先剔除不兼容机台：{preview}{suffix}",
-        )
+    # 已移除生产组限制，允许同一批次混合 FT/G/XS 等不同族类机型
+    # 原：检查 production_group 是否一致，现已移除此限制
 
     bound_rows = [row for row in machine_rows if _is_bound_machine_row(row)]
     if bound_rows:

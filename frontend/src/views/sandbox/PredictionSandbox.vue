@@ -1,28 +1,16 @@
 <template>
   <div class="sandbox-layout">
-    <div class="sandbox-intro">
-      <div>
-        <div class="sandbox-eyebrow">沙盘操作</div>
-        <h3>调整未来队列</h3>
-        <p>先设置机型比例并重算方案，再拖拽调整未确认队列，最后确认预测批次。</p>
-      </div>
-      <div class="sandbox-next-step"><span>当前操作顺序</span><strong>比例 → 重算 → 调整 → 确认</strong><small>比例和重算只影响未确认批次</small></div>
-    </div>
     <div class="sandbox-summary" aria-label="预测方案摘要">
-      <div><span>当前预测批次</span><strong>{{ predictedBatchCount }}</strong></div>
-      <div>
-        <span>已确认批次</span>
-        <strong>{{ confirmedBatchCount }}</strong>
-      </div>
-      <div><span>合同台数</span><strong>{{ contractUnitCount }}</strong></div>
-      <div><span>备货台数</span><strong>{{ stockUnitCount }}</strong></div>
+      <div><span>预测</span><strong>{{ predictedBatchCount }}</strong></div>
+      <div><span>已确认</span><strong>{{ confirmedBatchCount }}</strong></div>
+      <div><span>订单</span><strong>{{ contractUnitCount }}</strong></div>
+      <div><span>备货</span><strong>{{ stockUnitCount }}</strong></div>
     </div>
     <details class="sandbox-settings">
-      <summary>方案参数：机型比例</summary>
-      <div class="sandbox-header"><CapacityRatioEditor /></div>
+      <summary>机型比例</summary>
+      <div class="sandbox-header"><CapacityRatioEditor :editable="canEditSandbox" /></div>
     </details>
     <div class="sandbox-filters">
-      <span class="toolbar-label">预测方案</span>
       <el-radio-group
         v-model="selectedSeriesFilters"
         @change="onSeriesFilterChange"
@@ -35,23 +23,32 @@
           :value="series"
         >{{ series }}</el-radio-button>
       </el-radio-group>
-      <el-button text @click="handleManualRefresh" :loading="batchStore.loading">刷新数据</el-button>
-      <el-button type="primary" @click="handleRecompute" :loading="recomputing">
-        {{ recomputeButtonText }}方案
+      <el-button text @click="handleManualRefresh" :loading="batchStore.loading">刷新</el-button>
+      <span v-if="hasDataUpdate" class="sandbox-data-update" role="status">
+        数据有更新
+      </span>
+      <el-button v-if="canEditSandbox" type="primary" @click="handleRecompute" :loading="recomputing">
+        {{ recomputeButtonText }}
       </el-button>
-      <el-button type="success" @click="openManualPredictedDrawer">
-        新增预测产线
-      </el-button>
-
+      <span v-if="pendingRecomputeJobId" class="recompute-job-status">
+        正在重算
+        <span v-if="recomputeElapsedSeconds >= 2">已运行 {{ recomputeElapsedSeconds }} 秒</span>
+        <el-button text type="primary" size="small" @click="resumePendingRecompute">查看结果</el-button>
+      </span>
+      <el-tooltip :disabled="!selectedBatchBlockingReason" :content="selectedBatchBlockingReason" placement="bottom">
+        <span>
+          <el-button
+            v-if="selectedBatches.length > 0 && canEditSandbox"
+            type="warning"
+            :disabled="Boolean(selectedBatchBlockingReason)"
+            @click="batchConfirm"
+          >
+            确认预测批次
+          </el-button>
+        </span>
+      </el-tooltip>
       <el-button
-        v-if="selectedBatches.length > 0"
-        type="warning"
-        @click="batchConfirm"
-      >
-        确认预测批次
-      </el-button>
-      <el-button
-        v-if="canRevoke"
+        v-if="canRevoke && canEditSandbox"
         type="danger"
         @click="batchRevoke"
       >
@@ -75,7 +72,7 @@
         v-if="filteredBatches.length === 0 && !batchStore.loading"
         style="padding:40px;text-align:center;width:100%;color:#999;"
       >
-        暂无批次数据，请点击「全量重算」生成预测批次
+        暂无预测批次
       </div>
       <div
         v-for="batch in filteredBatches"
@@ -88,6 +85,7 @@
           {{ targetBadgeText(batch) }}
         </div>
         <div class="batch-status-top-right">
+          <el-tag v-if="isBatchManuallyAdjusted(batch)" type="info" size="small" class="manual-adjusted-tag">已人工调整</el-tag>
           <el-tag v-if="batch.status === 'Predicted'" type="warning" size="small" class="corner-tag">待确认</el-tag>
           <el-tag v-else-if="batch.status === 'Confirmed'" type="success" size="small" class="corner-tag">已确认</el-tag>
           <el-tag v-else size="small" class="corner-tag">{{ batch.status }}</el-tag>
@@ -109,25 +107,28 @@
                   <span class="batch-count-separator">/</span>
                   <span class="batch-count batch-count-stock">备货 {{ stockCount(batch) }}</span>
                 </template>
-                <template v-if="familyMismatchCount(batch) > 0">
-                  <span class="batch-count-separator">/</span>
-                  <span class="batch-count mismatch-text">混放 {{ familyMismatchCount(batch) }}</span>
-                </template>
               </span>
             </div>
 
             <!-- Capacity Progress Bar -->
             <div 
               class="batch-capacity-bar" 
-              :title="`容量: ${batch.capacity || 15} (已订: ${orderedCount(batch)}, 备货: ${stockCount(batch)}, 空槽: ${Math.max(0, (batch.capacity || 15) - orderedCount(batch) - stockCount(batch))})`"
+              :title="`容量: ${capacityLabel(batch)} (已订: ${orderedCount(batch)}, 备货: ${stockCount(batch)}, 空槽: ${emptySlotLabel(batch)})`"
             >
-              <div class="bar-segment segment-ordered" :style="{ width: (orderedCount(batch) / (batch.capacity || 15) * 100) + '%' }"></div>
-              <div class="bar-segment segment-stock" :style="{ width: (stockCount(batch) / (batch.capacity || 15) * 100) + '%' }"></div>
-              <div class="bar-segment segment-empty" :style="{ width: (Math.max(0, (batch.capacity || 15) - orderedCount(batch) - stockCount(batch)) / (batch.capacity || 15) * 100) + '%' }"></div>
+              <div class="bar-segment segment-ordered" :style="{ width: capacityPercent(batch, orderedCount(batch)) + '%' }"></div>
+              <div class="bar-segment segment-stock" :style="{ width: capacityPercent(batch, stockCount(batch)) + '%' }"></div>
+              <div class="bar-segment segment-empty" :style="{ width: capacityPercent(batch, emptySlots(batch)) + '%' }"></div>
             </div>
 
             <div class="batch-meta batch-meta-due">
               {{ batchDueRangeText(batch) }}
+            </div>
+            <div class="batch-plan-summary" :class="{ 'has-risk': batchRiskSummary(batch).length }" @click.stop="openBatchDetail(batch)">
+              <span class="plan-summary-item">容量 {{ orderedCount(batch) + stockCount(batch) }}/{{ capacityLabel(batch) }}</span>
+              <span class="plan-summary-item">空槽 {{ emptySlotLabel(batch) }}</span>
+              <button v-if="batchRiskSummary(batch).length" type="button" class="plan-summary-risk" @click.stop="openBatchDetail(batch)">
+                风险 {{ batchRiskSummary(batch).length }}
+              </button>
             </div>
             <!-- 批次号和预计入库时间的输入放到列顶 -->
             <div v-if="batch.status === 'Predicted'" class="batch-top-inputs" @click.stop>
@@ -141,18 +142,15 @@
                   v-model="inboundDateInputs[batch.batch_id]"
                   type="date"
                   value-format="YYYY-MM-DD"
-                  placeholder="预计入库时间"
+                  placeholder="预计入库日期"
                   style="width: 190px"
-                  :clearable="false"
+                  clearable
                 />
               </div>
             </div>
-            <div
-              class="batch-meta batch-placeholder-note"
-              :style="{ visibility: isNonTargetPredictedBatch(batch) ? 'visible' : 'hidden' }"
-            >
-              备货占位
-            </div>
+            <button v-if="isTargetOptimizedBatch(batch)" type="button" class="stock-recommendation" @click.stop="openBatchDetail(batch)">
+              建议补货 {{ recommendationStockCount(batch) }} 台
+            </button>
             <div class="batch-meta batch-meta-models">
               <template v-if="batchModelSummaryRows(batch).length">
                 <div
@@ -207,6 +205,7 @@
           :group="{ name: batch.model_type, pull: true, put: true }"
           item-key="unit_id"
           :animation="180"
+          :disabled="!canEditSandbox"
           draggable=".unit-card"
           filter=".locked"
           ghost-class="unit-ghost"
@@ -221,7 +220,7 @@
             <UnitCard
               :class="{ 
                 'hidden-card': !getStockPlaceholderStackInfo(u, batch).show,
-                'unit-lane-mismatch': isUnitFamilyMismatch(u, batch), 
+                'unit-risk-highlight': activeRiskUnitIds.has(String(u.unit_id)),
                 'unit-stock-placeholder': isNonTargetStockPlaceholder(u, batch),
                 'unit-stacked-card': getStockPlaceholderStackInfo(u, batch).isStacked,
                 'is-active-dropzone': dragging && isValidDragTargetBatch(batch) && (isUnitEmptySlot(u) || isStockUnit(u))
@@ -263,7 +262,6 @@
           <el-select
             v-model="editForm.model_type"
             filterable
-            :allow-create="!isEditingSpecialBatch"
             default-first-option
             style="width:100%"
           >
@@ -312,44 +310,82 @@
       </el-form>
     </el-drawer>
 
-    <el-drawer v-model="manualPredictedVisible" title="新增预测产线" size="420px">
-      <el-form label-width="90px" size="small">
-        <el-form-item label="机型族" required>
-          <el-select v-model="manualPredictedForm.model_family" placeholder="请选择明确机型族" style="width:100%">
-            <el-option
-              v-for="item in manualFamilyOptions"
-              :key="item.value"
-              :label="item.label"
-              :value="item.value"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="数量" required>
-          <el-input-number
-            v-model="manualPredictedForm.quantity"
-            :min="1"
-            :max="manualFamilyCapacity"
-            :step="1"
-            :precision="0"
-            controls-position="right"
-            style="width:100%"
-          />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input
-            v-model="manualPredictedForm.remark"
-            type="textarea"
-            :rows="3"
-            placeholder="可填写补排原因"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="submitManualPredictedBatch" :loading="manualPredictedSaving">
-            保存
-          </el-button>
-        </el-form-item>
-      </el-form>
+    <el-drawer v-model="batchDetailVisible" :title="batchDetail?.batch_id ? `预测列 · ${batchDetail.batch_id}` : '预测列'" size="440px">
+      <template v-if="batchDetail">
+        <div class="batch-detail-overview">
+          <div class="batch-detail-stat">
+            <span>容量</span>
+            <strong>{{ batchDetail.ordered_count + batchDetail.stock_count }}/{{ capacityLabel(batchDetail) }}</strong>
+          </div>
+          <div class="batch-detail-stat">
+            <span>空槽</span>
+            <strong>{{ emptySlotLabel(batchDetail) }}</strong>
+          </div>
+          <div class="batch-detail-stat batch-detail-inbound">
+            <span>预计入库</span>
+            <strong>{{ batchDetail.expected_inbound_date || '待填写' }}</strong>
+            <small>{{ batchDetail.expected_inbound_source || '人工填写' }}</small>
+          </div>
+        </div>
+        <div v-if="batchDetail.syncStatus?.status === 'failed'" class="batch-detail-sync-status">
+          <strong>同步失败，可重试</strong>
+          <span v-if="batchDetail.syncStatus.last_error" class="sync-error">{{ batchDetail.syncStatus.last_error }}</span>
+          <el-button v-if="batchDetail.syncStatus.status === 'failed' && batchDetail.status === 'Confirmed'" size="small" type="primary" @click="retryBatchSync">重试同步</el-button>
+        </div>
+        <div v-if="batchDetail.recommendation" class="batch-detail-recommendation">
+          <strong>建议补货 {{ batchDetail.recommendation.suggested_stock_count ?? '未知' }} 台</strong>
+          <span>{{ batchDetail.recommendation.name || '未知' }} · 当前 {{ formatPercent(batchDetail.recommendation.current_pct) }} / 目标 {{ formatPercent(batchDetail.recommendation.target_pct) }}</span>
+        </div>
+        <el-alert v-if="batchDetail.risks?.length" title="待处理问题" type="error" :closable="false" show-icon />
+        <div v-for="risk in batchDetail.risks || []" :key="risk.code" class="batch-detail-risk">
+          <strong>{{ risk.message }}</strong>
+          <small v-if="risk.unit_ids?.length">影响 {{ risk.unit_ids.length }} 张卡片</small>
+        </div>
+        <details v-if="batchDetail.recomputeJob" class="batch-detail-history">
+          <summary>重算记录</summary>
+          <div class="batch-detail-history-content">
+            <span>{{ batchDetail.recomputeJob.completed_at || batchDetail.recomputeJob.created_at || '时间未知' }}</span>
+            <span>{{ batchDetail.recomputeJob.parameters?.is_clicked ? '按选中列' : '全量' }}重算 · {{ recomputeResultSummary(batchDetail.recomputeJob.result) }}</span>
+          </div>
+        </details>
+        <details v-if="batchDetail.audit?.baseline || batchDetail.audit?.changes?.length" class="batch-detail-history">
+          <summary>变更记录</summary>
+          <div class="batch-detail-history-content">
+            <span v-if="batchDetail.audit?.baseline">首次调整前 {{ batchDetail.audit.baseline.units?.length || 0 }} 张卡片</span>
+            <span v-if="batchDetail.audit?.difference_summary">新增 {{ batchDetail.audit.difference_summary.added_count }} · 删除 {{ batchDetail.audit.difference_summary.removed_count }} · 变更 {{ batchDetail.audit.difference_summary.changed_count }}</span>
+            <span v-for="change in batchDetail.audit?.changes || []" :key="change.id">{{ change.operated_at }} · {{ change.operated_by || '未知' }} · {{ change.action_type }}</span>
+          </div>
+        </details>
+        <el-button v-if="batchDetail.status === 'Confirmed'" type="primary" plain @click="openProductionKanban(batchDetail.batch_id)">进入生产看板派工</el-button>
+      </template>
     </el-drawer>
+
+    <el-dialog
+      v-model="confirmationVisible"
+      title="确认预测批次"
+      width="560px"
+      :close-on-click-modal="false"
+      @closed="resetConfirmationPreview"
+    >
+      <template v-if="confirmationPreview">
+        <div class="confirmation-summary">
+          <span>批次号：{{ confirmationPreview.batch_code }}</span>
+          <span>预计入库：{{ confirmationPreview.expected_inbound_date || '待填写' }}</span>
+          <span>待排产：{{ confirmationPreview.sync_count }} 条</span>
+        </div>
+        <el-alert v-if="confirmationPreview.risks?.length" title="存在阻塞问题，处理后才能确认" type="error" :closable="false" show-icon />
+        <div v-for="risk in confirmationPreview.risks || []" :key="risk.code" class="confirmation-risk">
+          <strong>{{ risk.message }}</strong>
+          <span v-if="risk.unit_ids?.length">涉及 {{ risk.unit_ids.length }} 张卡片</span>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="confirmationVisible = false">取消</el-button>
+        <el-button type="warning" :loading="confirming" :disabled="!canSubmitConfirmation" @click="submitBatchConfirmation">
+          确认并同步
+        </el-button>
+      </template>
+    </el-dialog>
 
     <div
       v-if="contextMenu.visible"
@@ -368,27 +404,36 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage, ElMessageBox, ElDatePicker } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useBatchStore } from '../../stores/useSandboxBatchStore'
+import { useUserStore } from '../../store/user'
 import * as sandboxApi from '../../services/sandboxApi'
 import { getApiErrorMessage } from '../../utils/request'
 import UnitCard from '../../components/sandbox/UnitCard.vue'
 import CapacityRatioEditor from '../../components/sandbox/CapacityRatioEditor.vue'
 import { connect as wsConnect, disconnect as wsDisconnect, onEvent } from '../../services/sandboxWs'
-import { categoryOfModel, normalizeMajorFamily, productionGroupOfCategory } from '../../utils/sandboxCategory'
-import { compareModels } from '../../utils/modelOrder'
+import { categoryOfModel, normalizeMajorFamily } from '../../utils/sandboxCategory'
 
 const batchStore = useBatchStore()
+const userStore = useUserStore()
+const router = useRouter()
+const canEditSandbox = computed(() => userStore.hasPermission('SANDBOX_EDIT'))
 const recomputing = ref(false)
 const optimizedTargetSlotNo = ref(1)
+const manualAdjustedBatchIds = ref<Set<string>>(new Set())
+const latestAchievementCategories = ref<any[]>([])
+const pendingRecomputeJobId = ref(sessionStorage.getItem('sandbox_recompute_job_id') || '')
+const recomputeStartedAt = ref(Number(sessionStorage.getItem('sandbox_recompute_started_at') || 0))
+const recomputeElapsedSeconds = ref(0)
+let recomputeElapsedTimer: number | null = null
 
 const selectedBatches = ref<string[]>([])
 const batchCodeInputs = ref<Record<string, string>>({})
 const inboundDateInputs = ref<Record<string, string>>({})
 const lastBatchCodeFromDB = ref('')
-let enterRecomputed = false
 
 
 
@@ -400,7 +445,8 @@ function initBatchInputs() {
         batchCodeInputs.value[id] = ''
       }
       if (inboundDateInputs.value[id] === undefined) {
-        inboundDateInputs.value[id] = ''
+        // Keep the algorithm-derived date visible and editable at the column top.
+        inboundDateInputs.value[id] = String(batch.expected_inbound_date || '').slice(0, 10)
       }
     }
   }
@@ -415,22 +461,6 @@ async function fetchLastBatchCode() {
   }
 }
 
-async function autoRecomputeOnEnter() {
-  recomputing.value = true
-  let recomputeRes: any = null
-  try {
-    recomputeRes = await sandboxApi.recompute(1, false)
-    ElMessage.success('已自动进行全量重算')
-  } catch (e: any) {
-    console.error('Auto-recompute on load failed:', e)
-  } finally {
-    recomputing.value = false
-  }
-  await refresh()
-  // 全量重算后，根据大类缺口自动定位本次备货建议列
-  const suggestedSlot = findSuggestedSlotByGap(recomputeRes?.achievement?.categories)
-  optimizedTargetSlotNo.value = suggestedSlot
-}
 const selectedRecomputeTarget = computed(() => {
   if (selectedBatches.value.length !== 1) return null
   const selectedBatchId = selectedBatches.value[0]
@@ -441,14 +471,26 @@ const selectedRecomputeTarget = computed(() => {
 const recomputeButtonText = computed(() => {
   return selectedRecomputeTarget.value ? '按选中列重算' : '全量重算'
 })
+const selectedBatchBlockingReason = computed(() => {
+  if (selectedBatches.value.length !== 1) return '确认前请仅勾选 1 个待确认批次'
+  const batch = batchStore.batches.find((item: any) => String(item?.batch_id) === selectedBatches.value[0])
+  if (!batch) return '所选预测批次不存在或已刷新'
+  if (String(batch.status || '') !== 'Predicted') return '仅待确认预测批次可以确认'
+  const blocking = batchRiskSummary(batch).filter((risk) => risk.blocking)
+  return blocking.length ? `请先处理阻塞风险：${blocking.map((risk) => risk.message).join('；')}` : ''
+})
 const editVisible = ref(false)
 const editingUnit = ref<any>(null)
 const saving = ref(false)
 const specialAddVisible = ref(false)
 const specialAddSaving = ref(false)
 const specialAddBatch = ref<any>(null)
-const manualPredictedVisible = ref(false)
-const manualPredictedSaving = ref(false)
+const batchDetailVisible = ref(false)
+const batchDetail = ref<any>(null)
+const activeRiskUnitIds = ref<Set<string>>(new Set())
+const confirmationVisible = ref(false)
+const confirmationPreview = ref<any>(null)
+const confirming = ref(false)
 const contextMenu = ref<{ visible: boolean; x: number; y: number; unit: any }>({ visible: false, x: 0, y: 0, unit: null })
 const dragging = ref(false)
 const moving = ref(false)
@@ -460,9 +502,25 @@ const dragFamily = ref<string>('')
 const dragLane = ref<string>('')
 const modelTypes = ref<string[]>([])
 const modelFamilyMap = ref<Record<string, string>>({})
+const modelSortOrderMap = ref<Record<string, number>>({})
 const selectedSeriesFilters = ref<string>('')
+const hasDataUpdate = ref(false)
+const lastBatchDataFingerprint = ref('')
 const stockEdits = ref<Record<string, Record<string, number>>>({})
 const stockSaving = ref<Record<string, boolean>>({})
+
+const canSubmitConfirmation = computed(() =>
+  Boolean(confirmationPreview.value) &&
+  !confirmationPreview.value?.risks?.some((risk: any) => risk?.blocking),
+)
+
+function compareModelDictionaryOrder(a: string, b: string): number {
+  const orderA = modelSortOrderMap.value[String(a || '').trim().toUpperCase()]
+  const orderB = modelSortOrderMap.value[String(b || '').trim().toUpperCase()]
+  const normalizedA = Number.isFinite(orderA) ? orderA : Number.MAX_SAFE_INTEGER
+  const normalizedB = Number.isFinite(orderB) ? orderB : Number.MAX_SAFE_INTEGER
+  return normalizedA - normalizedB || String(a).localeCompare(String(b), 'zh-CN')
+}
 
 const topScrollRef = ref<HTMLElement | null>(null)
 const batchesContainerRef = ref<HTMLElement | null>(null)
@@ -472,26 +530,12 @@ const topScrollWidth = ref(1200)
 
 const editForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', order_remark: '' })
 const specialAddForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', due_date: '', order_remark: '' })
-const manualPredictedForm = ref({ model_family: '中大型XS', quantity: 10, remark: '' })
-const SANDBOX_STATUS = 'Predicted'
+const SANDBOX_STATUS = 'Predicted,Confirmed'
 const SANDBOX_STATUS_SET = new Set(SANDBOX_STATUS.split(','))
 const predictedBatchCount = computed(() => filteredBatches.value.filter((b: any) => b.status === 'Predicted').length)
 const confirmedBatchCount = computed(() => filteredBatches.value.filter((b: any) => b.status === 'Confirmed').length)
 const contractUnitCount = computed(() => filteredBatches.value.reduce((sum: number, b: any) => sum + (Array.isArray(b.units) ? b.units.filter((u: any) => String(u?.contract_no || '').trim()).length : 0), 0))
 const stockUnitCount = computed(() => filteredBatches.value.reduce((sum: number, b: any) => sum + (Array.isArray(b.units) ? b.units.filter((u: any) => !String(u?.contract_no || '').trim()).length : 0), 0))
-
-const manualFamilyOptions = [
-  { label: '中小型G', value: '中小型G', capacity: 30 },
-  { label: '中小型XS', value: '中小型XS', capacity: 30 },
-  { label: '中大型XS', value: '中大型XS', capacity: 16 },
-  { label: '中小型AUTO', value: '中小型AUTO', capacity: 27 },
-  { label: '中大型AUTO', value: '中大型AUTO', capacity: 16 },
-  { label: '特殊', value: '特殊', capacity: 15 },
-]
-
-const manualFamilyCapacity = computed(() => {
-  return manualFamilyOptions.find((item) => item.value === manualPredictedForm.value.model_family)?.capacity || 30
-})
 
 const filteredBatches = computed(() => {
   let batches = [...batchStore.filteredBatches].filter((b: any) => SANDBOX_STATUS_SET.has(String(b?.status || '')))
@@ -615,18 +659,243 @@ function hasAnyContract(batch: any): boolean {
   return units.some((u: any) => String(u?.contract_no || '').trim() !== '')
 }
 
-// 当前编辑单元所属批次的大类（G/XS/AUTO）
-const editingBatchFamily = computed(() => {
-  if (!editingUnit.value) return ''
-  const batch = batchStore.batches.find((b: any) => b.batch_id === editingUnit.value?.batch_id)
-  return majorFamilyOfModel(batch?.model_type)
-})
+async function runRecompute(targetSlotNo: number, isClicked: boolean): Promise<any> {
+  const accepted: any = await sandboxApi.recompute(targetSlotNo, isClicked)
+  if (!accepted?.job_id) return accepted
+  pendingRecomputeJobId.value = String(accepted.job_id)
+  recomputeStartedAt.value = Date.now()
+  sessionStorage.setItem('sandbox_recompute_job_id', pendingRecomputeJobId.value)
+  sessionStorage.setItem('sandbox_recompute_started_at', String(recomputeStartedAt.value))
+  startRecomputeElapsedTimer()
+  const started = Date.now()
+  while (Date.now() - started < 30000) {
+    const job: any = await sandboxApi.getRecomputeJob(pendingRecomputeJobId.value)
+    if (job.status === 'succeeded') return job.result || {}
+    if (job.status === 'failed') throw new Error(job.error_message || '重算失败')
+    await new Promise(resolve => setTimeout(resolve, 800))
+  }
+  throw new Error(`重算仍在进行，任务 ${pendingRecomputeJobId.value} 已保存，可离开页面后稍后查询`)
+}
 
-const editingBatchCategory = computed(() => {
-  if (!editingUnit.value) return ''
-  const batch = batchStore.batches.find((b: any) => b.batch_id === editingUnit.value?.batch_id)
-  return batch ? displayBatchCategory(batch) : ''
-})
+function clearPendingRecomputeJob() {
+  pendingRecomputeJobId.value = ''
+  recomputeStartedAt.value = 0
+  recomputeElapsedSeconds.value = 0
+  sessionStorage.removeItem('sandbox_recompute_job_id')
+  sessionStorage.removeItem('sandbox_recompute_started_at')
+  stopRecomputeElapsedTimer()
+}
+
+function updateRecomputeElapsed() {
+  if (!pendingRecomputeJobId.value || !recomputeStartedAt.value) {
+    recomputeElapsedSeconds.value = 0
+    return
+  }
+  recomputeElapsedSeconds.value = Math.max(0, Math.floor((Date.now() - recomputeStartedAt.value) / 1000))
+}
+
+function startRecomputeElapsedTimer() {
+  stopRecomputeElapsedTimer()
+  updateRecomputeElapsed()
+  recomputeElapsedTimer = window.setInterval(updateRecomputeElapsed, 1000)
+}
+
+function stopRecomputeElapsedTimer() {
+  if (recomputeElapsedTimer !== null) {
+    window.clearInterval(recomputeElapsedTimer)
+    recomputeElapsedTimer = null
+  }
+}
+
+async function resumePendingRecompute() {
+  const jobID = pendingRecomputeJobId.value
+  if (!jobID) return
+  try {
+    const job: any = await sandboxApi.getRecomputeJob(jobID)
+    if (job.status === 'succeeded') {
+      latestAchievementCategories.value = job?.result?.achievement?.categories || []
+      clearPendingRecomputeJob()
+      await refresh()
+      ElMessage.success('重算任务已完成，预测列已刷新')
+      return
+    }
+    if (job.status === 'failed') {
+      clearPendingRecomputeJob()
+      ElMessage.error(job.error_message || '重算任务失败')
+      return
+    }
+    ElMessage.info(`任务仍在${job.status === 'queued' ? '排队' : '执行'}，可继续处理其他工作`)
+  } catch (e: any) {
+    ElMessage.error(getApiErrorMessage(e) || '读取重算任务失败')
+  }
+}
+
+type BatchRisk = { code: string; message: string; blocking: boolean; severity?: string; unit_ids?: string[] }
+
+async function openBatchDetail(batch: any, clickedRisk?: BatchRisk) {
+  const inboundDate = String(inboundDateInputs.value[batch?.batch_id] || batch?.expected_inbound_date || '').slice(0, 10)
+  try {
+    const preview: any = await sandboxApi.previewBatchImpact(String(batch?.batch_id || ''), inboundDate)
+    const visibleRisks = actionableRisks(preview?.risks)
+    const id = String(batch?.batch_id || '')
+    const audit: any = await sandboxApi.getBatchAudit(id).catch(() => null)
+    const syncStatus: any = await sandboxApi.getBatchSyncStatus(id).catch(() => null)
+    const recomputeJobResponse: any = await sandboxApi.getLatestRecomputeJob().catch(() => null)
+    batchDetail.value = { ...preview, risks: visibleRisks, audit, syncStatus, recomputeJob: recomputeJobResponse?.job || null, recommendation: recommendationForBatch(batch) }
+    activeRiskUnitIds.value = new Set(
+      (clickedRisk ? visibleRisks.filter((risk: any) => risk.code === clickedRisk.code) : visibleRisks)
+        .flatMap((risk: any) => risk.unit_ids || [])
+        .map((id: any) => String(id))
+    )
+  } catch (e: any) {
+    // The local summary still provides a useful fallback when the read-only preview is unavailable.
+    batchDetail.value = {
+      batch_id: batch?.batch_id,
+      status: batch?.status,
+      ordered_count: orderedCount(batch),
+      stock_count: stockCount(batch),
+      empty_count: emptySlots(batch),
+      earliest_due_date: batchDueRangeText(batch),
+      expected_inbound_date: inboundDate,
+      expected_inbound_source: inboundDate ? '本次人工填写' : '待人工填写',
+      risks: batchRiskSummary(batch).map((risk) => ({ ...risk, unit_ids: [] })),
+      last_recompute_at: '',
+      recomputeJob: null,
+      recommendation: recommendationForBatch(batch),
+      syncStatus: await sandboxApi.getBatchSyncStatus(String(batch?.batch_id || '')).catch(() => null),
+    }
+    activeRiskUnitIds.value = new Set()
+  }
+  batchDetailVisible.value = true
+}
+
+async function retryBatchSync() {
+  const detail = batchDetail.value
+  if (!detail?.batch_id) return
+  const batchCode = String(batchCodeInputs.value[detail.batch_id] || detail.batch_code || '').trim()
+  try {
+    await sandboxApi.syncBatchToPlan(String(detail.batch_id), batchCode)
+    detail.syncStatus = await sandboxApi.getBatchSyncStatus(String(detail.batch_id))
+    ElMessage.success('同步已完成')
+    await refresh()
+  } catch (e: any) {
+    detail.syncStatus = await sandboxApi.getBatchSyncStatus(String(detail.batch_id)).catch(() => ({ status: 'failed', last_error: getApiErrorMessage(e) }))
+    ElMessage.error(getApiErrorMessage(e) || '同步失败，请稍后重试')
+  }
+}
+
+function recommendationForBatch(batch: any) {
+  if (!isTargetOptimizedBatch(batch)) return null
+  const category = displayBatchCategory(batch)
+  const item = latestAchievementCategories.value.find((entry: any) => String(entry?.name || '') === category)
+  if (!item) return null
+  // Older recompute records do not persist the count; keep the detail drawer
+  // consistent with the visible column recommendation in that case.
+  return {
+    ...item,
+    suggested_stock_count: item.suggested_stock_count ?? Math.max(
+      0,
+      Math.round(Number(item.gap_pct || 0) * -Number(batch?.capacity || 0) / 100),
+    ),
+  }
+}
+
+function recommendationStockCount(batch: any): string | number {
+  const item = recommendationForBatch(batch)
+  return item?.suggested_stock_count ?? '未知'
+}
+
+function openProductionKanban(batchId: string) {
+  batchDetailVisible.value = false
+  router.push({ path: '/production-kanban', query: { batch_id: batchId } })
+}
+
+function formatPercent(value: unknown): string {
+  const number = Number(value)
+  return Number.isFinite(number) ? `${number.toFixed(1)}%` : '未知'
+}
+
+function recomputeResultSummary(result: any): string {
+  if (!result || typeof result !== 'object') return '结果摘要未知'
+  const candidates = [result.message, result.summary, result.affected_batches, result.updated_batches, result.batch_count]
+  const value = candidates.find((item) => item !== undefined && item !== null && String(item).trim() !== '')
+  if (value === undefined) return '已完成，未返回数量摘要'
+  return typeof value === 'number' ? `影响 ${value} 个批次` : String(value)
+}
+
+function resetConfirmationPreview() {
+  confirmationPreview.value = null
+  confirming.value = false
+}
+
+async function submitBatchConfirmation() {
+  const preview = confirmationPreview.value
+  if (!preview?.batch_id || !canSubmitConfirmation.value || confirming.value) return
+  confirming.value = true
+  try {
+    await batchStore.confirmBatch(preview.batch_id, preview.batch_code, preview.expected_inbound_date)
+    try {
+      const syncResult = await sandboxApi.syncBatchToPlan(preview.batch_id, preview.batch_code)
+      ElMessage.success(`预测批次已确认，已同步 ${syncResult.count} 条至生产看板待排产队列`)
+    } catch (syncErr: any) {
+      const detail = getApiErrorMessage(syncErr) || syncErr?.message || '未知错误'
+      ElMessage.error(`预测批次已确认，但同步生产看板失败：${detail}。可在列详情中重试同步。`)
+    }
+    confirmationVisible.value = false
+    selectedBatches.value = []
+    await refresh()
+  } catch (e: any) {
+    ElMessage.error(getApiErrorMessage(e) || e?.message || '确认预测批次失败')
+  } finally {
+    confirming.value = false
+  }
+}
+
+function batchRiskSummary(batch: any): BatchRisk[] {
+  const risks = new Map<string, BatchRisk>()
+  const serverRisks = Array.isArray(batch?.risks) ? batch.risks : []
+  // Column risks are calculated by the sandbox service. Retaining them avoids
+  // drift when new constraints, such as locked-card conflicts, are added.
+  for (const risk of serverRisks) {
+    if (!risk?.code || risk.code === 'due_risk' || risk.code === 'stock_placeholder') continue
+    risks.set(String(risk.code), {
+      code: String(risk.code),
+      message: String(risk.message || '风险原因未知'),
+      blocking: Boolean(risk.blocking),
+      severity: String(risk.severity || ''),
+      unit_ids: Array.isArray(risk.unit_ids) ? risk.unit_ids.map(String) : [],
+    })
+  }
+  const units = Array.isArray(batch?.units) ? batch.units : []
+  const capacity = batchCapacity(batch)
+  const activeUnits = units.filter((u: any) => !isSpecialPlaceholder(u))
+  // Older Go deployments may not return risks yet. Keep a narrow local
+  // fallback for those responses, but prefer the authoritative payload above.
+  if (!serverRisks.length) {
+    if (capacity !== null && activeUnits.length > capacity) {
+      risks.set('capacity_overflow', { code: 'capacity_overflow', message: `超容量 ${activeUnits.length - capacity} 台`, blocking: true })
+    }
+  }
+  return Array.from(risks.values())
+}
+
+function actionableRisks(risks: any): BatchRisk[] {
+  if (!Array.isArray(risks)) return []
+  return risks
+    .filter((risk: any) => risk?.code && risk.code !== 'due_risk' && risk.code !== 'stock_placeholder')
+    .map((risk: any) => ({
+      code: String(risk.code),
+      message: String(risk.message || '风险原因未知'),
+      blocking: Boolean(risk.blocking),
+      severity: String(risk.severity || ''),
+      unit_ids: Array.isArray(risk.unit_ids) ? risk.unit_ids.map(String) : [],
+    }))
+}
+
+function isBatchManuallyAdjusted(batch: any): boolean {
+  return Boolean(batch?.is_manually_adjusted || manualAdjustedBatchIds.value.has(String(batch?.batch_id || '')))
+}
+
 const isEditingSpecialBatch = computed(() => {
   if (!editingUnit.value) return false
   const batch = batchStore.batches.find((b: any) => b.batch_id === editingUnit.value?.batch_id)
@@ -639,28 +908,14 @@ function isFamilyToken(modelType: string) {
   return upper === 'G' || upper === 'XS' || upper === 'AUTO' || upper === 'SPECIAL'
 }
 
-// 信息强改抽屉里的机型下拉：按当前列类别精确过滤，并排除大类名
+// 信息强改允许选择任意启用的具体机型；族类占位符仍由后端拒绝。
 const editModelTypes = computed(() => {
-  const family = editingBatchFamily.value
-  const category = editingBatchCategory.value
   const merged = new Set<string>([...modelTypes.value, ...batchStore.modelTypes])
-  const all = [...merged]
+  return [...merged]
     .map((m) => String(m || '').trim())
     .filter(Boolean)
     .filter((m) => !isFamilyToken(m))
-    .sort()
-  if (category === '特殊') {
-    const filtered = all.filter((m: string) => {
-      const mf = String(modelFamilyMap.value[m.toUpperCase()] || '')
-      return normalizeMajorFamily(mf) === 'SPECIAL' || mf.includes('特殊') || mf.includes('鐗规畩')
-    })
-    return filtered
-  }
-  if (!family) return all
-  if (category) {
-    return all.filter((m: string) => categoryOfModel(m, modelFamilyMap.value[m.toUpperCase()] || '') === category)
-  }
-  return all.filter((m: string) => majorFamilyOfModel(m) === family)
+    .sort(compareModelDictionaryOrder)
 })
 
 const specialModelTypes = computed(() => {
@@ -671,22 +926,10 @@ const specialModelTypes = computed(() => {
       const family = modelFamilyMap.value[String(m).toUpperCase()] || ''
       return normalizeMajorFamily(family) === 'SPECIAL' || family.includes('特殊') || family.includes('鐗规畩')
     })
-    .sort()
+    .sort(compareModelDictionaryOrder)
 })
 
 const seriesFilterOptions = ['中小型G', '中小型XS', '中大型XS', '中小型AUTO', '中大型AUTO', '特殊']
-
-function modelsForBatchCategory(batch: any) {
-  const category = displayBatchCategory(batch)
-  if (!category || category === '特殊') return []
-  const merged = new Set<string>([...modelTypes.value, ...batchStore.modelTypes])
-  return [...merged]
-    .map((m) => String(m || '').trim())
-    .filter(Boolean)
-    .filter((m) => !isFamilyToken(m))
-    .filter((m) => categoryOfModel(m, modelFamilyMap.value[m.toUpperCase()] || '') === category)
-    .sort(compareModels)
-}
 
 function displayBatchCategory(batch: any) {
   const batchModel = String(batch?.model_type || '').trim()
@@ -759,42 +1002,35 @@ function getStockPlaceholderStackInfo(unit: any, batch: any) {
   if (!batch || !Array.isArray(batch.units)) {
     return { isStacked: false, count: 1, show: true };
   }
-  
-  const hasBoundContract = (u: any) => Boolean(String(u?.contract_no || '').trim())
-  const currentModel = String(unit.model_type || '').trim().toUpperCase();
-  const isStackableStock = isStockUnit(unit) && !hasBoundContract(unit) && !isSpecialPlaceholder(unit) && !!currentModel;
-  if (!isStackableStock) {
+
+  const isStock = isStockUnit(unit) && !isSpecialPlaceholder(unit);
+  if (!isStock) {
     return { isStacked: false, count: 1, show: true };
   }
-  
+
   const units = batch.units;
   const idx = units.findIndex((u: any) => u.unit_id === unit.unit_id);
   if (idx === -1) {
     return { isStacked: false, count: 1, show: true };
   }
 
-  const sameStackableModel = (u: any) => {
-    return isStockUnit(u)
-      && !hasBoundContract(u)
-      && !isSpecialPlaceholder(u)
-      && String(u.model_type || '').trim().toUpperCase() === currentModel
-  }
+  const currentModel = String(unit.model_type || '').trim().toUpperCase();
 
-  const prev = idx > 0 ? units[idx - 1] : null
-  if (prev && sameStackableModel(prev)) {
+  const firstIdx = units.findIndex((u: any) => {
+    return isStockUnit(u) && !isSpecialPlaceholder(u) && String(u.model_type || '').trim().toUpperCase() === currentModel;
+  });
+  if (idx > firstIdx) {
     return { isStacked: true, count: 0, show: false };
   }
-  
+
   let count = 0;
-  for (let i = idx; i < units.length; i++) {
+  for (let i = 0; i < units.length; i++) {
     const u = units[i];
-    if (sameStackableModel(u)) {
+    if (isStockUnit(u) && !isSpecialPlaceholder(u) && String(u.model_type || '').trim().toUpperCase() === currentModel) {
       count++;
-    } else {
-      break;
     }
   }
-  
+
   return {
     isStacked: count > 1,
     count: count,
@@ -806,12 +1042,12 @@ function isValidDragTargetBatch(targetBatch: any) {
   if (!dragging.value || !dragSource.value) return false
   const unit = dragSource.value.unit
   const sourceBatchId = dragSource.value.sourceBatchId
-  
+
   // 1. Stock units cannot drag across batches
   if (isStockUnit(unit) && sourceBatchId && sourceBatchId !== targetBatch.batch_id) {
     return false
   }
-  
+
   // 2. Family matching check
   if (isUnitFamilyMismatch(unit, targetBatch)) {
     const canContractFirstOccupy = sourceBatchId && sourceBatchId !== targetBatch.batch_id && hasUnboundPlaceholder(targetBatch)
@@ -819,13 +1055,13 @@ function isValidDragTargetBatch(targetBatch: any) {
       return false
     }
   }
-  
+
   // 3. Lane matching check
   const sourceBatch = batchStore.batches.find((b: any) => b.batch_id === sourceBatchId)
   if (sourceBatch && laneKeyOfBatch(sourceBatch) !== laneKeyOfBatch(targetBatch) && !canMoveAcrossLanes(sourceBatch, targetBatch, unit)) {
     return false
   }
-  
+
   return true
 }
 
@@ -864,11 +1100,9 @@ function batchModelSummaryRows(batch: any) {
     }
     counter.set(model, current)
   }
-  return [...counter.values()].filter((row) => row.ordered > 0 || row.stock > 0).sort((a, b) => {
-    const totalA = a.ordered + a.stock
-    const totalB = b.ordered + b.stock
-    return totalB - totalA || a.model.localeCompare(b.model)
-  })
+  return [...counter.values()]
+    .filter((row) => row.ordered > 0 || row.stock > 0)
+    .sort((a, b) => compareModelDictionaryOrder(a.model, b.model))
 }
 
 function orderedCount(batch: any) {
@@ -882,7 +1116,31 @@ function stockCount(batch: any) {
 }
 
 function canEditBatchStock(batch: any) {
-  return isTargetOptimizedBatch(batch) && displayBatchCategory(batch) !== seriesFilterOptions[5]
+  return canEditSandbox.value && isTargetOptimizedBatch(batch) && displayBatchCategory(batch) !== seriesFilterOptions[5]
+}
+
+function batchCapacity(batch: any): number | null {
+  const value = Number(batch?.capacity)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function capacityLabel(batch: any): string {
+  return batchCapacity(batch) === null ? '未知' : String(batchCapacity(batch))
+}
+
+function emptySlots(batch: any): number | null {
+  const capacity = batchCapacity(batch)
+  return capacity === null ? null : Math.max(0, capacity - orderedCount(batch) - stockCount(batch))
+}
+
+function emptySlotLabel(batch: any): string {
+  const value = emptySlots(batch)
+  return value === null ? '未知' : String(value)
+}
+
+function capacityPercent(batch: any, count: number | null): number {
+  const capacity = batchCapacity(batch)
+  return capacity && count !== null ? Math.min(100, Math.max(0, count / capacity * 100)) : 0
 }
 
 function currentStockCounts(batch: any) {
@@ -912,9 +1170,6 @@ function resetBatchStockEdit(batch: any) {
   const batchId = String(batch?.batch_id || '')
   if (!batchId) return
   const counts = { ...currentStockCounts(batch) }
-  for (const model of modelsForBatchCategory(batch)) {
-    if (counts[model] === undefined) counts[model] = 0
-  }
   for (const model of orderedModelNames(batch)) {
     if (counts[model] === undefined) counts[model] = 0
   }
@@ -926,11 +1181,7 @@ function resetAllStockEdits() {
   for (const batch of batchStore.batches) {
     const batchId = String(batch?.batch_id || '')
     if (!batchId) continue
-    const counts = { ...currentStockCounts(batch) }
-    for (const model of modelsForBatchCategory(batch)) {
-      if (counts[model] === undefined) counts[model] = 0
-    }
-    next[batchId] = counts
+    next[batchId] = { ...currentStockCounts(batch) }
   }
   stockEdits.value = next
 }
@@ -947,10 +1198,10 @@ function ensureBatchStockEdit(batch: any) {
 function stockEditRows(batch: any) {
   const edit = ensureBatchStockEdit(batch)
   const current = currentStockCounts(batch)
-  const models = new Set<string>([...modelsForBatchCategory(batch), ...orderedModelNames(batch), ...Object.keys(current), ...Object.keys(edit)])
+  const models = new Set<string>([...orderedModelNames(batch), ...Object.keys(current), ...Object.keys(edit)])
   return [...models]
     .filter(Boolean)
-    .sort(compareModels)
+    .sort(compareModelDictionaryOrder)
     .map((model) => ({ model }))
 }
 
@@ -984,7 +1235,7 @@ async function saveBatchStockEdit(batch: any) {
   if (!batchId || stockEditError(batch)) return
   const edit = ensureBatchStockEdit(batch)
   const stocks = Object.keys(edit)
-    .sort((a, b) => a.localeCompare(b))
+    .sort(compareModelDictionaryOrder)
     .map((model) => ({ model_type: model, count: Math.max(0, Math.trunc(Number(edit[model]) || 0)) }))
   stockSaving.value[batchId] = true
   try {
@@ -1004,17 +1255,18 @@ function isSpecialBatch(batch: any) {
 }
 
 function isLargeMachineBatch(batch: any) {
-  return productionGroupOfCategory(displayBatchCategory(batch)) === 'LARGE'
+  const category = displayBatchCategory(batch)
+  return category === '中大型XS' || category === '中大型AUTO'
 }
 
 function laneKeyOfBatch(batch: any) {
   if (!batch) return ''
   if (isSpecialBatch(batch)) return 'SPECIAL'
-  if (isLargeMachineBatch(batch)) return 'LARGE'
   const family = majorFamilyOfModel(batch?.model_type || '')
   if (!family) return ''
   if (family === 'G') return 'G-SMALL'
-  return `${family}-SMALL`
+  const size = isLargeMachineBatch(batch) ? 'LARGE' : 'SMALL'
+  return `${family}-${size}`
 }
 
 function canMoveAcrossLanes(sourceBatch: any, targetBatch: any, unit: any) {
@@ -1026,27 +1278,27 @@ function canMoveAcrossLanes(sourceBatch: any, targetBatch: any, unit: any) {
   if (!sourceSpecial && !isLargeMachineBatch(sourceBatch)) return false
   if (!targetSpecial && !isLargeMachineBatch(targetBatch)) return false
   if (isStockUnit(unit) || isSpecialPlaceholder(unit)) return false
-  return ownershipLaneKeyOfUnit(unit) === 'LARGE'
+  const uf = majorFamilyOfModel(String(unit?.model_type || ''))
+  if (!uf || (uf !== 'XS' && uf !== 'AUTO')) return false
+  const anchorFamily = sourceSpecial
+    ? majorFamilyOfModel(String(targetBatch?.model_type || ''))
+    : majorFamilyOfModel(String(sourceBatch?.model_type || ''))
+  return uf === anchorFamily
 }
 
 function isUnitFamilyMismatch(unit: any, batch: any) {
   if (!unit || !batch) return false
   if (isSpecialPlaceholder(unit)) return false
   if (isCrossLanePlacement(unit, batch)) return false
-  const ownerLane = ownershipLaneKeyOfUnit(unit)
-  const batchLane = laneKeyOfBatch(batch)
-  if (!ownerLane || !batchLane) return false
-  return ownerLane !== batchLane
+  const uf = majorFamilyOfModel(String(unit?.model_type || ''))
+  const bf = majorFamilyOfModel(String(batch?.model_type || ''))
+  if (!uf || !bf) return false
+  return uf !== bf
 }
 
 function hasUnboundPlaceholder(batch: any) {
   const units = Array.isArray(batch?.units) ? batch.units : []
   return units.some((u: any) => isStockUnit(u) && !isSpecialPlaceholder(u))
-}
-
-function familyMismatchCount(batch: any) {
-  const units = Array.isArray(batch?.units) ? batch.units : []
-  return units.filter((u: any) => isUnitFamilyMismatch(u, batch)).length
 }
 
 function specialContractCount(batch: any) {
@@ -1058,9 +1310,9 @@ function ownershipLaneKeyOfUnit(unit: any) {
   if (!model) return ''
   const category = categoryOfModel(model, modelFamilyMap.value[model.toUpperCase()] || '')
   if (category === '特殊') return 'SPECIAL'
-  if (category === '中大型XS') return 'LARGE'
+  if (category === '中大型XS') return 'XS-LARGE'
   if (category === '中小型XS') return 'XS-SMALL'
-  if (category === '中大型AUTO') return 'LARGE'
+  if (category === '中大型AUTO') return 'AUTO-LARGE'
   if (category === '中小型AUTO') return 'AUTO-SMALL'
   if (category === '中小型G') return 'G-SMALL'
   const family = majorFamilyOfModel(model)
@@ -1080,7 +1332,7 @@ function isCrossLanePlacement(unit: any, batch: any) {
   const placedIsSpecial = placed === 'SPECIAL'
   if (ownerIsSpecial === placedIsSpecial) return false
   const otherLane = ownerIsSpecial ? placed : owner
-  return otherLane === 'LARGE'
+  return otherLane === 'XS-LARGE' || otherLane === 'AUTO-LARGE'
 }
 
 function canAddSpecialCard(batch: any) {
@@ -1167,57 +1419,49 @@ function displayBatchCode(batch: any) {
   return formatBatchCode(batch.batch_no)
 }
 
-async function toggleSelect(batchId: string) {
+function toggleSelect(batchId: string) {
   if (recomputing.value || batchStore.loading) return
   const isSelected = selectedBatches.value[0] === batchId
   selectedBatches.value = isSelected ? [] : [batchId]
-
-  if (!isSelected) {
-    const selectedBatch = batchStore.batches.find((b: any) => getBatchUniqueId(b) === batchId)
-    if (selectedBatch && String(selectedBatch.status || '') === 'Predicted' && !isSpecialBatch(selectedBatch)) {
-      const slotNo = batchSlotOrder(selectedBatch)
-
-      // 如果点击的已经是"本次备货建议"列，只选中不重算
-      if (slotNo === optimizedTargetSlotNo.value) {
-        return
-      }
-
-      // 选中其他预测列时才触发重算
-      recomputing.value = true
-      try {
-        await sandboxApi.recompute(slotNo, true)
-        optimizedTargetSlotNo.value = slotNo
-        ElMessage.success(`已按选中列(第 ${slotNo} 列)重算备货建议`)
-        await refresh()
-      } catch (e: any) {
-        const status = Number(e?.response?.status || 0)
-        if (status === 409) {
-          ElMessage.warning('已有重算任务执行中，请稍后再试')
-        } else if (status === 504) {
-          ElMessage.warning('重算仍在执行或超时，请稍后刷新重试')
-        } else {
-          ElMessage.error(e.message || '重算失败')
-        }
-      } finally {
-        recomputing.value = false
-      }
-    }
-  }
 }
 
 async function onSeriesFilterChange() {
   await syncScrollMetrics()
 }
 
-async function refresh() {
+function batchDataFingerprint(batches: any[]): string {
+  return batches
+    .map((batch: any) => ({
+      id: String(batch?.batch_id || ''),
+      updated_at: String(batch?.updated_at || ''),
+      status: String(batch?.status || ''),
+      unit_count: Array.isArray(batch?.units) ? batch.units.length : null,
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((item) => `${item.id}|${item.updated_at}|${item.status}|${item.unit_count ?? ''}`)
+    .join(';')
+}
+
+async function refresh(options: { markDataUpdate?: boolean } = {}) {
   if (dragging.value || moving.value) {
     pendingRefresh.value = true
     return
   }
   await batchStore.fetchBatches({ status: SANDBOX_STATUS })
+  const nextFingerprint = batchDataFingerprint(batchStore.batches)
+  if (options.markDataUpdate && lastBatchDataFingerprint.value && nextFingerprint !== lastBatchDataFingerprint.value) {
+    hasDataUpdate.value = true
+  }
+  lastBatchDataFingerprint.value = nextFingerprint
   sortBatchUnitsInPlace()
   initBatchInputs()
   resetAllStockEdits()
+  if (!latestAchievementCategories.value.length) {
+    try {
+      const achievement: any = await sandboxApi.getForecastAchievement()
+      latestAchievementCategories.value = achievement?.achievement?.categories || []
+    } catch { /* keep the recommendation basis explicitly unavailable */ }
+  }
   await syncScrollMetrics()
 }
 
@@ -1225,53 +1469,7 @@ async function handleManualRefresh() {
   suspendAutoSort.value = false
   pinnedBatchOrder.value = []
   await refresh()
-}
-
-function openManualPredictedDrawer() {
-  manualPredictedForm.value = { model_family: '中大型XS', quantity: 10, remark: '' }
-  manualPredictedVisible.value = true
-}
-
-async function submitManualPredictedBatch() {
-  const family = String(manualPredictedForm.value.model_family || '').trim()
-  const option = manualFamilyOptions.find((item) => item.value === family)
-  if (!option) {
-    ElMessage.warning('请选择明确机型族')
-    return
-  }
-
-  const quantity = Number(manualPredictedForm.value.quantity)
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    ElMessage.warning('数量必须是大于 0 的整数')
-    return
-  }
-  if (quantity > option.capacity) {
-    ElMessage.warning(`${option.label} 单条产线最多 ${option.capacity} 台`)
-    return
-  }
-
-  manualPredictedSaving.value = true
-  try {
-    const res = await sandboxApi.createManualPredictedBatch({
-      model_family: option.value,
-      quantity,
-      remark: String(manualPredictedForm.value.remark || '').trim(),
-    }) as any
-    ElMessage.success('新增预测产线已保存，可直接审核或挂起等待审核')
-    manualPredictedVisible.value = false
-    if (selectedSeriesFilters.value && selectedSeriesFilters.value !== option.value) {
-      selectedSeriesFilters.value = option.value
-    }
-    await refresh()
-    const batchId = String(res?.batch?.batch_id || '')
-    if (batchId) {
-      selectedBatches.value = [batchId]
-    }
-  } catch (e: any) {
-    ElMessage.error(getApiErrorMessage(e) || e.message || '新增预测产线失败')
-  } finally {
-    manualPredictedSaving.value = false
-  }
+  hasDataUpdate.value = false
 }
 
 async function forceRefresh() {
@@ -1299,6 +1497,7 @@ async function loadModelTypes() {
     const list = Array.isArray(res) ? res : (res?.model_types || res?.types || [])
     if (Array.isArray(list)) {
       const nextMap: Record<string, string> = {}
+      const nextSortOrderMap: Record<string, number> = {}
       modelTypes.value = list
         .map((item: any) => {
           if (typeof item === 'string') return item
@@ -1306,23 +1505,35 @@ async function loadModelTypes() {
             const mt = String(item.model_type || '').trim()
             const mf = String(item.model_family || '').trim()
             if (mt && mf) nextMap[mt.toUpperCase()] = mf
+            const rawSortOrder = item.sort_order
+            const sortOrder = Number(rawSortOrder)
+            if (mt && rawSortOrder !== null && rawSortOrder !== undefined && Number.isFinite(sortOrder)) {
+              nextSortOrderMap[mt.toUpperCase()] = sortOrder
+            }
             return mt
           }
           return ''
         })
         .filter(Boolean)
       modelFamilyMap.value = nextMap
+      modelSortOrderMap.value = nextSortOrderMap
     } else {
       modelTypes.value = []
       modelFamilyMap.value = {}
+      modelSortOrderMap.value = {}
     }
   } catch {
     modelTypes.value = []
     modelFamilyMap.value = {}
+    modelSortOrderMap.value = {}
   }
 }
 
 async function handleRecompute() {
+  if (!canEditSandbox.value) {
+    ElMessage.warning('当前账号没有预测沙盒编辑权限')
+    return
+  }
   let targetSlotNo: number | undefined
   let isClicked = false
   if (selectedBatches.value.length === 1) {
@@ -1339,9 +1550,26 @@ async function handleRecompute() {
     targetSlotNo = 1
     isClicked = false
   }
+  const affectedManualBatches = batchStore.batches.filter((batch: any) => {
+    if (String(batch?.status || '') !== 'Predicted' || !batch?.is_manually_adjusted) return false
+    return !isClicked || batchSlotOrder(batch) === targetSlotNo
+  })
+  if (affectedManualBatches.length) {
+    try {
+      await ElMessageBox.confirm(
+        `本次重算会覆盖 ${affectedManualBatches.length} 个未锁定的人工调整列；锁定卡片和已确认批次不会被覆盖。是否继续？`,
+        '确认重算影响',
+        { type: 'warning', confirmButtonText: '继续重算', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+  }
   recomputing.value = true
   try {
-    const recomputeRes: any = await sandboxApi.recompute(targetSlotNo, isClicked)
+    const recomputeRes: any = await runRecompute(targetSlotNo, isClicked)
+    clearPendingRecomputeJob()
+    latestAchievementCategories.value = recomputeRes?.achievement?.categories || []
     selectedBatches.value = []
     ElMessage.success('已按目标列优化备货比例，其他预测列备货仅作占位参考')
     await refresh()
@@ -1383,8 +1611,9 @@ async function batchConfirm() {
     ElMessage.warning('请在列顶输入批次号')
     return
   }
-  if (batchCode.length > 64 || /[\u0000-\u001F\u007F]/.test(batchCode)) {
-    ElMessage.warning('批次号最多64个字符，不能包含换行等控制字符')
+  const codePattern = /^(0[1-9]|1[0-2])-\d{2}[\u4e00-\u9fa5A-Za-z0-9_-]{0,20}$/
+  if (!codePattern.test(batchCode)) {
+    ElMessage.warning('批次号格式错误：必须以 MM-SS 开头，后面可追加20字以内中文/字母/数字/下划线/中划线')
     return
   }
 
@@ -1394,38 +1623,33 @@ async function batchConfirm() {
     return
   }
 
-  // Preview serial number range before final confirm
-  let previewMsg = ''
+  // Use the server-side validation result as the confirmation source of truth.
+  let impact: any
   try {
-    const preview: any = await sandboxApi.previewSyncToPlan(selectedId, batchCode, inboundDate)
-    if (preview && preview.count > 0) {
-      previewMsg = `\n\n该批次共 ${preview.count} 张卡片待同步\n流水号范围: ${preview.first_serial} ~ ${preview.last_serial}`
-    } else {
-      previewMsg = '\n\n该批次无可同步卡片'
+    impact = await sandboxApi.previewBatchImpact(selectedId, inboundDate)
+    const blockingRisks = (impact?.risks || []).filter((risk: any) => risk.blocking)
+    if (blockingRisks.length) {
+      batchDetail.value = impact
+      activeRiskUnitIds.value = new Set(blockingRisks.flatMap((risk: any) => risk.unit_ids || []).map((id: any) => String(id)))
+      batchDetailVisible.value = true
+      ElMessage.warning(`存在阻塞风险，暂不能确认：${blockingRisks.map((risk: any) => risk.message).join('；')}`)
+      return
     }
+    const preview: any = await sandboxApi.previewSyncToPlan(selectedId, batchCode)
+    confirmationPreview.value = {
+      ...impact,
+      batch_code: batchCode,
+      sync_count: preview?.count ?? impact?.sync_count ?? 0,
+      sync_preview: preview,
+      audit: await sandboxApi.getBatchAudit(selectedId).catch(() => null),
+    }
+    confirmationVisible.value = true
   } catch {
-    previewMsg = '\n\n（无法获取流水号预览）'
+    // A network failure must not bypass server-side validation.
+    ElMessage.error('无法获取确认前校验，请恢复服务后重试')
+    return
   }
 
-  try {
-    await ElMessageBox.confirm(
-      `确认预测批次 ${batchCode}？\n预计入库时间: ${inboundDate}${previewMsg}`,
-      '最终确认',
-      { confirmButtonText: '确认预测批次', cancelButtonText: '取消', type: 'warning' }
-    )
-
-    await batchStore.confirmBatch(selectedId, batchCode, inboundDate)
-    try {
-      const syncResult = await sandboxApi.syncBatchToPlan(selectedId, batchCode)
-      ElMessage.success(`预测批次已确认，已同步 ${syncResult.count} 条至生产看板待排产队列`)
-    } catch (syncErr: any) {
-      ElMessage.warning('预测批次已确认，但同步生产看板失败: ' + (getApiErrorMessage(syncErr) || syncErr?.message || '未知错误'))
-    }
-    selectedBatches.value = []
-    await refresh()
-  } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error(e.message || '确认预测批次失败')
-  }
 }
 
 function onDragStart(evt: any, sourceBatch: any) {
@@ -1467,21 +1691,21 @@ async function onUnitMoved(evt: any, targetBatch: any) {
     return
   }
   if (isStockUnit(unit) && sourceBatchId && sourceBatchId !== targetBatch.batch_id) {
-    ElMessage.warning('备货机台不可跨批拖拽')
+    ElMessage.warning('备货卡片不可跨批拖拽')
     await forceRefresh()
     return
   }
   if (isUnitFamilyMismatch(unit, targetBatch)) {
     const canContractFirstOccupy = sourceBatchId && sourceBatchId !== targetBatch.batch_id && hasUnboundPlaceholder(targetBatch)
     if (!canContractFirstOccupy) {
-      ElMessage.warning('仅允许同生产组机型在兼容批次内移动')
+      ElMessage.warning('仅允许同系列机型在同系列批次内移动')
       await forceRefresh()
       return
     }
   }
   const sourceBatch = batchStore.batches.find((b: any) => b.batch_id === sourceBatchId)
   if (sourceBatch && laneKeyOfBatch(sourceBatch) !== laneKeyOfBatch(targetBatch) && !canMoveAcrossLanes(sourceBatch, targetBatch, unit)) {
-    ElMessage.warning('仅允许在同生产组列内拖拽')
+    ElMessage.warning('仅允许在同列（同系列且同大类）内拖拽')
     await forceRefresh()
     return
   }
@@ -1496,7 +1720,11 @@ async function onUnitMoved(evt: any, targetBatch: any) {
       pinnedBatchOrder.value = filteredBatches.value.map((b: any) => String(b?.batch_id || ''))
     }
     suspendAutoSort.value = true
-    ElMessage.success('机台位置已更新')
+    const adjusted = new Set(manualAdjustedBatchIds.value)
+    if (sourceBatchId) adjusted.add(String(sourceBatchId))
+    adjusted.add(String(targetBatch.batch_id))
+    manualAdjustedBatchIds.value = adjusted
+    ElMessage.success('卡片位置已更新')
     await forceRefresh()
   } catch (e: any) {
     ElMessage.error('移动失败: ' + (e.message || '未知错误'))
@@ -1526,13 +1754,11 @@ async function saveEdit() {
   if (!editingUnit.value) return
   saving.value = true
   try {
-    const batch = batchStore.batches.find((b: any) => b.batch_id === editingUnit.value?.batch_id)
-    if (batch && isUnitFamilyMismatch({ ...editingUnit.value, model_type: editForm.value.model_type }, batch)) {
-      ElMessage.warning('机型与批次系列不匹配，请选择同系列机型')
-      return
-    }
     const { contract_no: _, ...data } = editForm.value as any
     await sandboxApi.updateUnit(editingUnit.value.unit_id, data)
+    const adjusted = new Set(manualAdjustedBatchIds.value)
+    adjusted.add(String(editingUnit.value.batch_id || ''))
+    manualAdjustedBatchIds.value = adjusted
     ElMessage.success('已保存并锁定')
     editVisible.value = false
     refresh()
@@ -1603,7 +1829,7 @@ async function handleMarkSpot() {
   const unit = contextMenu.value.unit
   if (!unit) return
   try {
-    await ElMessageBox.confirm('确认将此机台标记为现货（清除订单信息）？', '确认', { type: 'warning' })
+    await ElMessageBox.confirm('确认将此卡片标记为现货（清除订单信息）？', '确认', { type: 'warning' })
     const res: any = await sandboxApi.markSpot(unit.unit_id)
     if (res && res.blocked_or_warned_units && res.blocked_or_warned_units.length > 0) {
       ElMessage.warning(`已标记为现货，但同合同下仍有 ${res.blocked_or_warned_units.length} 台设备已确认或生产中，需人工处理`)
@@ -1720,49 +1946,32 @@ function onEdgeHover(e: MouseEvent) {
 let cleanupFns: (() => void)[] = []
 
 onMounted(async () => {
+  if (pendingRecomputeJobId.value) startRecomputeElapsedTimer()
   await loadModelTypes()
   await fetchLastBatchCode()
-  if (!enterRecomputed) {
-    enterRecomputed = true
-    await autoRecomputeOnEnter()
-  } else {
-    await refresh()
-  }
+  await refresh()
   wsConnect()
-  cleanupFns.push(onEvent('unit:updated', () => refresh()))
-  cleanupFns.push(onEvent('batch:updated', () => refresh()))
-  cleanupFns.push(onEvent('batch:confirmed', () => refresh()))
+  cleanupFns.push(onEvent('unit:updated', () => refresh({ markDataUpdate: true })))
+  cleanupFns.push(onEvent('batch:updated', () => refresh({ markDataUpdate: true })))
+  cleanupFns.push(onEvent('batch:confirmed', () => refresh({ markDataUpdate: true })))
   window.addEventListener('resize', syncScrollMetrics)
 })
 
 onActivated(async () => {
-  if (!enterRecomputed) {
-    enterRecomputed = true
-    await autoRecomputeOnEnter()
-  } else {
-    await refresh()
-  }
+  await refresh({ markDataUpdate: true })
 })
 
 onUnmounted(() => {
-  enterRecomputed = false
   cleanupFns.forEach(fn => fn())
   cleanupFns = []
   window.removeEventListener('resize', syncScrollMetrics)
   stopEdgeAutoScroll()
+  stopRecomputeElapsedTimer()
   wsDisconnect()
 })
 </script>
 
 <style scoped>
-.sandbox-intro { display: flex; justify-content: space-between; gap: 20px; padding: 20px 24px 14px; background: #fff; border-bottom: 1px solid #e8edf2; }
-.sandbox-eyebrow { color: #1677c8; font-size: 12px; font-weight: 700; }
-.sandbox-intro h3 { margin: 5px 0 3px; color: #1d2939; font-size: 21px; }
-.sandbox-intro p { margin: 0; color: #667085; font-size: 13px; }
-.sandbox-next-step { min-width: 220px; padding: 10px 14px; background: #f5faff; border-left: 3px solid #1677c8; }
-.sandbox-next-step span, .sandbox-next-step strong, .sandbox-next-step small { display: block; }
-.sandbox-next-step span, .sandbox-next-step small { color: #667085; font-size: 12px; }
-.sandbox-next-step strong { margin: 2px 0; color: #1464a5; font-size: 14px; }
 .sandbox-summary { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 1px; background: #e8edf2; border-bottom: 1px solid #e8edf2; }
 .sandbox-summary > div { padding: 12px 18px; background: #fff; }
 .sandbox-summary span, .sandbox-summary strong { display: block; }
@@ -1771,8 +1980,7 @@ onUnmounted(() => {
 .sandbox-settings { background: #fff; border-bottom: 1px solid #e8edf2; }
 .sandbox-settings summary { padding: 10px 24px; color: #475467; font-size: 13px; font-weight: 600; cursor: pointer; }
 .sandbox-settings .sandbox-header { padding: 0 24px 14px; }
-.toolbar-label { margin-right: auto; color: #344054; font-weight: 700; }
-@media (max-width: 700px) { .sandbox-intro { flex-direction: column; padding: 16px; } .sandbox-next-step { min-width: 0; } .sandbox-summary { grid-template-columns: repeat(2, minmax(120px, 1fr)); } .sandbox-summary > div { padding: 10px 14px; } .sandbox-settings summary { padding-inline: 16px; } .sandbox-settings .sandbox-header { padding-inline: 16px; } }
+@media (max-width: 700px) { .sandbox-summary { grid-template-columns: repeat(2, minmax(120px, 1fr)); } .sandbox-summary > div { padding: 10px 14px; } .sandbox-settings summary { padding-inline: 16px; } .sandbox-settings .sandbox-header { padding-inline: 16px; } }
 .top-scroll {
   overflow-x: auto;
   overflow-y: hidden;
@@ -1892,6 +2100,11 @@ onUnmounted(() => {
   border-right: none;
   font-weight: 700;
 }
+.manual-adjusted-tag {
+  margin-right: 4px;
+  border-radius: 0 0 6px 6px;
+  font-weight: 700;
+}
 
 .batch-meta-due {
   display: block;
@@ -1899,6 +2112,114 @@ onUnmounted(() => {
   font-size: 13.5px;
   color: #4b5563;
   font-weight: 600;
+}
+.batch-meta-provenance {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 3px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.batch-plan-summary {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.plan-summary-item + .plan-summary-item { border-left: 1px solid #d7dce5; padding-left: 7px; }
+.plan-summary-risk { color: #b42318; font-weight: 700; }
+.batch-risk-list {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+  color: #b42318;
+  font-size: 11px;
+}
+.batch-risk-item {
+  max-width: 145px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.batch-risk-item:hover { text-decoration: underline; }
+.batch-risk-item + .batch-risk-item { border-left: 1px solid #f1b5b0; padding-left: 4px; }
+.batch-risk-more { color: #667085; }
+
+.unit-risk-highlight {
+  box-shadow: 0 0 0 3px #f59e0b inset !important;
+  border-radius: 6px;
+}
+.batch-detail-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.batch-detail-stat {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 4px;
+  color: #475467;
+  font-size: 12px;
+}
+.batch-detail-stat strong {
+  overflow: hidden;
+  color: #182230;
+  font-size: 16px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-detail-inbound {
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.batch-detail-inbound small { color: #667085; font-size: 12px; white-space: nowrap; }
+.batch-detail-risk {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid #eaecf0;
+  color: #b42318;
+}
+.batch-detail-risk small { color: #667085; }
+.batch-detail-sync-status {
+  display: grid;
+  gap: 5px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  color: #344054;
+  font-size: 13px;
+}
+.batch-detail-sync-status .sync-error { color: #b42318; white-space: pre-wrap; }
+.batch-detail-note {
+  margin-top: 18px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .batch-meta-models {
@@ -1916,13 +2237,69 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 
-.batch-placeholder-note {
-  margin-top: 2px;
-  color: #8a6d3b;
-  font-size: 13px;
-  font-weight: 700;
+.recompute-job-status { display: inline-flex; align-items: center; gap: 4px; color: #946200; font-size: 12px; }
+.sandbox-data-update { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border: 1px solid #b8d7ff; border-radius: 4px; color: #2563eb; background: #eff6ff; font-size: 12px; white-space: nowrap; }
+.stock-recommendation {
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
 }
-
+.stock-recommendation span { color: #475467; }
+.batch-detail-recommendation {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+  color: #344054;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.batch-detail-history {
+  margin-top: 8px;
+  border-top: 1px solid #eaecf0;
+  color: #475467;
+  font-size: 13px;
+}
+.batch-detail-history summary {
+  padding: 10px 0;
+  color: #344054;
+  cursor: pointer;
+  font-weight: 600;
+}
+.batch-detail-history-content {
+  display: grid;
+  gap: 6px;
+  padding: 0 0 10px;
+  color: #667085;
+  line-height: 1.45;
+}
+.confirmation-summary {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: #344054;
+  font-size: 14px;
+}
+.confirmation-risk {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  color: #b42318;
+  font-size: 13px;
+}
+.confirmation-risk span { color: #667085; white-space: nowrap; }
 .batch-placeholder-slot {
   opacity: 0.82;
 }

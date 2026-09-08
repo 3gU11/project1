@@ -19,7 +19,7 @@ import websockets
 from fastapi import APIRouter, Request, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 
 from api.routes.auth import get_current_user_token, get_current_user_context
 from crud.roles import get_role_permissions
@@ -62,20 +62,6 @@ def _build_go_headers(user_ctx: dict) -> dict:
     if GO_INTERNAL_TOKEN:
         headers["X-Internal-Token"] = GO_INTERNAL_TOKEN
     return headers
-
-
-def _serial_month_from_batch_code(batch_code: str, inbound_date=None) -> str:
-    """Return the numeric month segment used by generated forecast serial numbers."""
-    match = re.match(r"^\s*(0[1-9]|1[0-2])(?:-\d{2})?", str(batch_code or ""))
-    if match:
-        return match.group(1)
-    if inbound_date is not None:
-        if hasattr(inbound_date, "strftime"):
-            return inbound_date.strftime("%m")
-        inbound_match = re.match(r"^\d{4}-(0[1-9]|1[0-2])-\d{2}", str(inbound_date))
-        if inbound_match:
-            return inbound_match.group(1)
-    return datetime.now().strftime("%m")
 
 
 def _get_timeout(path: str) -> float:
@@ -141,7 +127,6 @@ async def _get_client() -> httpx.AsyncClient:
         _client = httpx.AsyncClient(
             base_url=GO_SANDBOX_URL,
             timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
-            trust_env=False,
         )
     return _client
 
@@ -156,7 +141,7 @@ async def proxy_ws(websocket: WebSocket):
 
     role = str(user_ctx.get("role") or "").strip()
     perms = get_role_permissions(role)
-    if "SANDBOX_VIEW" not in perms and "MOBILE_KANBAN_VIEW" not in perms and not _is_line_operator(role):
+    if "SANDBOX_VIEW" not in perms:
         await websocket.close(code=4003, reason="Forbidden")
         return
 
@@ -168,7 +153,7 @@ async def proxy_ws(websocket: WebSocket):
     go_headers.append(("X-Role", str(user_ctx.get("role") or "")))
 
     try:
-        async with websockets.connect(go_ws_url, additional_headers=go_headers, proxy=None) as go_ws:
+        async with websockets.connect(go_ws_url, additional_headers=go_headers) as go_ws:
             await websocket.accept()
 
             async def client_to_go():
@@ -201,54 +186,7 @@ async def proxy_ws(websocket: WebSocket):
 
 
 from crud.inventory import append_import_staging_transactional
-from crud.model_dictionary import get_model_dictionary
-from crud.audit_logs import append_operation_logs
 from utils.parsers import execute_import_transaction_payload
-
-
-def _normalize_model_name(model: object) -> str:
-    return str(model or "").replace("(加高)", "").strip()
-
-
-def _model_sort_key(model: object, order_map: dict[str, int]) -> tuple[int, str, int, str]:
-    clean = _normalize_model_name(model)
-    upper = clean.upper()
-    no_space = re.sub(r"\s+", "", upper)
-    no_hyphen = upper.replace("-", "")
-    rank = order_map.get(clean)
-    if rank is None:
-        rank = order_map.get(upper)
-    if rank is None:
-        rank = order_map.get(no_space)
-    if rank is None:
-        rank = order_map.get(no_hyphen)
-    high = 1 if "加高" in str(model or "") else 0
-    return (rank if rank is not None else 9999, clean, high, str(model or ""))
-
-
-def _enabled_model_order_map() -> dict[str, int]:
-    order_map: dict[str, int] = {}
-    try:
-        rows = get_model_dictionary()
-    except Exception as e:
-        logger.warning("load model dictionary order failed: %s", e)
-        rows = []
-
-    for idx, row in enumerate(rows):
-        if not bool(row.get("enabled", True)):
-            continue
-        clean = _normalize_model_name(row.get("model_name"))
-        if not clean:
-            continue
-        keys = {
-            clean,
-            clean.upper(),
-            re.sub(r"\s+", "", clean).upper(),
-            clean.replace("-", "").upper(),
-        }
-        for key in keys:
-            order_map.setdefault(key, idx)
-    return order_map
 
 
 def _model_category(model_type: str, family_map: dict) -> str:
@@ -256,9 +194,6 @@ def _model_category(model_type: str, family_map: dict) -> str:
     v = model_type.strip().upper()
     if not v:
         return ""
-    direct_family = _normalize_model_family(model_type)
-    if direct_family:
-        return direct_family
     family = _normalize_model_family(family_map.get(v, ""))
     if family:
         return family
@@ -330,67 +265,61 @@ def _to_date(v: object) -> Optional[date]:
         return None
 
 
-def _json_default(value):
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return str(value)
+def _baseline_datetime(v: object) -> Optional[str]:
+    """Match Go's time.Time JSON format so the audit endpoint can decode it."""
+    value = _to_date(v)
+    return f"{value.isoformat()}T00:00:00Z" if value else None
 
 
-def _operator_name(user_ctx: dict) -> str:
-    return str(user_ctx.get("name") or user_ctx.get("username") or "System")
-
-
-def _record_line_assignment_trace(user_ctx: dict, line_id: str, batch_id: str) -> None:
-    line_id = str(line_id or "").strip()
-    batch_id = str(batch_id or "").strip()
-    if not line_id or not batch_id:
+def _capture_sandbox_baselines(conn, actor: str, batch_ids: list[str]) -> None:
+    """Persist each predicted column's first pre-change snapshot in this SQL transaction."""
+    unique_ids = sorted({str(batch_id or "").strip() for batch_id in batch_ids if str(batch_id or "").strip()})
+    if not unique_ids:
         return
-    try:
-        with get_engine().connect() as conn:
-            rows = conn.execute(
-                text("""
-                    SELECT
-                        COALESCE(NULLIF(u.serial_no, ''), NULLIF(u.forecast_serial_no, ''), u.unit_id) AS serial_no,
-                        u.unit_id,
-                        u.model_type,
-                        u.contract_no,
-                        u.customer,
-                        u.dealer_name,
-                        u.order_remark,
-                        b.batch_code,
-                        pl.line_name
-                    FROM units u
-                    LEFT JOIN batches b ON b.batch_id = u.batch_id
-                    LEFT JOIN production_lines pl ON pl.line_id = :line_id
-                    WHERE u.batch_id = :batch_id
-                    ORDER BY u.slot_index ASC, u.unit_id ASC
-                """),
-                {"line_id": line_id, "batch_id": batch_id},
-            ).mappings().all()
-    except Exception:
-        return
-
-    operator_id = str(user_ctx.get("username") or "")
-    operator_name = _operator_name(user_ctx)
-    append_operation_logs([
-        {
-            "user_id": operator_id,
-            "username": operator_name,
-            "module": "生产看板",
-            "action_type": "进入产线",
-            "biz_type": "机台",
-            "serial_no": str(row.get("serial_no") or ""),
-            "contract_no": str(row.get("contract_no") or ""),
-            "content": (
-                f"待排产队列进入生产看板产线；流水号：{row.get('serial_no') or ''}；"
-                f"批次号：{row.get('batch_code') or batch_id}；产线：{row.get('line_name') or line_id}；"
-                f"机型：{row.get('model_type') or ''}；合同号：{row.get('contract_no') or ''}；"
-                f"客户：{row.get('customer') or ''}"
-            ),
-        }
-        for row in rows
-        if str(row.get("serial_no") or "").strip()
-    ])
+    for batch_id in unique_ids:
+        batch = conn.execute(
+            text("SELECT batch_id FROM batches WHERE status = 'Predicted' AND batch_id = :batch_id FOR UPDATE"),
+            {"batch_id": batch_id},
+        ).mappings().fetchone()
+        if not batch:
+            continue
+        units = conn.execute(
+            text("""
+                SELECT unit_id, batch_id, slot_index, model_type, contract_no, customer,
+                       dealer_name, due_date, order_remark, is_locked
+                FROM units
+                WHERE batch_id = :batch_id
+                ORDER BY slot_index ASC
+            """),
+            {"batch_id": batch_id},
+        ).mappings().all()
+        snapshot = [
+            {
+                "unit_id": str(unit["unit_id"]),
+                "batch_id": str(unit["batch_id"]),
+                "slot_index": int(unit["slot_index"] or 0),
+                "model_type": str(unit["model_type"] or ""),
+                "contract_no": unit["contract_no"],
+                "customer": unit["customer"],
+                "dealer_name": unit["dealer_name"],
+                "due_date": _baseline_datetime(unit["due_date"]),
+                "order_remark": unit["order_remark"],
+                "is_locked": bool(unit["is_locked"]),
+            }
+            for unit in units
+        ]
+        conn.execute(
+            text("""
+                INSERT INTO sandbox_batch_baselines (batch_id, baseline_json, captured_by, captured_at)
+                VALUES (:batch_id, :baseline_json, :actor, NOW())
+                ON DUPLICATE KEY UPDATE batch_id = VALUES(batch_id)
+            """),
+            {
+                "batch_id": batch_id,
+                "baseline_json": json.dumps(snapshot, ensure_ascii=False),
+                "actor": actor or "system",
+            },
+        )
 
 
 def _find_slot_for_displaced(conn, displaced: dict, exclude_ids: set, due_buffer_days: int = 0):
@@ -409,7 +338,7 @@ def _find_slot_for_displaced(conn, displaced: dict, exclude_ids: set, due_buffer
     if displaced_line:
         rows = conn.execute(
             text("""
-                SELECT u.unit_id, u.model_type, u.slot_index,
+                SELECT u.unit_id, u.batch_id, u.model_type, u.slot_index,
                        COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
                 FROM units u
                 JOIN batches b ON b.batch_id = u.batch_id
@@ -431,7 +360,7 @@ def _find_slot_for_displaced(conn, displaced: dict, exclude_ids: set, due_buffer
     # 2) other production line empty slots (same model)
     rows = conn.execute(
         text("""
-            SELECT u.unit_id, u.model_type, u.slot_index, u.production_line_id,
+            SELECT u.unit_id, u.batch_id, u.model_type, u.slot_index, u.production_line_id,
                    COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound,
                    pl.line_name
             FROM units u
@@ -521,7 +450,7 @@ async def transfer_swap_units(request: Request):
             text(
                 """
                 SELECT
-                    u.unit_id, u.model_type, u.contract_no, u.customer, u.dealer_name,
+                    u.unit_id, u.batch_id, u.model_type, u.contract_no, u.customer, u.dealer_name,
                     u.due_date, u.sales_id, u.order_remark, u.is_locked,
                     u.production_line_id,
                     COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
@@ -583,6 +512,12 @@ async def transfer_swap_units(request: Request):
                         {"uid": alt_id},
                     )
                     auto_placed_to = alt_id
+
+        _capture_sandbox_baselines(
+            conn,
+            actor,
+            [urgent.get("batch_id"), target.get("batch_id"), (alt_info or {}).get("batch_id")],
+        )
 
         swap_fields = ["contract_no", "customer", "dealer_name", "due_date", "sales_id", "order_remark", "model_type"]
         urgent_vals = {k: urgent.get(k) for k in swap_fields}
@@ -659,15 +594,18 @@ async def transfer_swap_units(request: Request):
             },
             ensure_ascii=False,
         )
-        conn.execute(
-            text(
-                """
-                INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
-                VALUES (:actor, 'transfer_swap', 'unit', :target_id, :detail, NOW())
-                """
-            ),
-            {"actor": actor, "target_id": target_id, "detail": detail},
-        )
+        for affected_unit_id in [urgent_id, target_id, auto_placed_to]:
+            if not affected_unit_id:
+                continue
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+                    VALUES (:actor, 'transfer_swap', 'unit', :target_id, :detail, NOW())
+                    """
+                ),
+                {"actor": actor, "target_id": affected_unit_id, "detail": detail},
+            )
 
     return JSONResponse(content={"success": True, "buffer_days": due_buffer_days, "auto_placed_to": auto_placed_to})
 
@@ -832,7 +770,6 @@ async def sync_batch_preview(request: Request, batch_id: str):
     _ensure_permission(user_ctx, "GET", f"/api/batches/{batch_id}/sync-preview")
 
     batch_code = str(request.query_params.get("batch_code", "")).strip()
-    expected_inbound_date = str(request.query_params.get("expected_inbound_date", "")).strip()
 
     engine = get_engine()
     with engine.connect() as conn:
@@ -870,7 +807,12 @@ async def sync_batch_preview(request: Request, batch_id: str):
     if count == 0:
         return JSONResponse(content={"count": 0, "first_serial": "", "last_serial": ""})
 
-    month_part = _serial_month_from_batch_code(batch_code, expected_inbound_date)
+    month_part = "01"
+    if batch_code and "-" in batch_code:
+        month_part = batch_code.split("-")[0]
+    elif batch_code:
+        month_part = batch_code
+
     target_prefix = f"96-{month_part}-"
 
     with engine.connect() as conn:
@@ -910,6 +852,186 @@ async def sync_batch_preview(request: Request, batch_id: str):
         "first_serial": first_sn,
         "last_serial": last_sn,
     })
+
+
+def _build_batch_impact(batch_id: str, requested_inbound: str) -> Optional[dict]:
+    """Use one risk calculation for the preview and the confirmation guard."""
+    requested_inbound = str(requested_inbound or "").strip()[:10]
+    engine = get_engine()
+    with engine.connect() as conn:
+        batch = conn.execute(
+            text(
+                "SELECT batch_id, batch_no, batch_code, status, model_type, capacity, "
+                "due_date_start, due_date_end, expected_inbound_date, source, updated_at, "
+                "EXISTS(SELECT 1 FROM sandbox_batch_baselines sb WHERE "
+                "CONVERT(sb.batch_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = "
+                "CONVERT(batches.batch_id USING utf8mb4) COLLATE utf8mb4_unicode_ci) "
+                "AS is_manually_adjusted "
+                "FROM batches WHERE batch_id = :bid"
+            ),
+            {"bid": batch_id},
+        ).mappings().fetchone()
+        if batch is None:
+            return None
+        units = conn.execute(
+            text(
+                "SELECT unit_id, model_type, contract_no, due_date, is_locked "
+                "FROM units WHERE batch_id = :bid ORDER BY slot_index ASC"
+            ),
+            {"bid": batch_id},
+        ).mappings().fetchall()
+        dict_rows = conn.execute(
+            text("SELECT model_name, model_family FROM model_dictionary WHERE enabled = 1")
+        ).fetchall()
+        # A batch row's updated_at can be changed by manual edits. Keep the
+        # displayed recompute time tied to an actual completed predictor job.
+        last_recompute_at = conn.execute(
+            text("SELECT completed_at FROM sandbox_recompute_jobs WHERE status = 'succeeded' AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 1")
+        ).scalar()
+
+    family_map = {
+        str(row[0] or "").strip().upper(): str(row[1] or "").strip().upper()
+        for row in dict_rows if str(row[0] or "").strip()
+    }
+    ordered = [u for u in units if str(u["contract_no"] or "").strip()]
+    stock = [u for u in units if not str(u["contract_no"] or "").strip()]
+    syncable = [u for u in units if _model_category(str(u["model_type"] or ""), family_map)]
+    # Preserve a missing capacity as unknown. Treating NULL as zero would
+    # manufacture an empty/overflow signal and violate the API contract that
+    # missing fields must remain explicitly unknown.
+    raw_capacity = batch["capacity"]
+    capacity = int(raw_capacity) if raw_capacity is not None else None
+    active_count = len(units)
+    risks = []
+    overflow_unit_ids: list[str] = []
+    overflow_ids = set()
+    if capacity is not None and capacity > 0 and active_count > capacity:
+        overflow_unit_ids = [str(u["unit_id"]) for u in units[capacity:]]
+        overflow_ids = set(overflow_unit_ids)
+        risks.append({
+            "code": "capacity_overflow", "severity": "error", "blocking": True,
+            "message": f"卡片数超出容量 {active_count - capacity} 台",
+            "unit_ids": overflow_unit_ids,
+        })
+
+    batch_category = _model_category(str(batch["model_type"] or ""), family_map)
+    mismatched = [u for u in units if batch_category and _model_category(str(u["model_type"] or ""), family_map) not in ("", batch_category)]
+    if mismatched:
+        risks.append({
+            "code": "model_family_mismatch", "severity": "error", "blocking": True,
+            "message": f"机型大类不匹配 {len(mismatched)} 台",
+            "unit_ids": [str(u["unit_id"]) for u in mismatched],
+        })
+
+    mismatch_ids = {str(u["unit_id"]) for u in mismatched}
+    locked_conflicts = [
+        str(u["unit_id"]) for u in units
+        if bool(u["is_locked"]) and str(u["unit_id"]) in overflow_ids.union(mismatch_ids)
+    ]
+    if locked_conflicts:
+        risks.append({
+            "code": "locked_constraint_conflict", "severity": "error", "blocking": True,
+            "message": f"锁定卡片与当前约束冲突 {len(locked_conflicts)} 台，需先解锁或调整",
+            "unit_ids": locked_conflicts,
+        })
+
+    earliest_due = min((str(u["due_date"])[:10] for u in ordered if u["due_date"]), default="")
+    stored_inbound = str(batch["expected_inbound_date"] or "")[:10]
+    # The sandbox cannot derive a real inbound date from a due window. It is a
+    # manual commitment, so no date and no due-date warning exist until one is
+    # supplied by the user.
+    inbound = requested_inbound or stored_inbound
+    if requested_inbound:
+        inbound_source = "本次人工填写"
+    elif stored_inbound:
+        inbound_source = "人工填写"
+    else:
+        inbound_source = "待人工填写"
+    # expected_inbound_date is a manual commitment, not a predictor output.
+    # Keep it in the preview for editing/audit, but never derive a due-date risk
+    # from it because the sandbox has no authoritative inbound forecast.
+    due_gap_days = None
+
+    if str(batch["status"] or "") != "Predicted":
+        risks.append({
+            "code": "invalid_status", "severity": "error", "blocking": True,
+            "message": "仅待确认预测批次可以确认",
+            "unit_ids": [],
+        })
+
+    return {
+        "batch_id": str(batch["batch_id"]),
+        "status": str(batch["status"] or ""),
+        "batch_code": str(batch["batch_code"] or ""),
+        "model_type": str(batch["model_type"] or ""),
+        "capacity": capacity,
+        "ordered_count": len(ordered),
+        "stock_count": len(stock),
+        "empty_count": max(0, capacity - active_count) if capacity is not None else None,
+        "earliest_due_date": earliest_due,
+        "due_gap_days": due_gap_days,
+        "expected_inbound_date": inbound,
+        "expected_inbound_source": inbound_source,
+        "sync_count": len(syncable),
+        "risk_count": len(risks),
+        "risks": risks,
+        # The persisted first-change snapshot is the source of truth. `source`
+        # describes how a batch was created and does not cover later drag/drop,
+        # forced edits, or stock adjustments.
+        "is_manually_adjusted": bool(batch["is_manually_adjusted"]),
+        "last_recompute_at": str(last_recompute_at or "")[:19],
+        "algorithm_version": "heuristic-edd-v1",
+    }
+
+
+@router.api_route("/batches/{batch_id}/impact-preview", methods=["GET"])
+async def batch_impact_preview(request: Request, batch_id: str):
+    """Return the read-only validation data shown before confirming a batch."""
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "GET", f"/api/batches/{batch_id}/impact-preview")
+    impact = _build_batch_impact(batch_id, request.query_params.get("expected_inbound_date", ""))
+    if impact is None:
+        return JSONResponse(content={"detail": "批次不存在"}, status_code=404)
+    return JSONResponse(content=impact)
+
+
+@router.api_route("/batches/{batch_id}/confirm", methods=["POST"])
+async def confirm_batch_with_impact_guard(request: Request, batch_id: str):
+    """Reject a confirm request when the authoritative impact result is blocking.
+
+    The browser preview improves usability, but it must not be the only check:
+    callers can invoke this public API without using the prediction-sandbox UI.
+    """
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", f"/api/batches/{batch_id}/confirm")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return JSONResponse(content={"detail": "请求体必须为对象"}, status_code=422)
+
+    impact = _build_batch_impact(batch_id, payload.get("expected_inbound_date", ""))
+    if impact is None:
+        return JSONResponse(content={"detail": "批次不存在"}, status_code=404)
+    # Confirmation is retried by browsers/proxies when the original response is
+    # lost. A batch that is already confirmed must reach the Go service, which
+    # verifies the supplied business values and turns an identical retry into a
+    # successful no-op. Do not misreport that retry as an ordinary risk.
+    if impact.get("status") == "Confirmed":
+        return await _forward(request, f"/api/batches/{batch_id}/confirm")
+    blocking = [risk for risk in impact["risks"] if risk.get("blocking")]
+    if blocking:
+        return JSONResponse(
+            content={
+                "detail": "存在阻塞风险，不能确认预测批次",
+                "impact": impact,
+                "blocking_risks": blocking,
+            },
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+    return await _forward(request, f"/api/batches/{batch_id}/confirm")
 
 
 @router.api_route("/batches/last-batch-code", methods=["GET"])
@@ -966,7 +1088,8 @@ async def revoke_batch(request: Request, batch_id: str):
     _ensure_permission(user_ctx, "POST", f"/api/batches/{batch_id}/revoke")
 
     engine = get_engine()
-    # Delete plan_import records for this batch's batch_code
+    # Read the business code first, but keep the production-board records intact
+    # until the scheduling service has accepted the state reversal.
     with engine.connect() as conn:
         batch_row = conn.execute(
             text("SELECT batch_code FROM batches WHERE batch_id = :bid"),
@@ -977,16 +1100,6 @@ async def revoke_batch(request: Request, batch_id: str):
             return JSONResponse(content={"detail": "批次不存在"}, status_code=404)
 
         batch_code = str(batch_row[0] or "").strip()
-        if batch_code:
-            conn.execute(
-                text("DELETE FROM plan_import WHERE `批次号` = :bc"),
-                {"bc": batch_code},
-            )
-        conn.execute(
-            text("UPDATE units SET forecast_serial_no = NULL WHERE batch_id = :bid"),
-            {"bid": batch_id},
-        )
-        conn.commit()
 
     # Forward revoke to Go
     go_headers = _build_go_headers(user_ctx)
@@ -1009,6 +1122,32 @@ async def revoke_batch(request: Request, batch_id: str):
     except httpx.ConnectError:
         return JSONResponse(content={"detail": "沙盘服务不可用"}, status_code=503)
 
+    # The two services do not share one transaction.  At this point Go has
+    # successfully restored the batch to Predicted; clean up the board staging
+    # records atomically and surface a recoverable, explicit error if this step
+    # fails instead of claiming that the whole revoke succeeded.
+    try:
+        with engine.begin() as conn:
+            if batch_code:
+                conn.execute(
+                    text("DELETE FROM plan_import WHERE `批次号` = :bc"),
+                    {"bc": batch_code},
+                )
+            conn.execute(
+                text("UPDATE units SET forecast_serial_no = NULL WHERE batch_id = :bid"),
+                {"bid": batch_id},
+            )
+    except Exception:
+        return JSONResponse(
+            content={
+                "detail": "批次已撤销，但生产看板待排产记录清理失败；请重试清理或联系管理员处理",
+                "revoke_succeeded": True,
+                "cleanup_required": True,
+                "batch_id": batch_id,
+            },
+            status_code=500,
+        )
+
     return JSONResponse(content={"success": True})
 
 
@@ -1016,6 +1155,7 @@ async def revoke_batch(request: Request, batch_id: str):
 async def sync_batch_to_plan(request: Request, batch_id: str):
     user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
     _ensure_permission(user_ctx, "POST", f"/api/batches/{batch_id}/sync-to-plan")
+    actor = str(user_ctx.get("username") or "system").strip() or "system"
 
     body = {}
     try:
@@ -1025,6 +1165,82 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
     batch_code = str(body.get("batch_code", "")).strip()
 
     engine = get_engine()
+
+    def write_sync_audit(conn, action: str, detail: dict):
+        """Keep the user-visible sync state and its audit event consistent."""
+        conn.execute(
+            text("""
+                INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+                VALUES (:actor, :action, 'batch', :target_id, :detail, NOW())
+            """),
+            {
+                "actor": actor,
+                "action": action,
+                "target_id": batch_id,
+                "detail": json.dumps(detail, ensure_ascii=False),
+            },
+        )
+
+    # Persist a recoverable state before touching plan_import. Go and FastAPI
+    # do not share a distributed transaction, so the state machine is the
+    # authoritative explanation for retries and partial failures. Serialize
+    # retries per batch so concurrent requests cannot race serial allocation.
+    with engine.begin() as conn:
+        existing = conn.execute(
+            text("SELECT status, last_count, started_at FROM sandbox_batch_sync_status WHERE batch_id = :bid FOR UPDATE"),
+            {"bid": batch_id},
+        ).mappings().fetchone()
+        if existing and existing["status"] == "succeeded":
+            return JSONResponse(content={
+                "success": True,
+                "count": int(existing["last_count"] or 0),
+                "sync_status": "succeeded",
+                "idempotent": True,
+            })
+        if existing and existing["status"] == "processing":
+            started_at = existing.get("started_at")
+            # A worker/browser may die after persisting processing. Treat a
+            # stale record as a failed attempt so it never blocks the retry
+            # path forever. The next request below claims it atomically.
+            if isinstance(started_at, datetime) and datetime.now() - started_at < timedelta(minutes=5):
+                return JSONResponse(content={
+                    "detail": "该批次正在同步，请稍后查询同步状态",
+                    "sync_status": "processing",
+                    "retryable": True,
+                }, status_code=409)
+        conn.execute(
+            text("""
+                INSERT INTO sandbox_batch_sync_status
+                    (batch_id, batch_code, requested_by, status, attempts, last_error, started_at, completed_at)
+                VALUES (:bid, :bc, :actor, 'processing', 1, NULL, NOW(), NULL)
+                ON DUPLICATE KEY UPDATE
+                    batch_code = VALUES(batch_code),
+                    requested_by = VALUES(requested_by),
+                    status = 'processing',
+                    attempts = attempts + 1,
+                    last_error = NULL,
+                    started_at = NOW(),
+                    completed_at = NULL
+            """),
+            {"bid": batch_id, "bc": batch_code or None, "actor": actor},
+        )
+
+    def sync_failure(message: str, code: int = 500):
+        with engine.begin() as status_conn:
+            status_conn.execute(
+                text("""
+                    UPDATE sandbox_batch_sync_status
+                    SET status = 'failed', last_error = :err, completed_at = NULL
+                    WHERE batch_id = :bid
+                """),
+                {"bid": batch_id, "err": str(message)[:2000]},
+            )
+            write_sync_audit(status_conn, "sync_to_plan_failed", {
+                "batch_code": batch_code,
+                "message": str(message)[:2000],
+                "status_code": code,
+            })
+        return JSONResponse(content={"detail": message, "sync_status": "failed", "retryable": True}, status_code=code)
 
     with engine.connect() as conn:
         batch_row = conn.execute(
@@ -1037,11 +1253,11 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
         ).fetchone()
 
         if batch_row is None:
-            return JSONResponse(content={"detail": "批次不存在"}, status_code=404)
+            return sync_failure("批次不存在", 404)
 
         batch_status = str(batch_row[1] or "")
         if batch_status != "Confirmed":
-            return JSONResponse(content={"detail": "批次尚未审核确认，无法同步"}, status_code=400)
+            return sync_failure("批次尚未审核确认，无法同步", 400)
 
         inbound_date = batch_row[3]
         inbound_date_str = ""
@@ -1053,7 +1269,7 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
 
         unit_rows = conn.execute(
             text(
-                "SELECT unit_id, model_type, contract_no, customer, dealer_name, due_date, order_remark, forecast_serial_no, slot_index "
+                "SELECT unit_id, model_type, contract_no, customer, dealer_name, due_date, order_remark, forecast_serial_no "
                 "FROM units WHERE batch_id = :bid ORDER BY slot_index ASC"
             ),
             {"bid": batch_id},
@@ -1070,48 +1286,9 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
         if name:
             family_map[name] = family
 
-    model_order_map = _enabled_model_order_map()
-    ordered_unit_rows = sorted(
-        unit_rows,
-        key=lambda row: (
-            _model_sort_key(row[1], model_order_map),
-            int(row[8] or 0),
-            str(row[0] or ""),
-        ),
-    )
-
-    # Keep persisted slots aligned with the serial generation order, so the
-    # kanban queue reads the same grouped order after confirmation.
-    if ordered_unit_rows:
-        with engine.begin() as conn:
-            max_slot = int(
-                conn.execute(
-                    text("SELECT COALESCE(MAX(slot_index), 0) FROM units WHERE batch_id = :bid"),
-                    {"bid": batch_id},
-                ).scalar()
-                or 0
-            )
-            temp_base = max(max_slot, len(ordered_unit_rows)) + 10000
-            for idx, row in enumerate(ordered_unit_rows, start=1):
-                unit_id = str(row[0] or "").strip()
-                if not unit_id:
-                    continue
-                conn.execute(
-                    text("UPDATE units SET slot_index = :slot WHERE batch_id = :bid AND unit_id = :uid"),
-                    {"slot": temp_base + idx, "bid": batch_id, "uid": unit_id},
-                )
-            for idx, row in enumerate(ordered_unit_rows, start=1):
-                unit_id = str(row[0] or "").strip()
-                if not unit_id:
-                    continue
-                conn.execute(
-                    text("UPDATE units SET slot_index = :slot WHERE batch_id = :bid AND unit_id = :uid"),
-                    {"slot": idx, "bid": batch_id, "uid": unit_id},
-                )
-
     # Filter: skip uncategorized models only
     filtered = []
-    for row in ordered_unit_rows:
+    for row in unit_rows:
         mt = str(row[1] or "").strip()
         cat = _model_category(mt, family_map)
         if cat == "":
@@ -1119,13 +1296,23 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
         filtered.append(row)
 
     if not filtered:
-        return JSONResponse(
-            content={"success": True, "count": 0, "message": "该批次无可同步卡片"},
-            status_code=200,
-        )
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE sandbox_batch_sync_status SET status='succeeded', last_count=0, last_error=NULL, completed_at=NOW() WHERE batch_id=:bid"), {"bid": batch_id})
+            write_sync_audit(conn, "sync_to_plan", {
+                "batch_code": batch_code,
+                "count": 0,
+                "units_written": 0,
+                "reason": "no_syncable_units",
+            })
+        return JSONResponse(content={"success": True, "count": 0, "message": "该批次无可同步卡片", "sync_status": "succeeded"}, status_code=200)
 
-    # Generate serial numbers: 96-{month}-{seq}. Free-form batch codes use the inbound month.
-    month_part = _serial_month_from_batch_code(batch_code, inbound_date)
+    # Generate serial numbers: 96-{month}-{seq}
+    month_part = "01"
+    if batch_code and "-" in batch_code:
+        month_part = batch_code.split("-")[0]
+    elif batch_code:
+        month_part = batch_code
+
     target_prefix = f"96-{month_part}-"
 
     with engine.connect() as conn:
@@ -1187,52 +1374,71 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
             serial_pairs.append((unit_id, sn))
 
     df = pd.DataFrame(records)
-    result = append_import_staging_transactional(df)
+    try:
+        result = append_import_staging_transactional(df)
+    except Exception as exc:
+        logger.exception("sync batch %s into plan_import failed", batch_id)
+        return sync_failure(f"写入生产看板待排产队列失败：{exc}", 500)
 
     if not result.get("ok"):
-        return JSONResponse(
-            content={"detail": result.get("message", "写入plan_import失败")},
-            status_code=500,
-        )
+        return sync_failure(result.get("message", "写入plan_import失败"), 500)
 
     units_written = 0
     if serial_pairs:
-        with engine.begin() as conn:
-            for unit_id, sn in serial_pairs:
-                updated = conn.execute(
-                    text(
-                        "UPDATE units "
-                        "SET forecast_serial_no = :sn "
-                        "WHERE unit_id = :uid "
-                        "AND batch_id = :bid"
-                    ),
-                    {"sn": sn, "uid": unit_id, "bid": batch_id},
-                )
-                units_written += int(updated.rowcount or 0)
-
-    operator_id = str(user_ctx.get("username") or "")
-    operator_name = _operator_name(user_ctx)
-    append_operation_logs([
-        {
-            "user_id": operator_id,
-            "username": operator_name,
-            "module": "预测沙盘",
-            "action_type": "同步待入库",
-            "biz_type": "待入库数据",
-            "serial_no": str(record.get("流水号") or ""),
-            "contract_no": str(record.get("合同号") or ""),
-            "content": (
-                f"预测沙盘自动生成流水号并同步待入库；流水号：{record.get('流水号') or ''}；"
-                f"批次号：{batch_code}；机型：{record.get('机型') or ''}；"
-                f"预计入库日期：{record.get('预计入库时间') or ''}；合同号：{record.get('合同号') or ''}"
-            ),
-        }
-        for record in records
-        if str(record.get("流水号") or "").strip()
-    ])
+        try:
+            with engine.begin() as conn:
+                for unit_id, sn in serial_pairs:
+                    updated = conn.execute(
+                        text(
+                            "UPDATE units "
+                            "SET forecast_serial_no = :sn "
+                            "WHERE unit_id = :uid "
+                            "AND batch_id = :bid"
+                        ),
+                        {"sn": sn, "uid": unit_id, "bid": batch_id},
+                    )
+                    units_written += int(updated.rowcount or 0)
+        except Exception as exc:
+            logger.exception("sync batch %s could not save unit serials", batch_id)
+            return sync_failure(f"待排产队列已写入，但回写卡片流水号失败；可重试同步：{exc}", 500)
 
     inserted = result.get("inserted", len(records))
-    return JSONResponse(content={"success": True, "count": inserted, "units_written": units_written})
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE sandbox_batch_sync_status SET status='succeeded', last_count=:count, last_error=NULL, completed_at=NOW() WHERE batch_id=:bid"),
+                {"bid": batch_id, "count": int(inserted)},
+            )
+            write_sync_audit(conn, "sync_to_plan", {
+                "batch_code": batch_code,
+                "count": int(inserted),
+                "units_written": units_written,
+            })
+    except Exception as exc:
+        logger.exception("sync batch %s could not mark success", batch_id)
+        return sync_failure(f"待排产队列已写入，但同步状态更新失败；可重试同步：{exc}", 500)
+    return JSONResponse(content={"success": True, "count": inserted, "units_written": units_written, "sync_status": "succeeded"})
+
+
+@router.api_route("/batches/{batch_id}/sync-status", methods=["GET"])
+async def get_batch_sync_status(request: Request, batch_id: str):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "GET", f"/api/batches/{batch_id}/sync-status")
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT batch_id, batch_code, requested_by, status, attempts, last_error, last_count,
+                       DATE_FORMAT(started_at, '%Y-%m-%d %H:%i:%s') AS started_at,
+                       DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at,
+                       DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+                FROM sandbox_batch_sync_status WHERE batch_id = :bid
+            """),
+            {"bid": batch_id},
+        ).mappings().fetchone()
+    return JSONResponse(content=dict(row) if row else {
+        "batch_id": batch_id, "requested_by": None, "status": "pending", "attempts": 0,
+        "last_error": None, "last_count": None, "started_at": None, "completed_at": None,
+    })
 
 
 @router.api_route("/batches/{batch_id}/import-to-finished-goods", methods=["POST"])
@@ -1308,41 +1514,6 @@ async def import_batch_to_finished_goods(request: Request, batch_id: str):
     result = execute_import_transaction_payload(payload, retry_times=1)
     success_count = len(result.get("success", []))
     failed_count = len(result.get("failed", []))
-    success_sns = {
-        str(item.get("trackNo") or "").strip()
-        for item in result.get("success", [])
-        if str(item.get("trackNo") or "").strip()
-    }
-    if success_sns:
-        with engine.connect() as conn:
-            imported_rows = conn.execute(
-                text("""
-                    SELECT `流水号`, `批次号`, `机型`, `预计入库时间`, `合同号`, `占用订单号`
-                    FROM finished_goods_data
-                    WHERE TRIM(`流水号`) IN :sns
-                """).bindparams(bindparam("sns", expanding=True)),
-                {"sns": sorted(success_sns)},
-            ).mappings().all()
-        operator_id = str(user_ctx.get("username") or "")
-        operator_name = _operator_name(user_ctx)
-        append_operation_logs([
-            {
-                "user_id": operator_id,
-                "username": operator_name,
-                "module": "生产看板",
-                "action_type": "待入库转库存",
-                "biz_type": "机台",
-                "serial_no": str(row.get("流水号") or ""),
-                "order_no": str(row.get("占用订单号") or ""),
-                "contract_no": str(row.get("合同号") or ""),
-                "content": (
-                    f"待排产批次进入生产看板后同步库存；流水号：{row.get('流水号') or ''}；"
-                    f"批次号：{row.get('批次号') or batch_code}；机型：{row.get('机型') or ''}；"
-                    f"预计入库日期：{row.get('预计入库时间') or fallback_date}"
-                ),
-            }
-            for row in imported_rows
-        ])
 
     return JSONResponse(content={
         "success": True,
@@ -1441,7 +1612,7 @@ async def proxy_model_types(request: Request):
                     text(
                         "SELECT model_name, model_family FROM model_dictionary "
                         "WHERE enabled = 1 "
-                        "AND UPPER(TRIM(model_name)) NOT IN ('G','XS','AUTO') "
+                        "AND UPPER(TRIM(model_name)) NOT IN ('G','XS','AUTO','SPECIAL') "
                         "ORDER BY sort_order ASC, model_name ASC"
                     )
                 ).fetchall()
@@ -1450,7 +1621,7 @@ async def proxy_model_types(request: Request):
                 model_name = str(r[0]).strip()
                 if not model_name:
                     continue
-                family = _normalize_model_family(r[1]) or _model_category(model_name, {})
+                family = _normalize_model_family(r[1])
                 model_types.append(
                     {
                         "model_type": model_name,
@@ -1481,11 +1652,15 @@ async def proxy_units_empty_containers(request: Request):
 
 @router.api_route("/units/swap-content", methods=["POST"])
 async def proxy_units_swap_content(request: Request):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", "/api/units/swap-content")
     return await _forward(request, "/api/units/swap-content")
 
 
 @router.api_route("/units/rush-insert", methods=["POST"])
 async def proxy_units_rush_insert(request: Request):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", "/api/units/rush-insert")
     return await _forward(request, "/api/units/rush-insert")
 
 
@@ -1500,6 +1675,7 @@ async def convert_unit_to_rush(request: Request, unit_id: str):
             text("""
                 SELECT
                     u.unit_id,
+                    u.batch_id,
                     u.contract_no,
                     u.customer,
                     u.dealer_name,
@@ -1526,6 +1702,8 @@ async def convert_unit_to_rush(request: Request, unit_id: str):
         model_type = str(unit.get("model_type") or "").strip()
         if not contract_no or not model_type:
             raise HTTPException(status_code=422, detail="空位或备货占位不能转为急单")
+
+        _capture_sandbox_baselines(conn, actor, [unit.get("batch_id")])
 
         conn.execute(
             text("""
@@ -1564,6 +1742,20 @@ async def convert_unit_to_rush(request: Request, unit_id: str):
                 WHERE unit_id = :uid
             """),
             {"uid": unit_id},
+        )
+        conn.execute(
+            text("""
+                INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+                VALUES (:actor, 'convert_to_rush', 'unit', :target_id, :detail, NOW())
+            """),
+            {
+                "actor": actor,
+                "target_id": unit_id,
+                "detail": json.dumps(
+                    {"batch_id": unit.get("batch_id"), "contract_no": contract_no, "model_type": model_type},
+                    ensure_ascii=False,
+                ),
+            },
         )
 
     return JSONResponse(content={"success": True, "message": "已转为急单"})
@@ -1635,6 +1827,7 @@ async def return_rush_order_to_sandbox(request: Request, order_id: int):
                 target_unit_id = str(source_unit.get("unit_id") or "")
 
         if target_unit_id:
+            _capture_sandbox_baselines(conn, actor, [source_unit.get("batch_id")])
             conn.execute(
                 text("""
                     UPDATE units
@@ -1686,6 +1879,8 @@ async def return_rush_order_to_sandbox(request: Request, order_id: int):
             if not target_batch:
                 raise HTTPException(status_code=422, detail="没有可返回的待确认预测沙盘列")
 
+            _capture_sandbox_baselines(conn, actor, [target_batch["batch_id"]])
+
             max_slot = conn.execute(
                 text("SELECT COALESCE(MAX(slot_index), 0) FROM units WHERE batch_id = :bid"),
                 {"bid": target_batch["batch_id"]},
@@ -1733,6 +1928,15 @@ async def return_rush_order_to_sandbox(request: Request, order_id: int):
             """),
             {"id": int(order_id), "actor": actor},
         )
+        detail = json.dumps(
+            {
+                "rush_order_id": int(order_id),
+                "target_unit_id": target_unit_id,
+                "contract_no": contract_no,
+                "model_type": model_type,
+            },
+            ensure_ascii=False,
+        )
         conn.execute(
             text("""
                 INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
@@ -1741,16 +1945,15 @@ async def return_rush_order_to_sandbox(request: Request, order_id: int):
             {
                 "actor": actor,
                 "target_id": str(order_id),
-                "detail": json.dumps(
-                    {
-                        "rush_order_id": int(order_id),
-                        "target_unit_id": target_unit_id,
-                        "contract_no": contract_no,
-                        "model_type": model_type,
-                    },
-                    ensure_ascii=False,
-                ),
+                "detail": detail,
             },
+        )
+        conn.execute(
+            text("""
+                INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+                VALUES (:actor, 'rush_return_to_sandbox', 'unit', :target_id, :detail, NOW())
+            """),
+            {"actor": actor, "target_id": target_unit_id, "detail": detail},
         )
 
     return JSONResponse(content={"success": True, "target_unit_id": target_unit_id})
@@ -1763,6 +1966,8 @@ async def proxy_units_special_card(request: Request):
 
 @router.api_route("/units/{unit_id}/move-to-special", methods=["POST"])
 async def proxy_units_move_to_special(request: Request, unit_id: str):
+    user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    _ensure_permission(user_ctx, "POST", f"/api/units/{unit_id}/move-to-special")
     return await _forward(request, f"/api/units/{unit_id}/move-to-special")
 
 
@@ -1807,6 +2012,8 @@ async def return_unit_to_sandbox(request: Request, unit_id: str):
             raise HTTPException(status_code=404, detail="target batch not found")
         if target_batch["status"] not in ("Confirmed", "Predicted"):
             raise HTTPException(status_code=400, detail="target batch must be Confirmed or Predicted")
+
+        _capture_sandbox_baselines(conn, actor, [target_batch_id])
 
         old_line = unit_row["production_line_id"]
         old_batch = unit_row["batch_id"]
@@ -1894,38 +2101,17 @@ async def proxy_capacity_ratio(request: Request):
 
 @router.api_route("/production-lines{path:path}", methods=["GET", "POST"])
 async def proxy_production_lines(request: Request, path: str):
-    go_path = f"/api/production-lines{path}"
-    body = b""
-    payload = {}
-    if request.method == "POST":
-        body = await request.body()
-        if body:
-            try:
-                payload = json.loads(body.decode("utf-8"))
-            except Exception:
-                payload = {}
-
-    response = await _forward(request, go_path, body_override=body if body else None)
-    if (
-        request.method == "POST"
-        and response.status_code < 400
-        and re.fullmatch(r"/[^/]+/assign", path or "")
-    ):
-        line_id = str((path or "").strip("/").split("/", 1)[0] or "").strip()
-        batch_id = str(payload.get("batch_id") or "").strip()
-        user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
-        _record_line_assignment_trace(user_ctx, line_id, batch_id)
-    return response
+    return await _forward(request, f"/api/production-lines{path}")
 
 
-async def _forward(request: Request, go_path: str, body_override: bytes | None = None):
+async def _forward(request: Request, go_path: str):
     user_ctx = get_current_user_context(request.headers.get("Authorization", "").replace("Bearer ", ""))
     _ensure_permission(user_ctx, request.method, go_path)
     go_headers = _build_go_headers(user_ctx)
 
     body = None
     if request.method in ("POST", "PATCH", "PUT"):
-        body = body_override if body_override is not None else await request.body()
+        body = await request.body()
         if body:
             ct = request.headers.get("content-type", "")
             if "application/json" in ct or "json" in ct:

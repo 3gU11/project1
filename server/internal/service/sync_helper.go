@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -8,6 +9,50 @@ import (
 	"gorm.io/gorm"
 	"smart-scheduling/server/internal/model"
 )
+
+// CaptureSandboxBaselines stores the first editable snapshot for each batch.
+// Existing rows are intentionally left untouched so the audit compares against
+// the state before the first manual change.
+func CaptureSandboxBaselines(tx *gorm.DB, actor string, batchIDs ...string) error {
+	seen := make(map[string]struct{}, len(batchIDs))
+	for _, rawID := range batchIDs {
+		batchID := strings.TrimSpace(rawID)
+		if batchID == "" {
+			continue
+		}
+		if _, ok := seen[batchID]; ok {
+			continue
+		}
+		seen[batchID] = struct{}{}
+
+		var units []model.Unit
+		if err := tx.Where("batch_id = ?", batchID).Order("slot_index ASC").Find(&units).Error; err != nil {
+			return err
+		}
+		baseline := make([]map[string]interface{}, 0, len(units))
+		for _, unit := range units {
+			baseline = append(baseline, map[string]interface{}{
+				"unit_id": unit.UnitID, "batch_id": unit.BatchID, "slot_index": unit.SlotIndex,
+				"model_type": unit.ModelType, "contract_no": unit.ContractNo,
+				"customer": unit.Customer, "dealer_name": unit.DealerName,
+				"due_date": unit.DueDate, "order_remark": unit.OrderRemark,
+				"is_locked": unit.IsLocked,
+			})
+		}
+		payload, err := json.Marshal(baseline)
+		if err != nil {
+			return fmt.Errorf("marshal sandbox baseline for %s: %w", batchID, err)
+		}
+		if err := tx.Exec(`
+INSERT INTO sandbox_batch_baselines (batch_id, baseline_json, captured_by)
+VALUES (?, ?, ?)
+ON DUPLICATE KEY UPDATE batch_id = VALUES(batch_id)
+`, batchID, payload, strings.TrimSpace(actor)).Error; err != nil {
+			return fmt.Errorf("persist sandbox baseline for %s: %w", batchID, err)
+		}
+	}
+	return nil
+}
 
 // SyncFinishedGoodsByUnitIDs ensures that machine info in finished_goods_data is up-to-date with the sandbox card.
 func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
@@ -44,13 +89,12 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 		customer := strings.TrimSpace(strPtrVal(u.Customer))
 		dealerName := strings.TrimSpace(strPtrVal(u.DealerName))
 		orderRemark := strings.TrimSpace(strPtrVal(u.OrderRemark))
-		fgStatus := strings.TrimSpace(strPtrVal(u.FgStatus))
-		if shouldSkipFinishedGoodsSync(fgStatus) {
-			log.Printf("[Sync] Skipping finished_goods_data sync for unit %s because status %q is protected", u.UnitID, fgStatus)
-			continue
-		}
+		modelType := strings.TrimSpace(u.ModelType)
 
 		updates := map[string]interface{}{}
+		if cols["机型"] {
+			updates["机型"] = modelType
+		}
 		if cols["合同号"] {
 			updates["合同号"] = contractNo
 		}
@@ -69,8 +113,22 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 		if cols["状态"] {
 			if contractNo != "" {
 				updates["状态"] = "已绑定"
-			} else if fgStatus == "已绑定" {
-				updates["状态"] = "待入库"
+			} else {
+				fgStatus := strings.TrimSpace(strPtrVal(u.FgStatus))
+				isCompleted := false
+				if fgStatus == "库存中" || fgStatus == "待发货" {
+					isCompleted = true
+				} else if fgStatus == "待入库" || fgStatus == "已绑定" {
+					isCompleted = false
+				} else {
+					isCompleted = (u.Status == model.StatusCompleted)
+				}
+
+				if isCompleted {
+					updates["状态"] = "库存中"
+				} else {
+					updates["状态"] = "待入库"
+				}
 			}
 		}
 		if len(updates) == 0 {
@@ -91,72 +149,6 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 			return result.Error
 		}
 		log.Printf("[Sync] Finished goods sync for unit %s: %d rows affected", u.UnitID, result.RowsAffected)
-	}
-	return nil
-}
-
-func shouldSkipFinishedGoodsSync(status string) bool {
-	status = strings.TrimSpace(status)
-	return status == "待发货" ||
-		status == "已出库" ||
-		status == "已发货" ||
-		status == "报废" ||
-		strings.HasPrefix(status, "库存中")
-}
-
-// SyncPlanImportByUnitIDs keeps the import staging row aligned with edits made on kanban cards.
-func SyncPlanImportByUnitIDs(tx *gorm.DB, unitIDs []string, fields map[string]interface{}) error {
-	if len(unitIDs) == 0 || len(fields) == 0 {
-		return nil
-	}
-	cols, err := tableColumns(tx, "plan_import")
-	if err != nil {
-		return err
-	}
-	if !cols["流水号"] {
-		return fmt.Errorf("plan_import missing column: 流水号")
-	}
-
-	updates := map[string]interface{}{}
-	if value, ok := fields["model_type"]; ok && cols["机型"] {
-		updates["机型"] = stringField(value)
-	}
-	if value, ok := fields["customer"]; ok && cols["客户"] {
-		updates["客户"] = stringField(value)
-	}
-	if value, ok := fields["dealer_name"]; ok && cols["代理商"] {
-		updates["代理商"] = stringField(value)
-	}
-	if value, ok := fields["order_remark"]; ok && cols["合同备注"] {
-		updates["合同备注"] = stringField(value)
-	}
-	if len(updates) == 0 {
-		return nil
-	}
-
-	var units []model.Unit
-	if err := tx.Table("units").
-		Where("unit_id IN ?", unitIDs).
-		Find(&units).Error; err != nil {
-		return err
-	}
-
-	for _, u := range units {
-		serials := unitSerialCandidates(u)
-		if len(serials) == 0 {
-			continue
-		}
-		log.Printf("[Sync] Syncing unit %s (SNs: %v) to plan_import with updates: %v", u.UnitID, serials, updates)
-
-		result := tx.Table("plan_import").
-			Where("TRIM(`流水号`) IN ?", serials).
-			Updates(updates)
-
-		if result.Error != nil {
-			log.Printf("[Sync] Error updating plan_import for unit %s: %v", u.UnitID, result.Error)
-			return result.Error
-		}
-		log.Printf("[Sync] Plan import sync for unit %s: %d rows affected", u.UnitID, result.RowsAffected)
 	}
 	return nil
 }
@@ -197,11 +189,4 @@ func strPtrVal(v *string) string {
 		return ""
 	}
 	return *v
-}
-
-func stringField(v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	return strings.TrimSpace(fmt.Sprint(v))
 }

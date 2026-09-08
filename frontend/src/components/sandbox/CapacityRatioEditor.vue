@@ -14,6 +14,7 @@
                 <div class="ratio-item" v-for="group in familyRatioGroups" :key="`l1-${group.family}`">
                   <label>{{ group.label }}:</label>
                   <el-input-number
+                    :disabled="!editable"
                     :model-value="getFamilyValue(group.family)"
                     @update:model-value="(v:number | undefined) => setFamilyValue(group.family, v)"
                     :min="0"
@@ -39,6 +40,7 @@
                 <div class="ratio-item" v-for="item in group.models" :key="`${group.family}-${item.model}`">
                   <label>{{ item.model }}:</label>
                   <el-input-number
+                    :disabled="!editable"
                     :model-value="getFamilyModelValue(group.family, item.model)"
                     @update:model-value="(v:number | undefined) => setFamilyModelValue(group.family, item.model, v)"
                     :min="0"
@@ -56,8 +58,8 @@
             </div>
 
             <div class="panel-actions">
-              <el-button @click="fillFromHistoricalData" :loading="autoFilling">按往期数据自动填入</el-button>
-              <el-button type="primary" @click="save" :loading="saving">保存目标比例</el-button>
+              <el-button :disabled="!editable" @click="fillFromHistoricalData" :loading="autoFilling">按往期数据自动填入</el-button>
+              <el-button type="primary" :disabled="!editable" @click="save" :loading="saving">保存目标比例</el-button>
               <transition name="fade">
                 <span v-if="msg" class="message-bubble" :style="{ backgroundColor: msgBgColor, borderColor: msgBorderColor, color: msgColor }">
                   {{ msg }}
@@ -134,6 +136,9 @@ import { useInventoryStore } from '../../store/inventory'
 import { buildModelInventoryRatios, getActiveInventoryRows } from '../../utils/inventoryStats'
 import { compareModels } from '../../utils/modelOrder'
 import { apiGet } from '../../utils/request'
+
+const props = defineProps<{ editable?: boolean }>()
+const editable = computed(() => props.editable !== false)
 
 type MajorFamily = 'G' | 'XS' | 'AUTO' | 'SPECIAL'
 const majorFamilies: MajorFamily[] = ['G', 'XS', 'AUTO', 'SPECIAL']
@@ -218,7 +223,7 @@ function handleDragStart(e: MouseEvent) {
 }
 const inventoryLoading = ref(false)
 const inventoryTotal = ref(0)
-const inventoryRatioRows = ref<Array<{ name: string; family: MajorFamily; current_qty: number; high_qty: number; current_pct: number }>>([])
+const inventoryRatioRows = ref<Array<{ name: string; family?: MajorFamily; current_qty: number; high_qty: number; current_pct: number }>>([])
 const specialModelSet = ref<Set<string>>(new Set())
 const inventoryStore = useInventoryStore()
 const inventoryFamilyGroups = computed(() => {
@@ -372,7 +377,7 @@ function normalizeCategory(v: string) {
 
 function categoryOfModel(modelType: string, modelFamily?: string) {
   const mf = normalizeCategory(String(modelFamily || '').trim())
-  if (mf && !['G', 'XS', 'AUTO'].includes(mf.toUpperCase())) return mf
+  if (mf) return mf
   const mt = String(modelType || '').toUpperCase()
   if (mt === 'FH-300C') return '中小型G'
   if (mt.includes('AUTO')) return mt.includes('7055') || mt.includes('8055') || mt.includes('8060') ? '中大型AUTO' : '中小型AUTO'

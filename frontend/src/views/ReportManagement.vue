@@ -34,9 +34,9 @@
             <div class="report-detail">
               <p><strong>统计说明：</strong></p>
               <ul>
-                <li>统计已产出且进入成品库或出库历史的机台</li>
-                <li>按预计入库时间归属完工月份</li>
-                <li>数据来源：成品库 + 出库历史，按流水号去重</li>
+                <li>统计所有产出并入库的机台</li>
+                <li>包含所有入库方式：手动入库、配货自动入库</li>
+                <li>数据来源：入库历史记录（完整、准确、可追溯）</li>
                 <li>适用于产量统计和财务对账</li>
               </ul>
             </div>
@@ -378,22 +378,6 @@ const orderAppendices = ref<Record<string, any[]>>({})
 const shipmentAppendices = ref<Record<string, any[]>>({})
 const orderDealerSummary = ref<any[]>([])
 
-type CompletionSummaryRow = {
-  机型: string
-  数量: number
-  占比: string
-  [key: string]: any
-}
-
-const normalizeCompletionSummary = (rows: any[] = []): CompletionSummaryRow[] => {
-  return rows.map(row => ({
-    ...row,
-    机型: String(row?.机型 || '').trim(),
-    数量: Number(row?.数量 || 0),
-    占比: String(row?.占比 || '')
-  }))
-}
-
 // Computed total quantity for completion report
 const totalQuantity = computed(() => {
   return completionData.value.reduce((sum, item) => sum + (item.数量 || 0), 0)
@@ -528,6 +512,38 @@ const getDateRange = (queryType: string, dateRange: string[], month: string): [s
 }
 
 // Query functions (fetch data for preview)
+/* inbound query is not exposed in the current view; keep the shared order/shipment queries below. */
+/*
+const queryInboundReport = async () => {
+  const dateRange = getDateRange(inboundForm.value.queryType, inboundForm.value.dateRange, inboundForm.value.month)
+  if (!dateRange) {
+    ElMessage.warning(inboundForm.value.queryType === 'daterange' ? '请选择日期范围' : '请选择月份')
+    return
+  }
+
+  const [startDate, endDate] = dateRange
+  inboundLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+      model_type: inboundForm.value.modelType || '',
+      customer: inboundForm.value.customer || '',
+      format: 'json'
+    })
+
+    const res = await apiGet<{data: any[], total: number}>(`/reports/inbound?${params.toString()}`)
+    inboundData.value = res.data || []
+    ElMessage.success(`查询成功，共 ${res.total} 条数据`)
+  } catch (error) {
+    ElMessage.error('查询失败')
+    inboundData.value = []
+  } finally {
+    inboundLoading.value = false
+  }
+}
+*/
+
 const queryOrderReport = async () => {
   const dateRange = getDateRange(orderForm.value.queryType, orderForm.value.dateRange, orderForm.value.month)
   if (!dateRange) {
@@ -632,9 +648,8 @@ const queryCompletionReport = async () => {
     })
 
     const res = await apiGet<{data: any[], total: number}>(`/reports/completions?${params.toString()}`)
-    completionData.value = normalizeCompletionSummary(res.data || [])
-    const total = Number(res.total ?? totalQuantity.value)
-    ElMessage.success(`查询成功，总产量 ${total} 台`)
+    completionData.value = res.data || []
+    ElMessage.success(`查询成功，共 ${res.total} 条数据`)
   } catch (error) {
     ElMessage.error('查询失败')
     completionData.value = []
@@ -644,6 +659,35 @@ const queryCompletionReport = async () => {
 }
 
 // Export functions (download Excel)
+/*
+const exportInboundReport = async () => {
+  const dateRange = getDateRange(inboundForm.value.queryType, inboundForm.value.dateRange, inboundForm.value.month)
+  if (!dateRange) {
+    ElMessage.warning(inboundForm.value.queryType === 'daterange' ? '请选择日期范围' : '请选择月份')
+    return
+  }
+
+  const [startDate, endDate] = dateRange
+  inboundLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+      model_type: inboundForm.value.modelType || '',
+      customer: inboundForm.value.customer || '',
+      format: 'excel'
+    })
+
+    await apiDownloadBlob(`/reports/inbound?${params.toString()}`, `入库报表_${startDate}_${endDate}.xlsx`)
+    ElMessage.success('入库报表导出成功')
+  } catch (error) {
+    ElMessage.error('导出失败')
+  } finally {
+    inboundLoading.value = false
+  }
+}
+*/
+
 const exportOrderReport = async () => {
   const dateRange = getDateRange(orderForm.value.queryType, orderForm.value.dateRange, orderForm.value.month)
   if (!dateRange) {

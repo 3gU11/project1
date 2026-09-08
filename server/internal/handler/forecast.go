@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -33,22 +36,101 @@ func (h *ForecastHandler) Recompute(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	result, err := h.svc.Recompute(req.TargetSlotNo, req.IsClicked)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "recompute already in progress" {
-			status = http.StatusConflict
-		}
-		c.JSON(status, gin.H{"error": err.Error()})
+	if req.TargetSlotNo <= 0 {
+		req.TargetSlotNo = 1
+	}
+	jobID := fmt.Sprintf("recompute-%d", time.Now().UnixNano())
+	params, _ := json.Marshal(req)
+	if err := h.db.Exec(`INSERT INTO sandbox_recompute_jobs
+  (job_id, status, requested_by, parameters_json, created_at, updated_at)
+  VALUES (?, 'queued', ?, ?, NOW(), NOW())`, jobID, c.GetString("username"), params).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	achievement, aErr := h.computeAchievementPayload()
-	if aErr == nil {
+	go h.runRecomputeJob(jobID, req.TargetSlotNo, req.IsClicked, c.GetString("username"))
+	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID, "status": "queued", "target_slot_no": req.TargetSlotNo})
+}
+
+func (h *ForecastHandler) runRecomputeJob(jobID string, targetSlotNo int, isClicked bool, actor string) {
+	if strings.TrimSpace(actor) == "" {
+		actor = "system"
+	}
+	now := time.Now()
+	_ = h.db.Exec("UPDATE sandbox_recompute_jobs SET status='running', started_at=?, updated_at=NOW() WHERE job_id=?", now, jobID).Error
+	result, err := h.svc.Recompute(targetSlotNo, isClicked)
+	if err != nil {
+		_ = h.db.Exec("UPDATE sandbox_recompute_jobs SET status='failed', error_message=?, completed_at=NOW(), updated_at=NOW() WHERE job_id=?", err.Error(), jobID).Error
+		h.writeRecomputeAudit(actor, jobID, targetSlotNo, "failed", err.Error())
+		return
+	}
+	if achievement, aErr := h.computeAchievementPayload(); aErr == nil {
 		if m, ok := result.(map[string]interface{}); ok {
 			m["achievement"] = achievement
 		}
 	}
-	c.JSON(http.StatusOK, result)
+	resultJSON, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		_ = h.db.Exec("UPDATE sandbox_recompute_jobs SET status='failed', error_message=?, completed_at=NOW(), updated_at=NOW() WHERE job_id=?", marshalErr.Error(), jobID).Error
+		h.writeRecomputeAudit(actor, jobID, targetSlotNo, "failed", marshalErr.Error())
+		return
+	}
+	_ = h.db.Exec("UPDATE sandbox_recompute_jobs SET status='succeeded', result_json=?, completed_at=NOW(), updated_at=NOW() WHERE job_id=?", resultJSON, jobID).Error
+	h.writeRecomputeAudit(actor, jobID, targetSlotNo, "succeeded", "")
+}
+
+func (h *ForecastHandler) writeRecomputeAudit(actor, jobID string, targetSlotNo int, status, errMsg string) {
+	detail, _ := json.Marshal(map[string]interface{}{"job_id": jobID, "target_slot_no": targetSlotNo, "status": status, "error": errMsg})
+	_ = h.db.Exec(`INSERT INTO operation_log (actor, action, target_type, target_id, detail, created_at)
+VALUES (?, 'forecast_recompute', 'recompute_job', ?, ?, NOW())`, actor, jobID, detail).Error
+}
+
+func (h *ForecastHandler) RecomputeJob(c *gin.Context) {
+	var row recomputeJobRow
+	if err := h.db.Table("sandbox_recompute_jobs").Where("job_id = ?", c.Param("job_id")).First(&row).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "recompute job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, recomputeJobResponse(row))
+}
+
+type recomputeJobRow struct {
+	JobID        string     `gorm:"column:job_id"`
+	Status       string     `gorm:"column:status"`
+	RequestedBy  *string    `gorm:"column:requested_by"`
+	Parameters   []byte     `gorm:"column:parameters_json"`
+	Result       []byte     `gorm:"column:result_json"`
+	ErrorMessage *string    `gorm:"column:error_message"`
+	StartedAt    *time.Time `gorm:"column:started_at"`
+	CompletedAt  *time.Time `gorm:"column:completed_at"`
+	CreatedAt    time.Time  `gorm:"column:created_at"`
+}
+
+func recomputeJobResponse(row recomputeJobRow) gin.H {
+	response := gin.H{"job_id": row.JobID, "status": row.Status, "requested_by": row.RequestedBy, "parameters": json.RawMessage(row.Parameters), "result": nil, "error_message": row.ErrorMessage, "started_at": row.StartedAt, "completed_at": row.CompletedAt, "created_at": row.CreatedAt}
+	if len(row.Result) > 0 {
+		response["result"] = json.RawMessage(row.Result)
+	}
+	return response
+}
+
+// LatestRecomputeJob lets a prediction-column detail show the actual persisted
+// parameters and result of the latest completed recompute instead of treating a
+// generic updated_at timestamp as execution evidence.
+func (h *ForecastHandler) LatestRecomputeJob(c *gin.Context) {
+	var row recomputeJobRow
+	err := h.db.Table("sandbox_recompute_jobs").
+		Where("status = ?", "succeeded").
+		Order("completed_at DESC, created_at DESC").
+		First(&row).Error
+	if err == gorm.ErrRecordNotFound {
+		c.JSON(http.StatusOK, gin.H{"job": nil})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"job": recomputeJobResponse(row)})
 }
 
 func (h *ForecastHandler) Achievement(c *gin.Context) {
@@ -169,7 +251,18 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 	for m := range modelTargetQty {
 		modelNames = append(modelNames, m)
 	}
-	sort.Strings(modelNames)
+	modelSortOrder := h.loadModelSortOrder()
+	sort.SliceStable(modelNames, func(i, j int) bool {
+		a, aok := modelSortOrder[strings.ToUpper(strings.TrimSpace(modelNames[i]))]
+		b, bok := modelSortOrder[strings.ToUpper(strings.TrimSpace(modelNames[j]))]
+		if aok != bok {
+			return aok
+		}
+		if aok && a != b {
+			return a < b
+		}
+		return modelNames[i] < modelNames[j]
+	})
 	for _, m := range modelNames {
 		cur := modelCurrentQty[m]
 		tgt := modelTargetQty[m]
@@ -186,6 +279,27 @@ func (h *ForecastHandler) computeAchievementPayload() (gin.H, error) {
 		"models":         modelRows,
 		"categories":     categoryRows,
 	}, nil
+}
+
+// loadModelSortOrder is the single display-order source for model summaries.
+// Unknown models are kept after dictionary entries instead of being silently
+// interleaved by alphabetical order.
+func (h *ForecastHandler) loadModelSortOrder() map[string]int {
+	var rows []struct {
+		ModelName string `gorm:"column:model_name"`
+		SortOrder int    `gorm:"column:sort_order"`
+	}
+	if err := h.db.Table("model_dictionary").Select("model_name, sort_order").Where("enabled = 1").Order("sort_order ASC").Scan(&rows).Error; err != nil {
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(rows))
+	for _, row := range rows {
+		name := strings.ToUpper(strings.TrimSpace(row.ModelName))
+		if name != "" {
+			out[name] = row.SortOrder
+		}
+	}
+	return out
 }
 
 func (h *ForecastHandler) loadModelFamilyMap() map[string]string {

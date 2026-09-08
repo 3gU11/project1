@@ -69,7 +69,7 @@ router.get('/model-types', async (req, res) => {
     `SELECT model_name, enabled, sort_order
      FROM model_dictionary
      WHERE enabled = 1
-       AND UPPER(TRIM(model_name)) NOT IN ('G', 'XS', 'AUTO')
+       AND UPPER(TRIM(model_name)) NOT IN ('G', 'XS', 'AUTO', 'SPECIAL')
      ORDER BY sort_order ASC, model_name ASC`
   );
   res.json({

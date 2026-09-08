@@ -36,6 +36,26 @@ type Batch struct {
 	Units               []Unit         `gorm:"foreignKey:BatchID;references:BatchID" json:"units,omitempty"`
 	CreatedAt           time.Time      `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt           time.Time      `gorm:"column:updated_at" json:"updated_at"`
+	// Prediction-column summary fields are calculated from the loaded units.
+	OrderedCount          int         `gorm:"-" json:"ordered_count"`
+	StockCount            int         `gorm:"-" json:"stock_count"`
+	EmptyCount            int         `gorm:"-" json:"empty_count"`
+	EarliestDueDate       *time.Time  `gorm:"-" json:"earliest_due_date"`
+	DueGapDays            *int        `gorm:"-" json:"due_gap_days"`
+	ExpectedInboundSource string      `gorm:"-" json:"expected_inbound_source"`
+	RiskCount             int         `gorm:"-" json:"risk_count"`
+	Risks                 []BatchRisk `gorm:"-" json:"risks"`
+	IsManuallyAdjusted    bool        `gorm:"-" json:"is_manually_adjusted"`
+	LastRecomputeAt       time.Time   `gorm:"-" json:"last_recompute_at"`
+	AlgorithmVersion      string      `gorm:"-" json:"algorithm_version"`
+}
+
+type BatchRisk struct {
+	Code     string   `json:"code"`
+	Severity string   `json:"severity"`
+	Message  string   `json:"message"`
+	UnitIDs  []string `json:"unit_ids"`
+	Blocking bool     `json:"blocking"`
 }
 
 func (Batch) TableName() string { return "batches" }

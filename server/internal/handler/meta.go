@@ -22,11 +22,12 @@ func (h *MetaHandler) ModelTypes(c *gin.Context) {
 		ModelName   string `gorm:"column:model_name"`
 		ModelFamily string `gorm:"column:model_family"`
 		ModelSize   *int   `gorm:"column:model_size"`
+		SortOrder   *int   `gorm:"column:sort_order"`
 	}
 	err := h.db.Table("model_dictionary").
-		Select("model_name, model_family, model_size").
+		Select("model_name, model_family, model_size, sort_order").
 		Where("enabled = 1").
-		Where("UPPER(TRIM(model_name)) NOT IN ?", []string{"G", "XS", "AUTO"}).
+		Where("UPPER(TRIM(model_name)) NOT IN ?", []string{"G", "XS", "AUTO", "SPECIAL"}).
 		Order("sort_order ASC, model_name ASC").
 		Scan(&rows).Error
 	if err != nil {
@@ -52,6 +53,7 @@ func (h *MetaHandler) ModelTypes(c *gin.Context) {
 			"model_type":   name,
 			"model_family": family,
 			"model_size":   size,
+			"sort_order":   row.SortOrder,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"model_types": modelTypes})

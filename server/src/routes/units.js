@@ -2,6 +2,7 @@
 const db = require('../db');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
 const { refillEmptySlots } = require('../engine/predictor');
+const { ensureBaseline, appendChange } = require('../services/sandboxAudit');
 
 router.use(authMiddleware);
 
@@ -50,19 +51,36 @@ router.patch('/:id', adminOnly, async (req, res) => {
       return res.status(404).json({ error: 'Unit not found' });
     }
     const unit = units[0];
+    await ensureBaseline(conn, unit.batch_id, req.user.username);
 
-    // Guard: keep unit model family consistent with its batch family.
-    if (model_type !== undefined) {
-      const [batchRows] = await conn.query(
-        'SELECT model_type FROM batches WHERE batch_id = ?',
-        [unit.batch_id]
-      );
-      const batchModel = batchRows?.[0]?.model_type || '';
-      const nextFamily = normalizeModelFamily(model_type);
-      const batchFamily = normalizeModelFamily(batchModel);
-      if (nextFamily && batchFamily && nextFamily !== batchFamily) {
+    // Information overwrite may switch to any enabled concrete model, even
+    // when it belongs to a different family than the batch or line. Family
+    // tokens are scheduling placeholders, not valid unit model values.
+    let normalizedModelType;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'model_type')) {
+      if (typeof model_type !== 'string') {
         await conn.rollback();
-        return res.status(400).json({ error: `机型族不匹配：${model_type} 不可写入 ${batchModel} 批次` });
+        return res.status(400).json({ error: 'model_type must be string' });
+      }
+      normalizedModelType = model_type.trim();
+      if (normalizedModelType) {
+        const upper = normalizedModelType.toUpperCase();
+        if (['G', 'XS', 'AUTO', 'SPECIAL'].includes(upper)) {
+          await conn.rollback();
+          return res.status(400).json({ error: 'model_type must be specific model, not family' });
+        }
+        const [modelRows] = await conn.query(
+          `SELECT 1
+             FROM model_dictionary
+            WHERE enabled = 1
+              AND UPPER(TRIM(model_name)) = UPPER(?)
+            LIMIT 1`,
+          [normalizedModelType]
+        );
+        if (!modelRows.length) {
+          await conn.rollback();
+          return res.status(400).json({ error: 'invalid model_type' });
+        }
       }
     }
 
@@ -74,7 +92,7 @@ router.patch('/:id', adminOnly, async (req, res) => {
     if (dealer_id !== undefined) { updates.push('dealer_id = ?'); values.push(dealer_id); }
     if (sales_id !== undefined) { updates.push('sales_id = ?'); values.push(sales_id); }
     if (order_remark !== undefined) { updates.push('order_remark = ?'); values.push(order_remark); }
-    if (model_type !== undefined) { updates.push('model_type = ?'); values.push(model_type); }
+    if (normalizedModelType) { updates.push('model_type = ?'); values.push(normalizedModelType); }
 
     // Set lock
     updates.push('is_locked = 1');
@@ -86,6 +104,15 @@ router.patch('/:id', adminOnly, async (req, res) => {
       `UPDATE units SET ${updates.join(', ')}, updated_at = NOW() WHERE unit_id = ?`,
       values
     );
+    const [updatedUnits] = await conn.query('SELECT * FROM units WHERE unit_id = ?', [req.params.id]);
+    await appendChange(conn, {
+      batchId: unit.batch_id,
+      unitId: req.params.id,
+      action: 'force_edit',
+      before: unit,
+      after: updatedUnits[0],
+      username: req.user.username,
+    });
 
     // Audit log
     await conn.query(
@@ -112,22 +139,48 @@ router.patch('/:id', adminOnly, async (req, res) => {
 
 // PATCH /api/units/:id/unlock 鈥?admin unlock
 router.patch('/:id/unlock', adminOnly, async (req, res) => {
-  const [result] = await db.query(
-    `UPDATE units SET is_locked = 0, locked_by = NULL, locked_at = NULL, updated_at = NOW()
-     WHERE unit_id = ? AND is_locked = 1`,
-    [req.params.id]
-  );
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [units] = await conn.query('SELECT * FROM units WHERE unit_id = ? FOR UPDATE', [req.params.id]);
+    if (!units.length) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Unit not found' });
+    }
+    const unit = units[0];
+    if (unit.is_locked) {
+      await ensureBaseline(conn, unit.batch_id, req.user.username);
+      await conn.query(
+        `UPDATE units SET is_locked = 0, locked_by = NULL, locked_at = NULL, updated_at = NOW()
+         WHERE unit_id = ?`,
+        [req.params.id]
+      );
+      const [updatedUnits] = await conn.query('SELECT * FROM units WHERE unit_id = ?', [req.params.id]);
+      await appendChange(conn, {
+        batchId: unit.batch_id,
+        unitId: req.params.id,
+        action: 'unlock',
+        before: unit,
+        after: updatedUnits[0],
+        username: req.user.username,
+      });
+    }
 
-  await db.query(
-    `INSERT INTO sys_operation_log (user_id, username, operate_time, module, action_type, biz_type, content, serial_no)
-     VALUES (?, ?, NOW(), 'unit', 'unlock', 'unit', ?, ?)`,
-    [req.user.username, req.user.username, `Unlocked unit ${req.params.id}`, req.params.id]
-  );
-
-  const io = req.app.get('io');
-  if (io) io.emit('unit:updated', { unit_id: req.params.id, unlocked: true });
-
-  res.json({ success: true, unlocked: result.affectedRows > 0 });
+    await conn.query(
+      `INSERT INTO sys_operation_log (user_id, username, operate_time, module, action_type, biz_type, content, serial_no)
+       VALUES (?, ?, NOW(), 'unit', 'unlock', 'unit', ?, ?)`,
+      [req.user.username, req.user.username, `Unlocked unit ${req.params.id}`, req.params.id]
+    );
+    await conn.commit();
+    const io = req.app.get('io');
+    if (io) io.emit('unit:updated', { unit_id: req.params.id, unlocked: true });
+    res.json({ success: true, unlocked: Boolean(unit.is_locked) });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
 });
 
 // POST /api/units/:id/move-batch 鈥?drag unit to another (same-model) batch
@@ -160,6 +213,8 @@ router.post('/:id/move-batch', adminOnly, async (req, res) => {
 
     const sourceBatchId = unit.batch_id;
     const movingAcrossBatch = sourceBatchId !== target_batch_id;
+    await ensureBaseline(conn, sourceBatchId, req.user.username);
+    if (movingAcrossBatch) await ensureBaseline(conn, target_batch_id, req.user.username);
 
     // Capacity check only when crossing batches
     if (movingAcrossBatch) {
@@ -206,6 +261,26 @@ router.post('/:id/move-batch', adminOnly, async (req, res) => {
         [sourceBatchId]
       );
       await renumberBatchSlots(conn, sourceBatchId, sourceRows.map((r) => r.unit_id));
+    }
+
+    const [movedUnits] = await conn.query('SELECT * FROM units WHERE unit_id = ?', [req.params.id]);
+    await appendChange(conn, {
+      batchId: sourceBatchId,
+      unitId: req.params.id,
+      action: movingAcrossBatch ? 'move_out' : 'reorder',
+      before: unit,
+      after: movedUnits[0],
+      username: req.user.username,
+    });
+    if (movingAcrossBatch) {
+      await appendChange(conn, {
+        batchId: target_batch_id,
+        unitId: req.params.id,
+        action: 'move_in',
+        before: unit,
+        after: movedUnits[0],
+        username: req.user.username,
+      });
     }
 
     // Audit
@@ -283,6 +358,9 @@ router.post('/swap-content', adminOnly, async (req, res) => {
     const source = rows.find(r => r.unit_id === source_unit_id);
     const target = rows.find(r => r.unit_id === target_unit_id);
     const fallback = rows.find(r => r.unit_id === fallback_unit_id);
+    for (const batchId of new Set(rows.map((row) => row.batch_id).filter(Boolean))) {
+      await ensureBaseline(conn, batchId, req.user.username || operator);
+    }
 
     // Validations
     if (target.is_locked) {
@@ -331,6 +409,22 @@ router.post('/swap-content', adminOnly, async (req, res) => {
          WHERE unit_id=?`,
         [source_unit_id]
       );
+    }
+
+    const [updatedRows] = await conn.query(
+      `SELECT * FROM units WHERE unit_id IN (?, ?, ?)`,
+      [source_unit_id, target_unit_id, fallback_unit_id]
+    );
+    const updatedById = new Map(updatedRows.map((row) => [row.unit_id, row]));
+    for (const before of [source, target, fallback]) {
+      await appendChange(conn, {
+        batchId: before.batch_id,
+        unitId: before.unit_id,
+        action: 'swap_content',
+        before,
+        after: updatedById.get(before.unit_id),
+        username: req.user.username || operator,
+      });
     }
 
     // Audit log
@@ -435,6 +529,9 @@ router.post('/rush-insert', adminOnly, async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ error: 'Rush order model type mismatch with target unit' });
     }
+    for (const batchId of new Set([target.batch_id, fallback.batch_id].filter(Boolean))) {
+      await ensureBaseline(conn, batchId, req.user.username);
+    }
 
     // Hard guard: if target already belongs to a production line, line family must stay consistent.
     if (target.production_line_id) {
@@ -466,6 +563,21 @@ router.post('/rush-insert', adminOnly, async (req, res) => {
        WHERE unit_id=?`,
       [rush_order.contract_no, rush_order.customer || null, rush_order.model_type, 'rush_insert', req.user.username, target_unit_id]
     );
+
+    const [updatedRows] = await conn.query(
+      `SELECT * FROM units WHERE unit_id IN (?, ?)`, [target_unit_id, fallback_unit_id]
+    );
+    const updatedById = new Map(updatedRows.map((row) => [row.unit_id, row]));
+    for (const before of sameUnitFallback ? [target] : [target, fallback]) {
+      await appendChange(conn, {
+        batchId: before.batch_id,
+        unitId: before.unit_id,
+        action: 'rush_insert',
+        before,
+        after: updatedById.get(before.unit_id),
+        username: req.user.username,
+      });
+    }
 
     await conn.commit();
     conn.release();

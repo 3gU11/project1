@@ -50,6 +50,23 @@ func NewUnitHandler(db *gorm.DB, r *repo.UnitRepo, br *repo.BatchRepo, rs *servi
 	}
 }
 
+// auditTx records high-value sandbox actions in the same transaction as the
+// mutation. A failed transaction therefore cannot leave a misleading audit.
+func (h *UnitHandler) auditTx(tx *gorm.DB, c *gin.Context, action, targetType, targetID string, detail map[string]interface{}) error {
+	actor := c.GetString("username")
+	if strings.TrimSpace(actor) == "" {
+		actor = "system"
+	}
+	payload, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	return tx.Create(&model.OperationLog{
+		Actor: actor, Action: action, TargetType: targetType, TargetID: targetID,
+		Detail: datatypes.JSON(payload), CreatedAt: time.Now(),
+	}).Error
+}
+
 func (h *UnitHandler) GetByID(c *gin.Context) {
 	unit, err := h.repo.GetByID(c.Param("id"))
 	if err != nil {
@@ -125,8 +142,7 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		if mt == "" {
 			delete(req, "model_type")
 		} else {
-			upper := strings.ToUpper(mt)
-			if upper == "G" || upper == "XS" || upper == "AUTO" {
+			if isModelFamilyPlaceholder(mt) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "model_type must be specific model, not family"})
 				return
 			}
@@ -150,6 +166,12 @@ func (h *UnitHandler) Update(c *gin.Context) {
 
 	tx := h.db.Begin()
 	defer tx.Rollback()
+	if oldUnit != nil {
+		if err := service.CaptureSandboxBaselines(tx, actor, oldUnit.BatchID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 
 	if err := h.repo.UpdateOrderFields(tx, c.Param("id"), req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -209,6 +231,10 @@ WHERE status = 'In_Production' AND unit_id = ?
 	if err := service.SyncFinishedGoodsByUnitIDs(tx, []string{c.Param("id")}); err != nil {
 		// Log error but continue as primary update succeeded
 		fmt.Printf("Update: sync finished_goods failed: %v\n", err)
+	}
+	if err := h.auditTx(tx, c, "force_edit", "unit", c.Param("id"), map[string]interface{}{"fields": req}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	if err := service.SyncPlanImportByUnitIDs(tx, []string{c.Param("id")}, req); err != nil {
@@ -328,11 +354,33 @@ func (h *UnitHandler) isEnabledModelType(modelType string) (bool, error) {
 	return count > 0, err
 }
 
+func isModelFamilyPlaceholder(modelType string) bool {
+	switch strings.ToUpper(strings.TrimSpace(modelType)) {
+	case "G", "XS", "AUTO", "SPECIAL":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *UnitHandler) Unlock(c *gin.Context) {
 	tx := h.db.Begin()
 	defer tx.Rollback()
+	unit, err := h.repo.LockForUpdate(tx, c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "unit not found"})
+		return
+	}
+	if err := service.CaptureSandboxBaselines(tx, c.GetString("username"), unit.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	if err := h.repo.UnlockUnitDB(tx, c.Param("id")); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.auditTx(tx, c, "unlock", "unit", c.Param("id"), nil); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -413,6 +461,10 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "target batch not found"})
+		return
+	}
+	if err := service.CaptureSandboxBaselines(tx, c.GetString("username"), sourceBatch.BatchID, targetBatch.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -592,6 +644,10 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 		}
 	}
 
+	if err := h.auditTx(tx, c, "move", "unit", unitID, map[string]interface{}{"from_batch_id": sourceBatchID, "to_batch_id": req.TargetBatchID, "new_slot": newSlot}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -642,6 +698,10 @@ func (h *UnitHandler) MoveToSpecial(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := service.CaptureSandboxBaselines(tx, c.GetString("username"), sourceBatch.BatchID, targetBatch.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	if err := h.repo.MoveToBatch(tx, unit.UnitID, targetBatch.BatchID, 0); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -660,6 +720,10 @@ func (h *UnitHandler) MoveToSpecial(c *gin.Context) {
 		return
 	}
 	if err := h.normalizeSpecialBatchSlots(tx, targetBatch.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.auditTx(tx, c, "move_to_special", "unit", unit.UnitID, map[string]interface{}{"from_batch_id": sourceBatch.BatchID, "to_batch_id": targetBatch.BatchID, "new_slot": targetSlot}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -725,6 +789,10 @@ func (h *UnitHandler) CreateSpecialCard(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target batch must be a Predicted SPECIAL column"})
 		return
 	}
+	if err := service.CaptureSandboxBaselines(tx, c.GetString("username"), batch.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	const specialCardLimit = 15
 	cardCount, err := h.countSpecialCards(tx, batch.BatchID)
@@ -769,6 +837,10 @@ func (h *UnitHandler) CreateSpecialCard(c *gin.Context) {
 		return
 	}
 	if err := h.normalizeSpecialBatchSlots(tx, batch.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.auditTx(tx, c, "create_special_card", "unit", unit.UnitID, map[string]interface{}{"batch_id": batch.BatchID, "model_type": req.ModelType, "contract_no": req.ContractNo}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -2439,6 +2511,10 @@ func (h *UnitHandler) ReorderSlot(c *gin.Context) {
 	}
 
 	batchID := unit.BatchID
+	if err := service.CaptureSandboxBaselines(tx, c.GetString("username"), batchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	newSlot := req.NewSlotIndex
 
 	if unit.SlotIndex == newSlot {
@@ -2451,6 +2527,10 @@ func (h *UnitHandler) ReorderSlot(c *gin.Context) {
 		return
 	}
 	if err := h.repo.ReorderBatchWithUnit(tx, batchID, c.Param("id"), newSlot); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.auditTx(tx, c, "reorder", "unit", c.Param("id"), map[string]interface{}{"batch_id": batchID, "from_slot": unit.SlotIndex, "to_slot": newSlot}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -2635,6 +2715,10 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 	if unit.ContractNo != nil {
 		contractNo = strings.TrimSpace(*unit.ContractNo)
 	}
+	if err := service.CaptureSandboxBaselines(tx, c.GetString("username"), unit.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	if err := h.repo.ClearOrderFields(tx, unitID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -2703,6 +2787,10 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 			}
 		}
 	}
+	if err := h.auditTx(tx, c, "mark_spot", "unit", unitID, map[string]interface{}{"contract_no": contractNo, "sibling_units_cleared": contractNo != ""}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -2741,6 +2829,10 @@ func (h *UnitHandler) ConvertToRush(c *gin.Context) {
 	}
 	if unit.IsLocked {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unit is locked"})
+		return
+	}
+	if err := service.CaptureSandboxBaselines(tx, c.GetString("username"), batch.BatchID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -2783,6 +2875,10 @@ func (h *UnitHandler) ConvertToRush(c *gin.Context) {
 		return
 	}
 	if err := tx.Model(&model.Unit{}).Where("unit_id = ?", unitID).Update("is_contract_pinned", false).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.auditTx(tx, c, "rush_insert", "unit", unitID, map[string]interface{}{"contract_no": contractNo, "model_type": modelType}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
