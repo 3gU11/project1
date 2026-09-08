@@ -74,6 +74,13 @@ func (h *UnitHandler) Update(c *gin.Context) {
 
 	// Capture old state for sync
 	oldUnit, _ := h.repo.GetByID(c.Param("id"))
+	boundContract := oldUnit != nil && oldUnit.ContractNo != nil && strings.TrimSpace(*oldUnit.ContractNo) != ""
+	if oldUnit != nil && oldUnit.Status == model.StatusInProduction {
+		if _, exists := req["model_type"]; exists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "生产看板上线卡片不允许手动修改机型，请到机台编辑修改"})
+			return
+		}
+	}
 
 	// Remove protected fields
 	delete(req, "unit_id")
@@ -96,6 +103,14 @@ func (h *UnitHandler) Update(c *gin.Context) {
 	for key := range req {
 		if _, ok := allowedFields[key]; !ok {
 			delete(req, key)
+		}
+	}
+	if boundContract {
+		for _, key := range []string{"model_type", "customer", "dealer_name"} {
+			if _, exists := req[key]; exists {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "绑定合同的卡片只能在合同管理修改机型、客户和代理商"})
+				return
+			}
 		}
 	}
 
@@ -141,47 +156,64 @@ func (h *UnitHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// 同步修改到历史排产台账中
-	var newCustomer *string
-	var newDealer *string
-	var newRemark *string
-	var newModel string
+	// 同步修改到历史排产台账中。绑定合同卡片这里只允许备注变化。
+	if boundContract {
+		if rVal, ok := req["order_remark"].(string); ok {
+			if err := tx.Exec(`
+UPDATE production_history_ledger
+SET order_remark = ?
+WHERE status = 'In_Production' AND unit_id = ?
+`, rVal, c.Param("id")).Error; err != nil {
+				fmt.Printf("Update: sync production_history_ledger remark failed: %v\n", err)
+			}
+		}
+	} else {
+		var newCustomer *string
+		var newDealer *string
+		var newRemark *string
+		var newModel string
 
-	if cVal, ok := req["customer"].(string); ok {
-		newCustomer = &cVal
-	} else if oldUnit != nil {
-		newCustomer = oldUnit.Customer
-	}
+		if cVal, ok := req["customer"].(string); ok {
+			newCustomer = &cVal
+		} else if oldUnit != nil {
+			newCustomer = oldUnit.Customer
+		}
 
-	if dVal, ok := req["dealer_name"].(string); ok {
-		newDealer = &dVal
-	} else if oldUnit != nil {
-		newDealer = oldUnit.DealerName
-	}
+		if dVal, ok := req["dealer_name"].(string); ok {
+			newDealer = &dVal
+		} else if oldUnit != nil {
+			newDealer = oldUnit.DealerName
+		}
 
-	if rVal, ok := req["order_remark"].(string); ok {
-		newRemark = &rVal
-	} else if oldUnit != nil {
-		newRemark = oldUnit.OrderRemark
-	}
+		if rVal, ok := req["order_remark"].(string); ok {
+			newRemark = &rVal
+		} else if oldUnit != nil {
+			newRemark = oldUnit.OrderRemark
+		}
 
-	if mVal, ok := req["model_type"].(string); ok {
-		newModel = mVal
-	} else if oldUnit != nil {
-		newModel = oldUnit.ModelType
-	}
+		if mVal, ok := req["model_type"].(string); ok {
+			newModel = mVal
+		} else if oldUnit != nil {
+			newModel = oldUnit.ModelType
+		}
 
-	if err := tx.Exec(`
+		if err := tx.Exec(`
 UPDATE production_history_ledger
 SET customer = ?, dealer_name = ?, order_remark = ?, model_type = ?
 WHERE status = 'In_Production' AND unit_id = ?
 `, newCustomer, newDealer, newRemark, newModel, c.Param("id")).Error; err != nil {
-		fmt.Printf("Update: sync production_history_ledger failed: %v\n", err)
+			fmt.Printf("Update: sync production_history_ledger failed: %v\n", err)
+		}
 	}
 
 	if err := service.SyncFinishedGoodsByUnitIDs(tx, []string{c.Param("id")}); err != nil {
 		// Log error but continue as primary update succeeded
 		fmt.Printf("Update: sync finished_goods failed: %v\n", err)
+	}
+
+	if err := service.SyncPlanImportByUnitIDs(tx, []string{c.Param("id")}, req); err != nil {
+		// Log error but continue as primary update succeeded
+		fmt.Printf("Update: sync plan_import failed: %v\n", err)
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -193,38 +225,18 @@ WHERE status = 'In_Production' AND unit_id = ?
 
 	// 【缺口1补全】反向同步：如果修改了机型或备注，且属于某个合同，则写回 Python
 	if oldUnit != nil && newUnit != nil && newUnit.ContractNo != nil && *newUnit.ContractNo != "" {
-		newModel := newUnit.ModelType
 		newRemark := ""
 		if newUnit.OrderRemark != nil {
 			newRemark = *newUnit.OrderRemark
 		}
 
-		oldModel := oldUnit.ModelType
 		oldRemark := ""
 		if oldUnit.OrderRemark != nil {
 			oldRemark = *oldUnit.OrderRemark
 		}
 
-		// 只有在关键字段变动时才发起同步
-		oldCustomer := ""
-		if oldUnit.Customer != nil {
-			oldCustomer = *oldUnit.Customer
-		}
-		oldDealerName := ""
-		if oldUnit.DealerName != nil {
-			oldDealerName = *oldUnit.DealerName
-		}
-		newCustomer := ""
-		if newUnit.Customer != nil {
-			newCustomer = *newUnit.Customer
-		}
-		newDealerName := ""
-		if newUnit.DealerName != nil {
-			newDealerName = *newUnit.DealerName
-		}
-
-		if newModel != oldModel || newRemark != oldRemark || newCustomer != oldCustomer || newDealerName != oldDealerName {
-			go h.SyncToPython(*newUnit.ContractNo, oldModel, newModel, newRemark, newCustomer, newDealerName)
+		if newRemark != oldRemark {
+			go h.SyncRemarkToPython(*newUnit.ContractNo, newUnit.ModelType, newRemark)
 		}
 	}
 
@@ -232,16 +244,13 @@ WHERE status = 'In_Production' AND unit_id = ?
 	c.JSON(http.StatusOK, gin.H{"unit": newUnit})
 }
 
-func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark, customer, dealerName string) {
-	// 简单的 HTTP Client 调用 Python 内部接口
+func (h *UnitHandler) SyncRemarkToPython(contractNo, model, remark string) {
 	url := fmt.Sprintf("%s/internal/planning/unit-sync", h.pythonURL)
 	payload := map[string]string{
 		"contract_no":  contractNo,
-		"old_model":    oldModel,
-		"new_model":    newModel,
+		"old_model":    model,
+		"new_model":    model,
 		"order_remark": remark,
-		"customer":     customer,
-		"dealer_name":  dealerName,
 	}
 	body, _ := json.Marshal(payload)
 
@@ -265,6 +274,48 @@ func (h *UnitHandler) SyncToPython(contractNo, oldModel, newModel, remark, custo
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Printf("SyncToPython: status non-200: %d\n", resp.StatusCode)
+	}
+}
+
+func (h *UnitHandler) NotifyContractCancelToPython(contractNo, actor, source string) {
+	contractNo = strings.TrimSpace(contractNo)
+	if contractNo == "" || h.pythonURL == "" {
+		return
+	}
+	if actor == "" {
+		actor = "system"
+	}
+	if source == "" {
+		source = "go"
+	}
+	url := fmt.Sprintf("%s/internal/planning/contract-cancel-sync", h.pythonURL)
+	payload := map[string]string{
+		"contract_no": contractNo,
+		"operator":    actor,
+		"source":      source,
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
+	if err != nil {
+		fmt.Printf("NotifyContractCancelToPython: failed to create request: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if h.internalToken != "" {
+		req.Header.Set("X-Internal-Token", h.internalToken)
+	}
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("NotifyContractCancelToPython: request failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		fmt.Printf("NotifyContractCancelToPython: status non-2xx: %d\n", resp.StatusCode)
 	}
 }
 
@@ -414,18 +465,15 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 
 	sourceMT := engine.NormalizeModelType(unit.ModelType)
 	targetMT := engine.NormalizeModelType(targetBatch.ModelType)
-	if sourceMT != targetMT {
-		allowMismatch := false
-		if !isSameBatch && sourceBatch.Status == model.StatusPredicted && targetBatch.Status == model.StatusPredicted {
-			preferredSlot := slotFromRequest(requestedSlot, 1)
-			ejectUnit, pickErr := h.pickEjectableUnboundUnit(tx, req.TargetBatchID, preferredSlot)
-			if pickErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": pickErr.Error()})
-				return
-			}
-			allowMismatch = ejectUnit != nil
+	if !isSameBatch {
+		sourceGroup := engine.ProductionGroupForBatch(sourceBatch.ModelType, sourceBatch.Capacity)
+		targetGroup := engine.ProductionGroupForBatch(targetBatch.ModelType, targetBatch.Capacity)
+		unitGroup := engine.ProductionGroupForModel(unit.ModelType)
+		if !engine.ProductionGroupsCompatible(sourceGroup, targetGroup) || unitGroup != sourceGroup {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "production group mismatch: cannot move between incompatible batches"})
+			return
 		}
-		if !allowMismatch {
+		if sourceMT != targetMT && sourceGroup != engine.ProductionGroupLarge {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "model type mismatch: cannot move between different model types"})
 			return
 		}
@@ -512,10 +560,23 @@ func (h *UnitHandler) MoveBatch(c *gin.Context) {
 	}
 	overflowTouchedBatchIDs = append(overflowTouchedBatchIDs, gapTouchedBatchIDs...)
 
-	ratioBatchIDs := append([]string{sourceBatchID, req.TargetBatchID}, overflowTouchedBatchIDs...)
-	if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, targetMT, ratioBatchIDs...); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	sourceBatchMT := engine.NormalizeModelType(sourceBatch.ModelType)
+	if sourceBatchMT == targetMT {
+		ratioBatchIDs := append([]string{sourceBatchID, req.TargetBatchID}, overflowTouchedBatchIDs...)
+		if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, targetMT, ratioBatchIDs...); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, sourceBatchMT, sourceBatchID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		targetRatioBatchIDs := append([]string{req.TargetBatchID}, overflowTouchedBatchIDs...)
+		if err := h.rebalanceBatchesUnboundUnitsByRatio(tx, targetMT, targetRatioBatchIDs...); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	if !directEjectApplied {
@@ -763,9 +824,8 @@ func (h *UnitHandler) moveSpecialUnitToRegularBatch(tx *gorm.DB, unit *model.Uni
 		return 0, fmt.Errorf("cross-batch move is only supported in predicted columns")
 	}
 
-	sourceMT := engine.NormalizeModelType(unit.ModelType)
 	targetMT := engine.NormalizeModelType(targetBatch.ModelType)
-	if sourceMT != targetMT || !isLargeFamilyBatch(targetBatch) || (sourceMT != "XS" && sourceMT != "AUTO") {
+	if !isLargeFamilyBatch(targetBatch) || engine.ProductionGroupForModel(unit.ModelType) != engine.ProductionGroupLarge {
 		return 0, fmt.Errorf("only special <-> large XS/AUTO cross-column moves are allowed")
 	}
 
@@ -850,11 +910,7 @@ func (h *UnitHandler) moveRegularUnitToSpecialBatch(tx *gorm.DB, unit *model.Uni
 	if !strings.EqualFold(strings.TrimSpace(targetBatch.ModelType), "SPECIAL") {
 		return 0, fmt.Errorf("target must be special column")
 	}
-	sourceMT := engine.NormalizeModelType(unit.ModelType)
-	if sourceMT != "XS" && sourceMT != "AUTO" {
-		return 0, fmt.Errorf("only large XS/AUTO can move to special columns")
-	}
-	if engine.NormalizeModelType(sourceBatch.ModelType) != sourceMT || !isLargeFamilyBatch(sourceBatch) {
+	if !isLargeFamilyBatch(sourceBatch) || engine.ProductionGroupForModel(unit.ModelType) != engine.ProductionGroupLarge {
 		return 0, fmt.Errorf("only large XS/AUTO can move to special columns")
 	}
 
@@ -881,8 +937,7 @@ func isLargeFamilyBatch(batch *model.Batch) bool {
 	if batch == nil {
 		return false
 	}
-	family := engine.NormalizeModelType(batch.ModelType)
-	return batch.Capacity == 16 && (family == "XS" || family == "AUTO")
+	return engine.ProductionGroupForBatch(batch.ModelType, batch.Capacity) == engine.ProductionGroupLarge
 }
 
 func (h *UnitHandler) moveSpecialUnit(tx *gorm.DB, unit *model.Unit, sourceBatchID string, targetBatchID string, requestedSlot *int) (int, error) {
@@ -1832,6 +1887,62 @@ func supplementLevel3MapFromModelDict(db *gorm.DB, level3 map[string]map[string]
 			}
 		}
 	}
+	normalizeUnitLevel3RatioSums(level3)
+}
+
+func normalizeUnitLevel3RatioSums(level3 map[string]map[string]int) {
+	for _, category := range []string{"中小型G", "中小型XS", "中大型XS", "中小型AUTO", "中大型AUTO"} {
+		ratios := level3[category]
+		if len(ratios) == 0 {
+			continue
+		}
+		sum := 0
+		for _, value := range ratios {
+			if value > 0 {
+				sum += value
+			}
+		}
+		if sum == 100 {
+			continue
+		}
+		keys := make([]string, 0, len(ratios))
+		for key := range ratios {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		if sum <= 0 {
+			for _, key := range keys {
+				ratios[key] = 0
+			}
+			if len(keys) > 0 {
+				ratios[keys[0]] = 100
+			}
+			continue
+		}
+		type remainder struct {
+			key string
+			rem float64
+		}
+		used := 0
+		remainders := make([]remainder, 0, len(keys))
+		for _, key := range keys {
+			exact := float64(ratios[key]) * 100.0 / float64(sum)
+			base := int(math.Floor(exact))
+			ratios[key] = base
+			used += base
+			remainders = append(remainders, remainder{key: key, rem: exact - float64(base)})
+		}
+		sort.SliceStable(remainders, func(i, j int) bool {
+			if remainders[i].rem != remainders[j].rem {
+				return remainders[i].rem > remainders[j].rem
+			}
+			return remainders[i].key < remainders[j].key
+		})
+		for i := 0; used < 100 && i < len(remainders); i++ {
+			ratios[remainders[i].key]++
+			used++
+		}
+	}
 }
 
 func rehomeLevel3ModelsByDictionary(level3 map[string]map[string]int, dictCatByModel map[string]string) {
@@ -2253,26 +2364,6 @@ func slotFromRequest(slot *int, fallback int) int {
 	return fallback
 }
 
-func normalizeModelFamily(modelType string) string {
-	upper := strings.ToUpper(strings.TrimSpace(modelType))
-	if upper == "" {
-		return ""
-	}
-	if upper == "FH-300C" {
-		return "G"
-	}
-	if strings.Contains(upper, "AUTO") {
-		return "AUTO"
-	}
-	if strings.Contains(upper, "XS") {
-		return "XS"
-	}
-	if upper == "G" || strings.HasSuffix(upper, "G") {
-		return "G"
-	}
-	return upper
-}
-
 func (h *UnitHandler) SwapContent(c *gin.Context) {
 	var req service.SwapContentReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -2379,6 +2470,7 @@ func (h *UnitHandler) RepairFamilyMismatches(c *gin.Context) {
 		SlotIndex      int
 		ModelType      string
 		BatchModelType string
+		BatchCapacity  int
 	}
 	var rows []mismatchRow
 	if err := h.db.Raw(`
@@ -2387,7 +2479,8 @@ SELECT
   u.batch_id,
   u.slot_index,
   u.model_type,
-  b.model_type AS batch_model_type
+  b.model_type AS batch_model_type,
+  b.capacity AS batch_capacity
 FROM units u
 JOIN batches b ON b.batch_id = u.batch_id
 WHERE b.status IN ('Predicted', 'Confirmed', 'In_Production')
@@ -2399,7 +2492,9 @@ WHERE b.status IN ('Predicted', 'Confirmed', 'In_Production')
 
 	mismatches := make([]mismatchRow, 0)
 	for _, r := range rows {
-		if uf, bf := normalizeModelFamily(r.ModelType), normalizeModelFamily(r.BatchModelType); uf != "" && bf != "" && uf != bf {
+		unitGroup := engine.ProductionGroupForModel(r.ModelType)
+		batchGroup := engine.ProductionGroupForBatch(r.BatchModelType, r.BatchCapacity)
+		if unitGroup != "" && batchGroup != "" && unitGroup != batchGroup {
 			mismatches = append(mismatches, r)
 		}
 	}
@@ -2410,7 +2505,7 @@ WHERE b.status IN ('Predicted', 'Confirmed', 'In_Production')
 		tx := h.db.Begin()
 		var src mismatchRow
 		if err := tx.Raw(`
-SELECT u.unit_id, u.batch_id, u.slot_index, u.model_type, b.model_type AS batch_model_type
+SELECT u.unit_id, u.batch_id, u.slot_index, u.model_type, b.model_type AS batch_model_type, b.capacity AS batch_capacity
 FROM units u
 JOIN batches b ON b.batch_id = u.batch_id
 WHERE u.unit_id = ?
@@ -2420,24 +2515,28 @@ FOR UPDATE
 			failed = append(failed, gin.H{"unit_id": item.UnitID, "error": err.Error()})
 			continue
 		}
-		srcFamily := normalizeModelFamily(src.BatchModelType)
-		unitFamily := normalizeModelFamily(src.ModelType)
-		if srcFamily == "" || unitFamily == "" || srcFamily == unitFamily {
+		srcGroup := engine.ProductionGroupForBatch(src.BatchModelType, src.BatchCapacity)
+		unitGroup := engine.ProductionGroupForModel(src.ModelType)
+		if srcGroup == "" || unitGroup == "" || srcGroup == unitGroup {
 			tx.Rollback()
 			continue
 		}
 
-		var familyExpr string
-		switch unitFamily {
-		case "AUTO":
-			familyExpr = "UPPER(b2.model_type) LIKE '%AUTO%'"
-		case "XS":
-			familyExpr = "UPPER(b2.model_type) LIKE '%XS%'"
-		case "G":
-			familyExpr = "(UPPER(b2.model_type) = 'G' OR UPPER(b2.model_type) LIKE '%G')"
+		var groupExpr string
+		switch unitGroup {
+		case engine.ProductionGroupLarge:
+			groupExpr = "(b2.capacity = 16 AND (UPPER(b2.model_type) LIKE '%XS%' OR UPPER(b2.model_type) LIKE '%AUTO%'))"
+		case engine.ProductionGroupSmallAUTO:
+			groupExpr = "(b2.capacity <> 16 AND UPPER(b2.model_type) LIKE '%AUTO%')"
+		case engine.ProductionGroupSmallXS:
+			groupExpr = "(b2.capacity <> 16 AND UPPER(b2.model_type) LIKE '%XS%')"
+		case engine.ProductionGroupSmallG:
+			groupExpr = "(UPPER(b2.model_type) = 'G' OR UPPER(b2.model_type) LIKE '%G')"
+		case engine.ProductionGroupSpecial:
+			groupExpr = "UPPER(TRIM(b2.model_type)) = 'SPECIAL'"
 		default:
 			tx.Rollback()
-			failed = append(failed, gin.H{"unit_id": item.UnitID, "error": "unsupported family " + unitFamily})
+			failed = append(failed, gin.H{"unit_id": item.UnitID, "error": "unsupported production group " + unitGroup})
 			continue
 		}
 
@@ -2451,7 +2550,7 @@ SELECT u2.unit_id, u2.batch_id, u2.slot_index
 FROM units u2
 JOIN batches b2 ON b2.batch_id = u2.batch_id
 WHERE b2.status IN ('Predicted', 'Confirmed', 'In_Production')
-  AND ` + familyExpr + `
+  AND ` + groupExpr + `
   AND u2.contract_no IS NULL
   AND u2.is_locked = 0
 ORDER BY b2.due_date_start ASC, u2.slot_index ASC
@@ -2522,6 +2621,10 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 	defer tx.Rollback()
 
 	unitID := c.Param("id")
+	actor := c.GetString("username")
+	if actor == "" {
+		actor = "system"
+	}
 	unit, err := h.repo.LockForUpdate(tx, unitID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "unit not found"})
@@ -2604,6 +2707,13 @@ func (h *UnitHandler) MarkSpot(c *gin.Context) {
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if contractNo != "" {
+		go h.NotifyContractCancelToPython(contractNo, actor, "mark-spot")
+		h.hub.Broadcast("unit:updated", gin.H{"contract_no": contractNo, "unit_id": unitID, "mode": "contract-cancelled-by-mark-spot"})
+	} else {
+		h.hub.Broadcast("unit:updated", gin.H{"unit_id": unitID, "mode": "mark-spot"})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"success": true})

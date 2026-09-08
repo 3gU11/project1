@@ -33,13 +33,13 @@ type RushInsertReq struct {
 	TargetUnitID   string `json:"target_unit_id"`
 	FallbackUnitID string `json:"fallback_unit_id"`
 	RushOrder      struct {
-		ContractNo        string `json:"contract_no" binding:"required"`
-		Customer          string `json:"customer"`
-		ModelType         string `json:"model_type" binding:"required"`
-		DealerName        string `json:"dealer_name"`
-		DueDate           string `json:"due_date"`
-		Remark            string `json:"remark"`
-		PreferredBatchNo  string `json:"preferred_batch_no"` // 优先插入的批次号（来自指定批次/来源）
+		ContractNo       string `json:"contract_no" binding:"required"`
+		Customer         string `json:"customer"`
+		ModelType        string `json:"model_type" binding:"required"`
+		DealerName       string `json:"dealer_name"`
+		DueDate          string `json:"due_date"`
+		Remark           string `json:"remark"`
+		PreferredBatchNo string `json:"preferred_batch_no"` // 优先插入的批次号（来自指定批次/来源）
 	} `json:"rush_order" binding:"required"`
 	Reason string `json:"reason"`
 }
@@ -329,11 +329,12 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 
 	var chain []model.Unit
 	start := -1
+	chainModel := targetModel
 	if !isHigh {
 		// Build the chain using the TARGET unit's own model_type so we can locate it.
 		// (The rush order's model_type may differ within the same family, e.g. FR-400XS vs FR-500XS.)
 		// The carry's ModelType (rush order model) will still be written into the target slot.
-		chainModel := strings.TrimSpace(target.ModelType)
+		chainModel = strings.TrimSpace(target.ModelType)
 		if chainModel == "" {
 			chainModel = targetModel
 		}
@@ -352,7 +353,7 @@ func (s *RushSvc) rushInsertManual(req RushInsertReq, actor string) error {
 	var chain2 []model.Unit
 	start2 := -1
 	if start < 0 {
-		chain2, err = s.loadSandboxModelChain(tx, family, targetModel, "")
+		chain2, err = s.loadSandboxModelChain(tx, family, chainModel, "")
 		if err != nil {
 			return fmt.Errorf("load sandbox chain: %w", err)
 		}
@@ -752,7 +753,6 @@ func (s *RushSvc) SwapContent(req SwapContentReq, actor string) error {
 	return nil
 }
 
-
 func mapKeys(m map[string]struct{}) []string {
 	if len(m) == 0 {
 		return nil
@@ -767,7 +767,6 @@ func mapKeys(m map[string]struct{}) []string {
 	sort.Strings(keys)
 	return keys
 }
-
 
 func (s *RushSvc) markRushContractPlanned(tx *gorm.DB, contractNo string, modelType string) error {
 	cn := strings.TrimSpace(contractNo)

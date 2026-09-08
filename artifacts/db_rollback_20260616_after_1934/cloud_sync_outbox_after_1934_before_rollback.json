@@ -1,0 +1,44 @@
+[
+  {
+    "id": 271,
+    "event_id": "v8-outbox-dealer_order_reviewed-faa941f2c02c4313b4422717008129ce",
+    "event_type": "dealer_order_reviewed",
+    "biz_key": "DO202605221118433529",
+    "payload_json": "{\"order_no\": \"DO202605221118433529\", \"status\": \"rejected\", \"reviewer\": \"系统管理员\", \"note\": \"1\"}",
+    "status": "failed",
+    "retry_count": 2,
+    "last_error": "cloud order not found (404): order_no=DO202605221118433529",
+    "next_retry_at": "2026-06-16 19:42:37",
+    "created_at": "2026-06-16 19:40:02",
+    "updated_at": "2026-06-16 19:40:37",
+    "synced_at": null
+  },
+  {
+    "id": 272,
+    "event_id": "v8-outbox-dealer_order_reviewed-4a1144d4d16c4379a0de7466b4dadd7d",
+    "event_type": "dealer_order_reviewed",
+    "biz_key": "DO202605220932571099",
+    "payload_json": "{\"order_no\": \"DO202605220932571099\", \"status\": \"rejected\", \"reviewer\": \"系统管理员\", \"note\": \"1\"}",
+    "status": "failed",
+    "retry_count": 2,
+    "last_error": "cloud order not found (404): order_no=DO202605220932571099",
+    "next_retry_at": "2026-06-16 19:42:37",
+    "created_at": "2026-06-16 19:40:04",
+    "updated_at": "2026-06-16 19:40:37",
+    "synced_at": null
+  },
+  {
+    "id": 273,
+    "event_id": "v8-outbox-dealer_order_reviewed-fcc6ba90d3294e618d35ac5441abfaf7",
+    "event_type": "dealer_order_reviewed",
+    "biz_key": "DO202605231026583736",
+    "payload_json": "{\"order_no\": \"DO202605231026583736\", \"status\": \"rejected\", \"reviewer\": \"系统管理员\", \"note\": \"1\"}",
+    "status": "failed",
+    "retry_count": 2,
+    "last_error": "cloud order not found (404): order_no=DO202605231026583736",
+    "next_retry_at": "2026-06-16 19:42:42",
+    "created_at": "2026-06-16 19:40:07",
+    "updated_at": "2026-06-16 19:40:42",
+    "synced_at": null
+  }
+]

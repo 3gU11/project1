@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -42,6 +43,23 @@ func main() {
 	configRepo := repo.NewConfigRepo(db)
 
 	batchSvc := service.NewBatchSvc(db, batchRepo, unitRepo, configRepo, hub)
+	if completed, reconcileErr := batchSvc.ReconcileInboundBatches(nil, "system-startup"); reconcileErr != nil {
+		log.Printf("startup inbound reconciliation failed: %v", reconcileErr)
+	} else if len(completed) > 0 {
+		log.Printf("startup inbound reconciliation completed %d batches", len(completed))
+	}
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			completed, reconcileErr := batchSvc.ReconcileInboundBatches(nil, "system-periodic")
+			if reconcileErr != nil {
+				log.Printf("periodic inbound reconciliation failed: %v", reconcileErr)
+			} else if len(completed) > 0 {
+				log.Printf("periodic inbound reconciliation completed %d batches", len(completed))
+			}
+		}
+	}()
 	rushSvc := service.NewRushSvc(db, unitRepo, batchRepo, hub)
 	predictor := engine.NewPredictor(db, batchRepo, unitRepo, configRepo)
 	recomputeSvc := service.NewRecomputeSvc(lockMgr, predictor, hub)
@@ -50,7 +68,7 @@ func main() {
 	uh := handler.NewUnitHandler(db, unitRepo, batchRepo, rushSvc, cfg.PythonURL, cfg.InternalToken, hub)
 	fh := handler.NewForecastHandler(db, recomputeSvc)
 	lh := handler.NewLineHandler(db, batchSvc)
-	ch := handler.NewCapacityHandler(configRepo)
+	ch := handler.NewCapacityHandler(db, configRepo)
 	ah := handler.NewAuthHandler(db)
 	mh := handler.NewMetaHandler(db)
 	qh := handler.NewQueueHandler(db)

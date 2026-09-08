@@ -314,9 +314,14 @@
         </el-row>
 
         <div class="field-label" style="margin-top: 8px">需求机型 (可修改数量/加高，或增删行)</div>
-        <el-table :data="editModelRows" border stripe size="small">
+        <el-table v-loading="editDetailsLoading" :data="editModelRows" border stripe size="small">
           <el-table-column label="#" width="40">
             <template #default="scope">{{ scope.$index + 1 }}</template>
+          </el-table-column>
+          <el-table-column v-if="editDetailsSource === 'factory_plan'" label="合同号" width="150">
+            <template #default="scope">
+              <el-input v-model="scope.row.contractId" disabled />
+            </template>
           </el-table-column>
           <el-table-column label="机型">
             <template #default="scope">
@@ -342,6 +347,11 @@
           <el-table-column label="单行备注" min-width="160">
             <template #default="scope">
               <el-input v-model="scope.row.rowNote" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" fixed="right">
+            <template #default="scope">
+              <el-button link type="danger" @click="removeEditRow(scope.$index)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -370,11 +380,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
-import { apiDelete, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
+import { apiDelete, apiGet, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
@@ -386,13 +396,18 @@ const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
-const loadedOnce = ref(false)
 const { submitWithLock } = useFormSubmit()
 const rows = ref<RowData[]>([])
 const planRows = ref<RowData[]>([])
-const inventoryRows = ref<RowData[]>([])
+const ordersLoaded = ref(false)
+const plansLoaded = ref(false)
 
-const activeTab = ref<'manual' | 'import' | 'manage'>('manual')
+const initialTab = String(route.query.tab || '')
+const activeTab = ref<'manual' | 'import' | 'manage'>(
+  ['manual', 'import', 'manage'].includes(initialTab)
+    ? (initialTab as 'manual' | 'import' | 'manage')
+    : 'import'
+)
 const keyword = ref('')
 const statusFilter = ref<'active' | 'done' | 'deleted'>('active')
 const monthFilter = ref('all')
@@ -429,7 +444,9 @@ const editingId = ref('')
 const editNeedPack = ref(false)
 const editSourceText = ref('')
 const deleteReason = ref('')
-const editModelRows = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([])
+const editDetailsLoading = ref(false)
+const editDetailsSource = ref<'factory_plan' | 'sales_orders'>('sales_orders')
+const editModelRows = ref<Array<{ contractId: string; model: string; qty: number; high: boolean; rowNote: string }>>([])
 const editForm = reactive({
   客户名: '',
   代理商: '',
@@ -453,20 +470,6 @@ const availableModels = computed(() => {
   return getModelOrderList()
 })
 
-const parseOrderDemandTotal = (order: RowData) => {
-  const raw = String(order['需求机型'] || '')
-  let total = 0
-  for (const tokenRaw of raw.split(';')) {
-    const token = tokenRaw.trim()
-    if (!token) continue
-    const m = token.match(/[x×:：]\s*(\d+)$/i)
-    if (m) total += Number(m[1]) || 0
-  }
-  if (total > 0) return total
-  const fallback = Number(order['需求数量'] || 0)
-  return Number.isFinite(fallback) ? Math.max(0, fallback) : 0
-}
-
 const splitDemandModelTokens = (value: unknown) => {
   return String(value || '')
     .split(';')
@@ -480,6 +483,51 @@ const splitDemandModelTokens = (value: unknown) => {
     })
 }
 
+const orderLineNoteLabel = String.raw`(?:\[[^\]]+\]\s*)?[A-Za-z0-9][A-Za-z0-9_\-./+]*(?:\([^)]*\))*`
+const orderLineNotePattern = new RegExp(String.raw`(^|\s)${orderLineNoteLabel}\s*[:：]\s*.*?(?=\s+${orderLineNoteLabel}\s*[:：]|$)`, 'g')
+const orderLineNoteCapturePattern = new RegExp(
+  String.raw`(?:^|\s)(?:\[[^\]]+\]\s*)?([A-Za-z0-9][A-Za-z0-9_\-./+]*(?:\([^)]*\))*)\s*[:：]\s*` +
+    String.raw`(.*?)(?=\s+${orderLineNoteLabel}\s*[:：]|$)`,
+  'g',
+)
+
+const stripTotalNote = (value: unknown) => {
+  let note = String(value || '').trim().replace(/^(\[总\]\s*)+/, '').trim()
+  if (!note) return ''
+  note = note.replace(orderLineNotePattern, ' ')
+  return note.replace(/\s+/g, ' ').trim()
+}
+
+const splitHighFromRowNote = (value: unknown) => {
+  const raw = String(value || '').trim()
+  const high = raw.includes('加高')
+  const rowNote = raw
+    .replace(/(^|\s+)加高(?=\s+|$)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return { high, rowNote }
+}
+
+const buildDetailRemark = (high: boolean, rowNote: string) => {
+  return [high ? '加高' : '', String(rowNote || '').trim()].filter(Boolean).join(' ')
+}
+
+const parseLegacyOrderLineNotes = (note: unknown) => {
+  const map = new Map<string, string[]>()
+  const raw = String(note || '').replace(/^(\[总\]\s*)+/, '').trim()
+  if (!raw) return map
+  orderLineNoteCapturePattern.lastIndex = 0
+  let m: RegExpExecArray | null = null
+  while ((m = orderLineNoteCapturePattern.exec(raw)) !== null) {
+    const model = String(m[1] || '').replace('(加高)', '').trim()
+    const rowNote = String(m[2] || '').trim()
+    if (!model || !rowNote) continue
+    if (!map.has(model)) map.set(model, [])
+    map.get(model)?.push(rowNote)
+  }
+  return map
+}
+
 const normalizeQtyValue = (value: unknown) => {
   const digits = String(value ?? '').replace(/[^\d]/g, '')
   const parsed = Number(digits || '1')
@@ -490,32 +538,9 @@ const setQtyValue = (row: { qty: number }, value: unknown) => {
   row.qty = normalizeQtyValue(value)
 }
 
-const shippedCountByOrder = computed(() => {
-  const map = new Map<string, number>()
-  for (const r of inventoryRows.value) {
-    if (String(r['状态'] || '') !== '已出库') continue
-    const oid = String(r['占用订单号'] || '').trim()
-    if (!oid) continue
-    map.set(oid, (map.get(oid) || 0) + 1)
-  }
-  return map
-})
-
-const completedOrderIdSet = computed(() => {
-  const set = new Set<string>()
-  for (const r of rows.value) {
-    const oid = String(r['订单号'] || '').trim()
-    if (!oid) continue
-    const need = parseOrderDemandTotal(r)
-    const shipped = shippedCountByOrder.value.get(oid) || 0
-    if (need > 0 && shipped >= need) set.add(oid)
-  }
-  return set
-})
-
 const isEditingCompletedOrder = computed(() => {
   if (!editingId.value) return false
-  return editForm.status === 'done' || completedOrderIdSet.value.has(editingId.value)
+  return editForm.status === 'done'
 })
 
 const isEditingDeletedOrder = computed(() => {
@@ -527,16 +552,14 @@ const manageRowsFiltered = computed(() => {
   const term = keyword.value.trim().toLowerCase()
   return rows.value
     .filter((r) => {
-      const oid = String(r['订单号'] || '')
       const status = String(r.status || 'active')
       if (statusFilter.value === 'deleted') return status === 'deleted'
       if (status === 'deleted') return false
 
-      const completed = completedOrderIdSet.value.has(oid)
-      if (statusFilter.value === 'done') return status === 'done' || completed
+      if (statusFilter.value === 'done') return status === 'done'
       // active
       if (!['active', 'ready', 'packed', 'done'].includes(status)) return false
-      return !completed && status !== 'done'
+      return status !== 'done'
     })
     .filter((r) => {
       if (monthFilter.value === 'all') return true
@@ -582,38 +605,79 @@ const mergeWarningText = computed(() => {
   if (customers.size > 1) return '注意：您选择了不同客户的合同进行合并，请确认是否正确。'
   return '提示：请确认合并后的客户、代理、交期、机型数量与备注。'
 })
-const showInitialSkeleton = computed(() => loading.value && !loadedOnce.value && !loadError.value)
+const activeTabLoaded = computed(() => {
+  if (activeTab.value === 'import') return plansLoaded.value
+  if (activeTab.value === 'manage') return ordersLoaded.value
+  return true
+})
+const showInitialSkeleton = computed(() => loading.value && !activeTabLoaded.value && !loadError.value)
 
 const addManualRow = () => {
   manualRows.value.push({ model: '', qty: 1, high: false, rowNote: '' })
 }
 
-const fetchData = async () => {
+const normalizeOrderRows = (nextOrders: RowData[]) => {
+  return nextOrders.map((row) => ({
+    ...row,
+    '下单时间': String(row['下单时间'] || '').slice(0, 10),
+    '发货时间': String(row['发货时间'] || '').slice(0, 10),
+  }))
+}
+
+const loadOrders = async (force = false) => {
+  if (ordersLoaded.value && !force) return
+  const nextOrders = await apiGetAll<RowData>('/planning/orders')
+  rows.value = normalizeOrderRows(nextOrders)
+  ordersLoaded.value = true
+}
+
+const loadPlans = async (force = false) => {
+  if (plansLoaded.value && !force) return
+  planRows.value = await apiGetAll<RowData>('/planning/')
+  plansLoaded.value = true
+}
+
+const runDataLoad = async (loader: () => Promise<void>) => {
   loading.value = true
   loadError.value = ''
   try {
-    const [nextOrders, nextPlans, nextInventory] = await Promise.all([
-      apiGetAll<RowData>('/planning/orders'),
-      apiGetAll<RowData>('/planning/'),
-      apiGetAll<RowData>('/inventory/'),
-    ])
-    rows.value = nextOrders.map((row) => ({
-      ...row,
-      '下单时间': String(row['下单时间'] || '').slice(0, 10),
-      '发货时间': String(row['发货时间'] || '').slice(0, 10),
-    }))
-    planRows.value = nextPlans
-    inventoryRows.value = nextInventory
+    await loader()
   } catch (err: any) {
     loadError.value = getApiErrorMessage(err) || '读取数据失败'
     ElMessage.error(loadError.value)
   } finally {
     loading.value = false
-    loadedOnce.value = true
   }
 }
+
+const fetchData = async (force = false) => {
+  if (activeTab.value === 'manual') {
+    loadError.value = ''
+    return
+  }
+  await runDataLoad(async () => {
+    if (activeTab.value === 'import') {
+      await loadPlans(force)
+      return
+    }
+    if (activeTab.value === 'manage') {
+      await loadOrders(force)
+    }
+  })
+}
+
+const refreshLoadedData = async () => {
+  const loaders: Array<() => Promise<void>> = []
+  if (ordersLoaded.value) loaders.push(() => loadOrders(true))
+  if (plansLoaded.value) loaders.push(() => loadPlans(true))
+  if (loaders.length === 0) return
+  await runDataLoad(async () => {
+    await Promise.all(loaders.map((loader) => loader()))
+  })
+}
+
 const retryFetch = () => {
-  void fetchData()
+  void fetchData(true)
 }
 
 const getPlannedImportRowKey = (row: RowData) => {
@@ -680,7 +744,7 @@ const createManualOrder = async () => {
   const totalQty = validRows.reduce((sum, r) => sum + Number(r.qty || 0), 0)
   const rowNotes = validRows
     .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
+    .map((r) => `${r.model}: ${buildDetailRemark(Boolean(r.high), String(r.rowNote || ''))}`)
   const noteParts = [manualForm.note.trim() ? `[总]${manualForm.note.trim()}` : '', ...rowNotes]
   const finalNote = noteParts.filter(Boolean).join(' ')
 
@@ -698,7 +762,7 @@ const createManualOrder = async () => {
     manualRows.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
     manualForm.note = ''
     manualForm.source = ''
-    await fetchData()
+    await refreshLoadedData()
   }, { successMessage: '订单已创建', errorMessage: '创建失败' })
 }
 
@@ -738,10 +802,15 @@ const createOrderFromPlanned = async () => {
     return
   }
 
-  const rowNotes = mergeRows.value
-    .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `[${r.sourceContract}] ${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
-  const mergedNote = [mergeDraft.note.trim() ? `[总]${mergeDraft.note.trim()}` : '', ...rowNotes].filter(Boolean).join(' ')
+  const mergedNote = stripTotalNote(mergeDraft.note)
+  const detailPayload = mergeRows.value
+    .filter((r) => String(r.model || '').trim() && Number(r.qty || 0) > 0)
+    .map((r) => ({
+      合同号: String(r.sourceContract || ''),
+      机型: String(r.model || '').trim(),
+      数量: Number(r.qty || 0),
+      备注: buildDetailRemark(Boolean(r.high), String(r.rowNote || '')),
+    }))
 
   await submitWithLock(saving, async () => {
     await apiPost('/planning/orders', {
@@ -753,13 +822,14 @@ const createOrderFromPlanned = async () => {
       备注: mergedNote || `合同导入: ${selectedImportContractIds.value.join(',')}`,
       包装选项: mergeDraft.needPack ? '需要包装' : '',
       contract_ids: selectedImportContractIds.value,
+      明细: detailPayload,
     })
     ElMessage.success('已转换为订单')
     selectedImportContractIds.value = []
     selectedPlannedImportRows.value = []
     mergeRows.value = []
     plannedImportTableRef.value?.clearSelection()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '转换失败' })
 }
 
@@ -779,31 +849,20 @@ watch(selectedImportContractIds, () => {
   mergeDraft.customer = String(first['客户名'] || '')
   mergeDraft.agent = String(first['代理商'] || '')
   mergeDraft.deliveryDate = String(first['要求交期'] || '')
-  mergeDraft.note = rows
-    .map((r) => {
-      const cid = String(r['合同号'] || '')
-      const note = String(r['备注'] || '').trim()
-      return note ? `[${cid}] ${note}` : ''
-    })
-    .filter(Boolean)
-    .join(' ')
+  mergeDraft.note = ''
 
   mergeRows.value = rows.map((r) => {
     const rawModel = String(r['机型'] || '').trim()
     const note = String(r['备注'] || '').trim()
-    // 兼容旧数据模型自带(加高)，以及新数据订单备注中包含"加高"
-    const high = rawModel.includes('(加高)') || note.includes('加高')
+    const parsedNote = splitHighFromRowNote(note)
     const model = rawModel.replace('(加高)', '').trim()
-    
-    // 从原始备注中剔除"加高"，避免重复显示
-    const cleanNote = note.split(/[|\[\]]/).map(s => s.trim()).filter(s => s && s !== '加高' && !['备注', '附加', '改数', '总'].includes(s)).join(' ')
     
     return {
       sourceContract: String(r['合同号'] || ''),
       model,
-      high,
+      high: rawModel.includes('(加高)') || parsedNote.high,
       qty: Math.max(1, Number(r['排产数量'] || 1) || 1),
-      rowNote: cleanNote,
+      rowNote: parsedNote.rowNote,
     }
   })
 })
@@ -819,6 +878,59 @@ watch(plannedContractRows, async () => {
   }
 })
 
+const buildFallbackEditRows = (row: RowData) => {
+  const legacyNotes = parseLegacyOrderLineNotes(row['备注'])
+  const parsedRows: Array<{ contractId: string; model: string; qty: number; high: boolean; rowNote: string }> = []
+  const rawModels = String(row['需求机型'] || '')
+    .split(';')
+    .map((x: string) => x.trim())
+    .filter(Boolean)
+  for (const token of rawModels) {
+    const m = token.match(/^(.*?)(?:\s*[x×:：]\s*)(\d+)$/i)
+    const modelRaw = m ? m[1].trim() : token
+    const qty = m ? Number(m[2]) : 1
+    const model = modelRaw.replace('(加高)', '').trim()
+    const noteList = legacyNotes.get(model) || []
+    const legacyNote = noteList.shift() || ''
+    const parsedNote = splitHighFromRowNote(legacyNote)
+    parsedRows.push({
+      contractId: '',
+      model,
+      qty: qty > 0 ? qty : 1,
+      high: modelRaw.includes('(加高)') || parsedNote.high,
+      rowNote: parsedNote.rowNote,
+    })
+  }
+  return parsedRows.length > 0 ? parsedRows : [{ contractId: '', model: '', qty: 1, high: false, rowNote: '' }]
+}
+
+const loadEditDetails = async (orderId: string) => {
+  editDetailsLoading.value = true
+  try {
+    const res: any = await apiGet(`/planning/orders/${encodeURIComponent(orderId)}/details`)
+    if (editingId.value !== orderId) return
+    editDetailsSource.value = res.source === 'factory_plan' ? 'factory_plan' : 'sales_orders'
+    editForm.备注 = String(res.total_note || '')
+    const detailRows = Array.isArray(res.details) ? res.details : []
+    editModelRows.value = detailRows.length > 0
+      ? detailRows.map((item: any) => {
+          const parsedNote = splitHighFromRowNote(item['备注'])
+          return {
+            contractId: String(item['合同号'] || ''),
+            model: String(item['机型'] || ''),
+            qty: Math.max(1, Number(item['数量'] || 1) || 1),
+            high: parsedNote.high,
+            rowNote: parsedNote.rowNote,
+          }
+        })
+      : [{ contractId: '', model: '', qty: 1, high: false, rowNote: '' }]
+  } catch (err: any) {
+    ElMessage.warning(getApiErrorMessage(err) || '订单明细读取失败，已使用订单汇总回填')
+  } finally {
+    if (editingId.value === orderId) editDetailsLoading.value = false
+  }
+}
+
 const openEdit = (row: RowData, syncSelection = true) => {
   const currentId = String(row['订单号'] || '')
   if (syncSelection) selectedManageOrderId.value = currentId
@@ -828,9 +940,10 @@ const openEdit = (row: RowData, syncSelection = true) => {
   editForm.需求机型 = String(row['需求机型'] || '')
   editForm.需求数量 = Number(row['需求数量'] || 1) || 1
   editForm.发货时间 = String(row['发货时间'] || '')
-  editForm.备注 = String(row['备注'] || '')
+  editForm.备注 = stripTotalNote(row['备注'])
   editForm.status = String(row['status'] || 'active')
   editNeedPack.value = String(row['包装选项'] || '').includes('需要')
+  editDetailsSource.value = 'sales_orders'
   const sourceRaw = row['指定批次/来源']
   if (typeof sourceRaw === 'string') {
     const t = sourceRaw.trim()
@@ -842,28 +955,8 @@ const openEdit = (row: RowData, syncSelection = true) => {
     editSourceText.value = ''
   }
   deleteReason.value = ''
-
-  const parsedRows: Array<{ model: string; qty: number; high: boolean; rowNote: string }> = []
-  const rawModels = String(row['需求机型'] || '')
-    .split(';')
-    .map((x: string) => x.trim())
-    .filter(Boolean)
-  for (const token of rawModels) {
-    const m = token.match(/^(.*?)(?:\s*[x×:：]\s*)(\d+)$/i)
-    const modelRaw = m ? m[1].trim() : token
-    const qty = m ? Number(m[2]) : 1
-    const orderNote = String(row['备注'] || '')
-    // 兼容旧数据模型自带(加高)，以及新数据订单备注中包含"加高"
-    const high = modelRaw.includes('(加高)') || orderNote.includes('加高')
-    
-    parsedRows.push({
-      model: modelRaw.replace('(加高)', '').trim(),
-      qty: qty > 0 ? qty : 1,
-      high,
-      rowNote: '', // 备注作为整体显示，行备注留空供用户重新追加
-    })
-  }
-  editModelRows.value = parsedRows.length > 0 ? parsedRows : [{ model: '', qty: 1, high: false, rowNote: '' }]
+  editModelRows.value = buildFallbackEditRows(row)
+  void loadEditDetails(currentId)
 }
 
 const clearEditPanel = () => {
@@ -879,6 +972,8 @@ const clearEditPanel = () => {
   editNeedPack.value = false
   editSourceText.value = ''
   deleteReason.value = ''
+  editDetailsSource.value = 'sales_orders'
+  editDetailsLoading.value = false
   editModelRows.value = []
 }
 
@@ -910,7 +1005,13 @@ const onManagePageChange = (page: number) => {
 }
 
 const addEditRow = () => {
-  editModelRows.value.push({ model: '', qty: 1, high: false, rowNote: '' })
+  const contractId = editDetailsSource.value === 'factory_plan' ? String(editModelRows.value[0]?.contractId || '') : ''
+  editModelRows.value.push({ contractId, model: '', qty: 1, high: false, rowNote: '' })
+}
+
+const removeEditRow = (index: number) => {
+  if (index < 0 || index >= editModelRows.value.length) return
+  editModelRows.value.splice(index, 1)
 }
 
 const saveEdit = async () => {
@@ -931,10 +1032,13 @@ const saveEdit = async () => {
   }
   const modelTokens = validRows.map((r) => `${r.model.trim()}x${r.qty}`)
   const totalQty = validRows.reduce((sum, r) => sum + Number(r.qty || 0), 0)
-  const lineNotes = validRows
-    .filter((r) => r.rowNote.trim() || r.high)
-    .map((r) => `${r.model}: ${[r.high ? '加高' : '', r.rowNote.trim()].filter(Boolean).join(' ')}`)
-  const finalNote = [editForm.备注.trim() ? `[总]${editForm.备注.trim()}` : '', ...lineNotes].filter(Boolean).join(' ')
+  const finalNote = stripTotalNote(editForm.备注)
+  const detailPayload = validRows.map((r) => ({
+    合同号: String(r.contractId || ''),
+    机型: String(r.model || '').trim(),
+    数量: Number(r.qty || 0),
+    备注: buildDetailRemark(Boolean(r.high), String(r.rowNote || '')),
+  }))
 
   await submitWithLock(saving, async () => {
     await apiPut(`/planning/orders/${encodeURIComponent(editingId.value)}`, {
@@ -947,9 +1051,10 @@ const saveEdit = async () => {
       包装选项: editNeedPack.value ? '需要包装' : '',
       '指定批次/来源': editSourceText.value,
       status: editForm.status,
+      明细: detailPayload,
     })
     ElMessage.success('订单已更新')
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '保存失败' })
 }
 
@@ -964,7 +1069,7 @@ const deleteOrder = async () => {
     })
     ElMessage.success('订单已标记删除')
     clearEditPanel()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '删除失败' })
 }
 
@@ -976,7 +1081,7 @@ const restoreOrder = async () => {
     })
     ElMessage.success('订单已还原')
     clearEditPanel()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '还原失败' })
 }
 
@@ -989,7 +1094,7 @@ const hardDeleteOrder = async () => {
     await apiDelete(`/planning/orders/${encodeURIComponent(editingId.value)}`)
     ElMessage.success('订单已从数据库永久清除')
     clearEditPanel()
-    await fetchData()
+    await refreshLoadedData()
   }, { errorMessage: '彻底删除失败' })
 }
 
@@ -1007,12 +1112,15 @@ const confirm = (msg: string, title = '提示'): Promise<boolean> => {
   })
 }
 
-onMounted(() => {
-  const tab = route.query.tab as string
-  if (tab && ['manual', 'import', 'manage'].includes(tab)) {
-    activeTab.value = tab as any
+watch(activeTab, () => {
+  void fetchData()
+}, { immediate: true })
+
+watch(() => route.query.tab, (tab) => {
+  const nextTab = String(tab || '')
+  if (['manual', 'import', 'manage'].includes(nextTab) && nextTab !== activeTab.value) {
+    activeTab.value = nextTab as 'manual' | 'import' | 'manage'
   }
-  fetchData()
 })
 
 watch([keyword, statusFilter, monthFilter], () => {

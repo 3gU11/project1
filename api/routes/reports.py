@@ -19,6 +19,7 @@ from crud.reports import (
     get_order_report_data,
     get_shipment_report_data,
     get_completion_report_data,
+    get_completion_output_report_data,
     get_available_filters,
     serialize_model_report_appendices,
 )
@@ -349,8 +350,7 @@ def generate_completion_report(
         if start_date > end_date:
             raise HTTPException(status_code=400, detail="结束日期必须大于或等于开始日期")
 
-        # 复用入库报表逻辑
-        summary_df, detail_df = get_inbound_report_data(
+        summary_df, detail_df = get_completion_output_report_data(
             start_date, end_date, model_type, customer
         )
 
@@ -361,9 +361,10 @@ def generate_completion_report(
 
         # Return JSON format for preview (use summary data grouped by batch)
         if format == "json":
+            total_quantity = int(summary_df['数量'].sum()) if '数量' in summary_df.columns else len(detail_df)
             return {
                 "data": summary_df.to_dict('records'),
-                "total": len(summary_df)
+                "total": total_quantity
             }
 
         # Return Excel format for download

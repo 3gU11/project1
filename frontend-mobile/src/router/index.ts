@@ -72,7 +72,9 @@ const defaultPath = () => {
 
 router.beforeEach((to, _from, next) => {
   const userStore = useUserStore()
-  const isAuth = !!userStore.token
+  // The API interceptor can clear storage before a full page reload finishes.
+  // Do not let a stale Pinia token send the user back into protected pages.
+  const isAuth = !!userStore.token && !!localStorage.getItem('token')
 
   if (to.meta.requiresAuth && !isAuth) {
     next('/login')

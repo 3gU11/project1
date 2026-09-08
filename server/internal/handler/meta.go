@@ -7,8 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-
-	"smart-scheduling/server/internal/engine"
 )
 
 type MetaHandler struct {
@@ -44,7 +42,7 @@ func (h *MetaHandler) ModelTypes(c *gin.Context) {
 		}
 		family := canonicalCategory(strings.TrimSpace(row.ModelFamily))
 		if family == "" {
-			family = engine.NormalizeModelType(name)
+			family = modelCategoryOf(name)
 		}
 		size := ""
 		if row.ModelSize != nil && *row.ModelSize > 0 {

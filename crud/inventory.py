@@ -1,5 +1,6 @@
 import json
 import logging
+from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 
@@ -9,7 +10,7 @@ from sqlalchemy.exc import OperationalError
 
 from database import get_engine
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
-from crud.inbound_history import record_inbound_history
+from crud.inbound_history import notify_inbound_completion, record_inbound_history
 from utils.cache import fetch_data_with_cache
 from utils.local_cache import ttl_cache
 
@@ -18,6 +19,133 @@ logger = logging.getLogger(__name__)
 INVENTORY_COLS = ["批次号", "机型", "流水号", "状态", "预计入库时间", "更新时间", "占用订单号", "客户", "代理商", "合同备注", "Location_Code", "合同号"]
 IMPORT_COLS = ["流水号", "批次号", "机型", "状态", "预计入库时间", "客户", "代理商", "合同备注", "合同号", "订单号"]
 WAREHOUSE_MAX_CAPACITY = 5
+LARGE_WAREHOUSE_MAX_CAPACITY = 15
+SCRAP_WAREHOUSE_MAX_CAPACITY = 5
+UNLIMITED_WAREHOUSE_CAPACITY = float("inf")
+OLD_FACTORY_SLOT_CODES = (
+    "老厂一车间400",
+    "老厂一车间600",
+    "老厂一车间500",
+    "老厂四车间二楼400",
+    "老厂四车间一楼400",
+    "老厂四车间一楼500",
+    "老厂四车间一楼600",
+)
+OLD_FACTORY_SLOT_CODE_SET = {"".join(code.split()) for code in OLD_FACTORY_SLOT_CODES}
+EMERGENCY_BUFFER_SLOT_CODES = (
+    "新厂一楼小机床存放区",
+    "新厂2楼仓库门口存放区",
+)
+UNLIMITED_SLOT_CODE_SET = {
+    "".join(code.split())
+    for code in (*OLD_FACTORY_SLOT_CODES, *EMERGENCY_BUFFER_SLOT_CODES)
+}
+REQUIRED_SLOT_CODES = tuple(
+    [f"大机型区域{index:02d}" for index in range(1, 16)]
+    + ["闲置区01", "闲置区02", "实验室区01"]
+    + list(OLD_FACTORY_SLOT_CODES)
+    + list(EMERGENCY_BUFFER_SLOT_CODES)
+    + ["报废区01"]
+)
+
+
+def _normalize_slot_code(slot_code):
+    return "".join(str(slot_code or "").split())
+
+
+def canonical_slot_code(slot_code):
+    return str(slot_code or "").strip()
+
+
+def is_scrap_slot(slot_code):
+    normalized = _normalize_slot_code(slot_code)
+    return normalized.startswith("报废区") or normalized.startswith("整机报废区")
+
+
+def is_unlimited_slot(slot_code):
+    normalized = _normalize_slot_code(slot_code)
+    return normalized in UNLIMITED_SLOT_CODE_SET or normalized.startswith("老厂")
+
+
+def get_slot_capacity(slot_code):
+    normalized = _normalize_slot_code(slot_code)
+    if is_unlimited_slot(slot_code):
+        return UNLIMITED_WAREHOUSE_CAPACITY
+    if any(normalized.startswith(prefix) for prefix in ("大机型区域", "闲置区", "实验室区")):
+        return LARGE_WAREHOUSE_MAX_CAPACITY
+    if is_scrap_slot(slot_code):
+        return SCRAP_WAREHOUSE_MAX_CAPACITY
+    return WAREHOUSE_MAX_CAPACITY
+
+
+def merge_required_warehouse_slots(slots):
+    existing = [deepcopy(slot) for slot in (slots or []) if isinstance(slot, dict)]
+    existing_codes = {
+        _normalize_slot_code(slot.get("code"))
+        for slot in existing
+        if _normalize_slot_code(slot.get("code"))
+    }
+    missing_codes = [code for code in REQUIRED_SLOT_CODES if _normalize_slot_code(code) not in existing_codes]
+    if not missing_codes:
+        return existing
+
+    max_bottom = max(
+        (float(slot.get("y") or 0) + float(slot.get("h") or 160) for slot in existing),
+        default=0,
+    )
+    base_y = max(20, max_bottom + 20)
+    width, height, gap_x, gap_y, columns = 300, 160, 40, 40, 5
+    used_ids = {str(slot.get("id") or "") for slot in existing}
+    for index, code in enumerate(missing_codes):
+        base_id = f"required-slot-{_normalize_slot_code(code)}"
+        slot_id = base_id
+        suffix = 2
+        while slot_id in used_ids:
+            slot_id = f"{base_id}-{suffix}"
+            suffix += 1
+        used_ids.add(slot_id)
+        existing.append({
+            "id": slot_id,
+            "code": code,
+            "x": 20 + (index % columns) * (width + gap_x),
+            "y": base_y + (index // columns) * (height + gap_y),
+            "w": width,
+            "h": height,
+            "status": "正常",
+        })
+    return existing
+
+
+def enrich_warehouse_layout(layout_json):
+    enriched = deepcopy(layout_json) if isinstance(layout_json, dict) else {"slots": []}
+    slots = enriched.get("slots")
+    if not isinstance(slots, list):
+        enriched["slots"] = []
+        return enriched
+    enriched["slots"] = []
+    for raw_slot in slots:
+        if not isinstance(raw_slot, dict):
+            continue
+        slot = deepcopy(raw_slot)
+        capacity = get_slot_capacity(slot.get("code"))
+        unlimited = capacity == UNLIMITED_WAREHOUSE_CAPACITY
+        slot["capacity"] = None if unlimited else int(capacity)
+        slot["unlimited"] = unlimited
+        enriched["slots"].append(slot)
+    return enriched
+
+
+def sanitize_warehouse_layout(layout_json):
+    sanitized = deepcopy(layout_json) if isinstance(layout_json, dict) else {"slots": []}
+    slots = sanitized.get("slots")
+    if not isinstance(slots, list):
+        sanitized["slots"] = []
+        return sanitized
+    for slot in slots:
+        if isinstance(slot, dict):
+            slot.pop("capacity", None)
+            slot.pop("unlimited", None)
+    return sanitized
 
 
 def _has_column(conn, table_name, column_name):
@@ -149,9 +277,14 @@ def get_data_v2():
         raise RuntimeError(f"数据读取失败: {e}") from e
 
 
-def save_data(df):
+def clear_inventory_data_caches():
+    """Invalidate both inventory readers regardless of the active feature flags."""
     get_data.cache_clear()
-    get_data_v2.cache_clear()  # 清除 v2 版本缓存
+    get_data_v2.cache_clear()
+
+
+def save_data(df):
+    clear_inventory_data_caches()
     try:
         df = df.drop_duplicates(subset=['流水号'], keep='last')
         df = df.copy()
@@ -184,7 +317,7 @@ def save_data_v2(df):
     优化版 save_data：使用 UPSERT (INSERT ... ON DUPLICATE KEY UPDATE)
     通过批量执行 (executemany) 并处理 NaT/NaN 提升性能和稳定性
     """
-    get_data_v2.cache_clear()
+    clear_inventory_data_caches()
 
     try:
         df = df.drop_duplicates(subset=['流水号'], keep='last')
@@ -275,6 +408,14 @@ def archive_shipped_data(df_shipped):
                 conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
             if not _has_column(conn, "shipping_history", "合同号"):
                 conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
+            target_cols = [
+                row[0] for row in conn.execute(text(
+                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() "
+                    "AND TABLE_NAME = 'shipping_history'"
+                )).fetchall()
+            ]
+        df_shipped = df_shipped[[col for col in target_cols if col in df_shipped.columns]]
         df_shipped.fillna("").to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
     except (OperationalError, Exception) as e:
         print(f"archive_shipped_data error: {e}")
@@ -459,14 +600,15 @@ def get_warehouse_layout(layout_id="default"):
             return {"layout_id": layout_id, "layout_json": {"slots": []}, "update_time": ""}
         raw_json = row[0] if len(row) > 0 else "{}"
         parsed = json.loads(raw_json) if raw_json else {"slots": []}
-        return {"layout_id": layout_id, "layout_json": parsed, "update_time": str(row[1] or "")}
+        return {"layout_id": layout_id, "layout_json": enrich_warehouse_layout(parsed), "update_time": str(row[1] or "")}
     except Exception as e:
         raise RuntimeError(f"读取库位布局失败: {e}") from e
 
 
 def save_warehouse_layout(layout_id, layout_json):
     try:
-        payload = json.dumps(layout_json, ensure_ascii=False)
+        clean_layout = sanitize_warehouse_layout(layout_json)
+        payload = json.dumps(clean_layout, ensure_ascii=False)
         with get_engine().begin() as conn:
             conn.execute(
                 text(
@@ -484,7 +626,7 @@ def save_warehouse_layout(layout_id, layout_json):
                     "VALUES(:layout_id, :layout_json, CURRENT_TIMESTAMP) "
                     "ON CONFLICT(layout_id) DO UPDATE SET layout_json=excluded.layout_json, update_time=CURRENT_TIMESTAMP"
                 ),
-                {"layout_id": layout_id, "layout_json": json.dumps(layout_json, ensure_ascii=False)},
+                {"layout_id": layout_id, "layout_json": json.dumps(sanitize_warehouse_layout(layout_json), ensure_ascii=False)},
             )
     return get_warehouse_layout(layout_id)
 
@@ -498,6 +640,10 @@ def reset_warehouse_layout(layout_id="default"):
 def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
     if not serial_no or not slot_code:
         return {"ok": False, "code": "E_INVALID_PARAM", "message": "流水号与库位号不能为空"}
+    slot_code = canonical_slot_code(slot_code)
+    slot_capacity = get_slot_capacity(slot_code)
+    scrap_slot = is_scrap_slot(slot_code)
+    unlimited_slot = is_unlimited_slot(slot_code)
         
     # 检查库位是否被锁定或异常
     layout_resp = get_warehouse_layout("default")
@@ -517,8 +663,12 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
             conn,
         )
         slot_df = stats_df[stats_df["Location_Code"].astype(str).str.strip() == str(slot_code).strip()]
-        active_slot_df = slot_df[slot_df["状态"].astype(str).str.contains("库存中", na=False)]
-        if len(active_slot_df) >= WAREHOUSE_MAX_CAPACITY:
+        status_series = slot_df["状态"].astype(str).str.strip()
+        if scrap_slot:
+            active_slot_df = slot_df[status_series == "报废"]
+        else:
+            active_slot_df = slot_df[status_series.str.contains("库存中", na=False)]
+        if not unlimited_slot and len(active_slot_df) >= slot_capacity:
             trans.rollback()
             return {"ok": False, "code": "E_SLOT_FULL", "message": f"库位 {slot_code} 已满载"}
         row = conn.execute(
@@ -529,10 +679,13 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
             trans.rollback()
             return {"ok": False, "code": "E_NOT_FOUND", "message": "机台不存在"}
         current_status = str(row[1] or "").strip()
+        if current_status == "报废" and not scrap_slot:
+            trans.rollback()
+            return {"ok": False, "code": "E_SCRAPPED", "message": "报废机台不能调拨到普通库位"}
         if not is_transfer and current_status.startswith("库存中"):
             trans.rollback()
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
-        status_after = f"库存中（{slot_code}）"
+        status_after = "报废" if scrap_slot else f"库存中（{slot_code}）"
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
@@ -553,25 +706,27 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
                 status_after=status_after,
             )
         trans.commit()
+        completed_batches = []
+        if not is_transfer:
+            completed_batches = notify_inbound_completion([serial_no], operator=operator)
         enqueue_wechat_batch_summary_sync("finished_goods_inbound")
         get_data.cache_clear()
         get_data_v2.cache_clear()  # 清除 v2 缓存，确保下次读取到最新库存状态
         try:
-            import asyncio
             from api.websockets.manager import manager
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(manager.broadcast({"type": "INVENTORY_UPDATE", "serial_no": serial_no, "slot_code": slot_code}))
-                else:
-                    loop.run_until_complete(manager.broadcast({"type": "INVENTORY_UPDATE", "serial_no": serial_no, "slot_code": slot_code}))
-            except Exception:
-                pass
+            manager.broadcast_from_sync({"type": "INVENTORY_UPDATE", "serial_no": serial_no, "slot_code": slot_code})
         except ImportError:
             pass
             
         action_msg = "调拨成功" if is_transfer else "入库成功"
-        return {"ok": True, "code": "OK", "message": action_msg, "inbound_time": now_text, "slot_code": slot_code}
+        return {
+            "ok": True,
+            "code": "OK",
+            "message": action_msg,
+            "inbound_time": now_text,
+            "slot_code": slot_code,
+            "auto_completed_batches": completed_batches,
+        }
     except Exception as e:
         if trans is not None:
             trans.rollback()
@@ -588,6 +743,10 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
     """
     if not serial_no or not slot_code:
         return {"ok": False, "code": "E_INVALID_PARAM", "message": "流水号与库位号不能为空"}
+    slot_code = canonical_slot_code(slot_code)
+    slot_capacity = get_slot_capacity(slot_code)
+    scrap_slot = is_scrap_slot(slot_code)
+    unlimited_slot = is_unlimited_slot(slot_code)
 
     # 检查库位是否被锁定或异常
     layout_resp = get_warehouse_layout("default")
@@ -603,22 +762,24 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
         conn = get_engine().connect()
         trans = conn.begin()
 
-        # 优化：使用 SQL COUNT 替代全表读取
-        # 原代码：stats_df = pd.read_sql("SELECT ... FROM finished_goods_data", conn)
-        # 新代码：直接在数据库层统计
-        slot_count = conn.execute(
-            text("""
-                SELECT COUNT(*) as cnt
-                FROM finished_goods_data
-                WHERE `Location_Code` = :slot_code
-                AND `状态` LIKE '库存中%'
-            """),
-            {"slot_code": slot_code}
-        ).scalar()
+        if not unlimited_slot:
+            # 优化：使用 SQL COUNT 替代全表读取
+            # 原代码：stats_df = pd.read_sql("SELECT ... FROM finished_goods_data", conn)
+            # 新代码：直接在数据库层统计
+            slot_status_condition = "`状态` = '报废'" if scrap_slot else "`状态` LIKE '库存中%'"
+            slot_count = conn.execute(
+                text(f"""
+                    SELECT COUNT(*) as cnt
+                    FROM finished_goods_data
+                    WHERE `Location_Code` = :slot_code
+                    AND {slot_status_condition}
+                """),
+                {"slot_code": slot_code}
+            ).scalar()
 
-        if slot_count >= WAREHOUSE_MAX_CAPACITY:
-            trans.rollback()
-            return {"ok": False, "code": "E_SLOT_FULL", "message": f"库位 {slot_code} 已满载"}
+            if slot_count >= slot_capacity:
+                trans.rollback()
+                return {"ok": False, "code": "E_SLOT_FULL", "message": f"库位 {slot_code} 已满载"}
 
         # 检查机台状态（保持不变）
         row = conn.execute(
@@ -629,12 +790,15 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
             trans.rollback()
             return {"ok": False, "code": "E_NOT_FOUND", "message": "机台不存在"}
         current_status = str(row[1] or "").strip()
+        if current_status == "报废" and not scrap_slot:
+            trans.rollback()
+            return {"ok": False, "code": "E_SCRAPPED", "message": "报废机台不能调拨到普通库位"}
         if not is_transfer and current_status.startswith("库存中"):
             trans.rollback()
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
 
         # 更新入库（保持不变）
-        status_after = f"库存中（{slot_code}）"
+        status_after = "报废" if scrap_slot else f"库存中（{slot_code}）"
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
@@ -655,6 +819,9 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
                 status_after=status_after,
             )
         trans.commit()
+        completed_batches = []
+        if not is_transfer:
+            completed_batches = notify_inbound_completion([serial_no], operator=operator)
         enqueue_wechat_batch_summary_sync("finished_goods_inbound_v2")
 
         # 清除所有缓存版本
@@ -677,7 +844,14 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
             pass
 
         action_msg = "调拨成功" if is_transfer else "入库成功"
-        return {"ok": True, "code": "OK", "message": action_msg, "inbound_time": now_text, "slot_code": slot_code}
+        return {
+            "ok": True,
+            "code": "OK",
+            "message": action_msg,
+            "inbound_time": now_text,
+            "slot_code": slot_code,
+            "auto_completed_batches": completed_batches,
+        }
     except Exception as e:
         if trans is not None:
             trans.rollback()

@@ -25,6 +25,9 @@ export const confirmBatch = (id: string, batchCode?: string, expectedInboundDate
 export const batchConfirm = (batchIds: string[]) =>
   apiPost(`${P}/batches/batch-confirm`, { batch_ids: batchIds })
 
+export const createManualPredictedBatch = (data: { model_family: string; quantity: number; remark?: string }) =>
+  apiPost(`${P}/batches/manual-predicted`, data)
+
 export const insertEmptySlot = (id: string, beforeSlotIndex: number, sizeKey?: string) =>
   apiPost(`${P}/batches/${id}/insert-empty-slot`, {
     before_slot_index: beforeSlotIndex,
@@ -126,6 +129,9 @@ export const getProductionLines = () =>
 export const assignLine = (id: string, batchId: string) =>
   apiPost(`${P}/production-lines/${id}/assign`, { batch_id: batchId })
 
+export const assignLineUnits = (id: string, batchId: string, unitIds: string[]) =>
+  apiPost(`${P}/production-lines/${id}/assign-units`, { batch_id: batchId, unit_ids: unitIds })
+
 export const manualComplete = (id: string) =>
   apiPost(`${P}/production-lines/${id}/manual-complete`)
 
@@ -140,8 +146,13 @@ export const revokeBatch = (batchId: string) =>
   apiPost(`${P}/batches/${batchId}/revoke`)
 
 // Sync batch cards to plan_import after confirm
-export const previewSyncToPlan = (batchId: string, batchCode: string) =>
-  apiGet(`${P}/batches/${batchId}/sync-preview`, { params: { batch_code: batchCode } })
+export const previewSyncToPlan = (batchId: string, batchCode: string, expectedInboundDate?: string) =>
+  apiGet(`${P}/batches/${batchId}/sync-preview`, {
+    params: {
+      batch_code: batchCode,
+      ...(expectedInboundDate ? { expected_inbound_date: expectedInboundDate } : {}),
+    },
+  })
 
 export const syncBatchToPlan = (batchId: string, batchCode: string) =>
   apiPost(`${P}/batches/${batchId}/sync-to-plan`, { batch_code: batchCode })

@@ -10,9 +10,31 @@ frontend/dist/
 .env
 server/.env
 
+# Local runtime state and generated reports
+*.out.log
+*.err.log
+test-results/
+tmp-playwright-output/
+.fullstack.pids.json
+backups/
+artifacts/
+data/contracts/
+data/*/
+server/data/
+server/logs/
+server/*.exe
+server/*.exe.bak*
+launcher.exe
+launcher.exe~
+*.xlsx
+
 .vite/
 .vue-global-types/
 
 server/.gocache-build/
 server/.gomodcache-build/
 server/.gopath-build/
+
+machine_archives/
+
+scripts/

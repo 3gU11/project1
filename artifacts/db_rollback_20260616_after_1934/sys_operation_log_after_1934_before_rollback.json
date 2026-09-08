@@ -1,0 +1,67 @@
+[
+  {
+    "id": 8222,
+    "user_id": "admin",
+    "username": "系统管理员",
+    "operate_time": "2026-06-16 19:35:13",
+    "module": "销售下单",
+    "action_type": "新增",
+    "biz_type": "订单",
+    "content": "创建订单：SO-20260616-0D16；客户：朱孝一；需求机型：FR-400XS(PRO)x1；需求数量：1",
+    "serial_no": "SO-20260616-0D16",
+    "order_no": "SO-20260616-0D16",
+    "contract_no": ""
+  },
+  {
+    "id": 8223,
+    "user_id": "admin",
+    "username": "系统管理员",
+    "operate_time": "2026-06-16 19:36:27",
+    "module": "销售下单",
+    "action_type": "修改",
+    "biz_type": "订单",
+    "content": "修改订单：SO-20260616-0D16；更新字段：备注, status",
+    "serial_no": "SO-20260616-0D16",
+    "order_no": "SO-20260616-0D16",
+    "contract_no": ""
+  },
+  {
+    "id": 8224,
+    "user_id": "admin",
+    "username": "系统管理员",
+    "operate_time": "2026-06-16 19:40:03",
+    "module": "经销商订单",
+    "action_type": "审核驳回",
+    "biz_type": "订单",
+    "content": "经销商订单审核驳回：DO202605221118433529；原因：1",
+    "serial_no": "",
+    "order_no": "",
+    "contract_no": ""
+  },
+  {
+    "id": 8225,
+    "user_id": "admin",
+    "username": "系统管理员",
+    "operate_time": "2026-06-16 19:40:04",
+    "module": "经销商订单",
+    "action_type": "审核驳回",
+    "biz_type": "订单",
+    "content": "经销商订单审核驳回：DO202605220932571099；原因：1",
+    "serial_no": "",
+    "order_no": "",
+    "contract_no": ""
+  },
+  {
+    "id": 8226,
+    "user_id": "admin",
+    "username": "系统管理员",
+    "operate_time": "2026-06-16 19:40:07",
+    "module": "经销商订单",
+    "action_type": "审核驳回",
+    "biz_type": "订单",
+    "content": "经销商订单审核驳回：DO202605231026583736；原因：1",
+    "serial_no": "",
+    "order_no": "",
+    "contract_no": ""
+  }
+]

@@ -11,30 +11,6 @@ Starting server on :3001
 [GIN-debug] GET    /api/auth/me              --> smart-scheduling/server/internal/handler.(*AuthHandler).Me-fm (5 handlers)
 [GIN-debug] GET    /api/model-types          --> smart-scheduling/server/internal/handler.(*MetaHandler).ModelTypes-fm (5 handlers)
 [GIN-debug] POST   /api/units/:id/notify-update --> smart-scheduling/server/internal/handler.(*UnitHandler).NotifyUpdate-fm (4 handlers)
-[GIN-debug] POST   /api/v1/auth/login        --> smart-scheduling/server/internal/handler.(*AuthHandler).Login-fm (4 handlers)
-[GIN-debug] GET    /api/v1/auth/me           --> smart-scheduling/server/internal/handler.(*AuthHandler).Me-fm (5 handlers)
-[GIN-debug] GET    /api/v1/model-types       --> smart-scheduling/server/internal/handler.(*MetaHandler).ModelTypes-fm (5 handlers)
-[GIN-debug] GET    /api/v1/photo-files/:fileId/download --> smart-scheduling/server/internal/handler.(*PhotoHandler).DownloadTaskPhoto-fm (5 handlers)
-[GIN-debug] GET    /api/v1/machines/:serialNo/photo-profile --> smart-scheduling/server/internal/handler.(*PhotoHandler).MachinePhotoProfile-fm (5 handlers)
-[GIN-debug] POST   /api/v1/machines/:serialNo/photo-tasks/init --> smart-scheduling/server/internal/handler.(*PhotoHandler).InitMachinePhotoTasks-fm (5 handlers)
-[GIN-debug] GET    /api/v1/machines/:serialNo/photo-tasks --> smart-scheduling/server/internal/handler.(*PhotoHandler).MachinePhotoTasks-fm (5 handlers)
-[GIN-debug] POST   /api/v1/photo-tasks/:taskId/upload --> smart-scheduling/server/internal/handler.(*PhotoHandler).UploadTaskPhoto-fm (5 handlers)
-[GIN-debug] DELETE /api/v1/photo-tasks/:taskId/photo --> smart-scheduling/server/internal/handler.(*PhotoHandler).DeleteTaskPhoto-fm (5 handlers)
-[GIN-debug] POST   /api/v1/photo-tasks/:taskId/qr-decode --> smart-scheduling/server/internal/handler.(*PhotoHandler).DecodeTaskQR-fm (5 handlers)
-[GIN-debug] POST   /api/v1/photo-tasks/:taskId/ocr --> smart-scheduling/server/internal/handler.(*PhotoHandler).RunTaskOCR-fm (5 handlers)
-[GIN-debug] POST   /api/v1/photo-tasks/:taskId/recognition --> smart-scheduling/server/internal/handler.(*PhotoHandler).SaveTaskRecognition-fm (5 handlers)
-[GIN-debug] POST   /api/v1/photo-tasks/:taskId/confirm --> smart-scheduling/server/internal/handler.(*PhotoHandler).ConfirmTaskOCR-fm (5 handlers)
-[GIN-debug] POST   /api/v1/machines/:serialNo/photo-submit --> smart-scheduling/server/internal/handler.(*PhotoHandler).SubmitMachinePhotos-fm (5 handlers)
-[GIN-debug] GET    /api/v1/model-dictionary/ --> smart-scheduling/server/internal/handler.(*PhotoHandler).ListModelDictionary-fm (5 handlers)
-[GIN-debug] POST   /api/v1/model-dictionary/save --> smart-scheduling/server/internal/handler.(*PhotoHandler).SaveModelDictionary-fm (5 handlers)
-[GIN-debug] GET    /api/v1/model-dictionary/:modelId/photo-config --> smart-scheduling/server/internal/handler.(*PhotoHandler).GetModelPhotoConfig-fm (5 handlers)
-[GIN-debug] POST   /api/v1/model-dictionary/:modelId/photo-config/save --> smart-scheduling/server/internal/handler.(*PhotoHandler).SaveModelPhotoConfig-fm (5 handlers)
-[GIN-debug] GET    /api/v1/model-dictionary/photo-config/import-template --> smart-scheduling/server/internal/handler.(*PhotoHandler).DownloadPhotoImportTemplate-fm (5 handlers)
-[GIN-debug] POST   /api/v1/model-dictionary/photo-config/import --> smart-scheduling/server/internal/handler.(*PhotoHandler).ImportModelPhotoConfig-fm (5 handlers)
-[GIN-debug] GET    /api/v1/photo-items       --> smart-scheduling/server/internal/handler.(*PhotoHandler).ListPhotoItems-fm (5 handlers)
-[GIN-debug] POST   /api/v1/photo-items/save  --> smart-scheduling/server/internal/handler.(*PhotoHandler).SavePhotoItems-fm (5 handlers)
-[GIN-debug] GET    /api/v1/ocr-field-rules   --> smart-scheduling/server/internal/handler.(*PhotoHandler).ListOCRFieldRules-fm (5 handlers)
-[GIN-debug] POST   /api/v1/ocr-field-rules/save --> smart-scheduling/server/internal/handler.(*PhotoHandler).SaveOCRFieldRules-fm (5 handlers)
 [GIN-debug] GET    /api/batches              --> smart-scheduling/server/internal/handler.(*BatchHandler).List-fm (5 handlers)
 [GIN-debug] GET    /api/batches/:id          --> smart-scheduling/server/internal/handler.(*BatchHandler).GetByID-fm (5 handlers)
 [GIN-debug] GET    /api/batches/:id/units    --> smart-scheduling/server/internal/handler.(*BatchHandler).GetBatchUnits-fm (5 handlers)
@@ -68,38 +44,53 @@ Starting server on :3001
 [GIN-debug] [WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.
 Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.
 [GIN-debug] Listening and serving HTTP on :3001
-[GIN] 2026/08/31 - 15:51:38 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
-[GIN] 2026/08/31 - 15:51:44 | 200 |     29.1676ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:51:44 | 200 |     81.8804ms |             ::1 | POST     "/api/v1/machines/96-06-485/photo-tasks/init"
-[GIN] 2026/08/31 - 15:52:04 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
-[GIN] 2026/08/31 - 15:52:05 | 401 |            0s |             ::1 | GET      "/api/v1/machines/96-06-66/photo-profile"
-[GIN] 2026/08/31 - 15:53:29 | 200 |       3.965ms |             ::1 | GET      "/api/v1/machines/96-06-790/photo-profile"
-[GIN] 2026/08/31 - 15:54:31 | 200 |         4.2ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:54:33 | 200 |      3.1683ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:54:33 | 200 |      3.2316ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:54:33 | 200 |     13.7018ms |             ::1 | POST     "/api/v1/machines/96-06-485/photo-tasks/init"
-[GIN] 2026/08/31 - 15:54:41 | 200 |      3.3305ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:54:42 | 200 |    373.6816ms |             ::1 | POST     "/api/v1/photo-tasks/954/upload"
-[GIN] 2026/08/31 - 15:54:42 | 200 |      6.7631ms |             ::1 | POST     "/api/v1/photo-tasks/954/recognition"
-[GIN] 2026/08/31 - 15:54:42 | 200 |      1.7452ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-tasks"
-[GIN] 2026/08/31 - 15:54:52 | 200 |      2.8479ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:54:53 | 200 |    235.9393ms |             ::1 | POST     "/api/v1/photo-tasks/954/upload"
-[GIN] 2026/08/31 - 15:54:53 | 200 |    484.2382ms |             ::1 | POST     "/api/v1/photo-tasks/954/qr-decode"
-[GIN] 2026/08/31 - 15:54:53 | 200 |      1.0229ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-tasks"
-[GIN] 2026/08/31 - 15:55:01 | 200 |      3.4655ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:55:02 | 200 |    238.7526ms |             ::1 | POST     "/api/v1/photo-tasks/954/upload"
-[GIN] 2026/08/31 - 15:55:02 | 200 |      7.3633ms |             ::1 | POST     "/api/v1/photo-tasks/954/recognition"
-[GIN] 2026/08/31 - 15:55:02 | 200 |       838.9µs |             ::1 | GET      "/api/v1/machines/96-06-485/photo-tasks"
-[GIN] 2026/08/31 - 15:55:07 | 200 |      3.8414ms |             ::1 | GET      "/api/v1/machines/96-06-790/photo-profile"
-[GIN] 2026/08/31 - 15:55:07 | 200 |     15.0167ms |             ::1 | POST     "/api/v1/machines/96-06-790/photo-tasks/init"
-[GIN] 2026/08/31 - 15:55:18 | 200 |      3.3437ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:55:19 | 200 |    708.9662ms |             ::1 | POST     "/api/v1/photo-tasks/954/upload"
-[GIN] 2026/08/31 - 15:55:19 | 200 |      6.3188ms |             ::1 | POST     "/api/v1/photo-tasks/954/recognition"
-[GIN] 2026/08/31 - 15:55:19 | 200 |       1.016ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-tasks"
-[GIN] 2026/08/31 - 15:55:48 | 200 |      3.3233ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:56:28 | 200 |      3.8301ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:56:44 | 200 |      3.5857ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 15:57:35 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
-[GIN] 2026/08/31 - 15:57:48 | 200 |       4.985ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 16:01:48 | 200 |      3.8642ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
-[GIN] 2026/08/31 - 16:01:48 | 200 |      4.4891ms |             ::1 | GET      "/api/v1/machines/96-06-485/photo-profile"
+[GIN] 2026/06/18 - 14:30:26 | 200 |            0s |       127.0.0.1 | GET      "/api/health"
+[GIN] 2026/06/18 - 14:30:28 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/06/18 - 14:30:29 | 200 |       517.6µs |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/06/18 - 14:30:34 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/06/18 - 14:30:37 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/06/18 - 14:30:39 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/06/18 - 14:30:42 | 200 |      6.7643ms |       127.0.0.1 | POST     "/api/batches/BATCH-202606-SPECIAL-022-25394362/confirm"
+[GIN] 2026/06/18 - 14:30:43 | 200 |      5.9387ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/06/18 - 14:30:43 | 200 |     20.9984ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/06/18 - 14:30:43 | 200 |      14.807ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:30:43 | 200 |     16.3756ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:30:43 | 200 |      7.3299ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:30:45 | 200 |      5.6871ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:31:56 | 200 |      1.2355ms |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/06/18 - 14:31:56 | 200 |            0s |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/06/18 - 14:31:56 | 200 |       532.7µs |       127.0.0.1 | GET      "/api/capacity-ratio"
+[GIN] 2026/06/18 - 14:31:56 | 200 |    136.7882ms |       127.0.0.1 | POST     "/api/forecast/recompute"
+[GIN] 2026/06/18 - 14:31:56 | 200 |     21.2843ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/06/18 - 14:31:56 | 200 |      3.7161ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/06/18 - 14:31:56 | 200 |      5.8054ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:31:56 | 200 |      4.6992ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:31:56 | 200 |      5.2015ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:31:56 | 200 |      5.3484ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:31:57 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+[GIN] 2026/06/18 - 14:32:00 | 200 |       503.2µs |       127.0.0.1 | GET      "/api/model-types"
+[GIN] 2026/06/18 - 14:32:01 | 200 |     16.4594ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/06/18 - 14:32:01 | 200 |      3.6658ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/06/18 - 14:32:01 | 200 |            0s |       127.0.0.1 | GET      "/ws"
+
+2026/06/18 14:32:05 [31;1mE:/V8/project1/server/internal/repo/batch_repo.go:102 [35;1mrecord not found
+[0m[33m[0.530ms] [34;1m[rows:0][0m SELECT * FROM `batches` WHERE batch_id = 'CODEX-NO-SUCH-BATCH' ORDER BY `batches`.`batch_id` LIMIT 1 FOR UPDATE
+[GIN] 2026/06/18 - 14:32:05 | 400 |      1.7137ms |       127.0.0.1 | POST     "/api/batches/CODEX-NO-SUCH-BATCH/confirm"
+
+2026/06/18 14:32:05 [31;1mE:/V8/project1/server/internal/repo/batch_repo.go:102 [35;1mrecord not found
+[0m[33m[0.641ms] [34;1m[rows:0][0m SELECT * FROM `batches` WHERE batch_id = 'CODEX-NO-SUCH-BATCH' ORDER BY `batches`.`batch_id` LIMIT 1 FOR UPDATE
+[GIN] 2026/06/18 - 14:32:05 | 400 |     73.8681ms |       127.0.0.1 | POST     "/api/batches/CODEX-NO-SUCH-BATCH/confirm"
+
+2026/06/18 14:32:31 [31;1mE:/V8/project1/server/internal/repo/batch_repo.go:102 [35;1mrecord not found
+[0m[33m[0.531ms] [34;1m[rows:0][0m SELECT * FROM `batches` WHERE batch_id = 'CODEX-NO-SUCH-BATCH' ORDER BY `batches`.`batch_id` LIMIT 1 FOR UPDATE
+[GIN] 2026/06/18 - 14:32:31 | 400 |      2.2419ms |       127.0.0.1 | POST     "/api/batches/CODEX-NO-SUCH-BATCH/confirm"
+[GIN] 2026/06/18 - 14:49:51 | 200 |      5.1344ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/06/18 - 14:49:51 | 200 |      4.1694ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:49:51 | 200 |      4.0189ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:49:51 | 200 |     18.7013ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/06/18 - 14:49:51 | 200 |    240.8201ms |       127.0.0.1 | POST     "/api/forecast/recompute"
+[GIN] 2026/06/18 - 14:49:51 | 200 |      3.5208ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:54:35 | 200 |      5.6523ms |       127.0.0.1 | GET      "/api/batches"
+[GIN] 2026/06/18 - 14:54:35 | 200 |      5.3197ms |       127.0.0.1 | GET      "/api/batches?status=Predicted%2CConfirmed"
+[GIN] 2026/06/18 - 14:54:35 | 200 |      15.975ms |       127.0.0.1 | GET      "/api/production-lines"
+[GIN] 2026/06/18 - 14:54:35 | 200 |    861.2403ms |       127.0.0.1 | POST     "/api/forecast/recompute"

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import Any, Iterable
 
+import httpx
 from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 
+from config import GO_INTERNAL_TOKEN, GO_SANDBOX_URL
 from database import get_engine
+
+
+logger = logging.getLogger(__name__)
 
 
 def _clean(value: Any) -> str:
@@ -22,6 +28,37 @@ def _normalize_serials(serial_nos: Iterable[Any]) -> list[str]:
             seen.add(serial)
             result.append(serial)
     return result
+
+
+def notify_inbound_completion(serial_nos: Iterable[Any], operator: str = "") -> list[dict[str, Any]]:
+    serials = _normalize_serials(serial_nos)
+    if not serials:
+        return []
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Username": _clean(operator) or "system",
+        "X-Role": "Admin",
+    }
+    if GO_INTERNAL_TOKEN:
+        headers["X-Internal-Token"] = GO_INTERNAL_TOKEN
+
+    try:
+        with httpx.Client(timeout=5.0, trust_env=False) as client:
+            response = client.post(
+                f"{GO_SANDBOX_URL.rstrip('/')}/api/production-lines/reconcile-inbound",
+                headers=headers,
+                json={"serial_nos": serials},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            completed = payload.get("completed_batches", []) if isinstance(payload, dict) else []
+            return completed if isinstance(completed, list) else []
+    except Exception as exc:
+        # Inbound must remain successful even if the scheduling service is restarting.
+        # The Go service performs a full reconciliation on its next startup.
+        logger.warning("Failed to reconcile production batches after inbound: %s", exc)
+        return []
 
 
 def ensure_inbound_history_table(conn: Connection | None = None) -> None:

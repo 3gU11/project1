@@ -191,62 +191,78 @@ onMounted(loadRushOrders)
 
 <style scoped>
 .rush-entry {
-  padding: 14px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 8px;
   border: 1px solid #ebeef5;
   border-radius: 6px;
   background: #fff;
+  overflow-y: auto;
 }
 .rush-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 .rush-header h3 {
-  font-size: 14px;
+  font-size: 13px;
   margin: 0;
 }
 .rush-count {
-  font-size: 13px;
+  font-size: 11px;
   color: #666;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .rush-search {
-  margin-bottom: 8px;
+  margin-bottom: 5px;
+}
+.rush-search :deep(.el-input__wrapper) {
+  min-height: 26px;
+}
+.rush-search :deep(.el-input__inner) {
+  height: 24px;
+  font-size: 12px;
 }
 .rush-card {
-  padding: 8px 10px;
-  margin-bottom: 8px;
+  padding: 5px 7px;
+  margin-bottom: 5px;
   border-left: 3px solid #f56c6c;
-  border-radius: 6px;
+  border-radius: 5px;
   background: #fff7f7;
   cursor: grab;
 }
 .rush-card-main {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.25;
 }
 .rush-card-meta {
-  margin-top: 3px;
-  font-size: 11px;
+  margin-top: 2px;
+  font-size: 10px;
   color: #999;
 }
 .rush-card-actions {
   display: flex;
-  gap: 8px;
+  gap: 5px;
   justify-content: flex-end;
-  margin-top: 4px;
+  margin-top: 2px;
+}
+.rush-card-actions :deep(.el-button) {
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
 }
 .rush-empty {
   color: #bbb;
   text-align: center;
-  padding: 24px 8px;
-  font-size: 13px;
+  padding: 14px 6px;
+  font-size: 12px;
 }
 .rush-empty-compact {
-  padding: 12px 8px 8px;
+  padding: 8px 6px 6px;
 }
 </style>

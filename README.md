@@ -52,6 +52,30 @@ V7STD1.0 突破了传统 ERP 与生产现场的“最后一公里”断层，通
 
 ---
 
+## 📚 文档与快速启动
+
+完整的安装、配置、架构、接口、业务操作、部署、备份、测试和故障排查文档见 [`docs/README.md`](docs/README.md)。
+
+最小本地启动流程：
+
+```powershell
+pip install -r requirements.txt
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+另开终端启动 Go 服务和 PC 前端：
+
+```powershell
+cd server; go run ./cmd/main.go
+cd frontend; npm ci; npm run dev
+```
+
+访问 `http://localhost:3000`，API 健康检查为 `http://localhost:8000/health`。运行前请按 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) 配置 MySQL 和本地 `.env`。
+
+> **安全提示**：不要提交真实 `.env`、数据库密码、云端 API key、内部 token、生产备份或合同/照片原件。生产部署前请阅读 [`docs/SECURITY.md`](docs/SECURITY.md)。
+
+---
+
 ## 📅 近期优化记录
 
 ### 2026-05-23 (V8/云端协同及可靠同步体系)

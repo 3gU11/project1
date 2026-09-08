@@ -271,11 +271,11 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
   flex-shrink: 0;
 }
 .transfer-header h3 {
-  font-size: 14px;
+  font-size: 13px;
   margin: 0;
 }
 .transfer-dialog-body {
@@ -338,16 +338,16 @@ defineExpose({
 .transfer-empty {
   color: #ccc;
   text-align: center;
-  padding: 16px 8px;
-  font-size: 13px;
+  padding: 10px 6px;
+  font-size: 12px;
 }
 .transfer-pair-card {
-  padding: 8px 10px;
-  margin-bottom: 8px;
+  padding: 5px 7px;
+  margin-bottom: 5px;
   border-radius: 6px;
   border-left: 3px solid #e6a23c;
   background: #fef9f0;
-  font-size: 12px;
+  font-size: 11px;
 }
 .transfer-pair-card.selecting {
   border-left-color: #e6a23c;
@@ -370,22 +370,23 @@ defineExpose({
 .pair-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .pair-unit {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex-wrap: wrap;
   min-width: 0;
   flex: 1;
+  line-height: 1.2;
 }
 .pair-label {
   display: inline-flex;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   color: #fff;
   align-items: center;
@@ -393,41 +394,52 @@ defineExpose({
 }
 .pair-unit.urgent .pair-label { background: #e6a23c; }
 .pair-unit.target .pair-label { background: #1677ff; }
-.pair-contract { font-weight: 600; }
-.pair-model { color: #888; font-size: 11px; }
+.pair-contract {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.pair-model { color: #888; font-size: 10px; }
 .pair-due {
   flex-basis: 100%;
-  margin-left: 22px;
+  margin-left: 19px;
   color: #e65100;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
 }
 .pair-arrow { color: #999; font-weight: 700; }
 .pair-status {
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 2px;
+  font-size: 10px;
 }
 .pair-status.done { color: #67c23a; }
 .pair-status.failed { color: #f56c6c; }
 .pair-actions {
-  margin-top: 4px;
+  margin-top: 2px;
   display: flex;
-  gap: 8px;
+  gap: 5px;
   justify-content: flex-end;
+}
+.pair-actions :deep(.el-button) {
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
 }
 .transfer-footer {
   flex-shrink: 0;
   text-align: center;
-  padding-top: 6px;
+  padding-top: 4px;
   border-top: 1px solid #ebeef5;
 }
 .alternatives-box {
-  margin-top: 6px;
+  margin-top: 4px;
   border: 1px solid #e8e8e8;
   border-radius: 6px;
   background: #fff;
-  padding: 8px;
-  max-height: 260px;
+  padding: 5px;
+  max-height: 180px;
   overflow-y: auto;
 }
 .alt-group {

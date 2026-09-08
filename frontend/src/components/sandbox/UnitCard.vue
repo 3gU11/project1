@@ -77,6 +77,7 @@ const props = defineProps({
   disableProgressColor: { type: Boolean, default: false },
   stockPlaceholder: { type: Boolean, default: false },
   showCrossLane: { type: Boolean, default: false },
+  forceShowSerialNo: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
   stackCount: { type: Number, default: 1 }
 })
@@ -116,6 +117,7 @@ const displayDealerName = computed(() => {
 })
 
 const showSerialNo = computed(() => {
+  if (props.forceShowSerialNo) return true
   const bs = String(props.unit.batch_status || '').trim()
   const us = String(props.unit.status || '').trim()
   return bs === 'Confirmed' || bs === 'In_Production' || us === 'In_Production'

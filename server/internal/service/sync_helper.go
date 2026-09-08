@@ -44,6 +44,11 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 		customer := strings.TrimSpace(strPtrVal(u.Customer))
 		dealerName := strings.TrimSpace(strPtrVal(u.DealerName))
 		orderRemark := strings.TrimSpace(strPtrVal(u.OrderRemark))
+		fgStatus := strings.TrimSpace(strPtrVal(u.FgStatus))
+		if shouldSkipFinishedGoodsSync(fgStatus) {
+			log.Printf("[Sync] Skipping finished_goods_data sync for unit %s because status %q is protected", u.UnitID, fgStatus)
+			continue
+		}
 
 		updates := map[string]interface{}{}
 		if cols["合同号"] {
@@ -64,22 +69,8 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 		if cols["状态"] {
 			if contractNo != "" {
 				updates["状态"] = "已绑定"
-			} else {
-				fgStatus := strings.TrimSpace(strPtrVal(u.FgStatus))
-				isCompleted := false
-				if fgStatus == "库存中" || fgStatus == "待发货" {
-					isCompleted = true
-				} else if fgStatus == "待入库" || fgStatus == "已绑定" {
-					isCompleted = false
-				} else {
-					isCompleted = (u.Status == model.StatusCompleted)
-				}
-
-				if isCompleted {
-					updates["状态"] = "库存中"
-				} else {
-					updates["状态"] = "待入库"
-				}
+			} else if fgStatus == "已绑定" {
+				updates["状态"] = "待入库"
 			}
 		}
 		if len(updates) == 0 {
@@ -100,6 +91,72 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 			return result.Error
 		}
 		log.Printf("[Sync] Finished goods sync for unit %s: %d rows affected", u.UnitID, result.RowsAffected)
+	}
+	return nil
+}
+
+func shouldSkipFinishedGoodsSync(status string) bool {
+	status = strings.TrimSpace(status)
+	return status == "待发货" ||
+		status == "已出库" ||
+		status == "已发货" ||
+		status == "报废" ||
+		strings.HasPrefix(status, "库存中")
+}
+
+// SyncPlanImportByUnitIDs keeps the import staging row aligned with edits made on kanban cards.
+func SyncPlanImportByUnitIDs(tx *gorm.DB, unitIDs []string, fields map[string]interface{}) error {
+	if len(unitIDs) == 0 || len(fields) == 0 {
+		return nil
+	}
+	cols, err := tableColumns(tx, "plan_import")
+	if err != nil {
+		return err
+	}
+	if !cols["流水号"] {
+		return fmt.Errorf("plan_import missing column: 流水号")
+	}
+
+	updates := map[string]interface{}{}
+	if value, ok := fields["model_type"]; ok && cols["机型"] {
+		updates["机型"] = stringField(value)
+	}
+	if value, ok := fields["customer"]; ok && cols["客户"] {
+		updates["客户"] = stringField(value)
+	}
+	if value, ok := fields["dealer_name"]; ok && cols["代理商"] {
+		updates["代理商"] = stringField(value)
+	}
+	if value, ok := fields["order_remark"]; ok && cols["合同备注"] {
+		updates["合同备注"] = stringField(value)
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	var units []model.Unit
+	if err := tx.Table("units").
+		Where("unit_id IN ?", unitIDs).
+		Find(&units).Error; err != nil {
+		return err
+	}
+
+	for _, u := range units {
+		serials := unitSerialCandidates(u)
+		if len(serials) == 0 {
+			continue
+		}
+		log.Printf("[Sync] Syncing unit %s (SNs: %v) to plan_import with updates: %v", u.UnitID, serials, updates)
+
+		result := tx.Table("plan_import").
+			Where("TRIM(`流水号`) IN ?", serials).
+			Updates(updates)
+
+		if result.Error != nil {
+			log.Printf("[Sync] Error updating plan_import for unit %s: %v", u.UnitID, result.Error)
+			return result.Error
+		}
+		log.Printf("[Sync] Plan import sync for unit %s: %d rows affected", u.UnitID, result.RowsAffected)
 	}
 	return nil
 }
@@ -140,4 +197,11 @@ func strPtrVal(v *string) string {
 		return ""
 	}
 	return *v
+}
+
+func stringField(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
 }
