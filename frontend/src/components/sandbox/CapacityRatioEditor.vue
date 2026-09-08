@@ -218,7 +218,7 @@ function handleDragStart(e: MouseEvent) {
 }
 const inventoryLoading = ref(false)
 const inventoryTotal = ref(0)
-const inventoryRatioRows = ref<Array<{ name: string; current_qty: number; high_qty: number; current_pct: number }>>([])
+const inventoryRatioRows = ref<Array<{ name: string; family: MajorFamily; current_qty: number; high_qty: number; current_pct: number }>>([])
 const specialModelSet = ref<Set<string>>(new Set())
 const inventoryStore = useInventoryStore()
 const inventoryFamilyGroups = computed(() => {
