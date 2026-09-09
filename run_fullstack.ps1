@@ -4,7 +4,7 @@ param(
   [string]$GoPort = '3001',
   [string]$OCRPort = '8010',
   [string]$ApiPort = '8000',
-  [string]$WebPort = '8888',
+  [string]$WebPort = '3000',
   [string]$MobilePort = '5174',
   [string]$PythonExe = ''
 )
@@ -233,12 +233,15 @@ if ($goCmd) {
 }
 
 $npmCmd = Resolve-CommandSource 'npm.cmd'
+if (-not $npmCmd -and (Test-Path -LiteralPath 'C:\Program Files\nodejs\npm.cmd')) {
+  $npmCmd = 'C:\Program Files\nodejs\npm.cmd'
+}
 if (-not $npmCmd) { $npmCmd = Resolve-CommandSource 'npm' }
 if (-not $npmCmd) { Fail 'npm not found in PATH.' 1 }
 Log "npm: $npmCmd"
 
 $goCache = Join-Path $serverDir '.gocache-build'
-$goModCache = Join-Path $serverDir '.gomodcache-build'
+$goModCache = if ($goCmd) { (& $goCmd env GOMODCACHE).Trim() } else { Join-Path $serverDir '.gomodcache-build' }
 if (-not $DryRun) {
   New-Item -ItemType Directory -Force -Path $goCache | Out-Null
   New-Item -ItemType Directory -Force -Path $goModCache | Out-Null

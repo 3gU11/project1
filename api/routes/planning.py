@@ -2136,6 +2136,27 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
             inv_df[col] = ""
     inv_df = inv_df[inv_df["状态"].astype(str).str.strip() != "报废"].copy()
 
+    # Confirmed batches may still exist only in the sandbox `units` table
+    # (especially after a machine-level cross-family edit). Expose those
+    # forecast serials to allocation as inventory candidates.
+    try:
+        with get_engine().connect() as conn:
+            unit_inventory = conn.execute(text("""
+                SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS `流水号`,
+                       u.model_type AS `机型`, COALESCE(u.contract_no, '') AS `合同号`,
+                       COALESCE(u.sales_id, '') AS `占用订单号`, '待配货' AS `状态`,
+                       b.batch_code AS `批次号`, COALESCE(u.customer, '') AS `客户`,
+                       COALESCE(u.dealer_name, '') AS `代理商`, COALESCE(u.order_remark, '') AS `合同备注`
+                FROM units u JOIN batches b ON b.batch_id=u.batch_id
+                WHERE b.status IN ('Confirmed','In_Production')
+                  AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IS NOT NULL
+                  AND TRIM(COALESCE(u.contract_no, '')) = ''
+            """)).mappings().all()
+        if unit_inventory:
+            inv_df = pd.concat([inv_df, pd.DataFrame([dict(x) for x in unit_inventory])], ignore_index=True).drop_duplicates(subset=['流水号'], keep='first')
+    except Exception:
+        pass
+
     linked_rows = pd.DataFrame(columns=inv_df.columns)
     if contract_ids:
         linked_rows = inv_df[inv_df["合同号"].astype(str).str.strip().isin(contract_ids)].copy()
@@ -2805,6 +2826,30 @@ def _sync_order_detail_rows_to_units_and_inventory(
             """).bindparams(bindparam("remarks", expanding=True)),
             {"cid": cid, "model": model, "order_id": order_id, "remarks": desired_remarks or [""]},
         ).mappings().all()
+        # A machine-level cross-family edit may leave the unit uncontracted.
+        # Bind available units by their actual model before syncing order data.
+        if len(unit_rows) < len(desired_remarks):
+            missing = len(desired_remarks) - len(unit_rows)
+            candidates = conn.execute(
+                text("""
+                    SELECT u.unit_id, u.serial_no, u.forecast_serial_no,
+                           COALESCE(u.order_remark, '') AS order_remark
+                    FROM units u JOIN batches b ON b.batch_id = u.batch_id
+                    WHERE TRIM(COALESCE(u.contract_no, '')) = ''
+                      AND TRIM(COALESCE(u.model_type, '')) = :model
+                      AND b.status IN ('Confirmed', 'In_Production')
+                    ORDER BY u.batch_id, u.slot_index, u.unit_id
+                    LIMIT :missing
+                    FOR UPDATE
+                """), {"model": model, "missing": missing}).mappings().all()
+            if candidates:
+                for candidate in candidates:
+                    conn.execute(text("""
+                        UPDATE units SET contract_no=:cid, sales_id=:order_id, updated_at=NOW()
+                        WHERE unit_id=:unit_id
+                    """), {"cid": cid, "order_id": order_id, "unit_id": candidate["unit_id"]})
+                    stats["units"] += 1
+                unit_rows = list(unit_rows) + list(candidates)
         unit_ids = [str(r.get("unit_id") or "").strip() for r in unit_rows if str(r.get("unit_id") or "").strip()]
         assigned_unit_remarks = assign_remarks(list(unit_rows), desired_remarks, "order_remark")
         for idx, unit_id in enumerate(unit_ids):
@@ -3272,6 +3317,18 @@ def complete_order_allocation_api(
             raise HTTPException(status_code=422, detail="订单需求机型为空，无法完成配货")
 
         inv_df = get_data()
+        # Include sandbox units allocated by forecast serial; these are not yet
+        # materialized in finished_goods_data but are valid pre-inbound machines.
+        with get_engine().connect() as conn:
+            unit_rows = conn.execute(text("""
+                SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS `流水号`,
+                       u.model_type AS `机型`, COALESCE(u.sales_id, '') AS `占用订单号`,
+                       '待入库' AS `状态`, b.batch_code AS `批次号`, COALESCE(u.order_remark, '') AS `合同备注`
+                FROM units u JOIN batches b ON b.batch_id=u.batch_id
+                WHERE TRIM(COALESCE(u.sales_id, ''))=:order_id
+            """), {"order_id": order_id}).mappings().all()
+        if unit_rows:
+            inv_df = pd.concat([inv_df, pd.DataFrame([dict(x) for x in unit_rows])], ignore_index=True)
         if inv_df.empty:
             raise HTTPException(status_code=422, detail="配货未完成：未找到已配机台")
         for col in ["流水号", "机型", "批次号", "合同备注", "状态", "占用订单号"]:
@@ -3307,12 +3364,24 @@ def complete_order_allocation_api(
             for _, row in pending_inbound_df.iterrows()
         }
         if serials:
-            from database import get_engine
-            from sqlalchemy import text, bindparam
+            from sqlalchemy import bindparam
             from crud.inbound_history import notify_inbound_completion, record_inbound_history
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
             try:
                 with get_engine().begin() as conn:
+                    # Materialize sandbox units into the inventory read model
+                    # before the automatic-inbound status transition.
+                    conn.execute(text("""
+                        INSERT INTO finished_goods_data
+                            (`流水号`,`批次号`,`机型`,`状态`,`预计入库时间`,`更新时间`,`占用订单号`,`客户`,`代理商`,`合同备注`,`合同号`)
+                        SELECT COALESCE(NULLIF(u.serial_no,''),u.forecast_serial_no), b.batch_code, u.model_type,
+                               '待入库', b.expected_inbound_date, :now, u.sales_id, u.customer, u.dealer_name,
+                               u.order_remark, u.contract_no
+                        FROM units u JOIN batches b ON b.batch_id=u.batch_id
+                        WHERE COALESCE(NULLIF(u.serial_no,''),u.forecast_serial_no) IN :sns
+                          AND NOT EXISTS (SELECT 1 FROM finished_goods_data fg
+                                          WHERE fg.`流水号`=COALESCE(NULLIF(u.serial_no,''),u.forecast_serial_no))
+                    """).bindparams(bindparam("sns", expanding=True)), {"sns": serials, "now": now_str})
                     conn.execute(
                         text("""
                             UPDATE finished_goods_data

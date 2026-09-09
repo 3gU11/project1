@@ -66,7 +66,7 @@
         <div class="c note">合同备注</div>
         <div class="c time">更新时间</div>
       </div>
-      <VirtualScrollList :items="filteredRows" :height="500" :item-height="44" item-key="流水号" :overscan="12">
+      <VirtualScrollList :items="paginatedRows" :height="500" :item-height="44" item-key="流水号" :overscan="12">
         <template #default="{ item: row }">
           <div class="vrow">
             <div class="c ck">
@@ -83,6 +83,20 @@
           </div>
         </template>
       </VirtualScrollList>
+    </div>
+
+    <div class="pagination-bar">
+      <span class="pagination-info">
+        共 {{ filteredRows.length }} 条，显示第 {{ Math.min((currentPage - 1) * pageSize + 1, filteredRows.length) }} - {{ Math.min(currentPage * pageSize, filteredRows.length) }} 条
+      </span>
+      <el-pagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :page-sizes="pageSizeOptions"
+        :total="filteredRows.length"
+        layout="sizes, prev, pager, next, jumper"
+        @size-change="currentPage = 1"
+      />
     </div>
 
     <el-divider />
@@ -118,6 +132,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { normalizeModelName } from '../utils/modelOrder'
+import { productionGroupOfCategory } from '../utils/sandboxCategory'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type MessageResponse = { message?: string }
 
@@ -139,6 +154,11 @@ const batchModel = ref('')
 const optXsAuto = ref(false)
 const optBackCond = ref(false)
 const sortState = ref<{ key: SortKey; direction: SortDirection } | null>(null)
+
+// 分页相关
+const currentPage = ref(1)
+const pageSize = ref(100)
+const pageSizeOptions = [50, 100, 200, 500, 1000]
 
 const modelOptions = computed(() =>
   modelDictionaryStore.rows
@@ -241,6 +261,12 @@ const isBoundRow = (row: Row) => {
   return Boolean(String(row['占用订单号'] || '').trim() || String(row['合同号'] || '').trim())
 }
 
+const formatMachineBrief = (row: Row) => {
+  const sn = String(row['流水号'] || '').trim() || '-'
+  const model = String(row['机型'] || '').trim() || '-'
+  return `${sn}(${model})`
+}
+
 const formatBoundMachine = (row: Row) => {
   const sn = String(row['流水号'] || '').trim() || '-'
   const orderNo = String(row['占用订单号'] || '').trim()
@@ -260,6 +286,13 @@ const filteredRows = computed(() => {
   const state = sortState.value
   if (!state) return result
   return [...result].sort((a, b) => compareRows(a, b, state.key, state.direction))
+})
+
+// 分页后的数据
+const paginatedRows = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return filteredRows.value.slice(start, end)
 })
 
 const cycleSort = (key: SortKey) => {
@@ -371,32 +404,38 @@ const toggleRow = (row: Row, checked: boolean) => {
   selectedSet.value = next
   selectedSerials.value = Array.from(next)
 }
-const allVisibleSelected = computed(() => filteredRows.value.length > 0 && filteredRows.value.every((r) => isSelected(r)))
+const allVisibleSelected = computed(() => paginatedRows.value.length > 0 && paginatedRows.value.every((r) => isSelected(r)))
 const isVisibleIndeterminate = computed(() => {
-  if (filteredRows.value.length === 0) return false
-  const hit = filteredRows.value.filter((r) => isSelected(r)).length
-  return hit > 0 && hit < filteredRows.value.length
+  if (paginatedRows.value.length === 0) return false
+  const hit = paginatedRows.value.filter((r) => isSelected(r)).length
+  return hit > 0 && hit < paginatedRows.value.length
 })
 const toggleAllVisible = (checked: boolean) => {
-  const next = new Set(selectedSet.value)
   if (checked) {
-    for (const r of filteredRows.value) {
+    // 全选时：先清空所有已选，然后只选中当前页
+    const next = new Set<string>()
+    for (const r of paginatedRows.value) {
       const sn = String(r['流水号'] || '')
       if (sn) next.add(sn)
     }
+    selectedSet.value = next
+    selectedSerials.value = Array.from(next)
   } else {
-    for (const r of filteredRows.value) {
+    // 取消全选时：取消当前页的选中
+    const next = new Set(selectedSet.value)
+    for (const r of paginatedRows.value) {
       const sn = String(r['流水号'] || '')
       if (sn) next.delete(sn)
     }
+    selectedSet.value = next
+    selectedSerials.value = Array.from(next)
   }
-  selectedSet.value = next
-  selectedSerials.value = Array.from(next)
 }
 
 const confirmBatchModelChange = async (targetModel: string) => {
   const targetFamily = modelFamilyOf(targetModel)
-  if (!targetFamily) {
+  const targetGroup = productionGroupOfCategory(targetFamily)
+  if (!targetFamily || !targetGroup) {
     ElMessage.error(`目标机型未配置族类，无法改型：${targetModel}`)
     return false
   }
@@ -407,8 +446,8 @@ const confirmBatchModelChange = async (targetModel: string) => {
 
   try {
     await ElMessageBox.confirm(
-      `确认按流水号将 ${selectedRows.value.length} 台机台机型改为 ${targetModel}？批次号、流水号、预计入库时间保持不变。`,
-      '改型确认',
+      `确认按流水号将 ${selectedRows.value.length} 台机台机型改为 ${targetModel}？这是批次内机台级机型调整，批次号、流水号、预计入库时间保持不变。`,
+      '批次内机台级机型调整确认',
       {
         confirmButtonText: '确认修改',
         cancelButtonText: '取消',
@@ -449,6 +488,11 @@ const saveBatch = async () => {
       confirm_bound_change: false,
     })
     ElMessage.success(targetModel ? (res.message || '已按流水号修正机型，批次号不变') : (res.message || '批量更新成功'))
+
+    // 清空备注输入框和机型选择
+    batchNote.value = ''
+    batchModel.value = ''
+
     await loadData()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '批量更新失败')
@@ -474,6 +518,17 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-size: var(--font-size-sm);
+  color: var(--color-gray-500);
+}
+.pagination-bar {
+  margin-top: var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+}
+.pagination-info {
   font-size: var(--font-size-sm);
   color: var(--color-gray-500);
 }
