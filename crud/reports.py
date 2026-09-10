@@ -446,12 +446,31 @@ def get_completion_output_report_data(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Fetch completion/output report data with filters.
-    Uses finished_goods_data + shipping_history so historical shipped machines
-    that lack inbound_history events are still counted once by serial number.
+    Count the first manual/automatic inbound event across all history, then
+    filter its date and the authoritative current machine status.
     """
     with get_engine().connect() as conn:
         base_sql = """
-            WITH combined AS (
+            WITH inbound_events AS (
+                SELECT TRIM(serial_no) COLLATE utf8mb4_0900_ai_ci AS serial_no,
+                    operate_time AS completed_at,
+                    '人工入库' AS inbound_method, 'sys_operation_log' AS log_source,
+                    0 AS event_rank
+                FROM sys_operation_log
+                WHERE module = '入库作业' AND action_type = '入库' AND biz_type = '机台'
+                UNION ALL
+                SELECT TRIM(`流水号`) COLLATE utf8mb4_0900_ai_ci,
+                    `时间`, '自动匹配入库', 'transaction_log', 1
+                FROM transaction_log
+                WHERE `操作类型` IN ('直接配货-自动入库', '配货自动入库')
+            ), first_inbound AS (
+                SELECT inbound_events.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY serial_no ORDER BY completed_at, event_rank
+                    ) AS event_rn
+                FROM inbound_events
+                WHERE COALESCE(serial_no, '') <> '' AND completed_at IS NOT NULL
+            ), combined AS (
                 SELECT
                     0 AS source_rank,
                     '成品库' COLLATE utf8mb4_0900_ai_ci AS source_table,
@@ -468,12 +487,6 @@ def get_completion_output_report_data(
                     COALESCE(fg.`合同备注`, '') COLLATE utf8mb4_0900_ai_ci AS remark,
                     COALESCE(fg.`Location_Code`, '') COLLATE utf8mb4_0900_ai_ci AS slot_code
                 FROM finished_goods_data fg
-                WHERE fg.`预计入库时间` >= :start_date
-                    AND fg.`预计入库时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
-                    AND COALESCE(fg.`状态`, '') <> '待入库'
-                    AND COALESCE(fg.`状态`, '') <> ''
-                    AND (:model_type = '' OR fg.`机型` = :model_type)
-                    AND (:customer = '' OR fg.`客户` = :customer)
 
                 UNION ALL
 
@@ -493,12 +506,6 @@ def get_completion_output_report_data(
                     COALESCE(sh.`合同备注`, '') COLLATE utf8mb4_0900_ai_ci AS remark,
                     '' COLLATE utf8mb4_0900_ai_ci AS slot_code
                 FROM shipping_history sh
-                WHERE sh.`预计入库时间` >= :start_date
-                    AND sh.`预计入库时间` < DATE_ADD(:end_date, INTERVAL 1 DAY)
-                    AND COALESCE(sh.`状态`, '') <> '待入库'
-                    AND COALESCE(sh.`状态`, '') <> ''
-                    AND (:model_type = '' OR sh.`机型` = :model_type)
-                    AND (:customer = '' OR sh.`客户` = :customer)
             ),
             dedup AS (
                 SELECT
@@ -514,8 +521,8 @@ def get_completion_output_report_data(
 
         detail_sql = text(base_sql + """
             SELECT
-                DATE_FORMAT(completed_at, '%Y-%m-%d') AS `完工日期`,
-                serial_no AS `流水号`,
+                DATE_FORMAT(e.completed_at, '%Y-%m-%d') AS `完工日期`,
+                d.serial_no AS `流水号`,
                 batch_no AS `批次号`,
                 model AS `机型`,
                 status AS `状态`,
@@ -526,11 +533,19 @@ def get_completion_output_report_data(
                 slot_code AS `库位`,
                 remark AS `合同备注`,
                 source_table AS `数据来源`,
-                DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i') AS `完工时间`,
+                e.inbound_method AS `入库方式`,
+                e.log_source AS `日志来源`,
+                DATE_FORMAT(e.completed_at, '%Y-%m-%d %H:%i:%s') AS `完工时间`,
                 DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i') AS `更新时间`
-            FROM dedup
-            WHERE rn = 1
-            ORDER BY completed_at ASC, batch_no ASC, serial_no ASC
+            FROM dedup d
+            JOIN first_inbound e ON e.serial_no = d.serial_no AND e.event_rn = 1
+            WHERE d.rn = 1
+                AND e.completed_at >= :start_date
+                AND e.completed_at < DATE_ADD(:end_date, INTERVAL 1 DAY)
+                AND TRIM(COALESCE(d.status, '')) NOT IN ('', '待入库')
+                AND (:model_type = '' OR d.model = :model_type)
+                AND (:customer = '' OR d.customer = :customer)
+            ORDER BY e.completed_at ASC, batch_no ASC, d.serial_no ASC
         """)
 
         params = {
@@ -541,21 +556,13 @@ def get_completion_output_report_data(
         }
         detail_df = pd.read_sql(detail_sql, conn, params=params)
 
-        summary_sql = text(base_sql + """
-            SELECT
-                d.model AS `机型`,
-                COUNT(*) AS `数量`,
-                COALESCE(md.sort_order, 9999) AS sort_order
-            FROM dedup d
-            LEFT JOIN model_dictionary md
-                ON md.model_name = d.model COLLATE utf8mb4_general_ci
-            WHERE d.rn = 1
-                AND COALESCE(d.model, '') <> ''
-            GROUP BY d.model, md.sort_order
-            ORDER BY sort_order ASC, d.model
-        """)
-
-        summary_df = pd.read_sql(summary_sql, conn, params=params)
+        # Aggregate the same detail snapshot so preview and export cannot diverge.
+        detail_df['机型'] = detail_df['机型'].fillna('').replace('', '未填写机型')
+        summary_df = detail_df.groupby('机型').size().reset_index(name='数量')
+        dictionary = pd.read_sql(text('SELECT model_name, sort_order FROM model_dictionary'), conn)
+        order = dictionary.drop_duplicates('model_name').set_index('model_name')['sort_order']
+        summary_df['sort_order'] = summary_df['机型'].map(order).fillna(9999)
+        summary_df = summary_df.sort_values(['sort_order', '机型'])
         if not summary_df.empty:
             total = summary_df['数量'].sum()
             summary_df['占比'] = summary_df['数量'].apply(lambda x: f"{(x/total*100):.2f}%")

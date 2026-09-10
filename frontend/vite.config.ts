@@ -35,7 +35,7 @@ export default defineConfig({
     proxy: {
       '/api/v1/photo-items': photoApiProxy,
       '/api/v1/ocr-field-rules': photoApiProxy,
-      '/api/v1/model-dictionary': photoApiProxy,
+      '^/api/v1/model-dictionary/(?:[^/]+/)?photo-config(?:/|$)': photoApiProxy,
       '/api/v1/machines': photoApiProxy,
       '/api/v1/photo-tasks': photoApiProxy,
       '/api/v1/photo-files': photoApiProxy,
