@@ -26,7 +26,7 @@
     <div class="card">
       <!-- 库管角色：直接点击编辑 -->
       <van-list
-        v-if="isProd"
+        v-if="isProd || isAfterSales"
         v-model:loading="loadingMore"
         :finished="finished"
         finished-text="没有更多了"
@@ -175,11 +175,12 @@ const onlyShippingReview = computed({
 })
 
 const isProd = computed(() => userStore.userInfo?.role === 'Prod')
-const pageTitle = computed(() => isProd.value ? '查询管理' : '机台入库')
+const isAfterSales = computed(() => userStore.userInfo?.role === 'AfterSales')
+const pageTitle = computed(() => isAfterSales.value ? '拍照任务查询' : (isProd.value ? '查询管理' : '机台入库'))
 const countTitle = computed(() => (isProd.value ? '现有数量' : '待入库数量'))
 const visibleList = computed(() => {
   let list = inventoryStore.list
-  if (isProd.value) {
+  if (isProd.value || isAfterSales.value) {
     if (onlyShippingReview.value) {
       list = list.filter((item) => item.status.includes('待发货'))
     }
@@ -188,7 +189,7 @@ const visibleList = computed(() => {
   return list.filter((item) => item.status.includes('待入库'))
 })
 const countValue = computed(() => {
-  if (isProd.value) {
+  if (isProd.value || isAfterSales.value) {
     return visibleList.value.length
   }
   return visibleList.value.length
@@ -206,7 +207,7 @@ const filteredSlots = computed(() => {
 
 const load = async () => {
   await inventoryStore.loadInventory(keyword.value)
-  if (!isProd.value) {
+  if (!isProd.value && !isAfterSales.value) {
     await inventoryStore.loadSlots()
   }
   resetProgressiveList()
@@ -253,7 +254,7 @@ watch([keyword, onlyShippingReview], () => {
 
 const goToEdit = (serialNo: string) => {
   if (!serialNo) return
-  router.push(`/machine-edit/${serialNo}`)
+  router.push(isAfterSales.value ? `/photo-tasks/${serialNo}` : `/machine-edit/${serialNo}`)
 }
 
 const toggleSelection = (serialNo: string) => {

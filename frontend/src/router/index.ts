@@ -29,6 +29,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/shipping-review', name: 'ShippingReview', label: '📗 发货复核', title: '发货复核', permission: 'SHIP_CONFIRM', component: () => import('../views/ShippingReview.vue') },
   { path: '/machine-archive', name: 'MachineArchive', label: '🔧 机台档案', title: '机台档案', permission: 'ARCHIVE', component: () => import('../views/MachineArchive.vue') },
   { path: '/machine-edit', name: 'MachineEdit', label: '🛠️ 机台编辑', title: '机台编辑', permission: 'MACHINE_EDIT', component: () => import('../views/MachineEdit.vue') },
+  { path: '/photo-tasks', name: 'PhotoTasks', label: '📷 拍照任务', title: '拍照任务管理', permission: 'ARCHIVE', isManagement: true, component: () => import('../views/PhotoTaskManagement.vue') },
   { path: '/warehouse-dashboard', name: 'WarehouseDashboard', label: '🖥️ 库位大屏', title: '库位大屏', permission: 'WAREHOUSE_MAP', component: () => import('../views/WarehouseDashboard.vue') },
   { path: '/logs', name: 'Logs', label: '📜 交易日志', title: '交易日志', permission: 'LOG_VIEW', component: () => import('../views/LogViewer.vue') },
   { path: '/inventory', name: 'Inventory', label: '🔎 库存查询', title: '库存查询', permission: 'QUERY', component: () => import('../views/InventoryQuery.vue') },

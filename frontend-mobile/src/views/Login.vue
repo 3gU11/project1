@@ -23,6 +23,7 @@
                 <van-radio-group v-model="reg.role" direction="horizontal">
                   <van-radio name="Inbound">入库员</van-radio>
                   <van-radio name="Prod">库管</van-radio>
+                  <van-radio name="AfterSales">售后</van-radio>
                   <van-radio name="LineOperator">产线操作员</van-radio>
                 </van-radio-group>
               </template>
@@ -56,7 +57,7 @@ const reg = ref({
   name: '',
   username: '',
   password: '',
-  role: 'Inbound' as 'Inbound' | 'Prod' | 'LineOperator',
+  role: 'Inbound' as 'Inbound' | 'Prod' | 'AfterSales' | 'LineOperator',
 })
 
 const canViewProduction = () =>

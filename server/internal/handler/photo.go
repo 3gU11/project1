@@ -485,6 +485,27 @@ func (h *PhotoHandler) MachinePhotoTasks(c *gin.Context) {
 	h.respondTasks(c, strings.TrimSpace(c.Param("serialNo")))
 }
 
+// ListPhotoTasks returns the collected task records for the web management view.
+func (h *PhotoHandler) ListPhotoTasks(c *gin.Context) {
+	query := h.db.Table("machine_photo_tasks")
+	if serialNo := strings.TrimSpace(c.Query("serial_no")); serialNo != "" {
+		query = query.Where("serial_no LIKE ?", "%"+serialNo+"%")
+	}
+	if status := strings.TrimSpace(c.Query("status")); status != "" {
+		query = query.Where("status = ?", status)
+	}
+	var rows []machinePhotoTaskRow
+	if err := query.Order("serial_no ASC, sort_order ASC, id ASC").Limit(1000).Find(&rows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.attachOCRResults(rows); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rows, "total": len(rows)})
+}
+
 func (h *PhotoHandler) UploadTaskPhoto(c *gin.Context) {
 	taskID, err := strconv.ParseInt(c.Param("taskId"), 10, 64)
 	if err != nil || taskID <= 0 {

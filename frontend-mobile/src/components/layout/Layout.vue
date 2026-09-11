@@ -24,10 +24,6 @@ import { startInventorySync, stopInventorySync } from '@/utils/inventorySync'
 
 const userStore = useUserStore()
 
-const canViewProduction = computed(() =>
-  userStore.userInfo?.role === 'LineOperator' || userStore.hasPermission('MOBILE_KANBAN_VIEW')
-)
-
 const tabbarItems = computed(() => {
   if (userStore.userInfo?.role === 'LineOperator') {
     return [
@@ -36,24 +32,10 @@ const tabbarItems = computed(() => {
     ]
   }
 
-  if (userStore.userInfo?.role === 'Prod') {
-    return [
-      { title: '查询', to: '/query', icon: 'search' },
-      { title: '找货', to: '/locator', icon: 'location-o' },
-      { title: '我的', to: '/profile', icon: 'user-o' },
-    ]
-  }
-
-  const items = [
-    { title: '入库', to: '/query', icon: 'scan' },
-    { title: '找货', to: '/locator', icon: 'location-o' },
-    { title: '看板', to: '/dashboard', icon: 'chart-trending-o' },
+  return [
+    { title: '扫码任务', to: '/query', icon: 'scan' },
+    { title: '我的', to: '/profile', icon: 'user-o' },
   ]
-  if (canViewProduction.value) {
-    items.push({ title: '生产', to: '/production', icon: 'cluster-o' })
-  }
-  items.push({ title: '我的', to: '/profile', icon: 'user-o' })
-  return items
 })
 
 onMounted(() => startInventorySync(userStore.token))

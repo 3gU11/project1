@@ -14,7 +14,7 @@ export type LoginResponse = {
 export type RegisterPayload = {
   username: string
   password: string
-  role: 'Boss' | 'Admin' | 'Sales' | 'Prod' | 'Inbound' | 'LineOperator'
+    role: 'Boss' | 'Admin' | 'Sales' | 'Prod' | 'Inbound' | 'AfterSales' | 'LineOperator'
   name: string
 }
 

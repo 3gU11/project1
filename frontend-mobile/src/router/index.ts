@@ -17,7 +17,7 @@ const routes = [
         path: 'query',
         name: 'Query',
         component: () => import('../views/InventoryQuery.vue'),
-        meta: { roles: ['Inbound', 'Prod'] }
+        meta: { roles: ['Inbound', 'Prod', 'AfterSales'] }
       },
       {
         path: 'dashboard',
@@ -41,7 +41,7 @@ const routes = [
         path: 'profile',
         name: 'Profile',
         component: () => import('../views/Profile.vue'),
-        meta: { roles: ['Inbound', 'Prod', 'LineOperator'] }
+        meta: { roles: ['Inbound', 'Prod', 'AfterSales', 'LineOperator'] }
       }
     ]
   },
@@ -49,7 +49,13 @@ const routes = [
     path: '/machine-edit/:id',
     name: 'MachineEdit',
     component: () => import('../views/MachineEdit.vue'),
-    meta: { requiresAuth: true, roles: ['Inbound', 'Prod'] }
+    meta: { requiresAuth: true, roles: ['Inbound', 'Prod', 'AfterSales'] }
+  },
+  {
+    path: '/photo-tasks/:id',
+    name: 'PhotoTasks',
+    component: () => import('../views/MachineEdit.vue'),
+    meta: { requiresAuth: true, roles: ['Inbound', 'Prod', 'AfterSales'] }
   },
   {
     path: '/:pathMatch(.*)*',

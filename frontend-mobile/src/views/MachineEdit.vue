@@ -1,6 +1,6 @@
 <template>
   <div class="machine-edit">
-    <van-nav-bar title="机台档案" left-arrow fixed placeholder @click-left="router.back()" />
+    <van-nav-bar :title="isPhotoTasksPage ? '拍照任务' : '机台档案'" left-arrow fixed placeholder @click-left="router.back()" />
 
     <van-cell-group inset title="基础信息" class="mt-4">
       <van-cell title="流水号" :value="machineInfo.serialNo || serialNo" />
@@ -9,7 +9,16 @@
       <van-cell title="所在库位" :value="machineInfo.slotCode || '-'" />
     </van-cell-group>
 
-    <van-cell-group inset title="结构化拍照任务" class="mt-4">
+    <van-cell-group v-if="!isPhotoTasksPage && !isProd" inset title="拍照任务" class="mt-4">
+      <van-cell
+        title="结构化拍照任务"
+        value="进入任务模块"
+        is-link
+        @click="router.push({ name: 'PhotoTasks', params: { id: serialNo } })"
+      />
+    </van-cell-group>
+
+    <van-cell-group v-if="isPhotoTasksPage" inset title="结构化拍照任务" class="mt-4">
       <div class="task-summary">
         <div>
           <strong>{{ summary.photo_done }}/{{ summary.total }}</strong>
@@ -101,7 +110,7 @@
       </div>
     </van-cell-group>
 
-    <van-cell-group inset title="历史图片/其他图片" class="mt-4">
+    <van-cell-group v-if="!isPhotoTasksPage" inset title="历史图片/其他图片" class="mt-4">
       <div class="upload-container">
         <van-uploader
           v-model="fileList"
@@ -128,13 +137,17 @@ import type { UploaderFileListItem } from 'vant'
 import request from '@/api/index'
 import { inventoryApi } from '@/api/inventory'
 import { useInventoryStore } from '@/store/inventory'
+import { useUserStore } from '@/store/user'
 import { mapMachine } from '@/utils/mapper'
 import { useInventoryAutoRefresh } from '@/utils/useInventoryAutoRefresh'
 
 const route = useRoute()
 const router = useRouter()
 const inventoryStore = useInventoryStore()
+const userStore = useUserStore()
 const serialNo = computed(() => String(route.params.id || ''))
+const isPhotoTasksPage = computed(() => route.name === 'PhotoTasks')
+const isProd = computed(() => userStore.userInfo?.role === 'Prod')
 
 type ArchiveUploaderItem = UploaderFileListItem & {
   file_name?: string
@@ -755,7 +768,7 @@ const onDelete = async (item: any) => {
 }
 
 watch(
-  serialNo,
+  [serialNo, isPhotoTasksPage],
   async () => {
     revokeObjectUrls()
     fileList.value = []
@@ -763,8 +776,11 @@ watch(
     summary.value = defaultSummary()
     machineInfo.value = { serialNo: '', model: '', status: '', slotCode: '' }
     await loadMachineInfo()
-    await initTasks()
-    await loadFiles()
+    if (isPhotoTasksPage.value) {
+      await initTasks()
+    } else {
+      await loadFiles()
+    }
   },
   { immediate: true }
 )
