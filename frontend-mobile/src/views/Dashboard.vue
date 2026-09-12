@@ -154,8 +154,8 @@ const findMachine = async () => {
   if (!keyword) { showToast('请输入机台流水号'); return }
   searching.value = true
   try {
-    // 保留看板全量库存，避免打开库位时只剩下被搜索的单台机。
-    if (!inventoryStore.list.length) await inventoryStore.loadInventory()
+    // 每次查询前强制恢复看板全量库存，避免复用其他页面留下的筛选列表。
+    await inventoryStore.loadInventory()
     searchedMachine.value = inventoryStore.list.find((item) => item.serialNo === keyword) || inventoryStore.list.find((item) => item.serialNo.includes(keyword)) || null
     if (!searchedMachine.value) showToast('未找到对应机台')
   } finally { searching.value = false }
