@@ -55,19 +55,6 @@
 
         <div class="section-title">目标库位</div>
         <van-field v-model="targetSlotCode" label="目标库位" placeholder="请输入目标库位名称" clearable />
-        <div v-if="availableTargetSlots.length" class="target-grid">
-          <div
-            v-for="slot in availableTargetSlots"
-            :key="slot.code"
-            class="target-card"
-            :class="{ 'target-card--active': targetSlotCode === slot.code }"
-            @click="targetSlotCode = slot.code"
-          >
-            <div class="target-card__code">{{ slot.code }}</div>
-            <div class="target-card__meta">{{ slot.current }} / {{ capacityText(slot) }}</div>
-          </div>
-        </div>
-        <van-empty v-else description="没有可调拨的目标库位" />
 
         <div class="popup-actions">
           <van-button block round @click="showSlotPopup = false">关闭</van-button>
@@ -110,15 +97,6 @@ const currentSlotMachines = computed(() => {
   const code = currentSlot.value?.code || ''
   if (!code) return [] as MobileMachine[]
   return inventoryStore.list.filter((item) => item.slotCode === code && item.status.includes('库存中'))
-})
-
-const availableTargetSlots = computed(() => {
-  const currentCode = currentSlot.value?.code || ''
-  return inventoryStore.slots.filter((slot) => {
-    if (!slot.code || slot.code === currentCode) return false
-    if (slot.status.includes('锁定') || slot.status.includes('异常')) return false
-    return slot.unlimited || slot.max === null || slot.current < slot.max
-  })
 })
 
 const canTransfer = computed(() => !!selectedSerialNo.value && !!targetSlotCode.value.trim())
@@ -299,8 +277,7 @@ useInventoryAutoRefresh(loadData)
   position: relative;
   height: 100%;
   box-sizing: border-box;
-  overflow-y: auto;
-  padding: 16px 16px 96px;
+  padding: 16px 16px 32px;
 }
 
 .popup-header {
@@ -362,12 +339,6 @@ useInventoryAutoRefresh(loadData)
 
 .popup-actions {
   display: flex;
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
   margin-top: 24px;
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-  background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 </style>
