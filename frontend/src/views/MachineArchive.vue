@@ -7,8 +7,8 @@
       </div>
 
       <div class="search-box-wrapper">
-        <el-select v-model="selectedSerial" filterable clearable placeholder="🔍 输入或搜索机器流水号..." class="hero-search-select" @change="onSerialChange">
-          <el-option v-for="sn in serials" :key="sn" :label="sn" :value="sn" />
+        <el-select v-model="selectedSerial" filterable clearable :filter-method="filterSerials" placeholder="🔍 输入或搜索机器流水号..." class="hero-search-select" @change="onSerialChange">
+          <el-option v-for="sn in visibleSerials" :key="sn" :label="sn" :value="sn" />
         </el-select>
       </div>
 
@@ -56,6 +56,9 @@
           </div>
         </div>
       </div>
+
+      <el-divider />
+      <PhotoTaskManagement :serial-no="selectedSerial" />
 
       <el-divider />
 
@@ -124,6 +127,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type UploadUserFile } from 'element-plus'
 import { getMachineArchivePreviewObjectUrl } from '../utils/machineArchivePreview'
+import PhotoTaskManagement from './PhotoTaskManagement.vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 type ListResponse<T = any> = { data: T[] }
 
@@ -132,12 +136,20 @@ const saving = ref(false)
 const deletingImages = ref(false)
 const activePanels = ref<string[]>([])
 const serials = ref<string[]>([])
+const serialQuery = ref('')
+const visibleSerials = computed(() => {
+  const query = serialQuery.value.trim().toLowerCase()
+  const source = query ? serials.value.filter((sn) => sn.toLowerCase().includes(query)) : serials.value
+  return source.slice(0, 100)
+})
 const selectedSerial = ref('')
 const files = ref<any[]>([])
 const renderedImages = ref<Array<{ file_name: string; size: number; update_time: string; objectUrl: string; fullUrl: string }>>([])
+let renderLoadSeq = 0
 const selectedImageNames = ref<string[]>([])
 const inventoryMap = ref<Record<string, { model: string; status: string }>>({})
 const selectedMachine = computed(() => inventoryMap.value[selectedSerial.value] || null)
+const filterSerials = (query: string) => { serialQuery.value = query }
 const imageFiles = computed(() => files.value.filter((f) => Boolean(f.is_image)))
 const previewImageUrls = computed(() => renderedImages.value.map((item) => item.fullUrl || item.objectUrl))
 const allImagesSelected = computed(() => renderedImages.value.length > 0 && renderedImages.value.every((item) => selectedImageNames.value.includes(item.file_name)))
@@ -161,11 +173,13 @@ const revokeRenderedImages = () => {
   selectedImageNames.value = []
 }
 const loadRenderedImages = async () => {
+  const seq = ++renderLoadSeq
+  const serialNo = selectedSerial.value
   revokeRenderedImages()
   // 并发加载缩略图以提升效率
   const promises = imageFiles.value.map(async (file) => {
     try {
-      const thumbUrl = await getMachineArchivePreviewObjectUrl(selectedSerial.value, String(file.file_name || ''), 'thumbnail')
+      const thumbUrl = await getMachineArchivePreviewObjectUrl(serialNo, String(file.file_name || ''), 'thumbnail')
       return {
         file_name: String(file.file_name || ''),
         size: Number(file.size || 0),
@@ -178,6 +192,10 @@ const loadRenderedImages = async () => {
     }
   })
   const results = await Promise.all(promises)
+  if (seq !== renderLoadSeq || serialNo !== selectedSerial.value) {
+    results.forEach((item: any) => { if (item?.objectUrl) URL.revokeObjectURL(item.objectUrl) })
+    return
+  }
   renderedImages.value = results.filter((i): i is any => i !== null)
 }
 
@@ -213,11 +231,20 @@ const otherFiles = ref<File[]>([])
 const loadSerials = async () => {
   loadingSerials.value = true
   try {
-    const [snRes, invRows] = await Promise.all([
-      apiGet<ListResponse>('/inventory/machine-archive/serials'),
-      apiGetAll<any>('/inventory/'),
-    ])
+    const snRes = await apiGet<ListResponse>('/inventory/machine-archive/serials')
     serials.value = snRes.data || []
+    // 库存全量数据仅用于补充机型/状态，不阻塞流水号列表首次展示。
+    void loadInventoryMap()
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '读取流水号失败')
+  } finally {
+    loadingSerials.value = false
+  }
+}
+
+const loadInventoryMap = async () => {
+  try {
+    const invRows = await apiGetAll<any>('/inventory/')
     const map: Record<string, { model: string; status: string }> = {}
     for (const row of invRows) {
       const sn = String(row['流水号'] || '').trim()
@@ -229,9 +256,7 @@ const loadSerials = async () => {
     }
     inventoryMap.value = map
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '读取流水号失败')
-  } finally {
-    loadingSerials.value = false
+    console.warn('补充机台信息失败', err)
   }
 }
 
@@ -244,7 +269,8 @@ const loadFiles = async () => {
   try {
     const res = await apiGet<ListResponse>(`/inventory/machine-archive/${encodeURIComponent(selectedSerial.value)}/files`)
     files.value = res.data || []
-    await loadRenderedImages()
+    // 先显示文件元数据，缩略图后台加载，避免大量附件阻塞机台切换。
+    void loadRenderedImages()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取档案失败')
     files.value = []

@@ -1707,9 +1707,15 @@ def _ensure_sn_dir(serial_no: str) -> str:
 @router.get("/machine-archive/serials")
 def machine_archive_serials():
     try:
-        df = cache.inventory.get_data()
-        sns = sorted(df["流水号"].astype(str).str.strip().replace({"nan": ""}).tolist(), reverse=True) if not df.empty else []
-        sns = [x for x in sns if x]
+        # 机台档案首屏只需要流水号，避免触发库存全表 Pandas 读取与规范化。
+        with get_engine().connect() as conn:
+            rows = conn.execute(text("""
+                SELECT DISTINCT TRIM(`流水号`) AS serial_no
+                FROM finished_goods_data
+                WHERE `流水号` IS NOT NULL AND TRIM(`流水号`) <> ''
+                ORDER BY serial_no DESC
+            """)).mappings().all()
+        sns = [str(row["serial_no"]).strip() for row in rows if str(row.get("serial_no") or "").strip()]
         return {"data": sns}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取流水号失败: {e}")

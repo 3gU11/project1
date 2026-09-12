@@ -530,7 +530,8 @@ const topScrollWidth = ref(1200)
 
 const editForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', order_remark: '' })
 const specialAddForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', due_date: '', order_remark: '' })
-const SANDBOX_STATUS = 'Predicted,Confirmed'
+// 已确认批次属于待排产队列，由生产看板管理，不再出现在预测沙盘。
+const SANDBOX_STATUS = 'Predicted'
 const SANDBOX_STATUS_SET = new Set(SANDBOX_STATUS.split(','))
 const predictedBatchCount = computed(() => filteredBatches.value.filter((b: any) => b.status === 'Predicted').length)
 const confirmedBatchCount = computed(() => filteredBatches.value.filter((b: any) => b.status === 'Confirmed').length)

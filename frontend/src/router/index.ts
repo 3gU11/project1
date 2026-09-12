@@ -40,7 +40,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/reports', name: 'Reports', label: '📊 报表管理', title: '报表管理', permission: 'REPORT_VIEW', isManagement: true, component: () => import('../views/ReportManagement.vue') },
 ]
 
-export const appMenus: AppMenuItem[] = appRouteDefs.map((r) => ({
+export const appMenus: AppMenuItem[] = appRouteDefs.filter((r) => r.name !== 'PhotoTasks').map((r) => ({
   path: r.path,
   label: r.label,
   permission: r.permission,

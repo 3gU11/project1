@@ -31,14 +31,16 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3000,
+    port: 8888,
     proxy: {
+      // Photo API routes to Go backend (port 3001)
       '/api/v1/photo-items': photoApiProxy,
       '/api/v1/ocr-field-rules': photoApiProxy,
       '^/api/v1/model-dictionary/(?:[^/]+/)?photo-config(?:/|$)': photoApiProxy,
-      '/api/v1/machines': photoApiProxy,
+      '/api/v1/machines/': photoApiProxy,
       '/api/v1/photo-tasks': photoApiProxy,
       '/api/v1/photo-files': photoApiProxy,
+      // All other /api routes to Python backend (port 8000)
       '/api': {
         target: API_TARGET,
         changeOrigin: true,

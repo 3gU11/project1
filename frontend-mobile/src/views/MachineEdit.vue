@@ -31,6 +31,18 @@
         </div>
         <van-button size="small" type="primary" :loading="taskLoading" @click="initTasks">生成/刷新任务</van-button>
       </div>
+      <van-uploader
+        :after-read="afterMachineRead"
+        :max-count="1"
+        accept="image/*"
+        capture="environment"
+        class="machine-capture"
+      >
+        <van-button block type="primary" :loading="uploadingTaskId !== null">统一拍摄并覆盖全部任务</van-button>
+      </van-uploader>
+      <van-button block type="success" plain class="machine-confirm" :loading="confirmingAll" :disabled="!canConfirmAll" @click="confirmAllTasks">
+        统一确认全部编号
+      </van-button>
 
       <van-empty v-if="!taskLoading && tasks.length === 0" description="该机型暂无拍照任务配置" />
 
@@ -42,6 +54,7 @@
               <van-tag v-if="task.required" type="danger">必拍</van-tag>
               <van-tag v-else>选拍</van-tag>
               <van-tag v-if="task.ocr_enabled" type="primary">QR</van-tag>
+              <van-tag v-if="task.ocr_enabled && task.file_name" type="success">已共享</van-tag>
               <van-tag :type="statusType(task.status)">{{ statusText(task.status) }}</van-tag>
             </div>
           </div>
@@ -49,14 +62,6 @@
         </div>
 
         <div class="task-actions">
-          <van-uploader
-            :after-read="(file) => afterTaskRead(task, file)"
-            :max-count="1"
-            accept="image/*"
-            capture="environment"
-          >
-            <van-button size="small" type="primary" :loading="uploadingTaskId === task.id">{{ taskUploadText(task) }}</van-button>
-          </van-uploader>
           <van-button
             v-if="canResetTaskPhoto(task)"
             size="small"
@@ -67,7 +72,6 @@
           >
             清空重拍
           </van-button>
-          <van-button v-if="task.status === 'manual_review' && !shouldShowRecognitionPanel(task)" size="small" type="success" @click="confirmTask(task, 'manual_passed')">人工通过</van-button>
           <van-button v-if="task.status === 'manual_review'" size="small" type="warning" @click="confirmTask(task, 'retake_required')">需补拍</van-button>
           <van-button v-if="!task.required && task.status === 'pending'" size="small" @click="confirmTask(task, 'skipped')">跳过</van-button>
         </div>
@@ -90,16 +94,6 @@
               {{ task.position_code }} + {{ field.display_value }}
             </div>
           </div>
-          <van-button
-            v-if="task.ocr_results?.length && ['manual_review', 'ocr_passed', 'uploaded', 'manual_passed', 'completed'].includes(task.status)"
-            block
-            size="small"
-            type="success"
-            class="ocr-confirm"
-            @click="confirmTask(task, 'manual_passed')"
-          >
-            确认并绑定编号
-          </van-button>
         </div>
       </div>
 
@@ -273,6 +267,7 @@ const tasks = ref<PhotoTask[]>([])
 const summary = ref<PhotoSummary>(defaultSummary())
 const taskLoading = ref(false)
 const uploadingTaskId = ref<number | null>(null)
+const confirmingAll = ref(false)
 const deletingTaskId = ref<number | null>(null)
 const submitting = ref(false)
 let qrModulePrepared = false
@@ -316,7 +311,7 @@ const checkStatusText = (status = '') => {
 }
 
 const shouldShowRecognitionPanel = (task: PhotoTask) => {
-  if (!task.ocr_enabled) return false
+  if (isManualOnlyQrTask(task)) return !!task.file_name || task.status !== 'pending'
   if (task.ocr_results?.length) return true
   return !!task.file_name || task.status !== 'pending'
 }
@@ -427,11 +422,7 @@ const scanQrFromPhoto = async (file: Blob, fileName: string) => {
   return { value: '', ambiguous: false }
 }
 
-const taskUploadText = (task: PhotoTask) => {
-  if (task.status === 'retake_required') return '补拍/重拍'
-  if (task.file_name || task.status === 'manual_review' || task.status === 'ocr_passed' || task.status === 'manual_passed') return '重拍/上传'
-  return '拍照/上传'
-}
+const isManualOnlyQrTask = (task: PhotoTask) => task.position_code === 'SN-MOTOR' || /三相异步电机/.test(task.item_name || '')
 
 const canResetTaskPhoto = (task: PhotoTask) => (
   !!task.file_name ||
@@ -456,7 +447,7 @@ const normalizePhotoTasks = (rows: PhotoTask[] = []) => rows.map((task) => ({
       ...field,
       display_value: String(field.display_value || field.manual_value || field.recognized_value || ''),
     }))
-    if (fields.length === 0 && task.ocr_enabled && (task.file_name || task.status !== 'pending')) {
+    if (fields.length === 0 && !isManualOnlyQrTask(task) && (task.file_name || task.status !== 'pending')) {
       fields.push(defaultOcrResult(task))
     }
     return fields
@@ -560,13 +551,13 @@ const initTasks = async () => {
   }
 }
 
-const afterTaskRead = async (task: PhotoTask, item: UploaderFileListItem | UploaderFileListItem[]) => {
+/* const afterTaskRead = async (task: PhotoTask, item: UploaderFileListItem | UploaderFileListItem[]) => {
   const first = (Array.isArray(item) ? item[0] : item) as UploaderFileListItem
   if (!first?.file && !first?.content) return
   uploadingTaskId.value = task.id
   try {
     const { file, fileName } = normalizeUploadPayload(first)
-    let qrResult = task.ocr_enabled
+    let qrResult = task.ocr_enabled && !isManualOnlyQrTask(task)
       ? await scanQrFromPhoto(file, fileName)
       : { value: '', ambiguous: false }
     let qrValue = qrResult.value
@@ -574,6 +565,11 @@ const afterTaskRead = async (task: PhotoTask, item: UploaderFileListItem | Uploa
     formData.append('file', file, fileName)
     await inventoryApi.uploadPhotoTask(task.id, formData)
     if (task.ocr_enabled) {
+      if (isManualOnlyQrTask(task)) {
+        showToast('三相异步电机无法扫码，请在下方手动输入编号')
+        await loadTasks()
+        return
+      }
       if (!qrValue) {
         const serverQr = await inventoryApi.decodePhotoTaskQr(task.id) as any
         qrValue = String(serverQr?.value || '').trim()
@@ -604,9 +600,62 @@ const afterTaskRead = async (task: PhotoTask, item: UploaderFileListItem | Uploa
   } finally {
     uploadingTaskId.value = null
   }
+} */
+
+const afterMachineRead = async (item: UploaderFileListItem | UploaderFileListItem[]) => {
+  const first = (Array.isArray(item) ? item[0] : item) as UploaderFileListItem
+  if (!first?.file && !first?.content || !tasks.value.length) return
+  uploadingTaskId.value = -1
+  try {
+    const { file, fileName } = normalizeUploadPayload(first)
+    const qrTask = tasks.value.find((task) => task.ocr_enabled && !isManualOnlyQrTask(task))
+    const qrResult = qrTask ? await scanQrFromPhoto(file, fileName) : { value: '', ambiguous: false }
+    if (!qrTask) throw new Error('当前机台没有可用于统一拍摄的任务')
+    const formData = new FormData()
+    formData.append('file', file, fileName)
+    await inventoryApi.uploadPhotoTask(qrTask.id, formData)
+    if (qrResult.value) {
+      for (const task of tasks.value) {
+        if (isManualOnlyQrTask(task)) continue
+        await inventoryApi.savePhotoTaskRecognition(task.id, { source: 'qr_static', value: qrResult.value, field_code: 'component_serial_no', field_name: '标签编码' })
+      }
+    }
+    if (qrResult.ambiguous) showToast('检测到多个二维码，请重新拍摄或人工确认')
+    else if (qrResult.value) showSuccessToast('已拍摄并覆盖当前机台全部任务，二维码已识别')
+    else showToast('已拍摄并覆盖当前机台全部任务，请手工确认编号')
+    await loadTasks()
+  } catch (error: any) {
+    showFailToast(error?.response?.data?.error || error.message || '统一拍摄失败')
+    await loadTasks()
+  } finally {
+    uploadingTaskId.value = null
+  }
 }
 
-const confirmTask = async (task: PhotoTask, status: string) => {
+const canConfirmAll = computed(() => tasks.value.some((task) => task.ocr_results?.some((field) => String(field.display_value || field.recognized_value || '').trim())))
+
+const confirmAllTasks = async () => {
+  const confirmable = tasks.value.filter((task) => task.ocr_results?.some((field) => String(field.display_value || field.recognized_value || '').trim()))
+  if (!confirmable.length) return
+  confirmingAll.value = true
+  try {
+    const failed: string[] = []
+    for (const task of confirmable) {
+      const ok = await confirmTask(task, 'manual_passed', false)
+      if (!ok) failed.push(task.position_code || task.item_name)
+    }
+    if (failed.length) {
+      showFailToast(`${failed.length} 个任务确认失败，请重试`)
+      return
+    }
+    showSuccessToast('当前机台编号已统一确认')
+    await loadTasks()
+  } finally {
+    confirmingAll.value = false
+  }
+}
+
+const confirmTask = async (task: PhotoTask, status: string, notify = true): Promise<boolean> => {
   try {
     const shouldPassFields = ['manual_passed', 'completed', 'ocr_passed'].includes(status)
     const fields = shouldPassFields
@@ -618,10 +667,12 @@ const confirmTask = async (task: PhotoTask, status: string) => {
         }))
       : []
     await inventoryApi.confirmPhotoTask(task.id, { status, fields })
-    showSuccessToast('状态已更新')
+    if (notify) showSuccessToast('状态已更新')
     await loadTasks()
+    return true
   } catch (error: any) {
-    showFailToast(error?.response?.data?.error || error.message || '更新失败')
+    if (notify) showFailToast(error?.response?.data?.error || error.message || '更新失败')
+    return false
   }
 }
 

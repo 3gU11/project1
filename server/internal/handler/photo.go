@@ -98,6 +98,7 @@ type machinePhotoTaskRow struct {
 	Enabled      bool           `json:"enabled" gorm:"column:enabled"`
 	FileID       *int64         `json:"file_id" gorm:"column:file_id"`
 	FileName     string         `json:"file_name" gorm:"column:file_name"`
+	UploadedBy   string         `json:"uploaded_by" gorm:"column:uploaded_by"`
 	UploadedAt   string         `json:"uploaded_at" gorm:"column:uploaded_at"`
 	OCRIssues    int            `json:"ocr_issues" gorm:"column:ocr_issues"`
 	OCRResults   []ocrResultRow `json:"ocr_results" gorm:"-"`
@@ -487,15 +488,23 @@ func (h *PhotoHandler) MachinePhotoTasks(c *gin.Context) {
 
 // ListPhotoTasks returns the collected task records for the web management view.
 func (h *PhotoHandler) ListPhotoTasks(c *gin.Context) {
-	query := h.db.Table("machine_photo_tasks")
+	query := h.db.Table("machine_photo_tasks AS t").Select(`
+		t.id, t.serial_no, t.model_name, t.position_code, t.item_name, t.required,
+		t.ocr_enabled, COALESCE(t.ocr_profile, '') AS ocr_profile, t.status,
+		t.sort_order, t.enabled, f.id AS file_id, COALESCE(f.file_name, '') AS file_name,
+		COALESCE(f.uploaded_by, '') AS uploaded_by,
+		COALESCE(DATE_FORMAT(f.uploaded_at, '%Y-%m-%d %H:%i:%s'), '') AS uploaded_at,
+		0 AS ocr_issues`).Joins(`LEFT JOIN machine_photo_files f ON f.id = (
+		SELECT mf.id FROM machine_photo_files mf WHERE mf.task_id = t.id ORDER BY mf.id DESC LIMIT 1
+	)`)
 	if serialNo := strings.TrimSpace(c.Query("serial_no")); serialNo != "" {
-		query = query.Where("serial_no LIKE ?", "%"+serialNo+"%")
+		query = query.Where("t.serial_no LIKE ?", "%"+serialNo+"%")
 	}
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
-		query = query.Where("status = ?", status)
+		query = query.Where("t.status = ?", status)
 	}
 	var rows []machinePhotoTaskRow
-	if err := query.Order("serial_no ASC, sort_order ASC, id ASC").Limit(1000).Find(&rows).Error; err != nil {
+	if err := query.Order("t.serial_no ASC, t.sort_order ASC, t.id ASC").Limit(1000).Find(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -531,9 +540,21 @@ func (h *PhotoHandler) UploadTaskPhoto(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	// A machine has one QR serial number shared by all QR photo items. Fan the
+	// uploaded image out to the other enabled OCR tasks so operators only need
+	// to capture the QR once. Each task keeps its own file/recognition records.
+	if task.OCREnabled {
+		if err := h.fanOutQRTaskFile(task, saved, file, c.GetString("username")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	nextStatus := "completed"
 	if task.OCREnabled {
 		nextStatus = "uploaded"
+	}
+	if task.PositionCode == "SN-MOTOR" || strings.Contains(task.ItemName, "三相异步电机") {
+		nextStatus = "manual_review"
 	}
 	if err := h.db.Exec("DELETE FROM machine_photo_ocr_results WHERE task_id = ?", taskID).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -550,6 +571,43 @@ func (h *PhotoHandler) UploadTaskPhoto(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "file": saved, "task_status": nextStatus})
+}
+
+func (h *PhotoHandler) fanOutQRTaskFile(source machinePhotoTaskRow, saved gin.H, uploaded *multipart.FileHeader, username string) error {
+	var targets []machinePhotoTaskRow
+	if err := h.db.Table("machine_photo_tasks").
+		Where("serial_no = ? AND enabled = 1 AND ocr_enabled = 1 AND id <> ?", source.SerialNo, source.ID).
+		Find(&targets).Error; err != nil {
+		return err
+	}
+	fileName, _ := saved["file_name"].(string)
+	fileSize := uploaded.Size
+	for _, target := range targets {
+		// Replace the previous copy while preserving task isolation for OCR rows.
+		if err := h.db.Exec("DELETE FROM machine_photo_ocr_results WHERE task_id = ?", target.ID).Error; err != nil {
+			return err
+		}
+		if err := h.db.Exec("DELETE FROM machine_photo_files WHERE task_id = ?", target.ID).Error; err != nil {
+			return err
+		}
+		if err := h.db.Exec(`INSERT INTO machine_photo_files
+  (task_id, serial_no, position_code, file_name, file_path, thumb_path, mime_type, file_size, uploaded_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, target.ID, target.SerialNo, target.PositionCode,
+			fileName, saved["file_path"], saved["file_path"], uploaded.Header.Get("Content-Type"), fileSize, username).Error; err != nil {
+			return err
+		}
+		status := "uploaded"
+		// 三相异步电机没有可贴二维码，上传照片后直接进入手工录入状态。
+		if target.PositionCode == "SN-MOTOR" || strings.Contains(target.ItemName, "三相异步电机") {
+			status = "manual_review"
+		} else if !target.OCREnabled {
+			status = "completed"
+		}
+		if err := h.db.Table("machine_photo_tasks").Where("id = ?", target.ID).Update("status", status).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *PhotoHandler) DeleteTaskPhoto(c *gin.Context) {
@@ -618,7 +676,11 @@ func (h *PhotoHandler) DeleteTaskPhoto(c *gin.Context) {
 				continue
 			}
 			seen[path] = true
-			_ = removeLocalTaskFile(path)
+			var refs int64
+			_ = h.db.Table("machine_photo_files").Where("file_path = ? OR thumb_path = ?", path, path).Count(&refs).Error
+			if refs == 0 {
+				_ = removeLocalTaskFile(path)
+			}
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "status": "pending"})
@@ -878,7 +940,7 @@ func (h *PhotoHandler) ConfirmTaskOCR(c *gin.Context) {
 			}
 			err := h.db.Table("machine_component_bindings").
 				Select("machine_no, position_code").
-				Where("active = 1 AND component_serial_no = ? AND NOT (machine_no = ? AND position_code = ?)", value, task.SerialNo, task.PositionCode).
+				Where("active = 1 AND TRIM(component_serial_no) = ? AND TRIM(machine_no) <> TRIM(?)", value, task.SerialNo).
 				Limit(1).
 				Scan(&duplicate).Error
 			if err != nil {
@@ -1847,7 +1909,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		Scan(&fileID).Error; err != nil {
 		return nil, err
 	}
-	return gin.H{"id": fileID, "file_name": fileName, "file_size": file.Size}, nil
+	return gin.H{"id": fileID, "file_name": fileName, "file_path": path, "file_size": file.Size}, nil
 }
 
 func (h *PhotoHandler) ocrRules(profile string, positionCode string) ([]ocrFieldRuleRow, error) {
