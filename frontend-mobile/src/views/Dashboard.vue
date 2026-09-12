@@ -296,7 +296,8 @@ useInventoryAutoRefresh(loadData)
 }
 
 .popup-content {
-  padding: 16px 16px 32px;
+  position: relative;
+  padding: 16px 16px 96px;
 }
 
 .popup-header {
@@ -358,6 +359,14 @@ useInventoryAutoRefresh(loadData)
 
 .popup-actions {
   display: flex;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
   margin-top: 24px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
 }
 </style>
