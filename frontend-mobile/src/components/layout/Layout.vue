@@ -24,36 +24,42 @@ import { startInventorySync, stopInventorySync } from '@/utils/inventorySync'
 
 const userStore = useUserStore()
 
-const canViewProduction = computed(() =>
-  userStore.userInfo?.role === 'LineOperator' || userStore.hasPermission('MOBILE_KANBAN_VIEW')
-)
-
 const tabbarItems = computed(() => {
-  if (userStore.userInfo?.role === 'LineOperator') {
+  const role = userStore.userInfo?.role
+
+  if (role === 'LineOperator') {
     return [
       { title: '生产', to: '/production', icon: 'cluster-o' },
       { title: '我的', to: '/profile', icon: 'user-o' },
     ]
   }
 
-  if (userStore.userInfo?.role === 'Prod') {
+  if (role === 'AfterSales') {
     return [
-      { title: '查询', to: '/query', icon: 'search' },
-      { title: '找货', to: '/locator', icon: 'location-o' },
+      { title: '扫码任务', to: '/query', icon: 'scan' },
       { title: '我的', to: '/profile', icon: 'user-o' },
     ]
   }
 
-  const items = [
-    { title: '扫码任务', to: '/query', icon: 'scan' },
-    { title: '找货', to: '/locator', icon: 'location-o' },
-    { title: '看板', to: '/dashboard', icon: 'chart-trending-o' },
-  ]
-  if (canViewProduction.value) {
-    items.push({ title: '生产', to: '/production', icon: 'cluster-o' })
+  if (role === 'Prod') {
+    return [
+      { title: '查询', to: '/query', icon: 'search' },
+      { title: '我的', to: '/profile', icon: 'user-o' },
+    ]
   }
-  items.push({ title: '我的', to: '/profile', icon: 'user-o' })
-  return items
+
+  if (role === 'Inbound') {
+    return [
+      { title: '查询', to: '/query', icon: 'search' },
+      { title: '找货', to: '/locator', icon: 'location-o' },
+      { title: '看板', to: '/dashboard', icon: 'chart-trending-o' },
+      { title: '我的', to: '/profile', icon: 'user-o' },
+    ]
+  }
+
+  return [
+    { title: '我的', to: '/profile', icon: 'user-o' },
+  ]
 })
 
 onMounted(() => startInventorySync(userStore.token))
