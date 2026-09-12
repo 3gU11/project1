@@ -297,6 +297,9 @@ useInventoryAutoRefresh(loadData)
 
 .popup-content {
   position: relative;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
   padding: 16px 16px 96px;
 }
 
@@ -359,10 +362,8 @@ useInventoryAutoRefresh(loadData)
 
 .popup-actions {
   display: flex;
-  position: absolute;
-  right: 0;
+  position: sticky;
   bottom: 0;
-  left: 0;
   z-index: 3;
   margin-top: 24px;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
