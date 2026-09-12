@@ -2,6 +2,15 @@
   <div class="page">
     <van-nav-bar title="库位看板" fixed placeholder />
 
+    <div class="search-panel">
+      <van-search v-model="serialKeyword" placeholder="查询机台流水号" clearable @search="findMachine" />
+      <van-button block type="primary" plain :loading="searching" @click="findMachine">查询流水号</van-button>
+      <div v-if="searchedMachine" class="search-result" @click="openMachineTransfer(searchedMachine)">
+        <div><strong>{{ searchedMachine.model || '-' }}</strong><span>{{ searchedMachine.serialNo }}</span></div>
+        <div class="search-result__slot">当前库位：{{ searchedMachine.slotCode || '未入库' }} · 点击调拨</div>
+      </div>
+    </div>
+
     <div class="board-list">
       <div
         v-for="slot in inventoryStore.slots"
@@ -45,6 +54,7 @@
         <van-empty v-else description="该库位暂无可调拨机台" />
 
         <div class="section-title">目标库位</div>
+        <van-field v-model="targetSlotCode" label="目标库位" placeholder="请输入目标库位名称" clearable />
         <div v-if="availableTargetSlots.length" class="target-grid">
           <div
             v-for="slot in availableTargetSlots"
@@ -92,6 +102,9 @@ const currentSlot = ref<MobileSlot | null>(null)
 const selectedSerialNo = ref('')
 const targetSlotCode = ref('')
 const submitting = ref(false)
+const serialKeyword = ref('')
+const searching = ref(false)
+const searchedMachine = ref<MobileMachine | null>(null)
 
 const currentSlotMachines = computed(() => {
   const code = currentSlot.value?.code || ''
@@ -108,7 +121,7 @@ const availableTargetSlots = computed(() => {
   })
 })
 
-const canTransfer = computed(() => !!selectedSerialNo.value && !!targetSlotCode.value)
+const canTransfer = computed(() => !!selectedSerialNo.value && !!targetSlotCode.value.trim())
 const capacityText = (slot: MobileSlot) => slot.unlimited || slot.max === null ? '不限' : String(slot.max)
 
 const slotClass = (slot: MobileSlot) => {
@@ -136,6 +149,25 @@ const openSlot = (slot: MobileSlot) => {
   showSlotPopup.value = true
 }
 
+const findMachine = async () => {
+  const keyword = serialKeyword.value.trim()
+  if (!keyword) { showToast('请输入机台流水号'); return }
+  searching.value = true
+  try {
+    await inventoryStore.loadInventory(keyword)
+    searchedMachine.value = inventoryStore.list.find((item) => item.serialNo === keyword) || inventoryStore.list.find((item) => item.serialNo.includes(keyword)) || null
+    if (!searchedMachine.value) showToast('未找到对应机台')
+  } finally { searching.value = false }
+}
+
+const openMachineTransfer = (machine: MobileMachine) => {
+  if (!machine.slotCode) { showToast('该机台当前没有库位'); return }
+  currentSlot.value = inventoryStore.slots.find((slot) => slot.code === machine.slotCode) || { code: machine.slotCode, current: 0, max: null, unlimited: true, status: '' } as MobileSlot
+  selectedSerialNo.value = machine.serialNo
+  targetSlotCode.value = ''
+  showSlotPopup.value = true
+}
+
 const confirmTransfer = async () => {
   if (!selectedSerialNo.value || !targetSlotCode.value) {
     showToast('请选择调拨机台和目标库位')
@@ -154,6 +186,7 @@ const confirmTransfer = async () => {
     selectedSerialNo.value = ''
     targetSlotCode.value = ''
     await loadData()
+    searchedMachine.value = inventoryStore.list.find((item) => item.serialNo === selectedSerialNo.value) || null
   } catch (error: any) {
     showFailToast(error.message || '调拨失败')
   } finally {
@@ -170,6 +203,24 @@ useInventoryAutoRefresh(loadData)
   min-height: 100vh;
   background: var(--van-background-2);
 }
+
+.search-panel {
+  padding: 12px;
+  background: #fff;
+}
+
+.search-panel :deep(.van-button) { margin-top: 8px; }
+
+.search-result {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--van-primary-color);
+  border-radius: 10px;
+  background: rgba(25, 137, 250, 0.06);
+}
+
+.search-result div:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.search-result__slot { margin-top: 6px; font-size: 12px; color: var(--van-text-color-2); }
 
 .board-list {
   padding: 12px;
