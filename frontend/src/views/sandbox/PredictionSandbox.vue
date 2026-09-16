@@ -1193,6 +1193,15 @@ function ensureBatchStockEdit(batch: any) {
   if (!stockEdits.value[batchId]) {
     resetBatchStockEdit(batch)
   }
+  const category = displayBatchCategory(batch)
+  if (category !== '特殊') {
+    for (const model of modelTypes.value) {
+      if (categoryOfModel(model, modelFamilyMap.value[model.toUpperCase()]) === category
+        && stockEdits.value[batchId][model] === undefined) {
+        stockEdits.value[batchId][model] = 0
+      }
+    }
+  }
   return stockEdits.value[batchId] || {}
 }
 
