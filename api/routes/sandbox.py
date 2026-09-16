@@ -1270,21 +1270,23 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
         unit_rows = conn.execute(
             text(
                 "SELECT unit_id, model_type, contract_no, customer, dealer_name, due_date, order_remark, forecast_serial_no "
-                "FROM units WHERE batch_id = :bid ORDER BY slot_index ASC"
+                "FROM units WHERE batch_id = :bid ORDER BY slot_index ASC, unit_id ASC"
             ),
             {"bid": batch_id},
         ).fetchall()
 
         model_dict_rows = conn.execute(
-            text("SELECT model_name, model_family FROM model_dictionary WHERE enabled = 1")
+            text("SELECT model_name, model_family, sort_order FROM model_dictionary WHERE enabled = 1")
         ).fetchall()
 
     family_map = {}
+    model_order = {}
     for r in model_dict_rows:
         name = str(r[0] or "").strip().upper()
         family = str(r[1] or "").strip().upper()
         if name:
             family_map[name] = family
+            model_order[name] = int(r[2]) if r[2] is not None else 1_000_000
 
     # Filter: skip uncategorized models only
     filtered = []
@@ -1345,6 +1347,11 @@ async def sync_batch_to_plan(request: Request, batch_id: str):
     records = []
     serial_pairs = []
     next_seq = max_seq + 1
+    # Slot order is editable presentation state, not the serial allocation order.
+    filtered.sort(key=lambda row: (
+        model_order.get(str(row[1] or "").strip().upper(), 1_000_000),
+        str(row[1] or "").strip().upper(),
+    ))
     for row in filtered:
         unit_id = str(row[0] or "").strip()
         mt = str(row[1] or "").strip()
