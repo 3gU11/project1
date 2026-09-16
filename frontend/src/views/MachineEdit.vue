@@ -261,12 +261,6 @@ const isBoundRow = (row: Row) => {
   return Boolean(String(row['占用订单号'] || '').trim() || String(row['合同号'] || '').trim())
 }
 
-const formatMachineBrief = (row: Row) => {
-  const sn = String(row['流水号'] || '').trim() || '-'
-  const model = String(row['机型'] || '').trim() || '-'
-  return `${sn}(${model})`
-}
-
 const formatBoundMachine = (row: Row) => {
   const sn = String(row['流水号'] || '').trim() || '-'
   const orderNo = String(row['占用订单号'] || '').trim()

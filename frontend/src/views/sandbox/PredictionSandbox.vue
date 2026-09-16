@@ -27,7 +27,7 @@
       <span v-if="hasDataUpdate" class="sandbox-data-update" role="status">
         数据有更新
       </span>
-      <el-button v-if="canEditSandbox" type="primary" @click="handleRecompute" :loading="recomputing">
+      <el-button v-if="canEditSandbox" type="primary" @click="handleRecompute()" :loading="recomputing">
         {{ recomputeButtonText }}
       </el-button>
       <span v-if="pendingRecomputeJobId" class="recompute-job-status">
@@ -1429,10 +1429,16 @@ function displayBatchCode(batch: any) {
   return formatBatchCode(batch.batch_no)
 }
 
-function toggleSelect(batchId: string) {
+async function toggleSelect(batchId: string) {
   if (recomputing.value || batchStore.loading) return
   const isSelected = selectedBatches.value[0] === batchId
   selectedBatches.value = isSelected ? [] : [batchId]
+  if (isSelected || !canEditSandbox.value) return
+  const batch = batchStore.batches.find((b: any) => getBatchUniqueId(b) === batchId)
+  if (!batch || String(batch.status || '') !== 'Predicted' || isSpecialBatch(batch)) return
+  const slotNo = batchSlotOrder(batch)
+  if (slotNo <= 0 || slotNo === optimizedTargetSlotNo.value) return
+  await handleRecompute(true)
 }
 
 async function onSeriesFilterChange() {
@@ -1539,7 +1545,8 @@ async function loadModelTypes() {
   }
 }
 
-async function handleRecompute() {
+async function handleRecompute(preserveSelection = false) {
+  if (recomputing.value) return
   if (!canEditSandbox.value) {
     ElMessage.warning('当前账号没有预测沙盒编辑权限')
     return
@@ -1560,6 +1567,7 @@ async function handleRecompute() {
     targetSlotNo = 1
     isClicked = false
   }
+  recomputing.value = true
   const affectedManualBatches = batchStore.batches.filter((batch: any) => {
     if (String(batch?.status || '') !== 'Predicted' || !batch?.is_manually_adjusted) return false
     return !isClicked || batchSlotOrder(batch) === targetSlotNo
@@ -1572,15 +1580,15 @@ async function handleRecompute() {
         { type: 'warning', confirmButtonText: '继续重算', cancelButtonText: '取消' }
       )
     } catch {
+      recomputing.value = false
       return
     }
   }
-  recomputing.value = true
   try {
     const recomputeRes: any = await runRecompute(targetSlotNo, isClicked)
     clearPendingRecomputeJob()
     latestAchievementCategories.value = recomputeRes?.achievement?.categories || []
-    selectedBatches.value = []
+    if (!preserveSelection) selectedBatches.value = []
     ElMessage.success('已按目标列优化备货比例，其他预测列备货仅作占位参考')
     await refresh()
     if (isClicked) {
