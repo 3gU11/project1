@@ -299,7 +299,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
-import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
+import { isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
+import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 
 type DealerOrder = {
@@ -502,7 +503,12 @@ const canApprove = (row: DealerOrder) => isFactoryPending(row) || row.status ===
 const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemark(row) : ['pending', 'approved'].includes(row.status))
 const canConvertDealerOrder = (row: DealerOrder) => ['pending', 'approved'].includes(String(row.status || '').trim()) && !isFactoryPending(row)
 
-const modelOptions = computed(() => getModelOrderList())
+const modelDictionaryStore = useModelDictionaryStore()
+const modelOptions = computed(() => modelDictionaryStore.rows
+  .filter((row) => row.enabled && row.model_name)
+  .slice()
+  .sort((a, b) => a.sort_order - b.sort_order)
+  .map((row) => row.model_name))
 const router = useRouter()
 const isRushActive = computed(() => convertForm.isRush)
 type ConvertItem = { model: string; qty: number; high: boolean; rowNote: string; remark: string; extraRemark: string; ermq: number }
@@ -609,27 +615,33 @@ const getInStockCountByModel = async () => {
   const inventoryRows = await apiGetAll<any>('/inventory/')
   const map = new Map<string, number>()
   for (const row of inventoryRows) {
-    const model = String(row['机型'] || '').trim()
+    const model = normalizeModelName(row['机型'])
     const status = String(row['状态'] || '').trim()
-    if (!model || !status.startsWith('库存中')) continue
-    map.set(model, (map.get(model) || 0) + 1)
+    const occupied = String(row['占用订单号'] || '').trim()
+    if (!model || !status.startsWith('库存中') || occupied) continue
+    const high = [row['机型'], row['批次号'], row['合同备注']].some((value) => String(value || '').includes('加高'))
+    const key = `${model}||${high ? 'high' : 'normal'}`
+    map.set(key, (map.get(key) || 0) + 1)
   }
   return map
 }
 
-const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: number }>) => {
+const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: number; high?: boolean }>) => {
   const requiredByModel = new Map<string, number>()
   for (const row of rows) {
-    const model = String(row.model || '').trim()
+    const model = normalizeModelName(row.model)
     if (!model) continue
-    requiredByModel.set(model, (requiredByModel.get(model) || 0) + Number(row.qty || 0))
+    const key = `${model}||${row.high ? 'high' : 'normal'}`
+    requiredByModel.set(key, (requiredByModel.get(key) || 0) + Number(row.qty || 0))
   }
   const stockByModel = await getInStockCountByModel()
   const blocked: string[] = []
-  for (const [model, required] of requiredByModel.entries()) {
-    const inStock = Number(stockByModel.get(model) || 0)
-    if (inStock <= 0) blocked.push(`${model}(无机台)`)
-    else if (inStock < required) blocked.push(`${model}(库存${inStock} < 需求${required})`)
+  for (const [key, required] of requiredByModel.entries()) {
+    const [model, variant] = key.split('||')
+    const label = `${model}${variant === 'high' ? '（加高）' : '（普通）'}`
+    const inStock = Number(stockByModel.get(key) || 0)
+    if (inStock <= 0) blocked.push(`${label}(无机台)`)
+    else if (inStock < required) blocked.push(`${label}(库存${inStock} < 需求${required})`)
   }
   return { canUseSpot: blocked.length === 0, reason: blocked.length === 0 ? '' : blocked.join('，') }
 }
@@ -1004,6 +1016,7 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
 let pollTimer: any = null
 
 onMounted(async () => {
+  await modelDictionaryStore.ensureLoaded()
   await loadTodoStats()
   if (todoStats.total > 0) {
     filters.status = 'todo'

@@ -316,177 +316,138 @@ def _find_model_note(model_note_map, model, row_note=""):
 
 
 def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
-    df = get_data()
+    order_id = str(order_id or "").strip()
+    serial_nos = list(dict.fromkeys(str(sn).strip() for sn in (selected_sns or []) if str(sn).strip()))
+    if not serial_nos:
+        return {"stock": 0, "production": 0}
+
     model_note_map = _build_model_note_map(order_id)
     remaining_note_counts = _remaining_model_note_counts(model_note_map)
+    contract_candidates: dict[str, set[str]] = {}
+    order_contract_ids: set[str] = set()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stock_sns: list[str] = []
+    production_sns: list[str] = []
 
-    # A stock unit can be selected before it has a contract number.  Resolve
-    # only unambiguous order+model matches; never guess between split contracts.
-    contract_by_model = {}
-    with get_engine().connect() as conn:
-        plan_rows = conn.execute(
-            text("SELECT `合同号`, `机型` FROM factory_plan WHERE TRIM(COALESCE(`订单号`, '')) = :order_id"),
-            {"order_id": str(order_id).strip()},
-        ).fetchall()
-    candidates_by_model = {}
-    for contract_no, model in plan_rows:
-        contract_no = str(contract_no or "").strip()
-        model = str(model or "").strip()
-        if contract_no and model:
-            candidates_by_model.setdefault(model, set()).add(contract_no)
-    for model, contract_ids in candidates_by_model.items():
-        if len(contract_ids) == 1:
-            contract_by_model[model] = next(iter(contract_ids))
+    try:
+        with get_engine().begin() as conn:
+            for contract_no, model in conn.execute(
+                text("SELECT `合同号`, `机型` FROM factory_plan WHERE TRIM(COALESCE(`订单号`, '')) = :order_id"),
+                {"order_id": order_id},
+            ).fetchall():
+                contract_no = str(contract_no or "").strip()
+                model = str(model or "").strip()
+                if contract_no and model:
+                    contract_candidates.setdefault(model, set()).add(contract_no)
+                    order_contract_ids.add(contract_no)
 
-    # 记录原先是 待入库 的机台（用于日志）
-    current_status_df = df[df['流水号'].isin(selected_sns)]
-    pending_inbound_sns = current_status_df[current_status_df['状态'] == '待入库']['流水号'].tolist()
-    pending_status_map = {
-        str(row.get("流水号", "")).strip(): str(row.get("状态", "") or "").strip()
-        for _, row in current_status_df.iterrows()
-    }
-    if pending_inbound_sns:
-        append_log("直接配货-自动入库", pending_inbound_sns, operator=operator)
+            active_units = conn.execute(text("""
+                SELECT u.unit_id, COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS serial_no,
+                       u.model_type, COALESCE(u.sales_id, '') AS sales_id,
+                       COALESCE(u.contract_no, '') AS contract_no,
+                       COALESCE(u.order_remark, '') AS order_remark,
+                       COALESCE(u.is_locked, 0) AS is_locked, b.batch_code, b.expected_inbound_date
+                FROM units u
+                JOIN batches b ON b.batch_id = u.batch_id
+                LEFT JOIN finished_goods_data fg
+                  ON TRIM(fg.`流水号`) = TRIM(COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no))
+                WHERE b.status IN ('Confirmed', 'In_Production')
+                  AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IN :sns
+                  AND (
+                      fg.`流水号` IS NULL
+                      OR (
+                          TRIM(COALESCE(fg.`状态`, '')) NOT LIKE '库存中%'
+                          AND TRIM(COALESCE(fg.`状态`, '')) NOT IN ('待发货', '已出库', '已发货', '报废')
+                      )
+                  )
+                FOR UPDATE
+            """).bindparams(bindparam("sns", expanding=True)), {"sns": serial_nos}).mappings().all()
+            unit_by_sn = {str(row["serial_no"]).strip(): dict(row) for row in active_units}
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            stock_rows = conn.execute(text("""
+                SELECT `流水号` AS serial_no, `机型` AS model_type, COALESCE(`状态`, '') AS status,
+                       COALESCE(`占用订单号`, '') AS sales_id, COALESCE(`合同号`, '') AS contract_no,
+                       COALESCE(`合同备注`, '') AS order_remark, COALESCE(`批次号`, '') AS batch_code
+                FROM finished_goods_data WHERE `流水号` IN :sns FOR UPDATE
+            """).bindparams(bindparam("sns", expanding=True)), {"sns": serial_nos}).mappings().all()
+            stock_by_sn = {str(row["serial_no"]).strip(): dict(row) for row in stock_rows}
 
-    # 直接用 SQL UPDATE 写入，避免全量 DataFrame 读写导致真实状态（库中(A01区)等）被缓存旧值覆盖
-    if selected_sns:
-        try:
-            with get_engine().begin() as conn:
-                sns_list = list(selected_sns)
-                conn.execute(
-                    text("""
-                        UPDATE finished_goods_data
-                        SET 状态 = '待发货',
-                            占用订单号 = :order_id,
-                            客户 = :customer,
-                            代理商 = :agent,
-                            更新时间 = :now
-                        WHERE 流水号 IN :sns AND 状态 != '已出库' AND 状态 != '报废'
-                    """).bindparams(bindparam("sns", expanding=True)),
-                    {"order_id": order_id, "customer": customer, "agent": agent,
-                     "now": now_str, "sns": sns_list}
-                )
-                for sn in selected_sns:
-                    row = df[df['流水号'] == sn]
-                    if row.empty:
-                        continue
-                    contract_no = contract_by_model.get(str(row.iloc[0].get('机型', '') or '').strip())
-                    if not contract_no:
-                        continue
-                    conn.execute(
-                        text("""
-                            UPDATE finished_goods_data
-                            SET 合同号 = :contract_no
-                            WHERE 流水号 = :sn
-                              AND (合同号 IS NULL OR TRIM(合同号) = '' OR TRIM(合同号) = :contract_no)
-                        """),
-                        {"contract_no": contract_no, "sn": sn},
-                    )
-                    conn.execute(
-                        text("""
-                            UPDATE inbound_history
-                            SET contract_no = :contract_no, order_no = :order_id
-                            WHERE serial_no = :sn
-                              AND (contract_no IS NULL OR TRIM(contract_no) = '' OR TRIM(contract_no) = :contract_no)
-                        """),
-                        {"contract_no": contract_no, "order_id": order_id, "sn": sn},
-                    )
-                # 按机型 + 加高属性写入合同备注；没有备注的普通需求要清空旧误写备注。
-                if model_note_map:
-                    for sn in selected_sns:
-                        row = df[df['流水号'] == sn]
-                        if row.empty:
-                            continue
-                        model = str(row.iloc[0].get('机型', '')).strip()
-                        current_note = _normalize_order_note(row.iloc[0].get('合同备注', ''))
-                        clean_model = _normalize_allocation_model(model)
-                        high = _is_high_model_hint(model, current_note)
-                        matched_key = None
-                        if current_note:
-                            exact_key = (clean_model, high, current_note)
-                            if remaining_note_counts.get(exact_key, 0) > 0:
-                                matched_key = exact_key
-                        if matched_key is None:
-                            for key, count in remaining_note_counts.items():
-                                if count > 0 and key[0] == clean_model and key[1] == high:
-                                    matched_key = key
-                                    break
-                        if matched_key is not None:
-                            remaining_note_counts[matched_key] -= 1
-                            note = matched_key[2]
-                            conn.execute(
-                                text("UPDATE finished_goods_data SET 合同备注 = :note WHERE 流水号 = :sn"),
-                                {"note": note or None, "sn": sn}
-                            )
-                if pending_inbound_sns:
-                    record_inbound_history(
-                        conn,
-                        pending_inbound_sns,
-                        source="直接配货-自动入库",
-                        operator=operator or "",
-                        inbound_time=now_str,
-                        status_before=pending_status_map,
-                        status_after="待发货",
-                    )
-        except Exception as e:
-            raise RuntimeError(f"配货写入失败: {e}") from e
+            missing = [sn for sn in serial_nos if sn not in unit_by_sn and sn not in stock_by_sn]
+            if missing:
+                raise ValueError(f"机台不存在: {', '.join(missing[:10])}")
 
-        # 清除缓存，确保后续读取到最新状态
-        clear_inventory_data_caches()
-        enqueue_wechat_batch_summary_sync("orders_allocate_inventory")
+            for sn in serial_nos:
+                source_row = unit_by_sn.get(sn) or stock_by_sn.get(sn) or {}
+                model = str(source_row.get("model_type") or "").strip()
+                contracts = contract_candidates.get(model, set())
+                contract_no = next(iter(contracts)) if len(contracts) == 1 else ""
+                current_note = _normalize_order_note(source_row.get("order_remark", ""))
+                clean_model = _normalize_allocation_model(model)
+                high = _is_high_model_hint(model, current_note)
+                note = current_note
+                for key, count in remaining_note_counts.items():
+                    if count > 0 and key[0] == clean_model and key[1] == high:
+                        note = key[2]
+                        remaining_note_counts[key] -= 1
+                        break
 
-    # 同步客户/代理商信息到沙盘 units 表，并绑定实物流水号（serial_no）
-    if selected_sns:
-        try:
-            with get_engine().begin() as conn:
-                # 批量更新 customer/dealer_name（已有逻辑保留）
-                conn.execute(
-                    text("""
-                        UPDATE units
-                        SET customer = :customer,
-                            dealer_name = :agent,
-                            sales_id = :order_id,
-                            updated_at = NOW()
-                        WHERE serial_no IN :sns OR forecast_serial_no IN :sns
-                    """).bindparams(bindparam("sns", expanding=True)),
-                    {"customer": customer, "agent": agent, "order_id": order_id,
-                     "sns": list(selected_sns)}
-                )
-                for sn in selected_sns:
-                    row = df[df['流水号'] == sn]
-                    if row.empty:
-                        continue
-                    contract_no = contract_by_model.get(str(row.iloc[0].get('机型', '') or '').strip())
-                    if contract_no:
-                        conn.execute(
-                            text("""
-                                UPDATE units
-                                SET contract_no = :contract_no, sales_id = :order_id, updated_at = NOW()
-                                WHERE (serial_no = :sn OR forecast_serial_no = :sn)
-                                  AND (contract_no IS NULL OR TRIM(contract_no) = '' OR TRIM(contract_no) = :contract_no)
-                            """),
-                            {"contract_no": contract_no, "order_id": order_id, "sn": sn},
-                        )
-                # 【缺口5补全】逐台将 forecast_serial_no → serial_no，让看板卡片显示实物流水号
-                for sn in selected_sns:
-                    conn.execute(
-                        text("""
-                            UPDATE units
-                            SET serial_no = :sn
-                            WHERE forecast_serial_no = :sn
-                              AND (serial_no IS NULL OR TRIM(serial_no) = '')
-                        """),
-                        {"sn": sn}
-                    )
-        except Exception as e:
-            print(f"Warning: Failed to sync units table on allocate_inventory: {e}")
+                if sn in unit_by_sn:
+                    row = unit_by_sn[sn]
+                    occupied = str(row.get("sales_id") or "").strip()
+                    if occupied not in ("", order_id):
+                        raise ValueError(f"在产机台 {sn} 已被订单 {occupied} 占用")
+                    if int(row.get("is_locked") or 0) and occupied != order_id:
+                        raise ValueError(f"在产机台 {sn} 已锁定")
+                    existing_contract = str(row.get("contract_no") or "").strip()
+                    if existing_contract and existing_contract not in order_contract_ids:
+                        raise ValueError(f"在产机台 {sn} 已绑定合同 {existing_contract}")
+                    contract_no = existing_contract or contract_no
+                    conn.execute(text("""
+                        UPDATE units SET contract_no=:contract_no, sales_id=:order_id,
+                            customer=:customer, dealer_name=:agent, order_remark=:note, updated_at=NOW()
+                        WHERE unit_id=:unit_id
+                    """), {"contract_no": contract_no or None, "order_id": order_id, "customer": customer,
+                           "agent": agent, "note": note or None, "unit_id": row["unit_id"]})
+                    conn.execute(text("""
+                        INSERT INTO finished_goods_data
+                            (`流水号`,`批次号`,`机型`,`状态`,`预计入库时间`,`更新时间`,`占用订单号`,`客户`,`代理商`,`合同备注`,`合同号`)
+                        VALUES (:sn,:batch,:model,'待入库',:eta,:now,:order_id,:customer,:agent,:note,:contract_no)
+                        ON DUPLICATE KEY UPDATE `占用订单号`=VALUES(`占用订单号`), `客户`=VALUES(`客户`),
+                            `代理商`=VALUES(`代理商`), `合同备注`=VALUES(`合同备注`), `合同号`=VALUES(`合同号`),
+                            `状态`='待入库', `批次号`=VALUES(`批次号`), `机型`=VALUES(`机型`),
+                            `预计入库时间`=VALUES(`预计入库时间`), `更新时间`=VALUES(`更新时间`)
+                    """), {"sn": sn, "batch": row.get("batch_code") or "", "model": model,
+                           "eta": row.get("expected_inbound_date"), "now": now_str, "order_id": order_id,
+                           "customer": customer, "agent": agent, "note": note or None,
+                           "contract_no": contract_no or None})
+                    production_sns.append(sn)
+                    continue
 
-    if pending_inbound_sns:
-        notify_inbound_completion(pending_inbound_sns, operator=operator or "")
+                row = stock_by_sn[sn]
+                status = str(row.get("status") or "").strip()
+                occupied = str(row.get("sales_id") or "").strip()
+                if not status.startswith("库存中"):
+                    raise ValueError(f"机台 {sn} 不是可用库存现货（当前状态：{status or '空'}）")
+                if occupied not in ("", order_id):
+                    raise ValueError(f"库存机台 {sn} 已被订单 {occupied} 占用")
+                conn.execute(text("""
+                    UPDATE finished_goods_data SET `状态`='待发货', `占用订单号`=:order_id,
+                        `客户`=:customer, `代理商`=:agent, `合同号`=:contract_no,
+                        `合同备注`=:note, `更新时间`=:now WHERE `流水号`=:sn
+                """), {"order_id": order_id, "customer": customer, "agent": agent,
+                       "contract_no": contract_no or row.get("contract_no") or None,
+                       "note": note or None, "now": now_str, "sn": sn})
+                stock_sns.append(sn)
+    except Exception as e:
+        raise RuntimeError(f"配货写入失败: {e}") from e
 
-    append_log(f"配货锁定-{order_id}", selected_sns, operator=operator)
+    clear_inventory_data_caches()
+    enqueue_wechat_batch_summary_sync("orders_allocate_inventory")
+    if stock_sns:
+        append_log(f"配货锁定-{order_id}-库存现货", stock_sns, operator=operator)
+    if production_sns:
+        append_log(f"配货锁定-{order_id}-在产预占", production_sns, operator=operator)
+    return {"stock": len(stock_sns), "production": len(production_sns)}
 
 
 def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
@@ -498,10 +459,19 @@ def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
 
     sns_param = bindparam("sns", expanding=True)
     with get_engine().begin() as conn:
+        active_rows = conn.execute(text("""
+            SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS serial_no
+            FROM units u JOIN batches b ON b.batch_id=u.batch_id
+            WHERE b.status IN ('Confirmed','In_Production')
+              AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IN :sns
+            FOR UPDATE
+        """).bindparams(sns_param), {"sns": serial_nos}).mappings().all()
+        production_sns = {str(row["serial_no"]).strip() for row in active_rows}
         conn.execute(
             text("""
                 UPDATE finished_goods_data
                 SET `状态` = CASE
+                        WHEN `流水号` IN :production_sns THEN '待入库'
                         WHEN TRIM(COALESCE(`Location_Code`, '')) <> ''
                             THEN CONCAT('库存中（', TRIM(`Location_Code`), '）')
                         ELSE '待入库'
@@ -512,8 +482,8 @@ def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
                     `合同号` = '',
                     `更新时间` = NOW()
                 WHERE `流水号` IN :sns
-            """).bindparams(sns_param),
-            {"sns": serial_nos},
+            """).bindparams(sns_param, bindparam("production_sns", expanding=True)),
+            {"sns": serial_nos, "production_sns": list(production_sns) or ["__none__"]},
         )
         conn.execute(
             text("""
@@ -523,7 +493,10 @@ def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
                     dealer_name = NULL,
                     sales_id = NULL,
                     due_date = NULL,
-                    is_locked = 0
+                    is_locked = 0,
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    updated_at = NOW()
                 WHERE serial_no IN :sns OR forecast_serial_no IN :sns
             """).bindparams(sns_param),
             {"sns": serial_nos},
@@ -532,6 +505,33 @@ def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
     clear_inventory_data_caches()
     enqueue_wechat_batch_summary_sync("orders_revert_to_inbound")
     append_log(f"{reason}-退回待入库", serial_nos, operator=operator)
+
+
+def mark_allocated_order_ready_after_inbound(order_id: str) -> bool:
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        return False
+    with get_engine().begin() as conn:
+        status = conn.execute(
+            text("SELECT `status` FROM sales_orders WHERE `订单号`=:order_id FOR UPDATE"),
+            {"order_id": order_id},
+        ).scalar()
+        if str(status or "").strip() != "allocated":
+            return False
+        pending = int(conn.execute(text("""
+            SELECT COUNT(*) FROM finished_goods_data
+            WHERE TRIM(COALESCE(`占用订单号`, ''))=:order_id
+              AND TRIM(COALESCE(`状态`, '')) <> '待发货'
+              AND TRIM(COALESCE(`状态`, '')) <> '已出库'
+        """), {"order_id": order_id}).scalar() or 0)
+        if pending > 0:
+            return False
+        conn.execute(
+            text("UPDATE sales_orders SET `status`='ready' WHERE `订单号`=:order_id"),
+            {"order_id": order_id},
+        )
+    get_orders.cache_clear()
+    return True
 
 
 def update_sales_order(order_id, new_data, force_unbind=False):

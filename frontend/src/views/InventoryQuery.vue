@@ -9,7 +9,10 @@
               <el-option label="全部" value="" />
               <el-option label="库存中" value="库存中" />
               <el-option label="待入库" value="待入库" />
-              <el-option label="已绑定" value="已绑定" />
+            </el-select>
+            <el-select v-model="relationFilter" style="width: 150px; margin-right: 10px">
+              <el-option label="全部绑定状态" value="" />
+              <el-option label="已绑定" value="bound" />
             </el-select>
             <el-select
               v-model="selectedModels"
@@ -53,7 +56,7 @@
               <div class="summary-value">{{ pendingCount }}</div>
             </div>
             <div class="summary-block">
-              <div class="summary-title">🔗 已绑定 (Bound)</div>
+              <div class="summary-title">已绑定</div>
               <div class="summary-value">{{ boundCount }}</div>
             </div>
           </div>
@@ -142,7 +145,8 @@
               <div>批次号</div>
               <div>机型</div>
               <div>流水号</div>
-              <div>状态</div>
+              <div>主状态</div>
+              <div>附加状态</div>
             </div>
             <VirtualScrollList
               :items="filteredForStats"
@@ -157,7 +161,11 @@
                   <div :title="item['批次号']">{{ item['批次号'] || '-' }}</div>
                   <div :title="item['机型']">{{ item['机型'] || '-' }}</div>
                   <div :title="item['流水号']">{{ item['流水号'] || '-' }}</div>
-                  <div :title="item['状态']">{{ item['状态'] || '-' }}</div>
+                  <div :title="getInventoryLifecycleStatus(item)">{{ getInventoryLifecycleStatus(item) || '-' }}</div>
+                  <div class="relation-tags">
+                    <el-tag v-if="isMachineBound(item)" size="small" type="warning" :title="getBindingTitle(item)">已绑定</el-tag>
+                    <span v-else>-</span>
+                  </div>
                 </div>
               </template>
             </VirtualScrollList>
@@ -188,7 +196,15 @@
             <el-table-column prop="批次号" label="批次号" width="120" />
             <el-table-column prop="机型" label="机型" min-width="160" />
             <el-table-column prop="流水号" label="流水号" width="150" />
-            <el-table-column prop="状态" label="状态" width="100" />
+            <el-table-column label="主状态" width="100">
+              <template #default="{ row }">{{ getInventoryLifecycleStatus(row) || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="绑定状态" width="120" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="isMachineBound(row)" size="small" type="warning" :title="getBindingTitle(row)">已绑定</el-tag>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="合同备注" label="合同备注" min-width="180" show-overflow-tooltip />
           </el-table>
           <div class="pagination-container">
@@ -214,6 +230,7 @@ import { useInventoryStore } from '../store/inventory'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
 import { getModelOrderList } from '../utils/modelOrder'
 import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount } from '../utils/inventoryStats'
+import { getBindingTitle, getInventoryLifecycleStatus, isMachineBound } from '../utils/inventoryState'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 
 const loading = ref(false)
@@ -221,6 +238,7 @@ const inventoryList = ref<any[]>([])
 const inventoryStore = useInventoryStore()
 const searchQuery = ref('')
 const statusFilter = ref('')
+const relationFilter = ref<'bound' | ''>('')
 const selectedModels = ref<string[]>([])
 const highOnly = ref(false)
 const activePanels = ref<string[]>([])
@@ -259,6 +277,7 @@ const filteredForStats = computed(() => {
     statusFilter: statusFilter.value,
     searchQuery: searchQuery.value,
     highOnly: highOnly.value,
+    relationFilter: relationFilter.value,
   })
   return rows.sort((a, b) => {
     const snA = String(a['流水号'] || '').toLowerCase()
@@ -277,9 +296,9 @@ const total = computed(() => {
 
 const totalCount = computed(() => filteredForStats.value.length)
 
-const inStockCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '').startsWith('库存中')).length)
-const pendingCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '') === '待入库').length)
-const boundCount = computed(() => filteredForStats.value.filter((r) => String(r['状态'] || '') === '已绑定').length)
+const inStockCount = computed(() => filteredForStats.value.filter((r) => getInventoryLifecycleStatus(r).startsWith('库存中')).length)
+const pendingCount = computed(() => filteredForStats.value.filter((r) => getInventoryLifecycleStatus(r) === '待入库').length)
+const boundCount = computed(() => filteredForStats.value.filter(isMachineBound).length)
 
 const modelSummarySource = computed(() => {
   return buildModelInventorySummary(filteredForStats.value)
@@ -638,8 +657,13 @@ onActivated(() => {
 .model-detail-header,
 .model-detail-row {
   display: grid;
-  grid-template-columns: 52px 110px minmax(150px, 1fr) 140px 95px;
+  grid-template-columns: 52px 110px minmax(130px, 1fr) 130px 90px minmax(150px, 1fr);
   align-items: center;
+}
+.relation-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .model-detail-header {
   height: 40px;

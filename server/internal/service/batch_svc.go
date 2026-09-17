@@ -736,6 +736,13 @@ SELECT
                 WHERE TRIM(ih.serial_no) COLLATE utf8mb4_general_ci =
                       COALESCE(NULLIF(TRIM(u.serial_no), ''), NULLIF(TRIM(u.forecast_serial_no), '')) COLLATE utf8mb4_general_ci
              )
+             AND EXISTS (
+                SELECT 1
+                FROM finished_goods_data fg
+                WHERE TRIM(fg.流水号) COLLATE utf8mb4_general_ci =
+                      COALESCE(NULLIF(TRIM(u.serial_no), ''), NULLIF(TRIM(u.forecast_serial_no), '')) COLLATE utf8mb4_general_ci
+                  AND TRIM(COALESCE(fg.状态, '')) NOT IN ('', '待入库', '已绑定')
+             )
             THEN 1 ELSE 0
         END
     ) AS inbound_units

@@ -83,9 +83,9 @@
               <div class="field-head-right" style="display: flex; gap: 8px; align-items: center;">
                 <el-input v-model="candidateKeyword" placeholder="搜索流水号/机型/批次" clearable style="width: 200px" />
                 <el-select v-model="candidateStatusFilter" style="width: 200px">
-                  <el-option label="全部状态" value="" />
-                  <el-option label="待入库" value="待入库" />
-                  <el-option label="库存中" value="库存中" />
+                  <el-option label="全部货源" value="" />
+                  <el-option label="库存现货" value="库存现货" />
+                  <el-option label="在产机器" value="在产机器" />
                 </el-select>
               </div>
             </div>
@@ -101,6 +101,7 @@
               <el-table-column type="selection" width="48" />
               <el-table-column prop="流水号" label="流水号" width="150" />
               <el-table-column prop="机型" label="机型" min-width="160" />
+              <el-table-column prop="货源" label="货源" width="100" />
               <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
               <el-table-column prop="合同备注" label="合同备注" min-width="160" />
@@ -123,7 +124,8 @@
               <el-table-column type="selection" width="48" />
               <el-table-column prop="流水号" label="流水号" width="150" />
               <el-table-column prop="机型" label="机型" min-width="160" />
-              <el-table-column prop="状态" label="状态" width="90" />
+              <el-table-column prop="货源" label="货源" width="100" />
+              <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
               <el-table-column prop="合同备注" label="合同备注" min-width="160" />
             </el-table>
@@ -339,8 +341,7 @@ const candidateRows = computed(() => {
     if (status === '未入库' || status === '已出库' || status === '已绑定') return false
     if (occupied) return false
     
-    if (candidateStatusFilter.value === '待入库' && status !== '待入库') return false
-    if (candidateStatusFilter.value === '库存中' && !status.startsWith('库存中')) return false
+    if (candidateStatusFilter.value && String(r['货源'] || '') !== candidateStatusFilter.value) return false
     
     if (kw) {
       const hit = `${model} ${batch} ${serialNo}`.toLowerCase()
@@ -595,9 +596,9 @@ const completeAllocation = async () => {
   if (!selectedOrderId.value) return
   saving.value = true
   try {
-    const res = await apiPost<{ message?: string }>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`, {})
+    const res = await apiPost<{ message?: string; status?: string }>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`, {})
     ElMessage.success(res.message || '配货完成')
-    await refreshCurrentOrder('ready')
+    await refreshCurrentOrder(res.status || 'ready')
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '配货完成失败')
   } finally {
@@ -614,6 +615,7 @@ const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
   if (s === 'ready') {
     return { text: '已满足', type: 'success' }
   }
+  if (s === 'allocated') return { text: '已配齐（含在产）', type: 'warning' }
   return { text: '待配齐', type: 'danger' }
 }
 

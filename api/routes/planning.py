@@ -1363,7 +1363,6 @@ def _sync_units_from_contract_edit(
             SET customer = :customer,
                 dealer_name = :dealer,
                 due_date = :due_date,
-                sales_id = CASE WHEN :order_id <> '' THEN :order_id ELSE sales_id END,
                 updated_at = NOW()
             WHERE TRIM(COALESCE(contract_no, '')) = :contract_id
         """),
@@ -1447,7 +1446,6 @@ def _sync_units_from_contract_edit(
                     customer = :customer,
                     dealer_name = :dealer,
                     due_date = :due_date,
-                    sales_id = :order_id,
                     order_remark = :remark,
                     model_type = :model,
                     updated_at = NOW()
@@ -1966,61 +1964,10 @@ def _sync_order_to_units_and_import(contract_ids: list[str], order_id: str) -> d
         return {"units": 0, "plan_import": 0}
 
     with get_engine().begin() as conn:
-        conflicts = conn.execute(
-            text(
-                "SELECT DISTINCT contract_no, sales_id FROM units "
-                "WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci IN :contract_ids "
-                "AND COALESCE(TRIM(sales_id), '') <> '' "
-                "AND TRIM(sales_id) <> :order_id"
-            ).bindparams(bindparam("contract_ids", expanding=True)),
-            {"contract_ids": contract_ids, "order_id": order_id},
-        ).fetchall()
-        if conflicts:
-            conflict_contract = str(conflicts[0][0] or "").strip()
-            conflict_order = str(conflicts[0][1] or "").strip()
-            raise HTTPException(status_code=422, detail=f"合同 {conflict_contract} 已绑定其他订单 {conflict_order}")
-
-        unit_ret = conn.execute(
-            text(
-                "UPDATE units SET sales_id = :order_id, updated_at = NOW() "
-                "WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci IN :contract_ids "
-                "AND (sales_id IS NULL OR TRIM(sales_id) = '' OR TRIM(sales_id) = :order_id)"
-            ).bindparams(bindparam("contract_ids", expanding=True)),
-            {"contract_ids": contract_ids, "order_id": order_id},
-        )
-
+        # Contract/order linkage belongs to factory_plan and plan_import. Machine
+        # reservation is performed only by the explicit allocation endpoint.
+        units_rows = 0
         finished_goods_rows = 0
-        if _table_has_column(conn, "finished_goods_data", "流水号") and _table_has_column(conn, "finished_goods_data", "占用订单号"):
-            unit_serial_rows = conn.execute(
-                text(
-                    "SELECT serial_no, forecast_serial_no, unit_id FROM units "
-                    "WHERE TRIM(COALESCE(contract_no, '')) COLLATE utf8mb4_general_ci IN :contract_ids"
-                ).bindparams(bindparam("contract_ids", expanding=True)),
-                {"contract_ids": contract_ids},
-            ).fetchall()
-            serials: list[str] = []
-            seen_serials: set[str] = set()
-            for row in unit_serial_rows:
-                for value in row:
-                    sn = str(value or "").strip()
-                    if not sn or sn in seen_serials:
-                        continue
-                    seen_serials.add(sn)
-                    serials.append(sn)
-            if serials:
-                set_sql = "`占用订单号` = :order_id"
-                if _table_has_column(conn, "finished_goods_data", "订单号"):
-                    set_sql += ", `订单号` = :order_id"
-                fg_ret = conn.execute(
-                    text(
-                        f"UPDATE finished_goods_data SET {set_sql} "
-                        "WHERE TRIM(COALESCE(`流水号`, '')) IN :serials "
-                        "AND TRIM(COALESCE(`状态`, '')) <> '已出库' "
-                        "AND (COALESCE(TRIM(`占用订单号`), '') = '' OR TRIM(`占用订单号`) = :order_id)"
-                    ).bindparams(bindparam("serials", expanding=True)),
-                    {"serials": serials, "order_id": order_id},
-                )
-                finished_goods_rows = int(fg_ret.rowcount or 0)
 
         plan_import_rows = 0
         if _table_has_column(conn, "plan_import", "合同号"):
@@ -2049,7 +1996,7 @@ def _sync_order_to_units_and_import(contract_ids: list[str], order_id: str) -> d
             )
             plan_import_rows = int(import_ret.rowcount or 0)
 
-    return {"units": int(unit_ret.rowcount or 0), "plan_import": plan_import_rows, "finished_goods_data": finished_goods_rows}
+    return {"units": units_rows, "plan_import": plan_import_rows, "finished_goods_data": finished_goods_rows}
 
 
 def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str | None = "已转订单") -> int:
@@ -2094,7 +2041,6 @@ def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str
         crud.planning.get_factory_plan_v2.cache_clear()
     
     _sync_order_to_units_and_import(contract_ids, str(order_id))
-    _occupy_inventory_for_order(contract_ids, str(order_id))
     return updated_count
 
 
@@ -2134,7 +2080,14 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
     for col in ["流水号", "合同号", "占用订单号", "状态", "机型", "批次号", "客户", "代理商", "合同备注"]:
         if col not in inv_df.columns:
             inv_df[col] = ""
-    inv_df = inv_df[inv_df["状态"].astype(str).str.strip() != "报废"].copy()
+    inv_df = inv_df[
+        inv_df["状态"].astype(str).str.strip().str.startswith("库存中")
+        | (
+            (inv_df["占用订单号"].astype(str).str.strip() == order_id)
+            & ~inv_df["状态"].astype(str).str.strip().isin(["已出库", "报废"])
+        )
+    ].copy()
+    inv_df["货源"] = "库存现货"
 
     # Confirmed batches may still exist only in the sandbox `units` table
     # (especially after a machine-level cross-family edit). Expose those
@@ -2144,16 +2097,43 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
             unit_inventory = conn.execute(text("""
                 SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS `流水号`,
                        u.model_type AS `机型`, COALESCE(u.contract_no, '') AS `合同号`,
-                       COALESCE(u.sales_id, '') AS `占用订单号`, '待配货' AS `状态`,
+                       COALESCE(u.sales_id, '') AS `占用订单号`,
+                       CASE WHEN TRIM(COALESCE(u.sales_id, '')) = :order_id
+                            THEN '在产已预占' ELSE '在产可选' END AS `状态`,
                        b.batch_code AS `批次号`, COALESCE(u.customer, '') AS `客户`,
-                       COALESCE(u.dealer_name, '') AS `代理商`, COALESCE(u.order_remark, '') AS `合同备注`
-                FROM units u JOIN batches b ON b.batch_id=u.batch_id
+                       COALESCE(u.dealer_name, '') AS `代理商`, COALESCE(u.order_remark, '') AS `合同备注`,
+                       '在产机器' AS `货源`, COALESCE(u.is_locked, 0) AS `_is_locked`
+                FROM units u
+                JOIN batches b ON b.batch_id=u.batch_id
+                LEFT JOIN finished_goods_data fg
+                  ON TRIM(fg.`流水号`) = TRIM(COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no))
                 WHERE b.status IN ('Confirmed','In_Production')
                   AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IS NOT NULL
-                  AND TRIM(COALESCE(u.contract_no, '')) = ''
-            """)).mappings().all()
+                  AND (
+                      fg.`流水号` IS NULL
+                      OR (
+                          TRIM(COALESCE(fg.`状态`, '')) NOT LIKE '库存中%'
+                          AND TRIM(COALESCE(fg.`状态`, '')) NOT IN ('待发货', '已出库', '已发货', '报废')
+                      )
+                  )
+            """), {"order_id": order_id}).mappings().all()
         if unit_inventory:
-            inv_df = pd.concat([inv_df, pd.DataFrame([dict(x) for x in unit_inventory])], ignore_index=True).drop_duplicates(subset=['流水号'], keep='first')
+            all_unit_df = pd.DataFrame([dict(x) for x in unit_inventory])
+            active_serials = set(all_unit_df["流水号"].astype(str).str.strip())
+            inv_df = inv_df[~inv_df["流水号"].astype(str).str.strip().isin(active_serials)].copy()
+            unit_df = all_unit_df[
+                (
+                    (all_unit_df["占用订单号"].astype(str).str.strip() == "")
+                    & (pd.to_numeric(all_unit_df["_is_locked"], errors="coerce").fillna(0) == 0)
+                    & (
+                        (all_unit_df["合同号"].astype(str).str.strip() == "")
+                        | all_unit_df["合同号"].astype(str).str.strip().isin(contract_ids)
+                    )
+                )
+                | (all_unit_df["占用订单号"].astype(str).str.strip() == order_id)
+            ].drop(columns=["_is_locked"], errors="ignore")
+            # An active production card is authoritative for the same serial.
+            inv_df = pd.concat([unit_df, inv_df], ignore_index=True).drop_duplicates(subset=['流水号'], keep='first')
     except Exception:
         pass
 
@@ -2192,7 +2172,10 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
     if needed_models:
         free_rows = inv_df[
             (inv_df["占用订单号"].astype(str).str.strip() == "")
-            & (inv_df["状态"].astype(str).str.strip() != "已出库")
+            & (
+                inv_df["状态"].astype(str).str.startswith("库存中")
+                | inv_df["状态"].astype(str).isin(["在产可选"])
+            )
         ].copy()
         model_mask = pd.Series(False, index=free_rows.index)
         for model, high in needed_models:
@@ -2265,11 +2248,39 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
                 "合同备注": expected_notes.get((cid, model, high), ""),
                 "Location_Code": "",
                 "合同号": cid,
+                "货源": "待补机台",
                 "_placeholder": f"{cid}-{model}-{'high' if high else 'normal'}-{i + 1}",
             })
     if placeholders:
         rows = pd.concat([rows, pd.DataFrame(placeholders)], ignore_index=True)
     return rows
+
+
+def _get_explicit_order_allocations(order_id: str) -> pd.DataFrame:
+    order_id = str(order_id or "").strip()
+    with get_engine().connect() as conn:
+        production = conn.execute(text("""
+            SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS `流水号`,
+                   u.model_type AS `机型`, COALESCE(u.sales_id, '') AS `占用订单号`,
+                   '在产已预占' AS `状态`, b.batch_code AS `批次号`,
+                   COALESCE(u.order_remark, '') AS `合同备注`, '在产机器' AS `货源`
+            FROM units u JOIN batches b ON b.batch_id=u.batch_id
+            WHERE b.status IN ('Confirmed','In_Production')
+              AND TRIM(COALESCE(u.sales_id, ''))=:order_id
+              AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IS NOT NULL
+        """), {"order_id": order_id}).mappings().all()
+        stock = conn.execute(text("""
+            SELECT fg.`流水号`, fg.`机型`, COALESCE(fg.`占用订单号`, '') AS `占用订单号`,
+                   fg.`状态`, fg.`批次号`, COALESCE(fg.`合同备注`, '') AS `合同备注`,
+                   '库存现货' AS `货源`
+            FROM finished_goods_data fg
+            WHERE TRIM(COALESCE(fg.`占用订单号`, ''))=:order_id
+              AND TRIM(COALESCE(fg.`状态`, ''))='待发货'
+        """), {"order_id": order_id}).mappings().all()
+    rows = [dict(row) for row in production] + [dict(row) for row in stock]
+    if not rows:
+        return pd.DataFrame(columns=["流水号", "机型", "占用订单号", "状态", "批次号", "合同备注", "货源"])
+    return pd.DataFrame(rows).drop_duplicates(subset=["流水号"], keep="first")
 
 @router.get("/")
 def get_planning_data(
@@ -2826,30 +2837,8 @@ def _sync_order_detail_rows_to_units_and_inventory(
             """).bindparams(bindparam("remarks", expanding=True)),
             {"cid": cid, "model": model, "order_id": order_id, "remarks": desired_remarks or [""]},
         ).mappings().all()
-        # A machine-level cross-family edit may leave the unit uncontracted.
-        # Bind available units by their actual model before syncing order data.
-        if len(unit_rows) < len(desired_remarks):
-            missing = len(desired_remarks) - len(unit_rows)
-            candidates = conn.execute(
-                text("""
-                    SELECT u.unit_id, u.serial_no, u.forecast_serial_no,
-                           COALESCE(u.order_remark, '') AS order_remark
-                    FROM units u JOIN batches b ON b.batch_id = u.batch_id
-                    WHERE TRIM(COALESCE(u.contract_no, '')) = ''
-                      AND TRIM(COALESCE(u.model_type, '')) = :model
-                      AND b.status IN ('Confirmed', 'In_Production')
-                    ORDER BY u.batch_id, u.slot_index, u.unit_id
-                    LIMIT :missing
-                    FOR UPDATE
-                """), {"model": model, "missing": missing}).mappings().all()
-            if candidates:
-                for candidate in candidates:
-                    conn.execute(text("""
-                        UPDATE units SET contract_no=:cid, sales_id=:order_id, updated_at=NOW()
-                        WHERE unit_id=:unit_id
-                    """), {"cid": cid, "order_id": order_id, "unit_id": candidate["unit_id"]})
-                    stats["units"] += 1
-                unit_rows = list(unit_rows) + list(candidates)
+        # Never acquire an unrelated production unit while creating an order.
+        # In-production machines are reserved only by the explicit allocation API.
         unit_ids = [str(r.get("unit_id") or "").strip() for r in unit_rows if str(r.get("unit_id") or "").strip()]
         assigned_unit_remarks = assign_remarks(list(unit_rows), desired_remarks, "order_remark")
         for idx, unit_id in enumerate(unit_ids):
@@ -2857,8 +2846,7 @@ def _sync_order_detail_rows_to_units_and_inventory(
             ret = conn.execute(
                 text("""
                     UPDATE units
-                    SET sales_id = :order_id,
-                        order_remark = :remark,
+                    SET order_remark = :remark,
                         updated_at = NOW()
                     WHERE unit_id = :unit_id
                 """),
@@ -3252,17 +3240,11 @@ def allocate_order_inventory_api(
 
         required_variants = _order_required_variant_counts(str(order_id), first)
         if required_variants:
-            inv_df = get_data()
-            for col in ["流水号", "机型", "批次号", "合同备注", "占用订单号", "状态"]:
-                if col not in inv_df.columns:
-                    inv_df[col] = ""
-            current_rows = inv_df[
-                (inv_df["占用订单号"].astype(str).str.strip() == str(order_id))
-                & (inv_df["状态"].astype(str).str.strip() != "已出库")
-            ].copy()
-            selected_rows = inv_df[inv_df["流水号"].astype(str).str.strip().isin(selected)].copy()
+            current_rows = _get_explicit_order_allocations(str(order_id))
+            selected_rows = candidate_rows[candidate_rows["流水号"].astype(str).str.strip().isin(selected)].copy()
             variant_counts: dict[tuple[str, bool], int] = {}
-            for _, row in pd.concat([current_rows, selected_rows], ignore_index=True).iterrows():
+            combined = pd.concat([current_rows, selected_rows], ignore_index=True).drop_duplicates(subset=["流水号"], keep="first")
+            for _, row in combined.iterrows():
                 model = _normalize_alloc_model(row.get("机型", ""))
                 if not model:
                     continue
@@ -3275,18 +3257,23 @@ def allocate_order_inventory_api(
                         status_code=422,
                         detail=f"{_variant_label(key[0], key[1])} 超配：需求 {need}，本次后 {allocated}",
                     )
-        allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
+        allocation_result = allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
+        stock_count = int(allocation_result.get("stock", 0))
+        production_count = int(allocation_result.get("production", 0))
         append_audit_log(
             module="订单配货",
             action_type="配货",
             biz_type="订单",
-            content=f"为订单 {order_id} 配货 {len(selected)} 台机台；流水号：{', '.join(selected[:10])}",
+            content=(f"为订单 {order_id} 配货 {len(selected)} 台机台（库存现货 {stock_count}，"
+                     f"在产预占 {production_count}）；流水号：{', '.join(selected[:10])}"),
             user_id=_user_id_from_context(current_user),
             username=current_operator,
         )
-        return {"message": f"配货成功，已锁定 {len(selected)} 台机台"}
+        return {"message": f"配货成功，已确认 {len(selected)} 台机台", **allocation_result}
     except HTTPException:
         raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"配货失败: {e}")
 
@@ -3309,38 +3296,16 @@ def complete_order_allocation_api(
             raise HTTPException(status_code=404, detail="订单不存在")
         order_idx = hit.index[0]
         current_status = str(orders_df.at[order_idx, "status"] or "active")
-        if current_status == "ready":
-            return {"message": "配货已完成", "completed": True, "logged": 0}
+        if current_status in {"ready", "allocated"}:
+            return {"message": "配货已完成", "completed": True, "logged": 0, "status": current_status}
 
         required_variants = _order_required_variant_counts(order_id, hit.iloc[0])
         if not required_variants:
             raise HTTPException(status_code=422, detail="订单需求机型为空，无法完成配货")
 
-        inv_df = get_data()
-        # Include sandbox units allocated by forecast serial; these are not yet
-        # materialized in finished_goods_data but are valid pre-inbound machines.
-        with get_engine().connect() as conn:
-            unit_rows = conn.execute(text("""
-                SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS `流水号`,
-                       u.model_type AS `机型`, COALESCE(u.sales_id, '') AS `占用订单号`,
-                       '待入库' AS `状态`, b.batch_code AS `批次号`, COALESCE(u.order_remark, '') AS `合同备注`
-                FROM units u JOIN batches b ON b.batch_id=u.batch_id
-                WHERE TRIM(COALESCE(u.sales_id, ''))=:order_id
-            """), {"order_id": order_id}).mappings().all()
-        if unit_rows:
-            inv_df = pd.concat([inv_df, pd.DataFrame([dict(x) for x in unit_rows])], ignore_index=True)
-        if inv_df.empty:
+        allocated_df = _get_explicit_order_allocations(order_id)
+        if allocated_df.empty:
             raise HTTPException(status_code=422, detail="配货未完成：未找到已配机台")
-        for col in ["流水号", "机型", "批次号", "合同备注", "状态", "占用订单号"]:
-            if col not in inv_df.columns:
-                inv_df[col] = ""
-
-        allocated_df = inv_df[
-            (inv_df["占用订单号"].astype(str).str.strip() == order_id)
-            & (inv_df["状态"].astype(str).str.strip() != "已出库")
-            & (inv_df["状态"].astype(str).str.strip() != "报废")
-            & (inv_df["流水号"].astype(str).str.strip() != "")
-        ].copy()
         allocated_counts: dict[tuple[str, bool], int] = {}
         for _, row in allocated_df.iterrows():
             model = _normalize_alloc_model(row.get("机型", ""))
@@ -3356,68 +3321,24 @@ def complete_order_allocation_api(
         if missing:
             raise HTTPException(status_code=422, detail=f"配货未完成：{'；'.join(missing)}")
 
-        serials = allocated_df["流水号"].astype(str).str.strip().tolist()
-        pending_inbound_df = allocated_df[allocated_df["状态"].astype(str).str.strip() == "待入库"].copy()
-        pending_inbound_serials = pending_inbound_df["流水号"].astype(str).str.strip().tolist()
-        pending_status_map = {
-            str(row.get("流水号", "")).strip(): str(row.get("状态", "") or "").strip()
-            for _, row in pending_inbound_df.iterrows()
-        }
-        if serials:
-            from sqlalchemy import bindparam
-            from crud.inbound_history import notify_inbound_completion, record_inbound_history
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            try:
-                with get_engine().begin() as conn:
-                    # Materialize sandbox units into the inventory read model
-                    # before the automatic-inbound status transition.
-                    conn.execute(text("""
-                        INSERT INTO finished_goods_data
-                            (`流水号`,`批次号`,`机型`,`状态`,`预计入库时间`,`更新时间`,`占用订单号`,`客户`,`代理商`,`合同备注`,`合同号`)
-                        SELECT COALESCE(NULLIF(u.serial_no,''),u.forecast_serial_no), b.batch_code, u.model_type,
-                               '待入库', b.expected_inbound_date, :now, u.sales_id, u.customer, u.dealer_name,
-                               u.order_remark, u.contract_no
-                        FROM units u JOIN batches b ON b.batch_id=u.batch_id
-                        WHERE COALESCE(NULLIF(u.serial_no,''),u.forecast_serial_no) IN :sns
-                          AND NOT EXISTS (SELECT 1 FROM finished_goods_data fg
-                                          WHERE fg.`流水号`=COALESCE(NULLIF(u.serial_no,''),u.forecast_serial_no))
-                    """).bindparams(bindparam("sns", expanding=True)), {"sns": serials, "now": now_str})
-                    conn.execute(
-                        text("""
-                            UPDATE finished_goods_data
-                            SET 状态 = '待发货',
-                                更新时间 = :now
-                            WHERE 流水号 IN :sns AND 状态 != '已出库' AND 状态 != '报废'
-                        """).bindparams(bindparam("sns", expanding=True)),
-                        {"now": now_str, "sns": serials}
-                    )
-                    if pending_inbound_serials:
-                        record_inbound_history(
-                            conn,
-                            pending_inbound_serials,
-                            source="配货自动入库",
-                            operator=current_operator,
-                            inbound_time=now_str,
-                            status_before=pending_status_map,
-                            status_after="待发货",
-                        )
-            except Exception as ex:
-                raise HTTPException(status_code=500, detail=f"更新机台状态为待发货失败: {ex}")
-            if pending_inbound_serials:
-                notify_inbound_completion(pending_inbound_serials, operator=current_operator)
-            append_log("配货自动入库", serials, operator=current_operator)
-
-        orders_df.at[order_idx, "status"] = "ready"
+        serials = allocated_df["流水号"].astype(str).str.strip().drop_duplicates().tolist()
+        production_count = int((allocated_df["货源"].astype(str) == "在产机器").sum())
+        stock_count = int((allocated_df["货源"].astype(str) == "库存现货").sum())
+        next_status = "allocated" if production_count > 0 else "ready"
+        orders_df.at[order_idx, "status"] = next_status
         save_orders(orders_df)
         append_audit_log(
             module="订单配货",
             action_type="配货完成",
             biz_type="订单",
-            content=f"订单 {order_id} 配货完成，记录配货自动入库 {len(serials)} 台；流水号：{', '.join(serials[:10])}",
+            content=(f"订单 {order_id} 配货完成（库存现货 {stock_count}，在产预占 {production_count}）；"
+                     f"流水号：{', '.join(serials[:10])}"),
             user_id=_user_id_from_context(current_user),
             username=current_operator,
         )
-        return {"message": "配货完成，订单已满足", "completed": True, "logged": len(serials)}
+        message = "配货完成，含在产机台，待实际入库" if next_status == "allocated" else "配货完成，订单已满足"
+        return {"message": message, "completed": True, "logged": len(serials), "status": next_status,
+                "stock": stock_count, "production": production_count}
     except HTTPException:
         raise
     except Exception as e:
@@ -3437,12 +3358,7 @@ def release_order_inventory_api(
         if not order_id:
             raise HTTPException(status_code=422, detail="订单号不能为空")
 
-        inv_df = get_data()
-        allocated_df = inv_df[
-            (inv_df["占用订单号"].astype(str) == order_id)
-            & (inv_df["状态"].astype(str) != "已出库")
-            & (inv_df["状态"].astype(str).str.strip() != "报废")
-        ]
+        allocated_df = _get_explicit_order_allocations(order_id)
         if allocated_df.empty:
             return {"message": "该订单当前没有可释放的配货机台", "released": 0}
 
@@ -3461,7 +3377,7 @@ def release_order_inventory_api(
         hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
         if not hit.empty:
             order_idx = hit.index[0]
-            if str(orders_df.at[order_idx, "status"] or "active") == "ready":
+            if str(orders_df.at[order_idx, "status"] or "active") in {"ready", "allocated"}:
                 orders_df.at[order_idx, "status"] = "active"
                 save_orders(orders_df)
         append_audit_log(

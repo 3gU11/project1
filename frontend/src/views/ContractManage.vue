@@ -656,7 +656,8 @@ import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
-import { compareModels, getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
+import { compareModels, isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
+import { useModelDictionaryStore } from '../store/modelDictionary'
 import PageHeader from '../components/PageHeader.vue'
 
 const router = useRouter()
@@ -778,6 +779,7 @@ const contractUnitDecisions = ref<ContractUnitDecision[]>([])
 const contractDecisionSupplements = ref<ContractSupplementDecision[]>([])
 const { submitWithLock } = useFormSubmit()
 const contractsStore = useContractsStore()
+const modelDictionaryStore = useModelDictionaryStore()
 const contractEditForm = reactive({
   contractNo: '',
   customer: '',
@@ -796,7 +798,11 @@ const batchForm = ref({
 const batchItems = ref<Array<{ model: string; qty: number; high: boolean; rowNote: string }>>([
   { model: '', qty: 1, high: false, rowNote: '' },
 ])
-const modelOptions = computed(() => getModelOrderList())
+const modelOptions = computed(() => modelDictionaryStore.rows
+  .filter((row) => row.enabled && row.model_name)
+  .slice()
+  .sort((a, b) => a.sort_order - b.sort_order)
+  .map((row) => row.model_name))
 type DealerConvertItem = { model: string; qty: number; high: boolean; rowNote: string; remark: string; extraRemark: string; ermq: number }
 const dealerConvertForm = reactive({
   contractNo: '',
@@ -1461,27 +1467,33 @@ const getInStockCountByModel = async () => {
   const inventoryRows = await apiGetAll<any>('/inventory/')
   const map = new Map<string, number>()
   for (const row of inventoryRows) {
-    const model = String(row['机型'] || '').trim()
+    const model = normalizeModelName(row['机型'])
     const status = String(row['状态'] || '').trim()
-    if (!model || !status.startsWith('库存中')) continue
-    map.set(model, (map.get(model) || 0) + 1)
+    const occupied = String(row['占用订单号'] || '').trim()
+    if (!model || !status.startsWith('库存中') || occupied) continue
+    const high = [row['机型'], row['批次号'], row['合同备注']].some((value) => String(value || '').includes('加高'))
+    const key = `${model}||${high ? 'high' : 'normal'}`
+    map.set(key, (map.get(key) || 0) + 1)
   }
   return map
 }
 
-const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: number }>) => {
+const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: number; high?: boolean }>) => {
   const requiredByModel = new Map<string, number>()
   for (const row of rows) {
-    const model = String(row.model || '').trim()
+    const model = normalizeModelName(row.model)
     if (!model) continue
-    requiredByModel.set(model, (requiredByModel.get(model) || 0) + Number(row.qty || 0))
+    const key = `${model}||${row.high ? 'high' : 'normal'}`
+    requiredByModel.set(key, (requiredByModel.get(key) || 0) + Number(row.qty || 0))
   }
   const stockByModel = await getInStockCountByModel()
   const blocked: string[] = []
-  for (const [model, required] of requiredByModel.entries()) {
-    const inStock = Number(stockByModel.get(model) || 0)
-    if (inStock <= 0) blocked.push(`${model}(无机台)`)
-    else if (inStock < required) blocked.push(`${model}(库存${inStock} < 需求${required})`)
+  for (const [key, required] of requiredByModel.entries()) {
+    const [model, variant] = key.split('||')
+    const label = `${model}${variant === 'high' ? '（加高）' : '（普通）'}`
+    const inStock = Number(stockByModel.get(key) || 0)
+    if (inStock <= 0) blocked.push(`${label}(无机台)`)
+    else if (inStock < required) blocked.push(`${label}(库存${inStock} < 需求${required})`)
   }
   return {
     canUseSpot: blocked.length === 0,
@@ -1838,6 +1850,7 @@ watch(selectedContractId, (newId) => {
 })
 
 onMounted(() => {
+  void modelDictionaryStore.ensureLoaded()
   void resetBatchForm()
   fetchContracts(true)
 })

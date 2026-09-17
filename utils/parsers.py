@@ -174,7 +174,7 @@ def execute_import_transaction_payload(payload, retry_times=1):
             "批次号": row.get("批次号", ""),
             "机型": row.get("机型", ""),
             "流水号": track_no,
-            "状态": "已绑定" if contract_no else "待入库",
+            "状态": "待入库",
             "预计入库时间": expect_date,
             "更新时间": current_time,
             "占用订单号": order_no,

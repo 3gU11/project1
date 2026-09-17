@@ -67,9 +67,9 @@ func SyncFinishedGoodsByUnitIDs(tx *gorm.DB, unitIDs []string) error {
 			updates["合同备注"] = orderRemark
 		}
 		if cols["状态"] {
-			if contractNo != "" {
-				updates["状态"] = "已绑定"
-			} else if fgStatus == "已绑定" {
+			// Contract and order relationships are additive attributes. Keep the
+			// lifecycle state independent and normalize legacy bound rows.
+			if fgStatus == "已绑定" {
 				updates["状态"] = "待入库"
 			}
 		}

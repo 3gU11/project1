@@ -452,7 +452,7 @@ async def transfer_swap_units(request: Request):
                 SELECT
                     u.unit_id, u.batch_id, u.model_type, u.contract_no, u.customer, u.dealer_name,
                     u.due_date, u.sales_id, u.order_remark, u.is_locked,
-                    u.production_line_id,
+                    u.production_line_id, b.status AS batch_status,
                     COALESCE(b.expected_inbound_date, b.due_date_end) AS slot_expected_inbound
                 FROM units u
                 JOIN batches b ON b.batch_id = u.batch_id
@@ -477,6 +477,12 @@ async def transfer_swap_units(request: Request):
             raise HTTPException(status_code=400, detail="urgent unit must have contract")
         if bool(urgent.get("is_locked")) or bool(target.get("is_locked")):
             raise HTTPException(status_code=400, detail="unit is locked")
+        allowed_batch_statuses = {"Predicted", "Confirmed", "In_Production"}
+        if str(urgent.get("batch_status") or "") not in allowed_batch_statuses \
+                or str(target.get("batch_status") or "") not in allowed_batch_statuses:
+            raise HTTPException(status_code=400, detail="only active production units can be swapped")
+        if str(urgent.get("sales_id") or "").strip() or str(target.get("sales_id") or "").strip():
+            raise HTTPException(status_code=409, detail="order-allocated units must be released before transfer")
 
         if str(urgent.get("model_type") or "").strip().upper() != str(target.get("model_type") or "").strip().upper():
             raise HTTPException(status_code=400, detail="model type mismatch, cannot swap different models")
@@ -579,6 +585,30 @@ async def transfer_swap_units(request: Request):
                     WHERE unit_id=:unit_id
                 """),
                 {"unit_id": target_id, **urgent_vals},
+            )
+
+        # Keep the pending-inbound mirror aligned with the swapped production
+        # cards. Lifecycle states for physical stock/shipping remain protected.
+        for sync_unit_id in [urgent_id, target_id, auto_placed_to]:
+            if not sync_unit_id:
+                continue
+            conn.execute(
+                text("""
+                    UPDATE finished_goods_data fg
+                    JOIN units u
+                      ON TRIM(fg.`流水号`) = TRIM(COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no))
+                    SET fg.`合同号` = COALESCE(u.contract_no, ''),
+                        fg.`客户` = COALESCE(u.customer, ''),
+                        fg.`代理商` = COALESCE(u.dealer_name, ''),
+                        fg.`合同备注` = COALESCE(u.order_remark, ''),
+                        fg.`机型` = COALESCE(u.model_type, fg.`机型`),
+                        fg.`占用订单号` = COALESCE(u.sales_id, ''),
+                        fg.`更新时间` = NOW()
+                    WHERE u.unit_id = :unit_id
+                      AND TRIM(COALESCE(fg.`状态`, '')) NOT LIKE '库存中%'
+                      AND TRIM(COALESCE(fg.`状态`, '')) NOT IN ('待发货', '已出库', '已发货', '报废')
+                """),
+                {"unit_id": sync_unit_id},
             )
 
         detail = json.dumps(

@@ -1,5 +1,6 @@
 import { buildInventoryIndex, filterInventoryRows } from './inventoryFilter'
 import { compareModels, isModelInDictionary } from './modelOrder'
+import { getInventoryLifecycleStatus, isMachineBound } from './inventoryState'
 
 export type ModelInventorySummary = {
   机型: string
@@ -36,11 +37,11 @@ export const buildModelInventorySummary = (rows: any[]): ModelInventorySummary[]
     if (!isModelInDictionary(model)) continue
     if (!map.has(model)) map.set(model, { 机型: model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0 })
     const hit = map.get(model)!
-    const status = String(row['状态'] || '')
+    const status = getInventoryLifecycleStatus(row)
     const highHint = `${model}|${String(row['合同备注'] || '')}`
     if (status.startsWith('库存中')) hit.库存中 += 1
     if (status === '待入库') hit.待入库 += 1
-    if (status === '已绑定') hit.已绑定 += 1
+    if (isMachineBound(row)) hit.已绑定 += 1
     if (highHint.includes('加高')) hit.加高 += 1
     hit.全部 += 1
   }

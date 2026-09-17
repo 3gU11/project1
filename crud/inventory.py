@@ -672,20 +672,21 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
             trans.rollback()
             return {"ok": False, "code": "E_SLOT_FULL", "message": f"库位 {slot_code} 已满载"}
         row = conn.execute(
-            text("SELECT `流水号`, `状态` FROM finished_goods_data WHERE `流水号`=:sn FOR UPDATE"),
+            text("SELECT `流水号`, `状态`, COALESCE(`占用订单号`, '') FROM finished_goods_data WHERE `流水号`=:sn FOR UPDATE"),
             {"sn": serial_no},
         ).fetchone()
         if row is None:
             trans.rollback()
             return {"ok": False, "code": "E_NOT_FOUND", "message": "机台不存在"}
         current_status = str(row[1] or "").strip()
+        occupied_order_id = str(row[2] or "").strip()
         if current_status == "报废" and not scrap_slot:
             trans.rollback()
             return {"ok": False, "code": "E_SCRAPPED", "message": "报废机台不能调拨到普通库位"}
         if not is_transfer and current_status.startswith("库存中"):
             trans.rollback()
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
-        status_after = "报废" if scrap_slot else f"库存中（{slot_code}）"
+        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
@@ -709,6 +710,9 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
         completed_batches = []
         if not is_transfer:
             completed_batches = notify_inbound_completion([serial_no], operator=operator)
+            if occupied_order_id:
+                from crud.orders import mark_allocated_order_ready_after_inbound
+                mark_allocated_order_ready_after_inbound(occupied_order_id)
         enqueue_wechat_batch_summary_sync("finished_goods_inbound")
         get_data.cache_clear()
         get_data_v2.cache_clear()  # 清除 v2 缓存，确保下次读取到最新库存状态
@@ -783,13 +787,14 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
 
         # 检查机台状态（保持不变）
         row = conn.execute(
-            text("SELECT `流水号`, `状态` FROM finished_goods_data WHERE `流水号`=:sn FOR UPDATE"),
+            text("SELECT `流水号`, `状态`, COALESCE(`占用订单号`, '') FROM finished_goods_data WHERE `流水号`=:sn FOR UPDATE"),
             {"sn": serial_no},
         ).fetchone()
         if row is None:
             trans.rollback()
             return {"ok": False, "code": "E_NOT_FOUND", "message": "机台不存在"}
         current_status = str(row[1] or "").strip()
+        occupied_order_id = str(row[2] or "").strip()
         if current_status == "报废" and not scrap_slot:
             trans.rollback()
             return {"ok": False, "code": "E_SCRAPPED", "message": "报废机台不能调拨到普通库位"}
@@ -798,7 +803,7 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
 
         # 更新入库（保持不变）
-        status_after = "报废" if scrap_slot else f"库存中（{slot_code}）"
+        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
@@ -822,6 +827,9 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
         completed_batches = []
         if not is_transfer:
             completed_batches = notify_inbound_completion([serial_no], operator=operator)
+            if occupied_order_id:
+                from crud.orders import mark_allocated_order_ready_after_inbound
+                mark_allocated_order_ready_after_inbound(occupied_order_id)
         enqueue_wechat_batch_summary_sync("finished_goods_inbound_v2")
 
         # 清除所有缓存版本
