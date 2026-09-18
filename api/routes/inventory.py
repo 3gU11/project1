@@ -39,6 +39,7 @@ from crud.orders import get_orders, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from api.websockets.manager import manager
 from database import get_engine
+from crud.inventory_scope import pending_inbound_scope_sql
 
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
@@ -449,6 +450,8 @@ def get_inventory(
         if str(status).strip():
             where_clauses.append("`状态` = :status")
             params["status"] = str(status).strip()
+            if params["status"] == "待入库":
+                where_clauses.append(f"({pending_inbound_scope_sql()}) <> 'queued'")
         if str(model).strip():
             where_clauses.append("`机型` = :model")
             params["model"] = str(model).strip()
@@ -462,9 +465,9 @@ def get_inventory(
             where_clauses.append("TRIM(COALESCE(`状态`, '')) <> '报废'")
 
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        count_sql = f"SELECT COUNT(*) AS total FROM finished_goods_data{where_sql}"
+        count_sql = f"SELECT COUNT(*) AS total FROM finished_goods_data fg{where_sql}"
         data_sql = (
-            "SELECT * FROM finished_goods_data"
+            f"SELECT fg.*, {pending_inbound_scope_sql()} AS pending_inbound_scope FROM finished_goods_data fg"
             f"{where_sql} "
             "ORDER BY `更新时间` DESC, `流水号` ASC LIMIT :limit OFFSET :skip"
         )

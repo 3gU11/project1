@@ -230,7 +230,7 @@ import { useInventoryStore } from '../store/inventory'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
 import { getModelOrderList } from '../utils/modelOrder'
 import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount } from '../utils/inventoryStats'
-import { getBindingTitle, getInventoryLifecycleStatus, isMachineBound } from '../utils/inventoryState'
+import { getBindingTitle, getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from '../utils/inventoryState'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 
 const loading = ref(false)
@@ -297,7 +297,7 @@ const total = computed(() => {
 const totalCount = computed(() => filteredForStats.value.length)
 
 const inStockCount = computed(() => filteredForStats.value.filter((r) => getInventoryLifecycleStatus(r).startsWith('库存中')).length)
-const pendingCount = computed(() => filteredForStats.value.filter((r) => getInventoryLifecycleStatus(r) === '待入库').length)
+const pendingCount = computed(() => filteredForStats.value.filter(isPendingInbound).length)
 const boundCount = computed(() => filteredForStats.value.filter(isMachineBound).length)
 
 const modelSummarySource = computed(() => {

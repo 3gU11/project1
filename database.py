@@ -838,7 +838,26 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 14
+CURRENT_SCHEMA_VERSION = 15
+
+
+def ensure_finished_goods_unique_serial(conn):
+    """Fail closed on legacy duplicates; cleanup requires an audited repair."""
+    indexes = conn.execute(text("SHOW INDEX FROM finished_goods_data")).mappings().all()
+    unique = {}
+    for row in indexes:
+        if not row["Non_unique"]:
+            unique.setdefault(row["Key_name"], []).append(row)
+    if any(len(rows) == 1 and rows[0]["Column_name"] == "流水号"
+           and rows[0]["Sub_part"] is None for rows in unique.values()):
+        return
+    duplicate = conn.execute(text(
+        "SELECT `流水号` FROM finished_goods_data WHERE `流水号` IS NOT NULL "
+        "GROUP BY `流水号` HAVING COUNT(*) > 1 LIMIT 1"
+    )).first()
+    if duplicate:
+        raise RuntimeError("库存存在重复流水号，须备份并核对订单关系后再建立唯一约束")
+    conn.execute(text("ALTER TABLE finished_goods_data ADD UNIQUE INDEX uq_fg_serial (`流水号`)"))
 
 
 def _ensure_schema_version_table(conn):
@@ -1036,6 +1055,7 @@ def init_mysql_tables_v2():
 
         # 如果已经是最新版本，跳过大部分初始化
         if current_version >= CURRENT_SCHEMA_VERSION:
+            ensure_finished_goods_unique_serial(conn)
             # 只执行必要的轻量级检查（如默认用户）
             _ensure_sales_orders_unique_order_no(conn)
             _ensure_free_text_columns(conn)
@@ -1609,6 +1629,10 @@ def init_mysql_tables_v2():
         if current_version < 14:
             _ensure_free_text_columns(conn)
             _record_schema_version(conn, 14, "expand user-entered note columns")
+
+        if current_version < 15:
+            ensure_finished_goods_unique_serial(conn)
+            _record_schema_version(conn, 15, "enforce unique finished goods serial number")
 
         return {
             "initialized": True,

@@ -331,6 +331,15 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
 
     try:
         with get_engine().begin() as conn:
+            queued = conn.execute(text("""
+                SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no)
+                FROM units u JOIN batches b ON b.batch_id=u.batch_id
+                WHERE b.status IN ('Predicted', 'Confirmed')
+                  AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IN :sns
+                FOR UPDATE
+            """).bindparams(bindparam("sns", expanding=True)), {"sns": serial_nos}).scalars().all()
+            if queued:
+                raise ValueError(f"待排产机台不能配货: {', '.join(queued[:10])}")
             for contract_no, model in conn.execute(
                 text("SELECT `合同号`, `机型` FROM factory_plan WHERE TRIM(COALESCE(`订单号`, '')) = :order_id"),
                 {"order_id": order_id},
@@ -351,7 +360,9 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                 JOIN batches b ON b.batch_id = u.batch_id
                 LEFT JOIN finished_goods_data fg
                   ON TRIM(fg.`流水号`) = TRIM(COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no))
-                WHERE b.status IN ('Confirmed', 'In_Production')
+                WHERE b.status = 'In_Production' AND u.status = 'In_Production'
+                  AND EXISTS (SELECT 1 FROM production_lines p
+                              WHERE p.line_id=u.production_line_id AND p.status='Busy')
                   AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IN :sns
                   AND (
                       fg.`流水号` IS NULL

@@ -8,7 +8,7 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
-from database import get_engine
+from database import get_engine, ensure_finished_goods_unique_serial
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 from crud.inbound_history import notify_inbound_completion, record_inbound_history
 from utils.cache import fetch_data_with_cache
@@ -320,8 +320,11 @@ def save_data_v2(df):
     clear_inventory_data_caches()
 
     try:
-        df = df.drop_duplicates(subset=['流水号'], keep='last')
         df = df.copy()
+        df['流水号'] = df['流水号'].fillna('').astype(str).str.strip()
+        if (df['流水号'] == '').any():
+            raise ValueError('流水号不能为空')
+        df = df.drop_duplicates(subset=['流水号'], keep='last')
         for col in INVENTORY_COLS:
             if col not in df.columns:
                 df[col] = ""
@@ -348,8 +351,8 @@ def save_data_v2(df):
                 enqueue_wechat_batch_summary_sync("finished_goods_save_v2_empty")
                 return {"inserted": 0, "updated": 0}
 
-            # UPSERT 语句: INSERT ... ON DUPLICATE KEY UPDATE
-            # 注意: 流水号 是主键，冲突时会自动触发 UPDATE
+            # Legacy imports can lack the unique key that UPSERT requires.
+            ensure_finished_goods_unique_serial(conn)
             upsert_sql = text("""
                 INSERT INTO finished_goods_data (
                     `流水号`, `批次号`, `机型`, `状态`, `预计入库时间`, `更新时间`,

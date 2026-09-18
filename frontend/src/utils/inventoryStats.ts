@@ -1,6 +1,6 @@
 import { buildInventoryIndex, filterInventoryRows } from './inventoryFilter'
 import { compareModels, isModelInDictionary } from './modelOrder'
-import { getInventoryLifecycleStatus, isMachineBound } from './inventoryState'
+import { getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from './inventoryState'
 
 export type ModelInventorySummary = {
   机型: string
@@ -40,7 +40,7 @@ export const buildModelInventorySummary = (rows: any[]): ModelInventorySummary[]
     const status = getInventoryLifecycleStatus(row)
     const highHint = `${model}|${String(row['合同备注'] || '')}`
     if (status.startsWith('库存中')) hit.库存中 += 1
-    if (status === '待入库') hit.待入库 += 1
+    if (isPendingInbound(row)) hit.待入库 += 1
     if (isMachineBound(row)) hit.已绑定 += 1
     if (highHint.includes('加高')) hit.加高 += 1
     hit.全部 += 1

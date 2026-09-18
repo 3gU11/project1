@@ -2089,9 +2089,14 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
     ].copy()
     inv_df["货源"] = "库存现货"
 
-    # Confirmed batches may still exist only in the sandbox `units` table
-    # (especially after a machine-level cross-family edit). Expose those
-    # forecast serials to allocation as inventory candidates.
+    # A queued card is not an allocatable machine, even with a stale inventory mirror.
+    with get_engine().connect() as conn:
+        queued_serials = set(conn.execute(text("""
+            SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no)
+            FROM units u JOIN batches b ON b.batch_id=u.batch_id
+            WHERE b.status IN ('Predicted', 'Confirmed')
+        """)).scalars().all())
+    inv_df = inv_df[~inv_df['流水号'].astype(str).str.strip().isin(queued_serials)].copy()
     try:
         with get_engine().connect() as conn:
             unit_inventory = conn.execute(text("""
@@ -2107,7 +2112,9 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
                 JOIN batches b ON b.batch_id=u.batch_id
                 LEFT JOIN finished_goods_data fg
                   ON TRIM(fg.`流水号`) = TRIM(COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no))
-                WHERE b.status IN ('Confirmed','In_Production')
+                WHERE b.status = 'In_Production' AND u.status = 'In_Production'
+                  AND EXISTS (SELECT 1 FROM production_lines p
+                              WHERE p.line_id=u.production_line_id AND p.status='Busy')
                   AND COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) IS NOT NULL
                   AND (
                       fg.`流水号` IS NULL

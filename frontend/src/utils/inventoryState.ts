@@ -1,5 +1,8 @@
 export const LEGACY_BOUND_STATUS = '已绑定'
 
+export const isPendingInbound = (row: any) =>
+  String(row?.['状态'] || '').trim() === '待入库' && row?.pending_inbound_scope !== 'queued'
+
 export const getInventoryLifecycleStatus = (row: any) => {
   const status = String(row?.['状态'] || '').trim()
   return status === LEGACY_BOUND_STATUS ? '待入库' : status

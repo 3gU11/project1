@@ -12,6 +12,14 @@ from crud.orders import allocate_inventory
 
 
 class OrderAllocationGuardTests(unittest.TestCase):
+    def test_queued_cards_are_not_allocatable(self):
+        for fn in (_get_order_contract_machine_rows, allocate_inventory):
+            source = inspect.getsource(fn)
+            self.assertIn("b.status = 'In_Production' AND u.status = 'In_Production'", source)
+            self.assertIn("p.line_id=u.production_line_id AND p.status='Busy'", source)
+            self.assertIn("b.status IN ('Predicted', 'Confirmed')", source)
+        self.assertIn('待排产机台不能配货', inspect.getsource(allocate_inventory))
+
     def test_order_creation_does_not_acquire_unrelated_production_units(self):
         source = inspect.getsource(_sync_order_detail_rows_to_units_and_inventory)
         self.assertNotIn("LIMIT :missing", source)
