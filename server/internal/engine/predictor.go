@@ -464,15 +464,16 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 		return nil, fmt.Errorf("read contracts: %w", err)
 	}
 
-	placedCounts, err := p.loadPlacedContractCounts()
+	placedCounts, err := p.loadPlacedContractModelCounts()
 	if err != nil {
 		return nil, fmt.Errorf("read placed contracts: %w", err)
 	}
 
 	grouped := map[string][]model.ContractUnit{}
 	for _, u := range allUnits {
-		if placedCounts[u.ContractNo] > 0 {
-			placedCounts[u.ContractNo]--
+		placementKey := placedContractModelKey(u.ContractNo, unitModelType(u))
+		if placedCounts[placementKey] > 0 {
+			placedCounts[placementKey]--
 			continue
 		}
 		cat := modelCategoryOf(u.ModelName, u.ModelType)
@@ -801,17 +802,25 @@ func normalizeModelKey(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))
 }
 
-func (p *Predictor) loadPlacedContractCounts() (map[string]int, error) {
+func placedContractModelKey(contractNo, modelType string) string {
+	return strings.TrimSpace(contractNo) + "\x00" + normalizeModelKey(modelType)
+}
+
+func (p *Predictor) loadPlacedContractModelCounts() (map[string]int, error) {
 	var rows []struct {
 		ContractNo string `gorm:"column:contract_no"`
+		ModelType  string `gorm:"column:model_type"`
 		Count      int    `gorm:"column:count"`
 	}
 	err := p.db.Table("units AS u").
-		Select("u.contract_no AS contract_no, COUNT(*) AS count").
+		Select("u.contract_no AS contract_no, u.model_type AS model_type, COUNT(*) AS count").
 		Joins("JOIN batches AS b ON b.batch_id = u.batch_id").
 		Where("u.contract_no IS NOT NULL AND u.contract_no <> ''").
-		Where("b.status <> ?", model.StatusPredicted).
-		Group("u.contract_no").
+		// Algorithmic predicted batches are replaced by recompute, but manual
+		// predicted batches survive it. Count each contract/model pair as already
+		// placed so other models from the same contract remain independently planned.
+		Where("(b.status <> ? OR COALESCE(b.source, '') = ?)", model.StatusPredicted, "manual").
+		Group("u.contract_no, u.model_type").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -819,7 +828,7 @@ func (p *Predictor) loadPlacedContractCounts() (map[string]int, error) {
 
 	counts := make(map[string]int, len(rows))
 	for _, row := range rows {
-		counts[row.ContractNo] = row.Count
+		counts[placedContractModelKey(row.ContractNo, row.ModelType)] = row.Count
 	}
 	return counts, nil
 }

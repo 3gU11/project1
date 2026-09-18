@@ -1,10 +1,39 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 
 	"smart-scheduling/server/internal/model"
 )
+
+func TestPlacedContractQueryCountsManualPredictedBatchesByModel(t *testing.T) {
+	source, err := sourceOfFunction("predictor.go", "func (p *Predictor) loadPlacedContractModelCounts()", "type batchGroup struct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"u.model_type AS model_type",
+		"b.status <> ?",
+		"COALESCE(b.source, '') = ?",
+		"model.StatusPredicted, \"manual\"",
+		"Group(\"u.contract_no, u.model_type\")",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("loadPlacedContractModelCounts missing %q", fragment)
+		}
+	}
+}
+
+func TestPlacedContractModelKeyKeepsModelsIndependent(t *testing.T) {
+	first := placedContractModelKey(" HT-1 ", "fr-400auto")
+	if first != placedContractModelKey("HT-1", " FR-400AUTO ") {
+		t.Fatal("contract/model key should normalize whitespace and model case")
+	}
+	if first == placedContractModelKey("HT-1", "FR-8055AUTO") {
+		t.Fatal("different models in one contract must not share placement counts")
+	}
+}
 
 func TestModelCategoryOfRespectsSpecialFamily(t *testing.T) {
 	tests := []struct {
