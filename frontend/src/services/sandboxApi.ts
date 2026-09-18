@@ -141,8 +141,8 @@ export const assignLine = (id: string, batchId: string) =>
 export const assignLineUnits = (id: string, batchId: string, unitIds: string[]) =>
   apiPost(`${P}/production-lines/${id}/assign-units`, { batch_id: batchId, unit_ids: unitIds })
 
-export const manualComplete = (id: string) =>
-  apiPost(`${P}/production-lines/${id}/manual-complete`)
+export const manualComplete = (id: string, batchId?: string) =>
+  apiPost(`${P}/production-lines/${id}/manual-complete${batchId ? `?batch_id=${encodeURIComponent(batchId)}` : ''}`)
 
 export const lockLineUnits = (lineId: string, unitIds: string[], orderRemark: string) =>
   apiPost(`${P}/production-lines/${lineId}/lock-units`, {

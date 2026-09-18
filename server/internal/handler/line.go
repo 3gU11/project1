@@ -123,7 +123,7 @@ func (h *LineHandler) ManualComplete(c *gin.Context) {
 	if actor == "" {
 		actor = "system"
 	}
-	if err := h.svc.ManualComplete(c.Param("id"), actor); err != nil {
+	if err := h.svc.ManualComplete(c.Param("id"), actor, c.Query("batch_id")); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

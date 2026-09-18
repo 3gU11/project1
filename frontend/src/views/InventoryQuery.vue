@@ -56,7 +56,7 @@
               <div class="summary-value">{{ pendingCount }}</div>
             </div>
             <div class="summary-block">
-              <div class="summary-title">已绑定</div>
+              <div class="summary-title" title="仍在产线生产且绑定订单或合同；独立统计，不与库存总数相加">在产已绑定</div>
               <div class="summary-value">{{ boundCount }}</div>
             </div>
           </div>
@@ -121,7 +121,7 @@
                 <span v-else style="color: #dcdfe6;">-</span>
               </template>
             </el-table-column>
-            <el-table-column label="已绑定" width="90" align="center">
+            <el-table-column label="在产已绑定" width="110" align="center">
               <template #default="{ row }">
                 <span v-if="row.已绑定 > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.已绑定 }}</span>
                 <span v-else style="color: #dcdfe6;">-</span>
@@ -298,10 +298,28 @@ const totalCount = computed(() => filteredForStats.value.length)
 
 const inStockCount = computed(() => filteredForStats.value.filter((r) => getInventoryLifecycleStatus(r).startsWith('库存中')).length)
 const pendingCount = computed(() => filteredForStats.value.filter(isPendingInbound).length)
-const boundCount = computed(() => filteredForStats.value.filter(isMachineBound).length)
+const productionBoundRows = computed(() => filterInventoryRows(indexedRows.value, {
+  selectedModels: selectedModels.value, statusFilter: statusFilter.value,
+  searchQuery: searchQuery.value, highOnly: highOnly.value,
+  relationFilter: relationFilter.value, includeProductionBound: true,
+}).filter((r) => r.production_bound === true || r.production_bound === 1))
+const boundCount = computed(() => new Set(productionBoundRows.value.map(r => r['流水号'])).size)
 
 const modelSummarySource = computed(() => {
-  return buildModelInventorySummary(filteredForStats.value)
+  const summary = buildModelInventorySummary(filteredForStats.value)
+  for (const row of summary) row.已绑定 = 0
+  const seen = new Set<string>()
+  for (const item of productionBoundRows.value) {
+    if (seen.has(item['流水号'])) continue
+    seen.add(item['流水号'])
+    let row = summary.find(r => r.机型 === item['机型'])
+    if (!row) {
+      row = { 机型: item['机型'], 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0 }
+      summary.push(row)
+    }
+    row.已绑定++
+  }
+  return summary
 })
 
 const modelSummary = computed(() => {

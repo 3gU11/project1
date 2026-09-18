@@ -1,4 +1,5 @@
 export const LEGACY_BOUND_STATUS = '已绑定'
+export const isProductionBound = (row: any) => row?.production_bound === true || row?.production_bound === 1
 
 export const isPendingInbound = (row: any) =>
   String(row?.['状态'] || '').trim() === '待入库' && row?.pending_inbound_scope !== 'queued'

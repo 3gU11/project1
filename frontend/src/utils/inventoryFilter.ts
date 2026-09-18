@@ -1,4 +1,4 @@
-import { getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from './inventoryState'
+import { getInventoryLifecycleStatus, isMachineBound, isPendingInbound, isProductionBound } from './inventoryState'
 
 export type InventoryFilterParams = {
   selectedModels: string[]
@@ -6,6 +6,7 @@ export type InventoryFilterParams = {
   searchQuery: string
   highOnly: boolean
   relationFilter?: 'bound' | ''
+  includeProductionBound?: boolean
 }
 
 export type IndexedInventoryRow = {
@@ -41,7 +42,7 @@ export const filterInventoryRows = (indexedRows: IndexedInventoryRow[], params: 
   const statusPrefix = params.statusFilter
 
   return indexedRows
-    .filter((x) => x.status.startsWith('库存中') || isPendingInbound(x.row))
+    .filter((x) => x.status.startsWith('库存中') || isPendingInbound(x.row) || (params.includeProductionBound && isProductionBound(x.row)))
     .filter((x) => !hasModels || pickedModels.includes(x.model))
     .filter((x) => !statusPrefix || x.status.startsWith(statusPrefix))
     .filter((x) => !q || x.searchText.includes(q))

@@ -38,11 +38,22 @@
             </span>
             <span style="flex:1;"></span>
             <el-button
-              v-if="line.status === 'Busy'"
+              v-if="line.status === 'Busy' && (line.batches || []).length <= 1"
               size="small" type="warning" @click="handleManualComplete(line.production_line_id)"
             >
               手动完工
             </el-button>
+            <el-dropdown v-if="line.status === 'Busy' && (line.batches || []).length > 1"
+              trigger="click" @command="(batchId: string) => handleManualComplete(line.production_line_id, batchId)">
+              <el-button size="small" type="warning">选择批次完工</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="batch in line.batches" :key="batch.batch_id" :command="batch.batch_id">
+                    {{ displayBatchCode(batch) }} 完工
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button
               v-if="line.status === 'Busy'"
               size="small"
@@ -1199,10 +1210,12 @@ async function doLockUnits() {
   }
 }
 
-async function handleManualComplete(lineId: string) {
+async function handleManualComplete(lineId: string, batchId?: string) {
   try {
-    await ElMessageBox.confirm('确认该产线已完工？', '确认', { type: 'warning' })
-    await lineStore.manualComplete(lineId)
+    const line = lineStore.lines.find((item: any) => item.production_line_id === lineId)
+    const batch = line?.batches?.find((item: any) => item.batch_id === batchId)
+    await ElMessageBox.confirm(batchId ? `确认批次 ${displayBatchCode(batch)} 已完工？其他批次继续生产。` : '确认该产线当前批次已完工？', '确认', { type: 'warning' })
+    await lineStore.manualComplete(lineId, batchId)
     ElMessage.success('已手动完工')
     await forceRefreshAll()
   } catch (e: any) {

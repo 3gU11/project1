@@ -24,8 +24,8 @@ export const useLineStore = defineStore('sandbox-line', {
       await sandboxApi.assignLine(lineId, batchId)
       await this.fetchLines()
     },
-    async manualComplete(lineId: string) {
-      await sandboxApi.manualComplete(lineId)
+    async manualComplete(lineId: string, batchId?: string) {
+      await sandboxApi.manualComplete(lineId, batchId)
       await this.fetchLines()
     },
     updateLineInList(line: any) {

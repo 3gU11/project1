@@ -561,12 +561,12 @@ func isSpecialBatchModel(modelType string) bool {
 	return strings.EqualFold(strings.TrimSpace(modelType), "SPECIAL")
 }
 
-func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
+func (s *BatchSvc) ManualComplete(lineID string, actor string, selectedBatch ...string) error {
 	tx := s.db.Begin()
 	defer tx.Rollback()
 
 	var line model.ProductionLine
-	if err := tx.Where("line_id = ?", lineID).First(&line).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("line_id = ?", lineID).First(&line).Error; err != nil {
 		return fmt.Errorf("line not found: %w", err)
 	}
 	var batchIDs []string
@@ -575,12 +575,19 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 		Pluck("batch_id", &batchIDs).Error; err != nil {
 		return err
 	}
-	if len(batchIDs) == 0 && line.CurrentBatchID != nil && strings.TrimSpace(*line.CurrentBatchID) != "" {
-		batchIDs = append(batchIDs, *line.CurrentBatchID)
-	}
 	if len(batchIDs) == 0 {
 		return fmt.Errorf("line %s has no active batch", lineID)
 	}
+	selected := ""
+	if len(selectedBatch) > 0 {
+		selected = strings.TrimSpace(selectedBatch[0])
+	}
+	target, remaining, err := manualCompletionTarget(batchIDs, selected)
+	if err != nil {
+		return err
+	}
+	batchIDs = []string{target}
+	lineStatus, currentBatch := lineStateAfterBatchCompletion(line.CurrentBatchID, target, remaining)
 
 	if err := tx.Model(&model.Batch{}).Where("batch_id IN ?", batchIDs).Updates(map[string]interface{}{
 		"status": model.StatusCompleted,
@@ -588,8 +595,8 @@ func (s *BatchSvc) ManualComplete(lineID string, actor string) error {
 		return err
 	}
 	if err := tx.Model(&line).Updates(map[string]interface{}{
-		"status":           model.LineIdle,
-		"current_batch_id": nil,
+		"status":           lineStatus,
+		"current_batch_id": currentBatch,
 	}).Error; err != nil {
 		return err
 	}
@@ -627,6 +634,28 @@ WHERE status = 'In_Production' AND unit_id IN ?
 
 func inboundBatchReady(progress inboundBatchProgress) bool {
 	return progress.TotalUnits > 0 && progress.TotalUnits == progress.InboundUnits
+}
+
+func manualCompletionTarget(active []string, selected string) (string, []string, error) {
+	if selected == "" {
+		if len(active) != 1 {
+			return "", nil, fmt.Errorf("该产线有多个批次，请指定需要完工的批次")
+		}
+		selected = active[0]
+	}
+	found := false
+	remaining := []string{}
+	for _, id := range active {
+		if id == selected {
+			found = true
+		} else {
+			remaining = append(remaining, id)
+		}
+	}
+	if !found {
+		return "", nil, fmt.Errorf("所选批次不在该产线生产中，请刷新后重试")
+	}
+	return selected, remaining, nil
 }
 
 func lineStateAfterBatchCompletion(currentBatchID *string, completedBatchID string, remainingBatchIDs []string) (string, *string) {
