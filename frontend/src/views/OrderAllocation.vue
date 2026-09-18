@@ -612,10 +612,9 @@ const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
   if (s === 'shipped') return { text: '已出库', type: 'info' }
   if (s === 'canceled') return { text: '已取消', type: 'danger' }
 
-  if (s === 'ready') {
-    return { text: '已满足', type: 'success' }
+  if (s === 'ready' || s === 'allocated') {
+    return { text: '待发货', type: 'success' }
   }
-  if (s === 'allocated') return { text: '已配齐（含在产）', type: 'warning' }
   return { text: '待配齐', type: 'danger' }
 }
 

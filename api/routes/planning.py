@@ -3297,7 +3297,10 @@ def complete_order_allocation_api(
         order_idx = hit.index[0]
         current_status = str(orders_df.at[order_idx, "status"] or "active")
         if current_status in {"ready", "allocated"}:
-            return {"message": "配货已完成", "completed": True, "logged": 0, "status": current_status}
+            if current_status == "allocated":
+                orders_df.at[order_idx, "status"] = "ready"
+                save_orders(orders_df)
+            return {"message": "配货已完成，订单待发货", "completed": True, "logged": 0, "status": "ready"}
 
         required_variants = _order_required_variant_counts(order_id, hit.iloc[0])
         if not required_variants:
@@ -3324,8 +3327,7 @@ def complete_order_allocation_api(
         serials = allocated_df["流水号"].astype(str).str.strip().drop_duplicates().tolist()
         production_count = int((allocated_df["货源"].astype(str) == "在产机器").sum())
         stock_count = int((allocated_df["货源"].astype(str) == "库存现货").sum())
-        next_status = "allocated" if production_count > 0 else "ready"
-        orders_df.at[order_idx, "status"] = next_status
+        orders_df.at[order_idx, "status"] = "ready"
         save_orders(orders_df)
         append_audit_log(
             module="订单配货",
@@ -3336,8 +3338,7 @@ def complete_order_allocation_api(
             user_id=_user_id_from_context(current_user),
             username=current_operator,
         )
-        message = "配货完成，含在产机台，待实际入库" if next_status == "allocated" else "配货完成，订单已满足"
-        return {"message": message, "completed": True, "logged": len(serials), "status": next_status,
+        return {"message": "配货完成，订单进入待发货", "completed": True, "logged": len(serials), "status": "ready",
                 "stock": stock_count, "production": production_count}
     except HTTPException:
         raise

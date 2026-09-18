@@ -408,18 +408,25 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                         WHERE unit_id=:unit_id
                     """), {"contract_no": contract_no or None, "order_id": order_id, "customer": customer,
                            "agent": agent, "note": note or None, "unit_id": row["unit_id"]})
-                    conn.execute(text("""
-                        INSERT INTO finished_goods_data
-                            (`流水号`,`批次号`,`机型`,`状态`,`预计入库时间`,`更新时间`,`占用订单号`,`客户`,`代理商`,`合同备注`,`合同号`)
-                        VALUES (:sn,:batch,:model,'待入库',:eta,:now,:order_id,:customer,:agent,:note,:contract_no)
-                        ON DUPLICATE KEY UPDATE `占用订单号`=VALUES(`占用订单号`), `客户`=VALUES(`客户`),
-                            `代理商`=VALUES(`代理商`), `合同备注`=VALUES(`合同备注`), `合同号`=VALUES(`合同号`),
-                            `状态`='待入库', `批次号`=VALUES(`批次号`), `机型`=VALUES(`机型`),
-                            `预计入库时间`=VALUES(`预计入库时间`), `更新时间`=VALUES(`更新时间`)
-                    """), {"sn": sn, "batch": row.get("batch_code") or "", "model": model,
-                           "eta": row.get("expected_inbound_date"), "now": now_str, "order_id": order_id,
-                           "customer": customer, "agent": agent, "note": note or None,
-                           "contract_no": contract_no or None})
+                    inventory_values = {
+                        "sn": sn, "batch": row.get("batch_code") or "", "model": model,
+                        "eta": row.get("expected_inbound_date"), "now": now_str, "order_id": order_id,
+                        "customer": customer, "agent": agent, "note": note or None,
+                        "contract_no": contract_no or None,
+                    }
+                    update_result = conn.execute(text("""
+                        UPDATE finished_goods_data
+                        SET `占用订单号`=:order_id, `客户`=:customer, `代理商`=:agent,
+                            `合同备注`=:note, `合同号`=:contract_no, `状态`='待发货',
+                            `批次号`=:batch, `机型`=:model, `预计入库时间`=:eta, `更新时间`=:now
+                        WHERE TRIM(`流水号`) = :sn
+                    """), inventory_values)
+                    if update_result.rowcount == 0:
+                        conn.execute(text("""
+                            INSERT INTO finished_goods_data
+                                (`流水号`,`批次号`,`机型`,`状态`,`预计入库时间`,`更新时间`,`占用订单号`,`客户`,`代理商`,`合同备注`,`合同号`)
+                            VALUES (:sn,:batch,:model,'待发货',:eta,:now,:order_id,:customer,:agent,:note,:contract_no)
+                        """), inventory_values)
                     production_sns.append(sn)
                     continue
 

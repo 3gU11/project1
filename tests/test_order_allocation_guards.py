@@ -2,6 +2,7 @@ import inspect
 import unittest
 
 from api.routes.planning import (
+    complete_order_allocation_api,
     _get_order_contract_machine_rows,
     _sync_order_detail_rows_to_units_and_inventory,
     _sync_order_to_units_and_import,
@@ -31,6 +32,19 @@ class OrderAllocationGuardTests(unittest.TestCase):
         for source in (candidate_source, allocation_source):
             self.assertIn("NOT LIKE '库存中%'", source)
             self.assertIn("'待发货', '已出库', '已发货', '报废'", source)
+
+    def test_manual_production_allocation_goes_directly_to_pending_shipment(self):
+        source = inspect.getsource(allocate_inventory)
+        self.assertIn("VALUES (:sn,:batch,:model,'待发货'", source)
+        self.assertIn("`合同备注`=:note, `合同号`=:contract_no, `状态`='待发货'", source)
+        self.assertNotIn("`状态`='待入库'", source)
+        self.assertIn("if update_result.rowcount == 0:", source)
+        self.assertNotIn("ON DUPLICATE KEY UPDATE", source)
+
+    def test_complete_allocation_never_creates_waiting_inbound_order_state(self):
+        source = inspect.getsource(complete_order_allocation_api)
+        self.assertNotIn('next_status = "allocated"', source)
+        self.assertIn('"status": "ready"', source)
 
 
 if __name__ == "__main__":
