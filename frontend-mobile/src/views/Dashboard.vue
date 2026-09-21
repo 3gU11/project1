@@ -54,7 +54,27 @@
         <van-empty v-else description="该库位暂无可调拨机台" />
 
         <div class="section-title">目标库位</div>
-        <van-field v-model="targetSlotCode" label="目标库位" placeholder="请输入目标库位名称" clearable />
+        <van-field
+          v-model="targetSlotKeyword"
+          label="目标库位"
+          placeholder="请输入库位号筛选，或直接选择下方库位"
+          clearable
+        />
+        <div class="target-slot-grid">
+          <van-grid v-if="targetSlotOptions.length" :column-num="2" gutter="8" clickable>
+            <van-grid-item
+              v-for="slot in targetSlotOptions"
+              :key="slot.value"
+              :class="{ 'active-slot': targetSlotCode === slot.value }"
+              @click="targetSlotCode = slot.value"
+            >
+              <template #text>
+                <div class="target-slot-option">{{ slot.text }}</div>
+              </template>
+            </van-grid-item>
+          </van-grid>
+          <van-empty v-else description="没有匹配的可用库位" />
+        </div>
 
         <div class="popup-actions">
           <van-button block round @click="showSlotPopup = false">关闭</van-button>
@@ -88,6 +108,7 @@ const showSlotPopup = ref(false)
 const currentSlot = ref<MobileSlot | null>(null)
 const selectedSerialNo = ref('')
 const targetSlotCode = ref('')
+const targetSlotKeyword = ref('')
 const submitting = ref(false)
 const serialKeyword = ref('')
 const searching = ref(false)
@@ -100,6 +121,16 @@ const currentSlotMachines = computed(() => {
 })
 
 const canTransfer = computed(() => !!selectedSerialNo.value && !!targetSlotCode.value.trim())
+const targetSlotOptions = computed(() => inventoryStore.slots
+  .filter((slot) => slot.code !== currentSlot.value?.code
+    && !slot.status.includes('锁定')
+    && !slot.status.includes('异常')
+    && (slot.unlimited || slot.max === null || slot.current < slot.max))
+  .filter((slot) => !targetSlotKeyword.value.trim() || slot.code.toLowerCase().includes(targetSlotKeyword.value.trim().toLowerCase()))
+  .map((slot) => ({
+    text: `${slot.code}：${slot.current}/${slot.unlimited || slot.max === null ? '不限' : slot.max}`,
+    value: slot.code,
+  })))
 const capacityText = (slot: MobileSlot) => slot.unlimited || slot.max === null ? '不限' : String(slot.max)
 
 const slotClass = (slot: MobileSlot) => {
@@ -124,6 +155,7 @@ const openSlot = (slot: MobileSlot) => {
   currentSlot.value = slot
   selectedSerialNo.value = ''
   targetSlotCode.value = ''
+  targetSlotKeyword.value = ''
   showSlotPopup.value = true
 }
 
@@ -144,12 +176,19 @@ const openMachineTransfer = (machine: MobileMachine) => {
   currentSlot.value = inventoryStore.slots.find((slot) => slot.code === machine.slotCode) || { code: machine.slotCode, current: 0, max: null, unlimited: true, status: '' } as MobileSlot
   selectedSerialNo.value = machine.serialNo
   targetSlotCode.value = ''
+  targetSlotKeyword.value = ''
   showSlotPopup.value = true
 }
 
 const confirmTransfer = async () => {
   if (!selectedSerialNo.value || !targetSlotCode.value) {
     showToast('请选择调拨机台和目标库位')
+    return
+  }
+  const targetSlot = targetSlotOptions.value.find((slot) => slot.value === targetSlotCode.value)
+  if (!targetSlot) {
+    showFailToast('目标库位不存在、已满或不可用，请重新选择')
+    targetSlotCode.value = ''
     return
   }
 

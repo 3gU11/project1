@@ -1005,6 +1005,8 @@ def inbound_machine_to_slot(
             operator=operator,
         )
         if not result.get("ok"):
+            if result.get("code") == "E_SLOT_NOT_FOUND":
+                raise HTTPException(status_code=400, detail=result.get("message") or "库位不存在")
             raise HTTPException(status_code=422, detail=result)
         
         action = "调拨机台" if payload.is_transfer else "机台入库"

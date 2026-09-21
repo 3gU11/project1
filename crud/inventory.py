@@ -67,6 +67,16 @@ def is_unlimited_slot(slot_code):
     return normalized in UNLIMITED_SLOT_CODE_SET or normalized.startswith("老厂")
 
 
+def _find_layout_slot(slots, slot_code):
+    """Return the configured slot matching a code, ignoring layout whitespace."""
+    normalized = _normalize_slot_code(slot_code)
+    return next(
+        (slot for slot in (slots or [])
+         if isinstance(slot, dict) and _normalize_slot_code(slot.get("code")) == normalized),
+        None,
+    )
+
+
 def get_slot_capacity(slot_code):
     normalized = _normalize_slot_code(slot_code)
     if is_unlimited_slot(slot_code):
@@ -651,7 +661,9 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
     # 检查库位是否被锁定或异常
     layout_resp = get_warehouse_layout("default")
     slots = layout_resp.get("layout_json", {}).get("slots", [])
-    target_slot = next((s for s in slots if s.get("code") == slot_code), None)
+    target_slot = _find_layout_slot(slots, slot_code)
+    if target_slot is None:
+        return {"ok": False, "code": "E_SLOT_NOT_FOUND", "message": f"库位 {slot_code} 不存在，请选择已建立的库位"}
     if target_slot and target_slot.get("status") in ["锁定", "异常"]:
         return {"ok": False, "code": "E_SLOT_LOCKED", "message": f"库位 {slot_code} 处于{target_slot.get('status')}状态，无法入库"}
         
@@ -758,7 +770,9 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
     # 检查库位是否被锁定或异常
     layout_resp = get_warehouse_layout("default")
     slots = layout_resp.get("layout_json", {}).get("slots", [])
-    target_slot = next((s for s in slots if s.get("code") == slot_code), None)
+    target_slot = _find_layout_slot(slots, slot_code)
+    if target_slot is None:
+        return {"ok": False, "code": "E_SLOT_NOT_FOUND", "message": f"库位 {slot_code} 不存在，请选择已建立的库位"}
     if target_slot and target_slot.get("status") in ["锁定", "异常"]:
         return {"ok": False, "code": "E_SLOT_LOCKED", "message": f"库位 {slot_code} 处于{target_slot.get('status')}状态，无法入库"}
 
