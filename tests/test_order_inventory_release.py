@@ -25,7 +25,7 @@ class OrderInventoryReleaseTests(unittest.TestCase):
             operator="tester",
         )
 
-        self.assertEqual(conn.execute.call_count, 3)
+        self.assertEqual(conn.execute.call_count, 5)
         statements = [str(call.args[0]) for call in conn.execute.call_args_list]
         self.assertTrue(any("FROM units" in sql and "FOR UPDATE" in sql for sql in statements))
         self.assertTrue(any("UPDATE finished_goods_data" in sql for sql in statements))

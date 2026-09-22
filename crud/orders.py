@@ -375,6 +375,12 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
             """).bindparams(bindparam("sns", expanding=True)), {"sns": serial_nos}).mappings().all()
             unit_by_sn = {str(row["serial_no"]).strip(): dict(row) for row in active_units}
 
+            from crud.batch_planning import pending_review_order
+            for sn in serial_nos:
+                reservation = pending_review_order(conn, sn)
+                if reservation:
+                    raise ValueError(f"机台 {sn} 已由订单 {reservation} 预占，请通过二次确认入口配货")
+
             stock_rows = conn.execute(text("""
                 SELECT `流水号` AS serial_no, `机型` AS model_type, COALESCE(`状态`, '') AS status,
                        COALESCE(`占用订单号`, '') AS sales_id, COALESCE(`合同号`, '') AS contract_no,
@@ -477,6 +483,21 @@ def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
 
     sns_param = bindparam("sns", expanding=True)
     with get_engine().begin() as conn:
+        # Capture ownership before clearing it; the shipping-review entry point
+        # must invalidate allocation completion just like order inventory release.
+        inventory_orders = conn.execute(text("""
+            SELECT `占用订单号` AS order_id FROM finished_goods_data
+            WHERE `流水号` IN :sns FOR UPDATE
+        """).bindparams(sns_param), {"sns": serial_nos}).mappings().all()
+        unit_orders = conn.execute(text("""
+            SELECT sales_id AS order_id FROM units
+            WHERE serial_no IN :sns OR forecast_serial_no IN :sns FOR UPDATE
+        """).bindparams(sns_param), {"sns": serial_nos}).mappings().all()
+        impacted_order_ids = sorted({
+            str(row["order_id"]).strip()
+            for row in [*inventory_orders, *unit_orders]
+            if row["order_id"] and str(row["order_id"]).strip()
+        })
         active_rows = conn.execute(text("""
             SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS serial_no
             FROM units u JOIN batches b ON b.batch_id=u.batch_id
@@ -520,6 +541,16 @@ def revert_to_inbound(selected_sns, reason="撤回操作", operator=None):
             {"sns": serial_nos},
         )
 
+        if impacted_order_ids:
+            conn.execute(text("""
+                UPDATE sales_orders SET status = 'active'
+                WHERE `订单号` IN :order_ids
+                  AND status IN ('ready', 'allocated', 'packed', 'done', 'shipped')
+            """).bindparams(bindparam("order_ids", expanding=True)),
+                {"order_ids": impacted_order_ids})
+
+    get_orders.cache_clear()
+    get_orders_v2.cache_clear()
     clear_inventory_data_caches()
     enqueue_wechat_batch_summary_sync("orders_revert_to_inbound")
     append_log(f"{reason}-退回待入库", serial_nos, operator=operator)

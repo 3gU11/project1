@@ -701,7 +701,12 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
         if not is_transfer and current_status.startswith("库存中"):
             trans.rollback()
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
-        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
+        from crud.batch_planning import pending_review_order
+        review_order = pending_review_order(conn, serial_no, occupied_order_id)
+        if review_order:
+            occupied_order_id = review_order
+            conn.execute(text("UPDATE finished_goods_data SET `占用订单号`=:oid WHERE `流水号`=:sn"), {"oid": review_order, "sn": serial_no})
+        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id and not review_order else f"库存中（{slot_code}）")
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
@@ -820,7 +825,12 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
 
         # 更新入库（保持不变）
-        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
+        from crud.batch_planning import pending_review_order
+        review_order = pending_review_order(conn, serial_no, occupied_order_id)
+        if review_order:
+            occupied_order_id = review_order
+            conn.execute(text("UPDATE finished_goods_data SET `占用订单号`=:oid WHERE `流水号`=:sn"), {"oid": review_order, "sn": serial_no})
+        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id and not review_order else f"库存中（{slot_code}）")
         conn.execute(
             text(
                 "UPDATE finished_goods_data "

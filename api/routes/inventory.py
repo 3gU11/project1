@@ -36,6 +36,7 @@ from utils.model_compatibility import normalize_model_family, production_group_f
 from crud.logs import append_log
 from crud.model_dictionary import find_disabled_models, get_model_dictionary, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound, save_orders
+from crud.order_reservations import release_completed_order_reservations
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from api.websockets.manager import manager
 from database import get_engine
@@ -488,6 +489,42 @@ def get_inventory(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/production-queue-summary")
+def get_production_queue_summary():
+    """Count confirmed queued units independently of current inventory."""
+    sql = """
+        SELECT b.batch_id, u.unit_id,
+               COALESCE(NULLIF(TRIM(u.model_type), ''), '未知') AS model,
+               CASE WHEN NULLIF(TRIM(u.contract_no), '') IS NOT NULL
+                      OR NULLIF(TRIM(u.sales_id), '') IS NOT NULL
+                    THEN 1 ELSE 0 END AS ordered
+        FROM batches b
+        LEFT JOIN units u ON u.batch_id = b.batch_id
+          AND u.status IN ('Pending', 'Confirmed')
+          AND NULLIF(TRIM(u.production_line_id), '') IS NULL
+        WHERE b.status = 'Confirmed'
+        ORDER BY b.batch_id, u.unit_id
+    """
+    with get_engine().connect() as conn:
+        rows = conn.execute(text(sql)).mappings().all()
+    batches = set()
+    models = {}
+    for row in rows:
+        batches.add(row['batch_id'])
+        if row['unit_id'] is None:
+            continue
+        item = models.setdefault(row['model'], {
+            'model': row['model'], 'pending': 0, 'ordered': 0, 'batch_ids': set(),
+        })
+        item['pending'] += 1
+        item['ordered'] += int(row['ordered'])
+        item['batch_ids'].add(row['batch_id'])
+    return {'batch_count': len(batches), 'data': [
+        {**item, 'batch_ids': sorted(item['batch_ids'])}
+        for item in models.values()
+    ]}
 
 
 @router.get("/machine-edit/list")
@@ -1327,6 +1364,18 @@ def confirm_shipping(
         cloud_synced = 0
         if impacted_order_ids:
             try:
+                with get_engine().begin() as conn:
+                    released = release_completed_order_reservations(conn, impacted_order_ids)
+                if released:
+                    append_audit_log(
+                        module="发货复核", action_type="释放已完成订单沙盘预留", biz_type="订单",
+                        content=f"订单完成后释放 {len(released)} 个未生产预留位置；机台位置："
+                                + ", ".join(str(row["unit_id"]) for row in released),
+                        user_id=current_user.get("username"), username=current_operator,
+                    )
+            except Exception as reservation_exc:
+                cloud_warning = f"本地发货已完成，但沙盘预留清理失败：{reservation_exc}"
+            try:
                 dealer_orders = sync_dealer_order_statuses_by_sales_orders(list(impacted_order_ids))
                 for dealer_order in dealer_orders:
                     if dealer_order.get("status") == "completed":
@@ -1343,7 +1392,7 @@ def confirm_shipping(
                         cloud_synced += 1
                 enqueue_wechat_batch_summary_sync("shipping_confirm")
             except Exception as cloud_exc:
-                cloud_warning = f"本地发货已完成，但回写小程序云端失败：{cloud_exc}"
+                cloud_warning = "；".join(filter(None, [cloud_warning, f"本地发货已完成，但回写小程序云端失败：{cloud_exc}"]))
         return {"message": f"发货完成，共 {len(sns_to_ship)} 台", "warning": cloud_warning, "cloud_synced": cloud_synced}
     except HTTPException:
         raise

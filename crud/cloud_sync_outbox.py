@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -432,6 +433,9 @@ def retry_failed_cloud_sync_events() -> dict[str, Any]:
 
 
 async def cloud_sync_worker_loop() -> None:
+    if os.getenv('V8_DEMO_MODE') == '1':
+        logger.info('Cloud push disabled for isolated demo')
+        return
     ensure_cloud_sync_outbox_table()
     logger.info("cloud sync worker started")
     while True:

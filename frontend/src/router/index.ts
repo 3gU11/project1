@@ -100,7 +100,7 @@ export const canAccessPath = (path: string, permissions?: string[] | null) => {
 
 const isKnownAppPath = (path: string) => {
   const cleanPath = String(path || '').split('?')[0].split('#')[0]
-  return appMenus.some((m) => m.path === cleanPath)
+  return appRouteDefs.some((route) => route.path === cleanPath)
 }
 
 const routes: Array<RouteRecordRaw> = [

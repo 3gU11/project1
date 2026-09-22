@@ -25,7 +25,8 @@ from crud.logs import append_log
 from crud.model_dictionary import is_model_enabled
 from crud.planning import get_factory_plan, get_factory_plan_v2, save_factory_plan
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
-from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
+from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token, require_permissions
+from crud import batch_planning
 from utils.parsers import parse_alloc_dict
 from utils.contract_ids import contract_no_exists, next_contract_no
 from database import get_engine
@@ -33,6 +34,50 @@ from database import get_engine
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
 
 RUSH_AUTO_INSERT_ON_ENTRY = os.getenv("RUSH_AUTO_INSERT_ON_ENTRY", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class BatchPlanningPayload(BaseModel):
+    batch_id: str = Field(min_length=1, max_length=100)
+
+
+@router.get("/contract/{contract_id}/eligible-batches", dependencies=[Depends(require_permissions("CONTRACT"))])
+def contract_eligible_batches_api(contract_id: str):
+    try:
+        return {"data": batch_planning.eligible_batches(contract_id)}
+    except batch_planning.BatchPlanningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/contract/{contract_id}/plan-batch", dependencies=[Depends(require_permissions("CONTRACT"))])
+def plan_contract_batch_api(contract_id: str, payload: BatchPlanningPayload,
+                            operator: str = Depends(get_current_operator_name)):
+    try:
+        result = batch_planning.plan_contract(contract_id, payload.batch_id, operator)
+        if not result.get("replayed"):
+            append_audit_log(module="合同规划", action_type="批次快捷规划", biz_type="合同", username=operator,
+                             content=f"合同：{contract_id}；订单：{result['order_id']}；批次：{payload.batch_id}；自动预占 {result['count']} 台，待二次确认")
+        return result
+    except batch_planning.BatchPlanningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/orders/{order_id}/confirm-batch-allocation", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
+def confirm_batch_allocation_api(order_id: str, operator: str = Depends(get_current_operator_name)):
+    try:
+        result = batch_planning.confirm_review(order_id, operator)
+        if not result.get("replayed"):
+            append_audit_log(module="订单配货", action_type="二次确认", biz_type="订单", username=operator,
+                             content=f"订单：{order_id}；确认批次自动配货 {result['count']} 台")
+        return result
+    except batch_planning.BatchPlanningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+def _guard_pending_batch_review(order_id: str):
+    with get_engine().connect() as conn:
+        status = conn.execute(text("SELECT status FROM sales_orders WHERE `订单号`=:oid"), {"oid": order_id}).scalar()
+    if status == batch_planning.REVIEW_STATUS:
+        raise HTTPException(status_code=409, detail="该订单为批次自动配货，请使用二次确认入口")
 
 
 def _parse_order_need_total(row: pd.Series) -> int:
@@ -3064,6 +3109,7 @@ def update_sales_order_api(
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        _guard_pending_batch_review(str(order_id))
         df_orders = get_orders()
         mask = df_orders["订单号"].astype(str) == str(order_id)
         if not mask.any():
@@ -3201,6 +3247,9 @@ def get_order_allocations_api(order_id: str):
         order_id = str(order_id).strip()
         if not order_id:
             raise HTTPException(status_code=422, detail="订单号不能为空")
+        review = batch_planning.review_rows(order_id)
+        if review is not None:
+            return {"data": review}
         rows = _get_order_contract_machine_rows(order_id)
         rows = rows.where(rows.notnull(), None)
         return {"data": rows.to_dict(orient="records")}
@@ -3219,6 +3268,7 @@ def allocate_order_inventory_api(
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        _guard_pending_batch_review(str(order_id))
         selected = [str(x).strip() for x in (payload.selected_serial_nos or []) if str(x).strip()]
         if not selected:
             raise HTTPException(status_code=422, detail="请先选择要配货的机台")
@@ -3293,6 +3343,7 @@ def complete_order_allocation_api(
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        _guard_pending_batch_review(str(order_id))
         order_id = str(order_id).strip()
         if not order_id:
             raise HTTPException(status_code=422, detail="订单号不能为空")
@@ -3362,6 +3413,7 @@ def release_order_inventory_api(
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        _guard_pending_batch_review(str(order_id))
         order_id = str(order_id).strip()
         if not order_id:
             raise HTTPException(status_code=422, detail="订单号不能为空")

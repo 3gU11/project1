@@ -78,6 +78,19 @@
             </el-table>
 
             <el-divider />
+            <template v-if="isBatchReview">
+              <el-alert title="系统已按所选批次预占以下机台，请核对后进行二次确认。尚未投产的机台需投产后才能确认配货。" type="warning" :closable="false" />
+              <div class="ops"><el-button type="success" :loading="saving" @click="confirmBatchReview">二次确认全部配货</el-button></div>
+              <el-table :data="allocations" border stripe max-height="460">
+                <el-table-column prop="流水号" label="流水号" min-width="150" />
+                <el-table-column prop="机型" label="机型" min-width="130" />
+                <el-table-column prop="批次号" label="批次号" min-width="120" />
+                <el-table-column prop="货源" label="货源" min-width="120" />
+                <el-table-column prop="状态" label="状态" min-width="120" />
+                <el-table-column prop="合同备注" label="合同备注" min-width="150" />
+              </el-table>
+            </template>
+            <template v-else>
             <div class="field-head">
               <div class="field-label">应配机台清单（按合同自动带出）</div>
               <div class="field-head-right" style="display: flex; gap: 8px; align-items: center;">
@@ -133,6 +146,7 @@
               <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
               <el-button type="success" :loading="saving" @click="completeAllocation">配货完成</el-button>
             </div>
+            </template>
           </template>
         </el-card>
       </el-col>
@@ -167,6 +181,18 @@ const cacheStore = useCacheStore()
 const route = useRoute()
 const selectedOrderId = ref('')
 const selectedOrder = ref<Row | null>(null)
+const isBatchReview = computed(() => selectedOrder.value?.status === 'pending_review')
+const confirmBatchReview = async () => {
+  if (saving.value || !selectedOrderId.value) return
+  saving.value = true
+  try {
+    const res = await apiPost<{ message?: string; status: string }>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/confirm-batch-allocation`, {})
+    ElMessage.success(res.message || '二次确认完成')
+    await refreshCurrentOrder(res.status)
+  } catch {
+    // The shared request interceptor displays the API error.
+  } finally { saving.value = false }
+}
 const selectedCandidateSerials = ref<string[]>([])
 const selectedAllocatedSerials = ref<string[]>([])
 const candidateStatusFilter = ref('')
@@ -303,7 +329,7 @@ const allocationModelCountMap = computed(() => {
     const occupied = String(r['占用订单号'] || '').trim()
     const status = String(r['状态'] || '').trim()
     if (occupied !== selectedOrderId.value) continue
-    if (status === '已出库' || status === '未入库') continue
+    if (status === '已出库' || status === '未入库' || status === '待二次确认') continue
     const variant = rowVariant(r)
     if (!variant.model) continue
     map.set(variant.key, (map.get(variant.key) || 0) + 1)
@@ -608,6 +634,7 @@ const completeAllocation = async () => {
 
 const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
   const s = String(o.status || 'active')
+  if (s === 'pending_review') return { text: '待二次确认', type: 'warning' }
   if (s === 'packed') return { text: '已打包', type: 'primary' }
   if (s === 'shipped') return { text: '已出库', type: 'info' }
   if (s === 'canceled') return { text: '已取消', type: 'danger' }

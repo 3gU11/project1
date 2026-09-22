@@ -301,6 +301,9 @@
                 >
                   转为已规划
                 </el-button>
+                <el-button v-if="canMarkPlannedSelected" type="success" :loading="executing" @click="openBatchPlanning">
+                  按批次规划并配货
+                </el-button>
                 <el-button
                   v-if="canCancelSelected"
                   type="danger"
@@ -644,6 +647,19 @@
       </template>
     </el-dialog>
   </div>
+  <el-dialog v-model="batchPlanningVisible" title="按批次规划并配货" width="560px" :close-on-click-modal="false" :before-close="closeBatchPlanning">
+    <p>合同：{{ batchPlanningContractId }}</p>
+    <el-alert title="仅列出空白机台的机型、加高规格及数量满足整份合同的已确认或在产批次。提交后自动建单、预占，等待配货员二次确认。" type="info" :closable="false" />
+    <el-select v-model="batchPlanningId" :loading="batchPlanningLoading" :disabled="executing || batchPlanningLoading" placeholder="请选择适配批次" filterable style="width: 100%; margin-top: 16px">
+      <el-option v-for="batch in batchPlanningOptions" :key="batch.batch_id" :value="batch.batch_id"
+        :label="`${batch.batch_code} · ${batch.status === 'Confirmed' ? '已确认' : '在产'} · 空卡 ${batch.available} / 本合同需求 ${batch.required}`" />
+    </el-select>
+    <el-empty v-if="!batchPlanningLoading && !batchPlanningOptions.length" description="暂无满足整份合同需求的批次，不会跨批次或挤占已有合同" :image-size="70" />
+    <template #footer>
+      <el-button :disabled="executing" @click="batchPlanningVisible = false">取消</el-button>
+      <el-button type="primary" :loading="executing" :disabled="!batchPlanningId || batchPlanningLoading" @click="submitBatchPlanning">确认规划、建单并自动配货</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -750,6 +766,39 @@ const cancellableStatuses = new Set(['待规划', '已规划'])
 
 const loading = ref(false)
 const executing = ref(false)
+const batchPlanningVisible = ref(false)
+const batchPlanningLoading = ref(false)
+const batchPlanningContractId = ref('')
+const batchPlanningId = ref('')
+const batchPlanningOptions = ref<Array<{ batch_id: string; batch_code: string; status: string; available: number; required: number }>>([])
+const closeBatchPlanning = (done: () => void) => { if (!executing.value) done() }
+const openBatchPlanning = async () => {
+  if (!selectedContract.value || selectedContract.value.status !== '待规划') return
+  batchPlanningContractId.value = selectedContract.value.id
+  batchPlanningId.value = ''
+  batchPlanningOptions.value = []
+  batchPlanningVisible.value = true
+  batchPlanningLoading.value = true
+  try {
+    const res = await apiGet<{ data: typeof batchPlanningOptions.value }>(`/planning/contract/${encodeURIComponent(batchPlanningContractId.value)}/eligible-batches`)
+    batchPlanningOptions.value = res.data || []
+  } catch {
+    // The shared request interceptor displays the API error.
+  } finally { batchPlanningLoading.value = false }
+}
+const submitBatchPlanning = async () => {
+  if (executing.value || !batchPlanningId.value) return
+  executing.value = true
+  try {
+    const res = await apiPost<{ order_id: string }>(`/planning/contract/${encodeURIComponent(batchPlanningContractId.value)}/plan-batch`, { batch_id: batchPlanningId.value })
+    batchPlanningVisible.value = false
+    ElMessage.success(`已生成订单 ${res.order_id} 并自动配货，等待配货员二次确认`)
+    await fetchContracts(true)
+  } catch {
+    // The shared request interceptor displays the API error.
+    // Do not silently retry a write or choose a different batch.
+  } finally { executing.value = false }
+}
 const batchSaving = ref(false)
 const batchPanelOpen = ref(false)
 const allRows = ref<any[]>([])
