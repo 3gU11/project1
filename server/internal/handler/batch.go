@@ -197,14 +197,16 @@ func (h *BatchHandler) CreateManualPredicted(c *gin.Context) {
 	)
 	remark := strings.TrimSpace(req.Remark)
 	batch := model.Batch{
-		BatchID:   batchID,
-		BatchNo:   nextNo,
-		ModelType: batchModelType,
-		Capacity:  capacity,
-		Status:    model.StatusPredicted,
-		Source:    "manual",
-		CreatedAt: now,
-		UpdatedAt: now,
+		BatchID:       batchID,
+		BatchNo:       nextNo,
+		ModelType:     batchModelType,
+		MajorCategory: stringPtrIfNotEmpty(familyCategory),
+		BaseCapacity:  intPtr(capacity),
+		Capacity:      capacity,
+		Status:        model.StatusPredicted,
+		Source:        "manual",
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := tx.Create(&batch).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -331,6 +333,8 @@ func stringPtrIfNotEmpty(value string) *string {
 	}
 	return &clean
 }
+
+func intPtr(value int) *int { return &value }
 
 func (h *BatchHandler) AssignToLine(c *gin.Context) {
 	var req struct {

@@ -30,6 +30,9 @@
       <el-button v-if="canEditSandbox" type="primary" @click="handleRecompute()" :loading="recomputing">
         {{ recomputeButtonText }}
       </el-button>
+      <el-button v-if="canEditSandbox" type="success" @click="openManualPredictedDrawer">
+        新增预测产线
+      </el-button>
       <span v-if="pendingRecomputeJobId" class="recompute-job-status">
         正在重算
         <span v-if="recomputeElapsedSeconds >= 2">已运行 {{ recomputeElapsedSeconds }} 秒</span>
@@ -310,6 +313,21 @@
       </el-form>
     </el-drawer>
 
+    <el-drawer v-model="manualPredictedVisible" title="新增预测产线" size="420px">
+      <el-form label-width="90px" size="small">
+        <el-form-item label="机型族" required>
+          <el-select v-model="manualPredictedForm.model_family" placeholder="请选择明确机型族" style="width:100%">
+            <el-option v-for="item in manualFamilyOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="数量" required>
+          <el-input-number v-model="manualPredictedForm.quantity" :min="1" :max="manualFamilyCapacity" controls-position="right" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="manualPredictedForm.remark" type="textarea" /></el-form-item>
+        <el-form-item><el-button type="primary" @click="submitManualPredictedBatch" :loading="manualPredictedSaving">保存</el-button></el-form-item>
+      </el-form>
+    </el-drawer>
+
     <el-drawer v-model="batchDetailVisible" :title="batchDetail?.batch_id ? `预测列 · ${batchDetail.batch_id}` : '预测列'" size="440px">
       <template v-if="batchDetail">
         <div class="batch-detail-overview">
@@ -485,6 +503,8 @@ const saving = ref(false)
 const specialAddVisible = ref(false)
 const specialAddSaving = ref(false)
 const specialAddBatch = ref<any>(null)
+const manualPredictedVisible = ref(false)
+const manualPredictedSaving = ref(false)
 const batchDetailVisible = ref(false)
 const batchDetail = ref<any>(null)
 const activeRiskUnitIds = ref<Set<string>>(new Set())
@@ -530,6 +550,16 @@ const topScrollWidth = ref(1200)
 
 const editForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', order_remark: '' })
 const specialAddForm = ref({ contract_no: '', customer: '', dealer_name: '', model_type: '', due_date: '', order_remark: '' })
+const manualPredictedForm = ref({ model_family: '中大型XS', quantity: 10, remark: '' })
+const manualFamilyOptions = [
+  { label: '中小型G', value: '中小型G', capacity: 30 },
+  { label: '中小型XS', value: '中小型XS', capacity: 30 },
+  { label: '中大型XS', value: '中大型XS', capacity: 16 },
+  { label: '中小型AUTO', value: '中小型AUTO', capacity: 27 },
+  { label: '中大型AUTO', value: '中大型AUTO', capacity: 16 },
+  { label: '特殊', value: '特殊', capacity: 15 },
+]
+const manualFamilyCapacity = computed(() => manualFamilyOptions.find((item) => item.value === manualPredictedForm.value.model_family)?.capacity || 30)
 // 已确认批次属于待排产队列，由生产看板管理，不再出现在预测沙盘。
 const SANDBOX_STATUS = 'Predicted'
 const SANDBOX_STATUS_SET = new Set(SANDBOX_STATUS.split(','))
@@ -1406,7 +1436,12 @@ async function batchRevoke() {
   if (selectedBatches.value.length !== 1) return
   const selectedBatchId = selectedBatches.value[0]
   const batch = batchStore.batches.find((b: any) => String(b.batch_id) === selectedBatchId)
-  if (!batch) return
+  if (!batch) {
+    selectedBatches.value = []
+    ElMessage.warning('该预测列已被重算替换，请刷新后选择最新预测列')
+    await refresh()
+    return
+  }
   const selectedId = batch.batch_id
   try {
     await ElMessageBox.confirm('撤销确认将删除 plan_import 中该批次的记录并恢复为待确认状态，确认？', '撤销确认', {
@@ -1464,6 +1499,18 @@ async function refresh(options: { markDataUpdate?: boolean } = {}) {
     return
   }
   await batchStore.fetchBatches({ status: SANDBOX_STATUS })
+  const liveIds = new Set(batchStore.batches.map((batch: any) => String(batch?.batch_id || '')))
+  const staleSelected = selectedBatches.value.filter((id) => !liveIds.has(String(id)))
+  if (staleSelected.length) {
+    selectedBatches.value = selectedBatches.value.filter((id) => liveIds.has(String(id)))
+    if (batchDetail.value && !liveIds.has(String(batchDetail.value.batch_id || ''))) {
+      batchDetail.value = null
+      batchDetailVisible.value = false
+    }
+    ElMessage.warning('预测方案已重算，原预测列已替换，请重新选择最新预测列')
+  }
+  for (const key of Object.keys(batchCodeInputs.value)) if (!liveIds.has(key)) delete batchCodeInputs.value[key]
+  for (const key of Object.keys(inboundDateInputs.value)) if (!liveIds.has(key)) delete inboundDateInputs.value[key]
   const nextFingerprint = batchDataFingerprint(batchStore.batches)
   if (options.markDataUpdate && lastBatchDataFingerprint.value && nextFingerprint !== lastBatchDataFingerprint.value) {
     hasDataUpdate.value = true
@@ -1486,6 +1533,31 @@ async function handleManualRefresh() {
   pinnedBatchOrder.value = []
   await refresh()
   hasDataUpdate.value = false
+}
+
+function openManualPredictedDrawer() {
+  manualPredictedForm.value = { model_family: '中大型XS', quantity: 10, remark: '' }
+  manualPredictedVisible.value = true
+}
+
+async function submitManualPredictedBatch() {
+  const family = String(manualPredictedForm.value.model_family || '').trim()
+  const option = manualFamilyOptions.find((item) => item.value === family)
+  const quantity = Number(manualPredictedForm.value.quantity)
+  if (!option) return ElMessage.warning('请选择明确机型族')
+  if (!Number.isInteger(quantity) || quantity <= 0) return ElMessage.warning('数量必须是大于 0 的整数')
+  if (quantity > option.capacity) return ElMessage.warning(`${option.label} 单条产线最多 ${option.capacity} 台`)
+  manualPredictedSaving.value = true
+  try {
+    const res = await sandboxApi.createManualPredictedBatch({ model_family: family, quantity, remark: String(manualPredictedForm.value.remark || '').trim() }) as any
+    ElMessage.success('新增预测产线已保存')
+    manualPredictedVisible.value = false
+    await refresh()
+    const batchId = String(res?.batch?.batch_id || '')
+    if (batchId) selectedBatches.value = [batchId]
+  } catch (e: any) {
+    ElMessage.error(getApiErrorMessage(e) || e.message || '新增预测产线失败')
+  } finally { manualPredictedSaving.value = false }
 }
 
 async function forceRefresh() {

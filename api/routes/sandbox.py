@@ -892,7 +892,7 @@ def _build_batch_impact(batch_id: str, requested_inbound: str) -> Optional[dict]
         batch = conn.execute(
             text(
                 "SELECT batch_id, batch_no, batch_code, status, model_type, capacity, "
-                "due_date_start, due_date_end, expected_inbound_date, source, updated_at, "
+                "due_date_start, due_date_end, expected_inbound_date, source, updated_at, major_category, base_capacity, capacity_override, "
                 "EXISTS(SELECT 1 FROM sandbox_batch_baselines sb WHERE "
                 "CONVERT(sb.batch_id USING utf8mb4) COLLATE utf8mb4_unicode_ci = "
                 "CONVERT(batches.batch_id USING utf8mb4) COLLATE utf8mb4_unicode_ci) "
@@ -944,7 +944,7 @@ def _build_batch_impact(batch_id: str, requested_inbound: str) -> Optional[dict]
             "unit_ids": overflow_unit_ids,
         })
 
-    batch_category = _model_category(str(batch["model_type"] or ""), family_map)
+    batch_category = _normalize_model_family(batch.get("major_category") or "") or _model_category(str(batch["model_type"] or ""), family_map)
     mismatched = [u for u in units if batch_category and _model_category(str(u["model_type"] or ""), family_map) not in ("", batch_category)]
     if mismatched:
         risks.append({

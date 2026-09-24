@@ -541,7 +541,11 @@ func (p *Predictor) FullRecompute(targetSlotNo int, isClicked bool) ([]model.Bat
 		b.BatchID = generateBatchID(family, slotIdx+1)
 		b.BatchNo = slotIdx + 1
 		b.ModelType = family
+		majorCategory := cat
+		b.MajorCategory = &majorCategory
 		b.Capacity = capacityForCategory(cat, caps)
+		baseCapacity := b.Capacity
+		b.BaseCapacity = &baseCapacity
 		b.Status = model.StatusPredicted
 		b.Source = "algorithm"
 		var stockAllocator *StockRatioAllocator
