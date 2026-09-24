@@ -25,6 +25,9 @@ type Batch struct {
 	BatchCode           *string        `gorm:"column:batch_code" json:"batch_code"`
 	ForecastSlotNo      *int           `gorm:"->;column:forecast_slot_no" json:"forecast_slot_no,omitempty"`
 	ModelType           string         `gorm:"column:model_type" json:"model_type"`
+	MajorCategory       *string        `gorm:"column:major_category" json:"major_category,omitempty"`
+	BaseCapacity        *int           `gorm:"column:base_capacity" json:"base_capacity,omitempty"`
+	CapacityOverride    *int           `gorm:"column:capacity_override" json:"capacity_override,omitempty"`
 	Capacity            int            `gorm:"column:capacity" json:"capacity"`
 	Status              string         `gorm:"column:status" json:"status"`
 	DueDateStart        *time.Time     `gorm:"column:due_date_start" json:"due_date_start"`
