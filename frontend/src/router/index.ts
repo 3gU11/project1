@@ -135,7 +135,14 @@ const routes: Array<RouteRecordRaw> = [
         meta: { title: '报表管理', permission: 'REPORT_VIEW', requiresAuth: true }
       },
     ]
-  }
+  },
+  {
+    // Resolve the first navigation before permission-based routes are installed.
+    path: '/:pathMatch(.*)*',
+    name: 'PendingAppRoute',
+    component: { render: () => null },
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({
@@ -163,7 +170,7 @@ router.beforeEach((to, _from, next) => {
     return
   }
 
-  if (to.matched.length === 0) {
+  if (to.matched.length === 0 || to.name === 'PendingAppRoute') {
     if (!userStore.isAuthenticated) {
       next({ name: 'Login', query: { redirect: to.fullPath } })
       return
@@ -177,7 +184,7 @@ router.beforeEach((to, _from, next) => {
       next({ name: 'Forbidden' })
       return
     }
-    next({ path: to.fullPath, replace: true })
+    next({ path: to.path, query: to.query, hash: to.hash, replace: true })
     return
   }
 

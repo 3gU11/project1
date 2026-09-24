@@ -40,6 +40,44 @@ class BatchPlanningPayload(BaseModel):
     batch_id: str = Field(min_length=1, max_length=100)
 
 
+@router.get("/orders/{order_id}/reservation", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
+def reservation_info_api(order_id: str):
+    try:
+        return batch_planning.reservation_info(order_id)
+    except batch_planning.BatchPlanningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/orders/{order_id}/replacement-batches", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
+def replacement_batches_api(order_id: str):
+    try:
+        return {"data": batch_planning.replacement_batches(order_id)}
+    except batch_planning.BatchPlanningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+def _change_batch_reservation(order_id, operator, batch_id=None):
+    try:
+        result = batch_planning.change_reservation(order_id, operator, batch_id)
+        append_audit_log(module="订单配货", action_type="改配预占" if batch_id else "撤销批次规划",
+                         biz_type="订单", username=operator,
+                         content=f"订单：{order_id}；目标批次：{batch_id or '撤销'}；{result['message']}")
+        return result
+    except batch_planning.BatchPlanningError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/orders/{order_id}/replace-reservation", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
+def replace_reservation_api(order_id: str, payload: BatchPlanningPayload,
+                            operator: str = Depends(get_current_operator_name)):
+    return _change_batch_reservation(order_id, operator, payload.batch_id)
+
+
+@router.post("/orders/{order_id}/cancel-reservation", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
+def cancel_reservation_api(order_id: str, operator: str = Depends(get_current_operator_name)):
+    return _change_batch_reservation(order_id, operator)
+
+
 @router.get("/contract/{contract_id}/eligible-batches", dependencies=[Depends(require_permissions("CONTRACT"))])
 def contract_eligible_batches_api(contract_id: str):
     try:
@@ -339,7 +377,7 @@ def _reconcile_completed_orders(df_orders: pd.DataFrame) -> pd.DataFrame:
         if not oid:
             continue
         status = str(row.get("status", "active") or "active")
-        if status in ("deleted", "done"):
+        if status in ("deleted", "done", "canceled", batch_planning.REVIEW_STATUS):
             continue
 
         shipped_rows = inv_df[(inv_df["占用订单号"] == oid) & (inv_df["状态"] == "已出库")]
@@ -2415,7 +2453,14 @@ def get_sales_orders(
 
         df_orders = _reconcile_completed_orders(df_orders)
         df_orders = df_orders.where(df_orders.notnull(), None)
-        return {"data": df_orders.to_dict(orient="records"), "total": total, "skip": skip, "limit": limit}
+        records = df_orders.to_dict(orient="records")
+        for record in records:
+            if record.get("status") == batch_planning.REVIEW_STATUS:
+                try:
+                    record["reservation"] = batch_planning.reservation_info(record["订单号"])
+                except batch_planning.BatchPlanningError as exc:
+                    record["reservation"] = {"label": "预占异常，待核查", "can_confirm": False, "risk": str(exc)}
+        return {"data": records, "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

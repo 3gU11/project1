@@ -79,14 +79,24 @@
 
             <el-divider />
             <template v-if="isBatchReview">
-              <el-alert title="系统已按所选批次预占以下机台，请核对后进行二次确认。尚未投产的机台需投产后才能确认配货。" type="warning" :closable="false" />
-              <div class="ops"><el-button type="success" :loading="saving" @click="confirmBatchReview">二次确认全部配货</el-button></div>
+              <el-alert :title="reservationInfo?.label || '正在核查预占状态'" type="warning" :closable="false">
+                <template #default>
+                  <div>当前批次已预占 {{ reservationInfo?.reserved_days ?? '-' }} 天；合同交期：{{ reservationInfo?.contract_due_date || '未填写' }}。</div>
+                  <div v-if="reservationInfo?.risk">{{ reservationInfo.risk }}</div>
+                  <div>未投产时可以改配其他批次，或撤销本次规划恢复合同需求。</div>
+                </template>
+              </el-alert>
+              <div class="ops">
+                <el-button type="success" :loading="saving" :disabled="!reservationInfo?.can_confirm" @click="confirmBatchReview">确认全部配货</el-button>
+                <el-button :disabled="saving" @click="openReplacement">改配批次</el-button>
+                <el-button type="danger" plain :disabled="saving" @click="cancelReservation">撤销本次规划</el-button>
+              </div>
               <el-table :data="allocations" border stripe max-height="460">
                 <el-table-column prop="流水号" label="流水号" min-width="150" />
                 <el-table-column prop="机型" label="机型" min-width="130" />
                 <el-table-column prop="批次号" label="批次号" min-width="120" />
                 <el-table-column prop="货源" label="货源" min-width="120" />
-                <el-table-column prop="状态" label="状态" min-width="120" />
+                <el-table-column label="状态" min-width="160"><template #default="scope">{{ reservationInfo?.machine_states?.[scope.row['流水号']] || '正在核查' }}</template></el-table-column>
                 <el-table-column prop="合同备注" label="合同备注" min-width="150" />
               </el-table>
             </template>
@@ -151,12 +161,20 @@
         </el-card>
       </el-col>
     </el-row>
+    <el-dialog v-model="replacementVisible" title="改配批次" width="560px" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving">
+      <el-alert title="成功后释放原机台并预占新批次机台，保留订单号；目标不足时原预占不变。" type="info" :closable="false" />
+      <el-select v-model="replacementId" placeholder="选择适配批次" :disabled="saving" style="width:100%;margin-top:16px">
+        <el-option v-for="b in replacementOptions" :key="b.batch_id" :value="b.batch_id" :label="`${b.batch_code} · ${b.status === 'Confirmed' ? '待投产' : '在产'} · 可用 ${b.available} 台`" />
+      </el-select>
+      <el-empty v-if="!replacementOptions.length" description="暂无满足整份合同需求的其他批次" />
+      <template #footer><el-button :disabled="saving" @click="replacementVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!replacementId" @click="replaceReservation">确认改配</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from '../store/cache'
@@ -182,6 +200,48 @@ const route = useRoute()
 const selectedOrderId = ref('')
 const selectedOrder = ref<Row | null>(null)
 const isBatchReview = computed(() => selectedOrder.value?.status === 'pending_review')
+const reservationInfo = ref<Row | null>(null)
+const replacementVisible = ref(false)
+const replacementId = ref('')
+const replacementOrderId = ref('')
+const replacementOptions = ref<Row[]>([])
+const openReplacement = async () => {
+  if (saving.value) return
+  saving.value = true
+  const oid = selectedOrderId.value
+  try {
+    const res = await apiGet<ListResponse>(`/planning/orders/${encodeURIComponent(oid)}/replacement-batches`)
+    replacementOptions.value = res.data || []
+    replacementOrderId.value = oid
+    replacementId.value = ''
+    replacementVisible.value = true
+  } catch { /* shared interceptor */ } finally { saving.value = false }
+}
+const replaceReservation = async () => {
+  if (saving.value || !replacementId.value) return
+  saving.value = true
+  try {
+    const res = await apiPost<{ message: string }>(`/planning/orders/${encodeURIComponent(replacementOrderId.value)}/replace-reservation`, { batch_id: replacementId.value })
+    replacementVisible.value = false
+    ElMessage.success(res.message)
+    await loadData(true)
+  } catch { /* shared interceptor */ } finally { saving.value = false }
+}
+const cancelReservation = async () => {
+  if (saving.value) return
+  const oid = selectedOrderId.value
+  saving.value = true
+  try {
+    await ElMessageBox.confirm(`撤销订单 ${oid} 的本次规划？将释放全部预占机台，取消该订单，并把合同恢复为待规划。`, '撤销本次规划', { type: 'warning', confirmButtonText: '确认撤销', cancelButtonText: '保留预占' })
+    const res = await apiPost<{ message: string }>(`/planning/orders/${encodeURIComponent(oid)}/cancel-reservation`, {})
+    ElMessage.success(res.message)
+    selectedOrderId.value = ''
+    selectedOrder.value = null
+    allocations.value = []
+    reservationInfo.value = null
+    await loadData(true)
+  } catch { /* cancel or shared interceptor */ } finally { saving.value = false }
+}
 const confirmBatchReview = async () => {
   if (saving.value || !selectedOrderId.value) return
   saving.value = true
@@ -481,7 +541,17 @@ const loadSelectedOrderContext = async () => {
     allocations.value = []
     return
   }
-  await Promise.all([loadOrderDetails(), loadAllocations()])
+  reservationInfo.value = null
+  const oid = selectedOrderId.value
+  await Promise.all([loadOrderDetails(), loadAllocations(), (async () => {
+    if (!isBatchReview.value) return
+    try {
+      const info = await apiGet<Row>(`/planning/orders/${encodeURIComponent(oid)}/reservation`)
+      if (selectedOrderId.value !== oid) return
+      reservationInfo.value = info
+      if (selectedOrder.value) selectedOrder.value.reservation = info
+    } catch { /* keep confirmation disabled */ }
+  })()])
 }
 
 const selectOrder = async (row: Row) => {
@@ -634,7 +704,7 @@ const completeAllocation = async () => {
 
 const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
   const s = String(o.status || 'active')
-  if (s === 'pending_review') return { text: '待二次确认', type: 'warning' }
+  if (s === 'pending_review') return { text: o.reservation?.label || '待核查预占', type: 'warning' }
   if (s === 'packed') return { text: '已打包', type: 'primary' }
   if (s === 'shipped') return { text: '已出库', type: 'info' }
   if (s === 'canceled') return { text: '已取消', type: 'danger' }

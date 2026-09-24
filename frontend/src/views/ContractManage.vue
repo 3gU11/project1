@@ -649,7 +649,7 @@
   </div>
   <el-dialog v-model="batchPlanningVisible" title="按批次规划并配货" width="560px" :close-on-click-modal="false" :before-close="closeBatchPlanning">
     <p>合同：{{ batchPlanningContractId }}</p>
-    <el-alert title="仅列出空白机台的机型、加高规格及数量满足整份合同的已确认或在产批次。提交后自动建单、预占，等待配货员二次确认。" type="info" :closable="false" />
+    <el-alert title="仅列出空白机台的机型、加高规格及数量满足整份合同的已确认或在产批次。提交后自动建单并预占；待排产机台显示待投产，可在订单配货中改配或撤销。" type="info" :closable="false" />
     <el-select v-model="batchPlanningId" :loading="batchPlanningLoading" :disabled="executing || batchPlanningLoading" placeholder="请选择适配批次" filterable style="width: 100%; margin-top: 16px">
       <el-option v-for="batch in batchPlanningOptions" :key="batch.batch_id" :value="batch.batch_id"
         :label="`${batch.batch_code} · ${batch.status === 'Confirmed' ? '已确认' : '在产'} · 空卡 ${batch.available} / 本合同需求 ${batch.required}`" />
@@ -657,7 +657,7 @@
     <el-empty v-if="!batchPlanningLoading && !batchPlanningOptions.length" description="暂无满足整份合同需求的批次，不会跨批次或挤占已有合同" :image-size="70" />
     <template #footer>
       <el-button :disabled="executing" @click="batchPlanningVisible = false">取消</el-button>
-      <el-button type="primary" :loading="executing" :disabled="!batchPlanningId || batchPlanningLoading" @click="submitBatchPlanning">确认规划、建单并自动配货</el-button>
+      <el-button type="primary" :loading="executing" :disabled="!batchPlanningId || batchPlanningLoading" @click="submitBatchPlanning">确认规划、建单并预占</el-button>
     </template>
   </el-dialog>
 </template>
@@ -792,7 +792,7 @@ const submitBatchPlanning = async () => {
   try {
     const res = await apiPost<{ order_id: string }>(`/planning/contract/${encodeURIComponent(batchPlanningContractId.value)}/plan-batch`, { batch_id: batchPlanningId.value })
     batchPlanningVisible.value = false
-    ElMessage.success(`已生成订单 ${res.order_id} 并自动配货，等待配货员二次确认`)
+    ElMessage.success(`已生成订单 ${res.order_id} 并预占机台，可在订单配货中查看投产进度、改配或撤销`)
     await fetchContracts(true)
   } catch {
     // The shared request interceptor displays the API error.
