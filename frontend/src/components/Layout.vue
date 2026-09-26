@@ -36,6 +36,7 @@
       </div>
     </aside>
     <main class="main-content" :class="{ expanded: sidebarCollapsed }">
+      <div v-if="isBoss" class="notification-toolbar"><ContractNotifications /></div>
       <router-view />
     </main>
   </div>
@@ -50,6 +51,7 @@ import { getAccessibleMenus } from '../router'
 import { cancelIdleRun, runWhenIdle } from '../utils/compat'
 import { normalizeRole } from '../utils/roles'
 import { apiGet } from '../utils/request'
+import ContractNotifications from './ContractNotifications.vue'
 
 const userStore = useUserStore()
 const modelDictionaryStore = useModelDictionaryStore()
@@ -178,6 +180,7 @@ const visibleMenus = computed(() => {
   })
 })
 const roleLabel = computed(() => userStore.userInfo?.role || '-')
+const isBoss = computed(() => normalizeRole(userStore.userInfo?.role) === 'Boss' && userStore.hasPermission('NOTIFICATION_VIEW'))
 const warmedPaths = new Set<string>()
 
 const preloadRoute = (path: string) => {
@@ -424,6 +427,7 @@ watch(() => userStore.isAuthenticated, (newVal) => {
   overflow-y: auto;
   transition: padding 0.2s ease;
 }
+.notification-toolbar { display: flex; justify-content: flex-end; min-height: 40px; margin: -8px 0 8px; position: relative; z-index: 1100; }
 .main-content.expanded {
   padding-left: 16px;
 }

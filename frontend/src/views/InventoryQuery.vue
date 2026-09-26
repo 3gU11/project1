@@ -151,6 +151,12 @@
                 <span v-else style="color: #dcdfe6;">-</span>
               </template>
             </el-table-column>
+            <el-table-column label="未配货需求" width="110" align="center">
+              <template #default="{ row }">
+                <span v-if="row.plannedDemand > 0" style="font-weight: 800; color: #7c2d12; background: #ffedd5; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.plannedDemand }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="加高" width="80" align="center">
               <template #default="{ row }">
                 <span v-if="row.加高 > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.加高 }}</span>
@@ -253,14 +259,17 @@ import { Refresh } from '@element-plus/icons-vue'
 import { useInventoryStore } from '../store/inventory'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
 import { getModelOrderList } from '../utils/modelOrder'
-import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount } from '../utils/inventoryStats'
+import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount, type ModelInventorySummary } from '../utils/inventoryStats'
 import { getBindingTitle, getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from '../utils/inventoryState'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 import { apiGet, getApiErrorMessage } from '../utils/request'
 import { compareModels } from '../utils/modelOrder'
 
 type QueueModelSummary = { model: string; pending: number; ordered: number; batch_ids: string[] }
+type PlannedDemandRow = { model: string; required_qty: number; contract_count: number }
+type InventoryModelRow = ModelInventorySummary & { pending: number; ordered: number; plannedDemand: number }
 const queueModels = ref<QueueModelSummary[]>([])
+const plannedDemandRows = ref<PlannedDemandRow[]>([])
 const queueLoading = ref(false)
 const queueError = ref('')
 const filteredQueueModels = computed(() => queueModels.value
@@ -284,6 +293,16 @@ const fetchQueueSummary = async () => {
   }
 }
 
+const fetchPlannedDemand = async () => {
+  try {
+    const result = await apiGet<{ data: PlannedDemandRow[] }>('/planning/contracts/planned-model-summary')
+    plannedDemandRows.value = result.data || []
+  } catch (error) {
+    plannedDemandRows.value = []
+    console.error('Fetch planned contract demand failed', error)
+  }
+}
+
 const loading = ref(false)
 const inventoryList = ref<any[]>([])
 const inventoryStore = useInventoryStore()
@@ -303,7 +322,7 @@ const pageSize = ref(50)
 const fetchData = async (force = false) => {
   loading.value = true
   try {
-    const [data] = await Promise.all([inventoryStore.fetchInventory(force), fetchQueueSummary()])
+    const [data] = await Promise.all([inventoryStore.fetchInventory(force), fetchQueueSummary(), fetchPlannedDemand()])
     inventoryList.value = data
   } catch (error) {
     console.error('Fetch inventory failed', error)
@@ -321,6 +340,7 @@ const modelOptions = computed(() => {
     ...getModelOrderList(),
     ...inventoryList.value.map(row => String(row['机型'] || '').trim()),
     ...queueModels.value.map(row => row.model),
+    ...plannedDemandRows.value.map(row => row.model),
   ].filter(Boolean))].sort(compareModels)
 })
 
@@ -361,15 +381,18 @@ const productionBoundRows = computed(() => filterInventoryRows(indexedRows.value
 const boundCount = computed(() => new Set(productionBoundRows.value.map(r => r['流水号'])).size)
 
 const modelSummarySource = computed(() => {
-  const summary = buildModelInventorySummary(filteredForStats.value)
-  for (const row of summary) row.已绑定 = 0
+  const summary = buildModelInventorySummary(filteredForStats.value) as InventoryModelRow[]
+  for (const row of summary) {
+    row.已绑定 = 0
+    row.plannedDemand = 0
+  }
   const seen = new Set<string>()
   for (const item of productionBoundRows.value) {
     if (seen.has(item['流水号'])) continue
     seen.add(item['流水号'])
     let row = summary.find(r => r.机型 === item['机型'])
     if (!row) {
-      row = { 机型: item['机型'], 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0 }
+      row = { 机型: item['机型'], 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0, pending: 0, ordered: 0, plannedDemand: 0 }
       summary.push(row)
     }
     row.已绑定++
@@ -378,17 +401,25 @@ const modelSummarySource = computed(() => {
 })
 
 const modelSummary = computed(() => {
-  const rows = new Map(modelSummarySource.value.map(row => [row.机型, {
-    ...row, pending: 0, ordered: 0,
-  }]))
+  const rows = new Map<string, InventoryModelRow>(modelSummarySource.value.map(row => [row.机型, { ...row, pending: 0, ordered: 0 }]))
   for (const queueModel of filteredQueueModels.value) {
     const row = rows.get(queueModel.model) || {
-      机型: queueModel.model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0,
+      机型: queueModel.model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0, plannedDemand: 0,
       pending: 0, ordered: 0,
     }
     row.pending = queueModel.pending
     row.ordered = queueModel.ordered
     rows.set(queueModel.model, row)
+  }
+  for (const demand of plannedDemandRows.value) {
+    if (selectedModels.value.length && !selectedModels.value.includes(demand.model)) continue
+    if (highOnly.value && !demand.model.includes('加高')) continue
+    const row = rows.get(demand.model) || {
+      机型: demand.model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0,
+      pending: 0, ordered: 0, plannedDemand: 0,
+    }
+    row.plannedDemand = Number(demand.required_qty || 0)
+    rows.set(demand.model, row)
   }
   return sortModelInventorySummary([...rows.values()])
 })

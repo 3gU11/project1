@@ -7,6 +7,7 @@ import hashlib
 
 import os
 import uuid
+from contextlib import nullcontext
 from datetime import datetime
 import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query, Request, BackgroundTasks
@@ -27,6 +28,7 @@ from crud.planning import get_factory_plan, get_factory_plan_v2, save_factory_pl
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token, require_permissions
 from crud import batch_planning
+from crud.contract_notifications import contract_rows, record_converted, record_planned
 from utils.parsers import parse_alloc_dict
 from utils.contract_ids import contract_no_exists, next_contract_no
 from database import get_engine
@@ -2040,13 +2042,13 @@ def _upsert_contract_edit_supplement_queue(conn, rows: list[dict[str, Any]]) -> 
     return inserted_or_updated
 
 
-def _sync_order_to_units_and_import(contract_ids: list[str], order_id: str) -> dict[str, int]:
+def _sync_order_to_units_and_import(contract_ids: list[str], order_id: str, conn=None) -> dict[str, int]:
     contract_ids = _clean_contract_ids(contract_ids)
     order_id = str(order_id or "").strip()
     if not contract_ids or not order_id:
         return {"units": 0, "plan_import": 0}
 
-    with get_engine().begin() as conn:
+    with (nullcontext(conn) if conn is not None else get_engine().begin()) as conn:
         # Contract/order linkage belongs to factory_plan and plan_import. Machine
         # reservation is performed only by the explicit allocation endpoint.
         units_rows = 0
@@ -2082,7 +2084,7 @@ def _sync_order_to_units_and_import(contract_ids: list[str], order_id: str) -> d
     return {"units": units_rows, "plan_import": plan_import_rows, "finished_goods_data": finished_goods_rows}
 
 
-def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str | None = "已转订单") -> int:
+def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str | None = "已转订单", operator: str = "") -> int:
     if not contract_ids:
         return 0
     
@@ -2115,6 +2117,8 @@ def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str
             params
         )
         updated_count = int(ret.rowcount or 0)
+        _sync_order_to_units_and_import(contract_ids, str(order_id), conn)
+        record_converted(conn, contract_rows(conn, contract_ids), order_id, operator)
 
     # 3. 清理缓存
     import crud.planning
@@ -2123,7 +2127,6 @@ def _link_contracts_to_order(contract_ids: list[str], order_id: str, status: str
     if hasattr(crud.planning.get_factory_plan_v2, "cache_clear"):
         crud.planning.get_factory_plan_v2.cache_clear()
     
-    _sync_order_to_units_and_import(contract_ids, str(order_id))
     return updated_count
 
 
@@ -2417,6 +2420,71 @@ def get_next_contract_id():
         raise HTTPException(status_code=500, detail=f"生成合同号失败: {e}")
 
 
+@router.get("/contracts/planned-model-summary")
+def get_planned_model_summary():
+    """Return remaining machine demand for active contracts/orders.
+
+    A linked order is reduced by the machines currently occupied by that order.
+    Batch planning reservations are also occupied at this stage, even while the
+    order is waiting for second confirmation.
+    This keeps inventory reference demand correct after a contract becomes an order
+    and also handles partial allocation without relying on a manually maintained
+    contract status.
+    """
+    try:
+        plan_sql = text("""
+            SELECT TRIM(`合同号`) AS contract_no, TRIM(`机型`) AS model,
+                   COALESCE(`排产数量`, 0) AS qty, TRIM(COALESCE(`状态`, '')) AS status,
+                   TRIM(COALESCE(`订单号`, '')) AS order_no
+            FROM factory_plan
+            WHERE TRIM(COALESCE(`状态`, '')) NOT IN ('已取消', '取消')
+              AND (TRIM(COALESCE(`状态`, '')) = '已规划' OR TRIM(COALESCE(`订单号`, '')) <> '')
+              AND TRIM(COALESCE(`机型`, '')) <> ''
+              AND COALESCE(`排产数量`, 0) > 0
+        """)
+        with get_engine().connect() as conn:
+            plan_rows = [dict(row) for row in conn.execute(plan_sql).mappings().all()]
+
+        allocated: dict[tuple[str, str], int] = {}
+        if plan_rows:
+            inv_df = get_data()
+            if not inv_df.empty and {"机型", "占用订单号"}.issubset(inv_df.columns):
+                occupied = inv_df.copy()
+                occupied["占用订单号"] = occupied["占用订单号"].astype(str).str.strip()
+                occupied["机型"] = occupied["机型"].astype(str).str.strip()
+                occupied = occupied[occupied["占用订单号"] != ""]
+                for _, inv_row in occupied.iterrows():
+                    key = (str(inv_row["占用订单号"]), str(inv_row["机型"]))
+                    allocated[key] = allocated.get(key, 0) + 1
+
+        # Aggregate contract rows first so allocation for an order linked to
+        # multiple contracts is deducted exactly once.
+        demand_by_order_model: dict[tuple[str, str], int] = {}
+        for item in plan_rows:
+            key = (str(item.get("order_no") or "").strip(), str(item.get("model") or "").strip())
+            demand_by_order_model[key] = demand_by_order_model.get(key, 0) + int(item.get("qty") or 0)
+
+        totals: dict[str, int] = {}
+        remaining_by_order_model: dict[tuple[str, str], int] = {}
+        for (order_no, model), qty in demand_by_order_model.items():
+            remaining = max(0, qty - allocated.get((order_no, model), 0)) if order_no else qty
+            remaining_by_order_model[(order_no, model)] = remaining
+            totals[model] = totals.get(model, 0) + remaining
+        contract_sets: dict[str, set[str]] = {}
+        for item in plan_rows:
+            model = str(item.get("model") or "").strip()
+            order_no = str(item.get("order_no") or "").strip()
+            if remaining_by_order_model.get((order_no, model), 0) > 0:
+                contract_sets.setdefault(model, set()).add(str(item.get("contract_no") or ""))
+        rows = [{"model": model, "required_qty": required_qty,
+                 "contract_count": len(contract_sets.get(model, set()))}
+                for model, required_qty in totals.items() if required_qty > 0]
+        rows.sort(key=lambda row: (-row["required_qty"], row["model"]))
+        return {"data": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取已规划合同需求失败: {e}")
+
+
 @router.get("/orders")
 def get_sales_orders(
     skip: int = Query(0, ge=0),
@@ -2550,7 +2618,7 @@ def create_sales_order_api(
         }
         df_orders = pd.concat([df_orders, pd.DataFrame([new_row])], ignore_index=True)
         save_orders(df_orders)
-        linked_count = _link_contracts_to_order(contract_ids, order_id) if contract_ids else 0
+        linked_count = _link_contracts_to_order(contract_ids, order_id, operator=current_operator) if contract_ids else 0
         sync_result: dict[str, Any] = {}
         if detail_items is not None and contract_ids:
             with get_engine().begin() as conn:
@@ -3538,6 +3606,8 @@ def update_contract_status(
                 )
                 if result.rowcount == 0:
                     raise HTTPException(status_code=404, detail="合同不存在")
+            if new_status == "已规划":
+                record_planned(conn, contract_rows(conn, [str(contract_id)]), current_operator)
                 
         _clear_planning_related_caches()
         if new_status == "已取消":
@@ -3590,7 +3660,7 @@ def link_contract_to_order(
         if not conflict.empty:
             raise HTTPException(status_code=400, detail=f"合同已关联订单 {conflict.iloc[0]}，请先解除关联")
 
-        _link_contracts_to_order([str(contract_id)], order_id)
+        _link_contracts_to_order([str(contract_id)], order_id, operator=current_operator)
         append_audit_log(
             module="合同管理",
             action_type="关联订单",
@@ -3643,7 +3713,10 @@ def _process_contracts_batch(
         raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
 
     df_plan = pd.concat([df_plan, pd.DataFrame(clean_add_list)], ignore_index=True)
-    save_factory_plan(df_plan)
+    created_groups: dict[str, list[dict[str, Any]]] = {}
+    for row in clean_add_list:
+        created_groups.setdefault(str(row["合同号"]), []).append(row)
+    save_factory_plan(df_plan, notification_rows=created_groups, notification_operator=operator)
 
     if save_mode == "sandbox" and not is_rush and background_tasks:
         background_tasks.add_task(_trigger_sandbox_recompute_sync, user_ctx)

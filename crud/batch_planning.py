@@ -148,6 +148,19 @@ def _sync_active_ledger(conn, uid):
          "dealer": u.get("dealer_name"), "note": u.get("order_remark")})
 
 
+def _new_order_id(conn):
+    """Use the same public order-number shape as ordinary sales orders."""
+    for _ in range(20):
+        oid = f"SO-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        exists = conn.execute(
+            text("SELECT 1 FROM sales_orders WHERE `订单号`=:oid LIMIT 1"),
+            {"oid": oid},
+        ).first()
+        if not exists:
+            return oid
+    raise BatchPlanningError("订单号生成冲突，请稍后重试")
+
+
 def plan_contract(cid, bid, operator):
     with get_engine().begin() as conn:
         contract = _contract(conn, cid, True)
@@ -169,7 +182,7 @@ def plan_contract(cid, bid, operator):
             WHERE u.contract_no=:cid AND b.status<>'Predicted'""", {"cid": cid}, True)
         if existing:
             raise BatchPlanningError("合同已绑定其他非预测卡片，不能重复分配")
-        oid = "SO" + datetime.now().strftime("%Y%m%d%H%M%S") + uuid.uuid4().hex[:8].upper()
+        oid = _new_order_id(conn)
         code = batch[0].get("batch_code") or bid
         metadata = {"batch_id": bid, "contract_id": cid, "unit_ids": [u["unit_id"] for u in units],
                     "operator": operator, "created_at": datetime.now().isoformat(), "reviewed": False}
@@ -205,6 +218,8 @@ def plan_contract(cid, bid, operator):
             WHERE `合同号`=:cid"""), {"oid":oid,"cid":cid,"source":json.dumps({code:len(units)},ensure_ascii=False)})
         conn.execute(text("UPDATE production_queue SET quantity_remaining=0,status='Pulled' WHERE contract_no=:cid AND status='Waiting'"), {"cid":cid})
         conn.execute(text("UPDATE rush_order_queue SET status='deleted',updated_by=:operator WHERE contract_no=:cid AND status='pending'"), {"cid":cid,"operator":operator})
+        from crud.contract_notifications import record_converted
+        record_converted(conn, {cid: contract}, oid, operator)
     _clear_caches()
     return {"order_id":oid,"status":REVIEW_STATUS,"count":len(units),"batch_code":code}
 

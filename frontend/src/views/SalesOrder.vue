@@ -231,6 +231,18 @@
           </template>
         </el-table-column>
         <el-table-column prop="订单号" label="订单号" width="170" />
+        <el-table-column label="订单状态" width="130">
+          <template #default="scope">
+            <el-tag
+              v-if="String(scope.row.status || '') === 'pending_review'"
+              type="warning"
+              size="small"
+            >待二次确认</el-tag>
+            <el-tag v-else-if="String(scope.row.status || '') === 'done'" type="success" size="small">已完成</el-tag>
+            <el-tag v-else-if="String(scope.row.status || '') === 'deleted'" type="info" size="small">已删除</el-tag>
+            <el-tag v-else type="primary" size="small">进行中</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="客户名" label="客户名" min-width="160" />
         <el-table-column prop="代理商" label="代理商" width="90" />
         <el-table-column label="需求机型" min-width="200">
@@ -558,7 +570,7 @@ const manageRowsFiltered = computed(() => {
 
       if (statusFilter.value === 'done') return status === 'done'
       // active
-      if (!['active', 'ready', 'packed', 'done'].includes(status)) return false
+      if (!['active', 'ready', 'packed', 'pending_review', 'done'].includes(status)) return false
       return status !== 'done'
     })
     .filter((r) => {
@@ -1016,6 +1028,10 @@ const removeEditRow = (index: number) => {
 
 const saveEdit = async () => {
   if (!editingId.value) return
+  if (editForm.status === 'pending_review') {
+    ElMessage.warning('批次预占订单需在订单详情中完成二次确认，不能通过普通编辑保存')
+    return
+  }
   if (!editForm.客户名.trim()) {
     ElMessage.warning('客户名不能为空')
     return

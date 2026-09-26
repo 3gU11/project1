@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     BatchCard: typeof import('./components/sandbox/BatchCard.vue')['default']
     CapacityRatioEditor: typeof import('./components/sandbox/CapacityRatioEditor.vue')['default']
+    ContractNotifications: typeof import('./components/ContractNotifications.vue')['default']
     EditModePanel: typeof import('./components/EditModePanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']

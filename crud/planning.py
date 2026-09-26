@@ -106,7 +106,7 @@ def get_factory_plan_v2():
         return pd.DataFrame(columns=cols)
 
 
-def save_factory_plan(df):
+def save_factory_plan(df, notification_rows=None, notification_operator=""):
     get_factory_plan.cache_clear()
     get_factory_plan_v2.cache_clear()  # 同时清除 v2 版本缓存
     cols = ["合同号", "机型", "排产数量", "要求交期", "状态", "备注", "客户名", "代理商", "指定批次/来源", "订单号"]
@@ -124,6 +124,9 @@ def save_factory_plan(df):
             conn.execute(text("DELETE FROM factory_plan"))
             if not df.empty:
                 df[cols].to_sql('factory_plan', conn, if_exists='append', index=False, method='multi', chunksize=500)
+            if notification_rows:
+                from crud.contract_notifications import record_created
+                record_created(conn, notification_rows, notification_operator)
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"排产计划保存失败: {e}") from e
 
