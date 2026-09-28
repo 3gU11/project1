@@ -1,0 +1,225 @@
+- generic [ref=f2e4]:
+  - complementary [ref=f2e5]:
+    - button "«" [ref=f2e6] [cursor=pointer]
+    - generic [ref=f2e7]: 🏭 管理系统 V8betaVer1.0
+    - generic [ref=f2e8]:
+      - generic [ref=f2e9]: 👤 系统管理
+      - link "🏠 首页" [ref=f2e10] [cursor=pointer]:
+        - /url: /
+    - generic [ref=f2e11]:
+      - paragraph [ref=f2e12]: "角色: Admin"
+      - paragraph [ref=f2e13]: "用户: UI诊断"
+      - button "🚪 退出登录" [ref=f2e14] [cursor=pointer]
+    - generic [ref=f2e15]:
+      - generic [ref=f2e16]: 👑 管理功能
+      - button "📊 合同管理" [ref=f2e17] [cursor=pointer]
+      - button "📚 机型字典" [ref=f2e18] [cursor=pointer]
+      - button "👤 用户管理" [ref=f2e19] [cursor=pointer]
+      - button "📌 销售下单" [ref=f2e20] [cursor=pointer]
+      - button "🧾 经销商订单审核" [ref=f2e21] [cursor=pointer]
+      - button "📋 订单配货" [ref=f2e22] [cursor=pointer]
+      - button "📗 发货复核" [ref=f2e23] [cursor=pointer]
+      - button "🔧 机台档案" [ref=f2e24] [cursor=pointer]
+      - button "🛠️ 机台编辑" [ref=f2e25] [cursor=pointer]
+      - button "🖥️ 库位大屏" [ref=f2e26] [cursor=pointer]
+      - button "📜 交易日志" [ref=f2e27] [cursor=pointer]
+      - button "🔎 库存查询" [ref=f2e28] [cursor=pointer]
+      - button "⬇️ 成品入库" [ref=f2e29] [cursor=pointer]
+      - button "🔍 汇总与追溯" [ref=f2e30] [cursor=pointer]
+      - button "🏭 生产看板" [ref=f2e31] [cursor=pointer]
+      - button "👑 预测沙盘" [ref=f2e32] [cursor=pointer]
+      - button "📊 报表管理" [ref=f2e33] [cursor=pointer]
+  - main [ref=f2e34]:
+    - generic [ref=f2e538]:
+      - heading "🏢 销售合同管理" [level=1] [ref=f2e541]
+      - generic [ref=f2e542]: 💡 提示：录入的新合同在审批通过后，将自动流转至老板计划/沙盘与下单环节。
+      - button "▾ ➕ 录入新合同 (批量)" [ref=f2e879] [cursor=pointer]
+      - generic [ref=f2e545]:
+        - generic [ref=f2e546]:
+          - generic [ref=f2e547]:
+            - generic [ref=f2e548]: 合同号
+            - textbox "请输入合同号" [ref=f2e551]: HT202609170001
+            - generic [ref=f2e552]: 默认自动生成，可按需手动修改
+          - generic [ref=f2e553]:
+            - generic [ref=f2e554]: 期望交付日期
+            - combobox [ref=f2e561]: 2026-09-17
+          - generic [ref=f2e562]:
+            - generic [ref=f2e563]: 客户名称
+            - textbox [ref=f2e566]: 界面诊断客户
+          - generic [ref=f2e567]:
+            - generic [ref=f2e568]: 代理商名称
+            - textbox [ref=f2e571]
+          - generic [ref=f2e572]:
+            - generic [ref=f2e573]: 急单
+            - generic [ref=f2e574]:
+              - switch
+              - generic [ref=f2e575] [cursor=pointer]: 否
+              - generic [ref=f2e577] [cursor=pointer]
+              - generic [aria-hidden] [ref=f2e580] [cursor=pointer]: 是
+        - separator [ref=f2e581]
+        - generic [ref=f2e582]: 📎 附加合同文件 (可选)
+        - generic [ref=f2e583]:
+          - button [ref=f2e584] [cursor=pointer]:
+            - generic [ref=f2e589]:
+              - text: 拖入合同文件到这里，或
+              - emphasis [ref=f2e590]: 点击选择
+          - generic [ref=f2e591]: 支持 PDF、Word、JPG/JPEG，单个文件不超过 50MB；不支持拖入文件夹。
+          - list
+        - separator [ref=f2e592]
+        - generic [ref=f2e593]: 请在下方清单中添加设备机型。支持同一机型添加多条记录（例如：标准版与加高版分开录入）。
+        - generic [ref=f2e595]:
+          - table [ref=f2e597]:
+            - rowgroup [ref=f2e604]:
+              - row [ref=f2e605]:
+                - columnheader "#" [ref=f2e606]
+                - columnheader "机型" [ref=f2e608]
+                - columnheader "数量" [ref=f2e610]
+                - columnheader "加高?" [ref=f2e612]
+                - columnheader "单行备注" [ref=f2e614]
+          - table [ref=f2e620]:
+            - rowgroup [ref=f2e627]:
+              - row "1 FR-7055XS(PRO) 1" [ref=f2e868]:
+                - cell "1" [ref=f2e629]
+                - cell "FR-7055XS(PRO)" [ref=f2e869]:
+                  - generic [ref=f2e634]:
+                    - generic:
+                      - combobox [ref=f2e636]
+                      - generic [ref=f2e878]: FR-7055XS(PRO)
+                    - generic [ref=f2e639] [cursor=pointer]
+                - cell [ref=f2e642]:
+                  - spinbutton "数量" [ref=f2e647]: "1"
+                - cell [ref=f2e648]:
+                  - generic [ref=f2e651] [cursor=pointer]:
+                    - checkbox
+                - cell [ref=f2e653]:
+                  - textbox [ref=f2e657]
+        - button "+ 添加机型行" [ref=f2e660] [cursor=pointer]
+        - generic [ref=f2e662]: 合同总备注
+        - textbox "可选，应用于所有条目" [ref=f2e665]
+        - button "💾 保存所有合同条目" [ref=f2e667] [cursor=pointer]
+      - generic [ref=f2e669]:
+        - generic [ref=f2e670]:
+          - button "待规划 22" [ref=f2e671] [cursor=pointer]:
+            - generic [ref=f2e672]: 待规划
+            - strong [ref=f2e673]: "22"
+          - button "已规划 0" [ref=f2e674] [cursor=pointer]:
+            - generic [ref=f2e675]: 已规划
+            - strong [ref=f2e676]: "0"
+          - button "已完成 1938" [ref=f2e677] [cursor=pointer]:
+            - generic [ref=f2e678]: 已完成
+            - strong [ref=f2e679]: "1938"
+        - generic [ref=f2e680]:
+          - complementary [ref=f2e681]:
+            - generic [ref=f2e682]:
+              - textbox "搜索合同号 / 客户 / 代理商" [ref=f2e685]
+              - generic [ref=f2e687]:
+                - generic:
+                  - combobox [ref=f2e689]
+                  - generic [ref=f2e690]: 按机台筛选
+                - generic [ref=f2e692] [cursor=pointer]
+            - generic [ref=f2e696]:
+              - button "2026-02 1 单" [ref=f2e698] [cursor=pointer]:
+                - generic [ref=f2e700]:
+                  - generic [ref=f2e701]: 2026-02
+                  - emphasis [ref=f2e702]: 1 单
+              - button "2026-03 1 单" [ref=f2e707] [cursor=pointer]:
+                - generic [ref=f2e709]:
+                  - generic [ref=f2e710]: 2026-03
+                  - emphasis [ref=f2e711]: 1 单
+              - button "2026-04 2 单" [ref=f2e716] [cursor=pointer]:
+                - generic [ref=f2e718]:
+                  - generic [ref=f2e719]: 2026-04
+                  - emphasis [ref=f2e720]: 2 单
+              - button "2026-05 2 单" [ref=f2e725] [cursor=pointer]:
+                - generic [ref=f2e727]:
+                  - generic [ref=f2e728]: 2026-05
+                  - emphasis [ref=f2e729]: 2 单
+              - button "2026-06 2 单" [ref=f2e734] [cursor=pointer]:
+                - generic [ref=f2e736]:
+                  - generic [ref=f2e737]: 2026-06
+                  - emphasis [ref=f2e738]: 2 单
+              - button "2026-08 2 单" [ref=f2e743] [cursor=pointer]:
+                - generic [ref=f2e745]:
+                  - generic [ref=f2e746]: 2026-08
+                  - emphasis [ref=f2e747]: 2 单
+              - button "2026-09 6 单" [ref=f2e752] [cursor=pointer]:
+                - generic [ref=f2e754]:
+                  - generic [ref=f2e755]: 2026-09
+                  - emphasis [ref=f2e756]: 6 单
+              - button "2026-10 6 单" [ref=f2e761] [cursor=pointer]:
+                - generic [ref=f2e763]:
+                  - generic [ref=f2e764]: 2026-10
+                  - emphasis [ref=f2e765]: 6 单
+          - main [ref=f2e769]:
+            - generic [ref=f2e770]:
+              - generic [ref=f2e771]:
+                - generic [ref=f2e772]: 待规划
+                - heading "HT202602058102" [level=2] [ref=f2e773]
+              - generic [ref=f2e774]: 待规划
+            - generic [ref=f2e776]:
+              - generic [ref=f2e777]:
+                - generic [ref=f2e778]: 客户名
+                - strong [ref=f2e779]: 印度
+              - generic [ref=f2e780]:
+                - generic [ref=f2e781]: 代理商
+                - strong [ref=f2e782]: 吴龙
+              - generic [ref=f2e783]:
+                - generic [ref=f2e784]: 要求交期
+                - strong [ref=f2e785]: 2026-02-05
+              - generic [ref=f2e786]:
+                - generic [ref=f2e787]: 合计数量
+                - strong [ref=f2e788]: "2"
+              - generic [ref=f2e789]:
+                - generic [ref=f2e790]: 机型摘要
+                - strong [ref=f2e791]: FR-7055XS(PRO)×2
+            - generic [ref=f2e792]:
+              - generic [ref=f2e793]: 机型明细
+              - generic [ref=f2e795]:
+                - table [ref=f2e797]:
+                  - rowgroup [ref=f2e804]:
+                    - row [ref=f2e805]:
+                      - columnheader "机型" [ref=f2e806]
+                      - columnheader "数量" [ref=f2e808]
+                      - columnheader "交期" [ref=f2e810]
+                      - columnheader "状态" [ref=f2e812]
+                      - columnheader "备注" [ref=f2e814]
+                - table [ref=f2e820]:
+                  - rowgroup [ref=f2e827]:
+                    - row [ref=f2e828]:
+                      - cell "FR-7055XS(PRO)" [ref=f2e829]
+                      - cell "2" [ref=f2e831]
+                      - cell "2026-02-05" [ref=f2e833]
+                      - cell "待规划" [ref=f2e835]
+                      - cell "3相415V（角度单边30-60度）" [ref=f2e837]
+            - generic [ref=f2e840]:
+              - generic [ref=f2e841]: 附件
+              - generic [ref=f2e842]:
+                - generic [ref=f2e843]: 合同附件
+                - button "刷新" [ref=f2e844] [cursor=pointer]
+              - generic [ref=f2e846]: 该合同暂无附件
+              - generic [ref=f2e848]:
+                - button [ref=f2e849] [cursor=pointer]:
+                  - generic [ref=f2e854]:
+                    - text: 拖入附件，或
+                    - emphasis [ref=f2e855]: 点击追加
+                - generic [ref=f2e856]: PDF、Word、JPG/JPEG，单个不超过 50MB；不支持文件夹。
+            - generic [ref=f2e857]:
+              - generic [ref=f2e858]:
+                - generic [ref=f2e859]: 可用操作
+                - generic [ref=f2e860]: 待规划合同可转为已规划并同步沙盘；取消后会清理预测沙盒占用、排产队列和急单队列，并触发重算。
+              - generic [ref=f2e861]:
+                - button "修改合同" [ref=f2e862] [cursor=pointer]
+                - button "转为已规划" [ref=f2e864] [cursor=pointer]
+                - button "取消合同" [ref=f2e866] [cursor=pointer]
+      - dialog "保存方式" [ref=f2e883]:
+        - generic [active] [ref=f2e884]:
+          - generic [ref=f2e885]:
+            - heading "保存方式" [level=2] [ref=f2e886]
+            - button "Close this dialog" [ref=f2e887] [cursor=pointer]
+          - generic [ref=f2e892]:
+            - generic [ref=f2e893]: 请选择保存方式：
+            - generic [ref=f2e894]: 进入沙盘（参与老板计划排产）或使用现货（直接置为已规划）。
+          - generic [ref=f2e895]:
+            - button "取消" [ref=f2e896] [cursor=pointer]
+            - button "使用现货" [ref=f2e898] [cursor=pointer]
+            - button "进入沙盘" [ref=f2e900] [cursor=pointer]

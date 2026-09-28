@@ -1,0 +1,1216 @@
+{
+  "layout_id": "default",
+  "layout": {
+    "slots": [
+      {
+        "id": "slot-1",
+        "code": "A01",
+        "x": 20,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-2",
+        "code": "A02",
+        "x": 360,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-3",
+        "code": "A03",
+        "x": 740,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-4",
+        "code": "A04",
+        "x": 1080,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-5",
+        "code": "A05",
+        "x": 1460,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-6",
+        "code": "A06",
+        "x": 1800,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-7",
+        "code": "A07",
+        "x": 2180,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-8",
+        "code": "A08",
+        "x": 2520,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-9",
+        "code": "A09",
+        "x": 2900,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-10",
+        "code": "A10",
+        "x": 3240,
+        "y": 20,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-11",
+        "code": "B01",
+        "x": 20,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-12",
+        "code": "B02",
+        "x": 360,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-13",
+        "code": "B03",
+        "x": 740,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-14",
+        "code": "B04",
+        "x": 1080,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-15",
+        "code": "B05",
+        "x": 1460,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-16",
+        "code": "B06",
+        "x": 1800,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-17",
+        "code": "B07",
+        "x": 2180,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-18",
+        "code": "B08",
+        "x": 2520,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-19",
+        "code": "B09",
+        "x": 2900,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-20",
+        "code": "B10",
+        "x": 3240,
+        "y": 200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-21",
+        "code": "C01",
+        "x": 20,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-22",
+        "code": "C02",
+        "x": 360,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-23",
+        "code": "C03",
+        "x": 740,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-24",
+        "code": "C04",
+        "x": 1080,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-25",
+        "code": "C05",
+        "x": 1460,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-26",
+        "code": "C06",
+        "x": 1800,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-27",
+        "code": "C07",
+        "x": 2180,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-28",
+        "code": "C08",
+        "x": 2520,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-29",
+        "code": "C09",
+        "x": 2900,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-30",
+        "code": "C10",
+        "x": 3240,
+        "y": 380,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-31",
+        "code": "D01",
+        "x": 20,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-32",
+        "code": "D02",
+        "x": 360,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-33",
+        "code": "D03",
+        "x": 740,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-34",
+        "code": "D04",
+        "x": 1080,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-35",
+        "code": "D05",
+        "x": 1460,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-36",
+        "code": "D06",
+        "x": 1800,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-37",
+        "code": "D07",
+        "x": 2180,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-38",
+        "code": "D08",
+        "x": 2520,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-39",
+        "code": "D09",
+        "x": 2900,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-40",
+        "code": "D10",
+        "x": 3240,
+        "y": 560,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-41",
+        "code": "E01",
+        "x": 20,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-42",
+        "code": "E02",
+        "x": 360,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-43",
+        "code": "E03",
+        "x": 740,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-44",
+        "code": "E04",
+        "x": 1080,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-45",
+        "code": "E05",
+        "x": 1460,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-46",
+        "code": "E06",
+        "x": 1800,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-47",
+        "code": "E07",
+        "x": 2180,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-48",
+        "code": "E08",
+        "x": 2520,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-49",
+        "code": "E09",
+        "x": 2900,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-50",
+        "code": "E10",
+        "x": 3240,
+        "y": 740,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-51",
+        "code": "F01",
+        "x": 20,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-52",
+        "code": "F02",
+        "x": 360,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-53",
+        "code": "F03",
+        "x": 740,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-54",
+        "code": "F04",
+        "x": 1080,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-55",
+        "code": "F05",
+        "x": 1460,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-56",
+        "code": "F06",
+        "x": 1800,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-57",
+        "code": "F07",
+        "x": 2180,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-58",
+        "code": "F08",
+        "x": 2520,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-59",
+        "code": "F09",
+        "x": 2900,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-60",
+        "code": "F10",
+        "x": 3240,
+        "y": 920,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-61",
+        "code": "G01",
+        "x": 20,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-62",
+        "code": "G02",
+        "x": 360,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-63",
+        "code": "G03",
+        "x": 740,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-64",
+        "code": "G04",
+        "x": 1080,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-65",
+        "code": "G05",
+        "x": 1460,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-66",
+        "code": "G06",
+        "x": 1800,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-67",
+        "code": "G07",
+        "x": 2180,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-68",
+        "code": "G08",
+        "x": 2520,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-69",
+        "code": "G09",
+        "x": 2900,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-70",
+        "code": "G10",
+        "x": 3240,
+        "y": 1100,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-71",
+        "code": "H01",
+        "x": 20,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-72",
+        "code": "H02",
+        "x": 360,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-73",
+        "code": "H03",
+        "x": 740,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-74",
+        "code": "H04",
+        "x": 1080,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-75",
+        "code": "H05",
+        "x": 1460,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-76",
+        "code": "H06",
+        "x": 1800,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-77",
+        "code": "H07",
+        "x": 2180,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-78",
+        "code": "H08",
+        "x": 2520,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-79",
+        "code": "H09",
+        "x": 2900,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-80",
+        "code": "H10",
+        "x": 3240,
+        "y": 1280,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-81",
+        "code": "I01",
+        "x": 20,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-82",
+        "code": "I02",
+        "x": 360,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-83",
+        "code": "I03",
+        "x": 740,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-84",
+        "code": "I04",
+        "x": 1080,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-85",
+        "code": "I05",
+        "x": 1460,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-86",
+        "code": "I06",
+        "x": 1800,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-87",
+        "code": "I07",
+        "x": 2180,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-88",
+        "code": "I08",
+        "x": 2520,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-89",
+        "code": "I09",
+        "x": 2900,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-90",
+        "code": "I10",
+        "x": 3240,
+        "y": 1460,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-93",
+        "code": "待发货缓冲区01",
+        "x": 20,
+        "y": 1820,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-94",
+        "code": "待发货缓冲区02",
+        "x": 360,
+        "y": 1820,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-95",
+        "code": "待发货缓冲区03",
+        "x": 740,
+        "y": 1820,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-96",
+        "code": "大机型区域01",
+        "x": 20,
+        "y": 1640,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-97",
+        "code": "大机型区域02",
+        "x": 360,
+        "y": 1640,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-98",
+        "code": "大机型区域03",
+        "x": 740,
+        "y": 1640,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-99",
+        "code": "大机型区域04",
+        "x": 1080,
+        "y": 1640,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "slot-100",
+        "code": "大机型区域05",
+        "x": 1460,
+        "y": 1640,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "required-slot-大机型区域06",
+        "code": "大机型区域06",
+        "x": 20,
+        "y": 2000.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域07",
+        "code": "大机型区域07",
+        "x": 360,
+        "y": 2000.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域08",
+        "code": "大机型区域08",
+        "x": 700,
+        "y": 2000.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域09",
+        "code": "大机型区域09",
+        "x": 1040,
+        "y": 2000.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域10",
+        "code": "大机型区域10",
+        "x": 1380,
+        "y": 2000.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域11",
+        "code": "大机型区域11",
+        "x": 20,
+        "y": 2200.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域12",
+        "code": "大机型区域12",
+        "x": 360,
+        "y": 2200.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域13",
+        "code": "大机型区域13",
+        "x": 700,
+        "y": 2200.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域14",
+        "code": "大机型区域14",
+        "x": 1040,
+        "y": 2200.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-大机型区域15",
+        "code": "大机型区域15",
+        "x": 1380,
+        "y": 2200.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-闲置区01",
+        "code": "闲置区01",
+        "x": 20,
+        "y": 2400.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-闲置区02",
+        "code": "闲置区02",
+        "x": 360,
+        "y": 2400.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-实验室区01",
+        "code": "实验室区01",
+        "x": 700,
+        "y": 2400.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-老厂一车间400",
+        "code": "老厂一车间400",
+        "x": 1040,
+        "y": 2400.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-老厂一车间600",
+        "code": "老厂一车间600",
+        "x": 1380,
+        "y": 2400.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-老厂一车间500",
+        "code": "老厂一车间500",
+        "x": 20,
+        "y": 2600.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-老厂四车间二楼400",
+        "code": "老厂四车间二楼400",
+        "x": 360,
+        "y": 2600.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-老厂四车间一楼400",
+        "code": "老厂四车间一楼400",
+        "x": 700,
+        "y": 2600.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-老厂四车间一楼600",
+        "code": "老厂四车间一楼600",
+        "x": 1040,
+        "y": 2600.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-报废区01",
+        "code": "报废区01",
+        "x": 1380,
+        "y": 2600.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "required-slot-老厂四车间一楼500",
+        "code": "老厂四车间一楼500",
+        "x": 20,
+        "y": 2780.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常"
+      },
+      {
+        "id": "emergency-buffer-1",
+        "code": "新厂一楼小机床存放区",
+        "x": 20,
+        "y": 2960.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "emergency-buffer-2",
+        "code": "新厂2楼仓库门口存放区",
+        "x": 360,
+        "y": 2960.0,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "custom-1",
+        "code": "二楼过道",
+        "x": 20,
+        "y": 3200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      },
+      {
+        "id": "custom-2",
+        "code": "二楼仓库门口",
+        "x": 360,
+        "y": 3200,
+        "w": 300,
+        "h": 160,
+        "status": "正常",
+        "allowed_models": ""
+      }
+    ]
+  }
+}

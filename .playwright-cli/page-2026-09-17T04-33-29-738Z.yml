@@ -1,0 +1,131 @@
+- generic [ref=f2e4]:
+  - complementary [ref=f2e5]:
+    - button "«" [ref=f2e6] [cursor=pointer]
+    - generic [ref=f2e7]: 🏭 管理系统 V8betaVer1.0
+    - generic [ref=f2e8]:
+      - generic [ref=f2e9]: 👤 系统管理
+      - link "🏠 首页" [ref=f2e10] [cursor=pointer]:
+        - /url: /
+    - generic [ref=f2e11]:
+      - paragraph [ref=f2e12]: "角色: Admin"
+      - paragraph [ref=f2e13]: "用户: UI诊断"
+      - button "🚪 退出登录" [ref=f2e14] [cursor=pointer]
+    - generic [ref=f2e15]:
+      - generic [ref=f2e16]: 👑 管理功能
+      - button "📊 合同管理" [ref=f2e17] [cursor=pointer]
+      - button "📚 机型字典" [ref=f2e18] [cursor=pointer]
+      - button "👤 用户管理" [ref=f2e19] [cursor=pointer]
+      - button "📌 销售下单" [ref=f2e20] [cursor=pointer]
+      - button "🧾 经销商订单审核" [active] [ref=f2e21] [cursor=pointer]
+      - button "📋 订单配货" [ref=f2e22] [cursor=pointer]
+      - button "📗 发货复核" [ref=f2e23] [cursor=pointer]
+      - button "🔧 机台档案" [ref=f2e24] [cursor=pointer]
+      - button "🛠️ 机台编辑" [ref=f2e25] [cursor=pointer]
+      - button "🖥️ 库位大屏" [ref=f2e26] [cursor=pointer]
+      - button "📜 交易日志" [ref=f2e27] [cursor=pointer]
+      - button "🔎 库存查询" [ref=f2e28] [cursor=pointer]
+      - button "⬇️ 成品入库" [ref=f2e29] [cursor=pointer]
+      - button "🔍 汇总与追溯" [ref=f2e30] [cursor=pointer]
+      - button "🏭 生产看板" [ref=f2e31] [cursor=pointer]
+      - button "👑 预测沙盘" [ref=f2e32] [cursor=pointer]
+      - button "📊 报表管理" [ref=f2e33] [cursor=pointer]
+  - main [ref=f2e34]:
+    - generic [ref=f2e375]:
+      - generic [ref=f2e376]:
+        - heading "经销商订单审核" [level=1] [ref=f2e378]
+        - generic [ref=f2e379]:
+          - button "同步云端" [ref=f2e380] [cursor=pointer]
+          - button "同步库存到云端" [ref=f2e382] [cursor=pointer]
+          - button "同步完成状态" [ref=f2e384] [cursor=pointer]
+          - button "刷新" [ref=f2e386] [cursor=pointer]
+      - generic [ref=f2e388]:
+        - generic [ref=f2e389]:
+          - text: "Cloud pending:"
+          - strong [ref=f2e390]: "0"
+        - generic [ref=f2e391]:
+          - text: "Failed:"
+          - strong [ref=f2e392]: "2"
+        - generic [ref=f2e393]: "Last failed: wechat_batch_summary / wechat_batch_summary_sync"
+        - button "Retry" [ref=f2e394] [cursor=pointer]
+      - generic [ref=f2e396]:
+        - textbox "搜索订单号 / 经销商 / 联系人 / 机型" [ref=f2e399]
+        - radiogroup "radio-group" [ref=f2e400]:
+          - generic [ref=f2e401]:
+            - radio "全部订单" [checked] [ref=f2e402]
+            - generic [ref=f2e403] [cursor=pointer]: 全部订单
+          - generic [ref=f2e404]:
+            - radio "待审核" [ref=f2e405]
+            - generic [ref=f2e406] [cursor=pointer]: 待审核
+          - generic [ref=f2e407]:
+            - radio "已通过" [ref=f2e408]
+            - generic [ref=f2e409] [cursor=pointer]: 已通过
+          - generic [ref=f2e410]:
+            - radio "已转合同" [ref=f2e411]
+            - generic [ref=f2e412] [cursor=pointer]: 已转合同
+          - generic [ref=f2e413]:
+            - radio "部分配货" [ref=f2e414]
+            - generic [ref=f2e415] [cursor=pointer]: 部分配货
+          - generic [ref=f2e416]:
+            - radio "已配货" [ref=f2e417]
+            - generic [ref=f2e418] [cursor=pointer]: 已配货
+          - generic [ref=f2e419]:
+            - radio "已驳回" [ref=f2e420]
+            - generic [ref=f2e421] [cursor=pointer]: 已驳回
+          - generic [ref=f2e422]:
+            - radio "已取消" [ref=f2e423]
+            - generic [ref=f2e424] [cursor=pointer]: 已取消
+          - generic [ref=f2e425]:
+            - radio "已完成" [ref=f2e426]
+            - generic [ref=f2e427] [cursor=pointer]: 已完成
+        - button "查询" [ref=f2e428] [cursor=pointer]
+      - generic [ref=f2e430]:
+        - generic [ref=f2e431]:
+          - text: 待办总数
+          - strong [ref=f2e432]: "0"
+        - generic [ref=f2e433]:
+          - text: 新备注审核中
+          - strong [ref=f2e434]: "0"
+        - generic [ref=f2e435]:
+          - text: 待审核
+          - strong [ref=f2e436]: "0"
+      - generic [ref=f2e438]:
+        - table [ref=f2e440]:
+          - rowgroup [ref=f2e452]:
+            - row [ref=f2e453]:
+              - columnheader "状态" [ref=f2e454]
+              - columnheader "经销商" [ref=f2e456]
+              - columnheader "客户名" [ref=f2e458]
+              - columnheader "机型明细" [ref=f2e460]
+              - columnheader "批次/来源" [ref=f2e462]
+              - columnheader "数量" [ref=f2e464]
+              - columnheader "原备注" [ref=f2e466]
+              - columnheader "附加备注" [ref=f2e468]
+              - columnheader "需改数量" [ref=f2e470]
+              - columnheader "操作" [ref=f2e472]
+        - table [ref=f2e478]:
+          - rowgroup [ref=f2e490]:
+            - row [ref=f2e491]:
+              - cell "已驳回" [ref=f2e492]
+              - cell "王致旻" [ref=f2e496]
+              - cell "瑞钧智科" [ref=f2e498]
+              - cell "FR-400XS(PRO)" [ref=f2e500]
+              - cell "07-06" [ref=f2e502]
+              - cell "1" [ref=f2e504]
+              - cell [ref=f2e507]
+              - cell [ref=f2e508]
+              - cell "0" [ref=f2e509]
+              - cell [ref=f2e511]:
+                - generic [ref=f2e513]:
+                  - button "通过" [disabled] [ref=f2e514]
+                  - button "驳回" [disabled] [ref=f2e516]
+                  - button "转合同" [disabled] [ref=f2e518]
+      - generic [ref=f2e522]:
+        - generic [ref=f2e523]: Total 1
+        - generic [ref=f2e526] [cursor=pointer]:
+          - generic:
+            - combobox [ref=f2e528]
+            - generic [ref=f2e529]: 50/page
+        - button "Go to previous page" [disabled] [ref=f2e534]
+        - list [ref=f2e535]:
+          - listitem "page 1" [ref=f2e536]: "1"
+        - button "Go to next page" [disabled] [ref=f2e537]

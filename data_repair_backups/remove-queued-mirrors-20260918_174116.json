@@ -1,0 +1,80 @@
+{
+  "inventory": [
+    {
+      "批次号": "09-08",
+      "机型": "FR-400G",
+      "流水号": "96-09-216",
+      "状态": "待入库",
+      "更新时间": "2026-09-18 16:08:38",
+      "占用订单号": null,
+      "客户": "",
+      "代理商": "",
+      "合同备注": null,
+      "合同号": "",
+      "预计入库时间": "2026-10-17 00:00:00",
+      "Location_Code": ""
+    },
+    {
+      "批次号": "09-08",
+      "机型": "FR-400G",
+      "流水号": "96-09-218",
+      "状态": "待入库",
+      "更新时间": "2026-09-18 10:23:37",
+      "占用订单号": null,
+      "客户": "",
+      "代理商": "",
+      "合同备注": "不配水箱",
+      "合同号": "",
+      "预计入库时间": "2026-10-17 00:00:00",
+      "Location_Code": ""
+    }
+  ],
+  "units_readonly": [
+    {
+      "unit_id": "BATCH-202609-G-006-02459488-STK-1789534986519341600-001",
+      "serial_no": null,
+      "forecast_serial_no": "96-09-216",
+      "batch_id": "BATCH-202609-G-006-02459488",
+      "slot_index": 6,
+      "model_type": "FR-400G",
+      "production_line_id": null,
+      "status": "Pending",
+      "contract_no": null,
+      "customer": null,
+      "dealer_id": null,
+      "dealer_name": null,
+      "due_date": null,
+      "sales_id": null,
+      "order_remark": null,
+      "is_locked": 0,
+      "locked_by": null,
+      "locked_at": null,
+      "is_contract_pinned": 0,
+      "created_at": "2026-09-16 13:03:07",
+      "updated_at": "2026-09-18 16:08:38"
+    },
+    {
+      "unit_id": "BATCH-202609-G-006-02459488-STK-1789534986519341600-003",
+      "serial_no": null,
+      "forecast_serial_no": "96-09-218",
+      "batch_id": "BATCH-202609-G-006-02459488",
+      "slot_index": 8,
+      "model_type": "FR-400G",
+      "production_line_id": null,
+      "status": "Pending",
+      "contract_no": null,
+      "customer": null,
+      "dealer_id": null,
+      "dealer_name": null,
+      "due_date": null,
+      "sales_id": null,
+      "order_remark": "不配水箱",
+      "is_locked": 0,
+      "locked_by": null,
+      "locked_at": null,
+      "is_contract_pinned": 0,
+      "created_at": "2026-09-16 13:03:07",
+      "updated_at": "2026-09-18 10:23:37"
+    }
+  ]
+}
