@@ -188,7 +188,12 @@ const pageTitle = computed(() => isAfterSales.value ? '拍照任务查询' : (is
 const countTitle = computed(() => (isProd.value ? '现有数量' : '待入库数量'))
 const visibleList = computed(() => {
   let list = inventoryStore.list
-  if (isProd.value || isAfterSales.value) {
+  if (isAfterSales.value) {
+    // 售后扫码任务只处理尚未入库的机台；已入库记录不应继续占用待处理数量。
+    list = list.filter((item) => item.status.includes('待入库'))
+    return list
+  }
+  if (isProd.value) {
     if (onlyShippingReview.value) {
       list = list.filter((item) => item.status.includes('待发货'))
     }

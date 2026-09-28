@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -24,9 +25,20 @@ type Config struct {
 func Load() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
 	ocrTimeoutMS, _ := strconv.Atoi(getenv("OCR_TIMEOUT_MS", "20000"))
+	dsn := strings.TrimSpace(os.Getenv("DB_DSN"))
+	if dsn == "" {
+		host := getenv("DB_HOST", "")
+		port := getenv("DB_PORT", "3306")
+		user := getenv("DB_USER", "")
+		password := os.Getenv("DB_PASSWORD")
+		database := getenv("DB_NAME", "")
+		if host != "" && user != "" && database != "" {
+			dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", user, password, host, port, database)
+		}
+	}
 	return Config{
 		HTTPAddr:      getenv("HTTP_ADDR", ":3001"),
-		DBDSN:         getenv("DB_DSN", ""),
+		DBDSN:         dsn,
 		RedisEnabled:  getenv("REDIS_ENABLED", "false") == "true",
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPass:     os.Getenv("REDIS_PASSWORD"),
@@ -38,6 +50,13 @@ func Load() Config {
 		OCRServiceURL: getenv("OCR_SERVICE_URL", "http://127.0.0.1:8010/ocr"),
 		OCRTimeoutMS:  ocrTimeoutMS,
 	}
+}
+
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.DBDSN) == "" {
+		return fmt.Errorf("database configuration is missing: set DB_DSN or DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME")
+	}
+	return nil
 }
 
 func getenv(key, fallback string) string {

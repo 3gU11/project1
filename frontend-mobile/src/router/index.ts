@@ -35,7 +35,7 @@ const routes = [
         path: 'production',
         name: 'MobileProduction',
         component: () => import('../views/ProductionKanban.vue'),
-        meta: { roles: ['LineOperator'], permissions: ['MOBILE_KANBAN_VIEW'] }
+        meta: { roles: ['LineOperator'], permissions: ['MOBILE_KANBAN_VIEW'], forceRoleRefresh: true }
       },
       {
         path: 'profile',
@@ -88,7 +88,7 @@ router.beforeEach(async (to) => {
     // is insufficient and can restore a stale role from persisted state.
     // Refresh at most once per short interval and share concurrent requests.
     // A transient network error should not block navigation with valid cached auth.
-    await userStore.refreshUser()
+    await userStore.refreshUser(Boolean(to.meta.forceRoleRefresh))
   }
 
   if (to.meta.requiresAuth && !isAuth) {

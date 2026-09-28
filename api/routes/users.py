@@ -7,7 +7,7 @@ from sqlalchemy import text
 from crud.audit_logs import append_audit_log
 from crud.users import get_all_users, save_all_users, create_pending_user, user_exists
 from crud.roles import role_exists
-from api.routes.auth import require_permissions
+from api.routes.auth import require_permissions, invalidate_user_cache
 from database import get_engine
 
 router = APIRouter()
@@ -174,6 +174,7 @@ def audit_user(payload: UserAuditPayload, request: Request, _ctx: dict = Depends
                     {"username": username, "auditor": str(payload.auditor or "system").strip()}
                 )
                 msg = "审核成功"
+        invalidate_user_cache(username)
         operator = str(_ctx.get("name") or _ctx.get("username") or "system").strip()
         append_audit_log(
             module="用户管理",
@@ -233,6 +234,7 @@ def patch_user(username: str, payload: UserPatchPayload, request: Request, _ctx:
         with get_engine().begin() as conn:
             sql = f"UPDATE users SET {', '.join(update_fields)} WHERE LOWER(TRIM(username)) = :username"
             conn.execute(text(sql), params)
+        invalidate_user_cache(un)
         operator = str(_ctx.get("name") or _ctx.get("username") or "system").strip()
         changed_fields = [k for k, v in payload.model_dump().items() if v is not None]
         append_audit_log(

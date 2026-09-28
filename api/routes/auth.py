@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+import threading
+import time
 from typing import Any, Union
 from jose import jwt
 from fastapi import APIRouter, HTTPException, Depends, status
@@ -13,9 +15,35 @@ from crud.audit_logs import append_audit_log
 SECRET_KEY = "V7EX_SECRET_KEY_SUPER_SECURE"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days
+USER_CACHE_TTL_SECONDS = 5.0
+_user_cache: dict[str, tuple[float, dict]] = {}
+_user_cache_lock = threading.Lock()
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+
+def invalidate_user_cache(username: str | None = None) -> None:
+    with _user_cache_lock:
+        if username:
+            _user_cache.pop(str(username).strip().lower(), None)
+        else:
+            _user_cache.clear()
+
+
+def _get_cached_user(username: str) -> dict | None:
+    key = str(username).strip().lower()
+    now = time.monotonic()
+    with _user_cache_lock:
+        cached = _user_cache.get(key)
+        if cached and now - cached[0] < USER_CACHE_TTL_SECONDS:
+            return dict(cached[1])
+    row = get_user_for_login(username)
+    if not row:
+        return None
+    with _user_cache_lock:
+        _user_cache[key] = (now, dict(row))
+    return dict(row)
 
 class Token(BaseModel):
     access_token: str
@@ -57,7 +85,7 @@ def get_current_user_context(token: str = Depends(oauth2_scheme)) -> dict:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         # The database is the authoritative source for the current role and name.
         # This prevents a stale token from retaining permissions after a role change.
-        user_row = get_user_for_login(username)
+        user_row = _get_cached_user(username)
         if not user_row:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         return {
@@ -145,7 +173,7 @@ def login_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @router.get("/me", response_model=dict)
 def current_user(user_ctx: dict = Depends(get_current_user_context)):
-    row = get_user_for_login(user_ctx["username"]) or {}
+    row = _get_cached_user(user_ctx["username"]) or {}
     role = str(row.get("role") or user_ctx.get("role") or "").strip()
     return {"user": {
         "username": user_ctx["username"],
