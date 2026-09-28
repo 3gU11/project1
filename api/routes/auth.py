@@ -137,3 +137,14 @@ def login_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
             "permissions": permissions,
         }
     }
+
+@router.get("/me", response_model=dict)
+def current_user(user_ctx: dict = Depends(get_current_user_context)):
+    row = get_user_for_login(user_ctx["username"]) or {}
+    role = str(row.get("role") or user_ctx.get("role") or "").strip()
+    return {"user": {
+        "username": user_ctx["username"],
+        "role": role,
+        "name": str(row.get("name") or user_ctx.get("name") or "").strip(),
+        "permissions": get_role_permissions(role),
+    }}

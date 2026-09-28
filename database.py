@@ -55,10 +55,6 @@ def get_engine():
         pool_pre_ping=True,
         pool_recycle=3600,
         connect_args={
-            "auth_plugin_map": {
-                "caching_sha2_password": "mysql_native_password",
-                "sha256_password": "mysql_native_password"
-            },
             "init_command": "SET NAMES utf8mb4 COLLATE utf8mb4_general_ci"
         },
     )

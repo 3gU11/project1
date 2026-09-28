@@ -3,7 +3,11 @@
     <van-nav-bar :title="pageTitle" fixed placeholder />
 
     <div class="card search-card">
-      <van-search v-model="keyword" placeholder="搜索流水号/批次号/机型" @search="load" />
+      <div v-if="isAfterSales && inventoryStore.lockedBatchNo" class="locked-batch-bar">
+        <span>批次工作模式：<strong>{{ inventoryStore.lockedBatchNo }}</strong></span>
+        <van-button size="small" type="primary" plain @click="unlockBatch">切换批次</van-button>
+      </div>
+      <van-search v-else v-model="keyword" placeholder="搜索流水号/批次号/机型" @search="load" />
       
       <!-- 库管角色：增加快捷过滤器 -->
       <div v-if="isProd" class="filter-bar">
@@ -50,6 +54,9 @@
                 <span class="slot-text">库位: {{ item.slotCode || '-' }}</span>
               </div>
             </div>
+          </template>
+          <template #right-icon>
+            <van-button v-if="isAfterSales && !inventoryStore.lockedBatchNo" size="mini" type="primary" plain @click.stop="lockBatch(item.batchNo)">进入批次</van-button>
           </template>
         </van-cell>
       </van-list>
@@ -149,7 +156,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast, showSuccessToast, showFailToast } from 'vant'
 import { useInventoryStore } from '@/store/inventory'
@@ -174,8 +181,9 @@ const onlyShippingReview = computed({
   set: (v) => { inventoryStore.onlyShippingReview = v }
 })
 
-const isProd = computed(() => userStore.userInfo?.role === 'Prod')
-const isAfterSales = computed(() => userStore.userInfo?.role === 'AfterSales')
+const currentRole = computed(() => String(userStore.userInfo?.role || '').trim().toLowerCase())
+const isProd = computed(() => currentRole.value === 'prod')
+const isAfterSales = computed(() => currentRole.value === 'aftersales')
 const pageTitle = computed(() => isAfterSales.value ? '拍照任务查询' : (isProd.value ? '查询管理' : '机台入库'))
 const countTitle = computed(() => (isProd.value ? '现有数量' : '待入库数量'))
 const visibleList = computed(() => {
@@ -206,11 +214,23 @@ const filteredSlots = computed(() => {
 })
 
 const load = async () => {
-  await inventoryStore.loadInventory(keyword.value)
+  await inventoryStore.loadInventory(inventoryStore.lockedBatchNo || keyword.value)
   if (!isProd.value && !isAfterSales.value) {
     await inventoryStore.loadSlots()
   }
   resetProgressiveList()
+}
+
+const lockBatch = async (batchNo: string) => {
+  if (!batchNo) return
+  inventoryStore.lockBatch(batchNo)
+  keyword.value = ''
+  await load()
+}
+const unlockBatch = async () => {
+  inventoryStore.unlockBatch()
+  keyword.value = ''
+  await load()
 }
 
 /** 渐进式渲染逻辑 (解决低性能手机卡顿) */
@@ -247,8 +267,8 @@ const onLoad = () => {
 }
 
 // 监听搜索词或过滤器变化，重置列表
-import { watch } from 'vue'
 watch([keyword, onlyShippingReview], () => {
+  if (inventoryStore.lockedBatchNo) return
   resetProgressiveList()
 })
 
@@ -303,7 +323,17 @@ const confirmInbound = async (slotCode?: string) => {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await userStore.refreshUser()
+  await load()
+})
+watch(currentRole, (role, previousRole) => {
+  if (role !== previousRole) {
+    inventoryStore.unlockBatch()
+    keyword.value = ''
+    resetProgressiveList()
+  }
+})
 useInventoryAutoRefresh(load)
 </script>
 
@@ -319,6 +349,14 @@ useInventoryAutoRefresh(load)
 }
 .search-card {
   padding-bottom: 8px;
+}
+.locked-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #eef6ff;
+  color: #334155;
 }
 .filter-bar {
   padding: 0 16px 8px;

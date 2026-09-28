@@ -62,6 +62,14 @@
         </div>
 
         <div class="task-actions">
+          <van-uploader
+            :after-read="(item) => afterTaskRead(task, item)"
+            :max-count="1"
+            accept="image/*"
+            capture="environment"
+          >
+            <van-button size="small" type="primary" plain :loading="uploadingTaskId === task.id">拍摄此项</van-button>
+          </van-uploader>
           <van-button
             v-if="canResetTaskPhoto(task)"
             size="small"
@@ -551,7 +559,7 @@ const initTasks = async () => {
   }
 }
 
-/* const afterTaskRead = async (task: PhotoTask, item: UploaderFileListItem | UploaderFileListItem[]) => {
+const afterTaskRead = async (task: PhotoTask, item: UploaderFileListItem | UploaderFileListItem[]) => {
   const first = (Array.isArray(item) ? item[0] : item) as UploaderFileListItem
   if (!first?.file && !first?.content) return
   uploadingTaskId.value = task.id
@@ -600,7 +608,7 @@ const initTasks = async () => {
   } finally {
     uploadingTaskId.value = null
   }
-} */
+}
 
 const afterMachineRead = async (item: UploaderFileListItem | UploaderFileListItem[]) => {
   const first = (Array.isArray(item) ? item[0] : item) as UploaderFileListItem

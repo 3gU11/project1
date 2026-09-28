@@ -179,6 +179,20 @@ function Start-LoggedProcess(
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
+# Load local, ignored environment files before starting child services.
+foreach ($envPath in @((Join-Path $root '.env'), (Join-Path $root '.env.local'))) {
+  if (Test-Path -LiteralPath $envPath) {
+    Get-Content -LiteralPath $envPath | ForEach-Object {
+      $line = $_.Trim()
+      if ($line -and -not $line.StartsWith('#') -and $line -match '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+        $name = $matches[1]
+        $value = $matches[2].Trim().Trim('"').Trim("'")
+        if (-not [string]::IsNullOrWhiteSpace($value)) { Set-Item -Path "Env:$name" -Value $value }
+      }
+    }
+  }
+}
+
 $serverDir = Join-Path $root 'server'
 $frontendDir = Join-Path $root 'frontend'
 $mobileDir = Join-Path $root 'frontend-mobile'

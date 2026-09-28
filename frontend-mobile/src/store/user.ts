@@ -10,8 +10,8 @@ type UserInfo = {
 
 export const useUserStore = defineStore('user', {
   state: () => ({
-    token: localStorage.getItem('token') || '',
-    userInfo: JSON.parse(localStorage.getItem('userInfo') || 'null') as UserInfo | null,
+    token: '',
+    userInfo: null as UserInfo | null,
   }),
   getters: {
     isAuthed: (state) => !!state.token,
@@ -21,14 +21,21 @@ export const useUserStore = defineStore('user', {
       const res = await authApi.login(username, password)
       this.token = res.access_token
       this.userInfo = res.user
-      localStorage.setItem('token', res.access_token)
-      localStorage.setItem('userInfo', JSON.stringify(res.user))
+    },
+    async refreshUser() {
+      if (!this.token) return false
+      try {
+        const res = await authApi.me()
+        if (!res?.user) return false
+        this.userInfo = res.user
+        return true
+      } catch {
+        return false
+      }
     },
     logout() {
       this.token = ''
       this.userInfo = null
-      localStorage.removeItem('token')
-      localStorage.removeItem('userInfo')
     },
     hasRole(roles: string[]) {
       const role = String(this.userInfo?.role || '').toLowerCase()
@@ -42,5 +49,8 @@ export const useUserStore = defineStore('user', {
       return permissions.some((permission) => owned.has(permission))
     },
   },
-  persist: true,
+  persist: {
+    key: 'v8-mobile-user',
+    pick: ['token', 'userInfo'],
+  },
 })

@@ -59,14 +59,14 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 	v1Admin.Use(middleware.AdminOnly(db))
 	{
 		v1Admin.POST("/model-dictionary/save", ph.SaveModelDictionary)
-		v1Admin.GET("/model-dictionary/:modelId/photo-config", ph.GetModelPhotoConfig)
+		v1Auth.GET("/model-dictionary/:modelId/photo-config", ph.GetModelPhotoConfig)
 		v1Admin.POST("/model-dictionary/:modelId/photo-config/save", ph.SaveModelPhotoConfig)
 		v1Admin.GET("/model-dictionary/photo-config/import-template", ph.DownloadPhotoImportTemplate)
 		v1Admin.POST("/model-dictionary/photo-config/import", ph.ImportModelPhotoConfig)
-		v1Admin.GET("/photo-items", ph.ListPhotoItems)
-		v1Admin.GET("/photo-tasks", ph.ListPhotoTasks)
+		v1Auth.GET("/photo-items", ph.ListPhotoItems)
+		v1Auth.GET("/photo-tasks", ph.ListPhotoTasks)
 		v1Admin.POST("/photo-items/save", ph.SavePhotoItems)
-		v1Admin.GET("/ocr-field-rules", ph.ListOCRFieldRules)
+		v1Auth.GET("/ocr-field-rules", ph.ListOCRFieldRules)
 		v1Admin.POST("/ocr-field-rules/save", ph.SaveOCRFieldRules)
 	}
 

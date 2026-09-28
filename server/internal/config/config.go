@@ -26,7 +26,7 @@ func Load() Config {
 	ocrTimeoutMS, _ := strconv.Atoi(getenv("OCR_TIMEOUT_MS", "20000"))
 	return Config{
 		HTTPAddr:      getenv("HTTP_ADDR", ":3001"),
-		DBDSN:         getenv("DB_DSN", "root:030705@tcp(127.0.0.1:3306)/rjfinshed?charset=utf8mb4&parseTime=True&loc=Local"),
+		DBDSN:         getenv("DB_DSN", ""),
 		RedisEnabled:  getenv("REDIS_ENABLED", "false") == "true",
 		RedisAddr:     getenv("REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPass:     os.Getenv("REDIS_PASSWORD"),

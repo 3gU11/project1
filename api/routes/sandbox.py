@@ -131,6 +131,15 @@ async def _get_client() -> httpx.AsyncClient:
     return _client
 
 
+async def _reset_client() -> httpx.AsyncClient:
+    global _client
+    old = _client
+    _client = None
+    if old is not None and not old.is_closed:
+        await old.aclose()
+    return await _get_client()
+
+
 async def proxy_ws(websocket: WebSocket):
     token = websocket.query_params.get("token", "")
     try:
@@ -2159,18 +2168,24 @@ async def _forward(request: Request, go_path: str):
     query_string = str(request.url.query) if request.url.query else ""
     client = await _get_client()
     timeout = _get_timeout(go_path)
-
+    request_kwargs = dict(
+        method=request.method,
+        url=go_path,
+        headers=go_headers,
+        content=body,
+        params=dict(pair.split("=", 1) for pair in query_string.split("&") if "=" in pair) if query_string else None,
+        timeout=timeout,
+    )
     try:
-        resp = await client.request(
-            method=request.method,
-            url=go_path,
-            headers=go_headers,
-            content=body,
-            params=dict(pair.split("=", 1) for pair in query_string.split("&") if "=" in pair) if query_string else None,
-            timeout=timeout,
-        )
+        resp = await client.request(**request_kwargs)
     except httpx.ConnectError:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="沙盘服务不可用，请确认 Go 服务已启动")
+        # A Go restart can leave httpx holding a dead keep-alive connection.
+        # Recreate the pool and retry once before reporting the service down.
+        client = await _reset_client()
+        try:
+            resp = await client.request(**request_kwargs)
+        except httpx.ConnectError:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="沙盘服务不可用，请确认 Go 服务已启动")
     except httpx.TimeoutException:
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="沙盘服务响应超时，请稍后重试")
 
