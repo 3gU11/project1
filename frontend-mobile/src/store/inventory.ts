@@ -14,6 +14,7 @@ export const useInventoryStore = defineStore('inventory', {
     slots: [] as MobileSlot[],
     loading: false,
     onlyShippingReview: false,
+    lockedBatchNo: '',
   }),
   actions: {
     async loadInventory(keyword = '') {
@@ -21,14 +22,13 @@ export const useInventoryStore = defineStore('inventory', {
       try {
         const rows = await inventoryApi.getInventoryAll() as Record<string, unknown>[]
         let mapped = rows.map((r, i) => mapMachine(r, i))
-        if (keyword.trim()) {
-          const q = keyword.trim().toLowerCase()
-          mapped = mapped.filter(
-            (x) =>
-              x.batchNo.toLowerCase().includes(q) ||
-              x.serialNo.toLowerCase().includes(q) ||
-              x.model.toLowerCase().includes(q)
-          )
+        const activeKeyword = this.lockedBatchNo || keyword.trim()
+        if (this.lockedBatchNo) {
+          const q = this.lockedBatchNo.toLowerCase()
+          mapped = mapped.filter((x) => x.batchNo.toLowerCase() === q)
+        } else if (activeKeyword) {
+          const q = activeKeyword.toLowerCase()
+          mapped = mapped.filter((x) => x.batchNo.toLowerCase().includes(q) || x.serialNo.toLowerCase().includes(q) || x.model.toLowerCase().includes(q))
         }
         this.list = mapped
         this.stats.total = mapped.length
@@ -38,6 +38,12 @@ export const useInventoryStore = defineStore('inventory', {
       } finally {
         this.loading = false
       }
+    },
+    lockBatch(batchNo: string) {
+      this.lockedBatchNo = String(batchNo || '').trim()
+    },
+    unlockBatch() {
+      this.lockedBatchNo = ''
     },
     async loadSlots() {
       const [layoutRes, inventoryRes] = await Promise.all([

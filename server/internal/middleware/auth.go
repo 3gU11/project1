@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -38,13 +40,36 @@ func extractFromToken(c *gin.Context) (string, string) {
 	if token == auth {
 		return "", ""
 	}
-	// Simple token parsing - in production use JWT validation
-	// For dev/demo, accept a plain user:role token
+	// The Python API issues HS256 JWTs. The Go photo service shares the
+	// authenticated request, so extract its identity for audit fields.
+	if username, role := parseJWTIdentity(token); username != "" {
+		return username, role
+	}
+	// Keep support for the legacy development token format user:role.
 	parts := strings.SplitN(token, ":", 2)
 	if len(parts) == 2 {
 		return parts[0], parts[1]
 	}
 	return token, ""
+}
+
+func parseJWTIdentity(token string) (string, string) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", ""
+	}
+	var claims struct {
+		Subject string `json:"sub"`
+		Role    string `json:"role"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(claims.Subject), strings.TrimSpace(claims.Role)
 }
 
 // CORS middleware for development

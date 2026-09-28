@@ -46,9 +46,9 @@ function dbConfig() {
     host: get("MYSQL_HOST", "localhost"),
     port: Number(get("MYSQL_PORT", "3306")),
     user: get("MYSQL_USER", "root"),
-    password: get("MYSQL_PASSWORD", "030705"),
+    password: get("MYSQL_PASSWORD", "123321"),
     database: cleanValue(
-      process.env.MYSQL_DATABASE || envFile.MYSQL_DATABASE || process.env.MYSQL_DB || envFile.MYSQL_DB,
+      process.env.MYSQL_DATABASE || envFile.MYSQL_DATABASE || process.env.MYSQL_DB || envFile.MYSQL_DB || "rjfinshed_v8_import",
       "rjfinshed"
     ),
     charset: "utf8mb4",

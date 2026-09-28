@@ -76,18 +76,18 @@ const defaultPath = () => {
   return '/query'
 }
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to) => {
   const userStore = useUserStore()
   // The API interceptor can clear storage before a full page reload finishes.
   // Do not let a stale Pinia token send the user back into protected pages.
   const isAuth = !!userStore.token && !!localStorage.getItem('token')
 
   if (to.meta.requiresAuth && !isAuth) {
-    next('/login')
+    return '/login'
   } else if (to.path === '/login' && isAuth) {
-    next(defaultPath())
+    return defaultPath()
   } else if (to.path === '/' && isAuth) {
-    next(defaultPath())
+    return defaultPath()
   } else {
     // Role based guard
     if (to.meta.roles && userStore.userInfo) {
@@ -96,11 +96,10 @@ router.beforeEach((to, _from, next) => {
       const roleAllowed = allowedRoles.includes(userStore.userInfo.role)
       const permissionAllowed = allowedPermissions.length > 0 && userStore.hasAnyPermission(allowedPermissions)
       if (!roleAllowed && !permissionAllowed) {
-        next(defaultPath())
-        return
+        return defaultPath()
       }
     }
-    next()
+    return true
   }
 })
 

@@ -3,7 +3,15 @@
     <van-nav-bar :title="pageTitle" fixed placeholder />
 
     <div class="card search-card">
-      <van-search v-model="keyword" placeholder="搜索流水号/批次号/机型" @search="load" />
+      <div v-if="isAfterSales && inventoryStore.lockedBatchNo" class="locked-batch-bar">
+        <div class="locked-batch-info">
+          <span class="locked-batch-label">当前批次</span>
+          <strong>{{ inventoryStore.lockedBatchNo }}</strong>
+          <span class="locked-batch-count">{{ visibleList.length }} 台</span>
+        </div>
+        <van-button size="small" type="primary" plain @click="unlockBatch">切换</van-button>
+      </div>
+      <van-search v-else v-model="keyword" placeholder="搜索流水号/批次号/机型" @search="load" />
       
       <!-- 库管角色：增加快捷过滤器 -->
       <div v-if="isProd" class="filter-bar">
@@ -50,6 +58,15 @@
                 <span class="slot-text">库位: {{ item.slotCode || '-' }}</span>
               </div>
             </div>
+          </template>
+          <template #right-icon>
+            <van-button
+              v-if="isAfterSales && !inventoryStore.lockedBatchNo"
+              size="mini"
+              type="primary"
+              plain
+              @click.stop="lockBatch(item.batchNo)"
+            >锁定批次</van-button>
           </template>
         </van-cell>
       </van-list>
@@ -181,6 +198,8 @@ const countTitle = computed(() => (isProd.value ? '现有数量' : '待入库数
 const visibleList = computed(() => {
   let list = inventoryStore.list
   if (isProd.value || isAfterSales.value) {
+    // 已出库机台不再属于当前可操作清单，也不能计入数量。
+    list = list.filter((item) => !item.status.trim().startsWith('已出库'))
     if (onlyShippingReview.value) {
       list = list.filter((item) => item.status.includes('待发货'))
     }
@@ -206,11 +225,24 @@ const filteredSlots = computed(() => {
 })
 
 const load = async () => {
-  await inventoryStore.loadInventory(keyword.value)
+  await inventoryStore.loadInventory(inventoryStore.lockedBatchNo || keyword.value)
   if (!isProd.value && !isAfterSales.value) {
     await inventoryStore.loadSlots()
   }
   resetProgressiveList()
+}
+
+const lockBatch = async (batchNo: string) => {
+  if (!batchNo) return
+  inventoryStore.lockBatch(batchNo)
+  keyword.value = ''
+  await load()
+}
+
+const unlockBatch = async () => {
+  inventoryStore.unlockBatch()
+  keyword.value = ''
+  await load()
 }
 
 /** 渐进式渲染逻辑 (解决低性能手机卡顿) */
@@ -249,6 +281,7 @@ const onLoad = () => {
 // 监听搜索词或过滤器变化，重置列表
 import { watch } from 'vue'
 watch([keyword, onlyShippingReview], () => {
+  if (inventoryStore.lockedBatchNo) return
   resetProgressiveList()
 })
 
@@ -320,6 +353,17 @@ useInventoryAutoRefresh(load)
 .search-card {
   padding-bottom: 8px;
 }
+.locked-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #eef6ff;
+}
+.locked-batch-info { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.locked-batch-label { color: #64748b; font-size: 13px; }
+.locked-batch-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.locked-batch-count { color: #2563eb; font-size: 13px; }
 .filter-bar {
   padding: 0 16px 8px;
   display: flex;

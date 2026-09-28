@@ -8,8 +8,8 @@ load_dotenv()
 MYSQL_HOST = os.environ.get("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
 MYSQL_USER = os.environ.get("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "030705")
-MYSQL_DB = os.environ.get("MYSQL_DB", "rjfinshed")
+MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "123321")
+MYSQL_DB = os.environ.get("MYSQL_DB", "rjfinshed_v8_import")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "888")
 
 # Go Sandbox Service Configuration
