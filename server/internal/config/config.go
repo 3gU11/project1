@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -49,4 +50,13 @@ func getenv(key, fallback string) string {
 
 func (c Config) String() string {
 	return fmt.Sprintf("http=%s redis_enabled=%t redis=%s", c.HTTPAddr, c.RedisEnabled, c.RedisAddr)
+}
+
+// Validate checks settings that are required for a safe server startup.
+// Credentials and connection strings must come from the deployment environment.
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.DBDSN) == "" {
+		return fmt.Errorf("DB_DSN is required; set it in the environment or an ignored .env file")
+	}
+	return nil
 }
