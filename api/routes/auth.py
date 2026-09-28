@@ -55,10 +55,15 @@ def get_current_user_context(token: str = Depends(oauth2_scheme)) -> dict:
         username: str = str(payload.get("sub") or "").strip()
         if not username:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        # The database is the authoritative source for the current role and name.
+        # This prevents a stale token from retaining permissions after a role change.
+        user_row = get_user_for_login(username)
+        if not user_row:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         return {
             "username": username,
-            "role": str(payload.get("role") or "").strip(),
-            "name": str(payload.get("name") or "").strip(),
+            "role": str(user_row.get("role") or "").strip(),
+            "name": str(user_row.get("name") or "").strip(),
         }
     except jwt.JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")

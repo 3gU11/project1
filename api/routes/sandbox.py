@@ -119,25 +119,32 @@ def _ensure_permission(user_ctx: dict, method: str, go_path: str = "") -> None:
 
 
 _client: Optional[httpx.AsyncClient] = None
+_client_lock = asyncio.Lock()
 
 
 async def _get_client() -> httpx.AsyncClient:
     global _client
-    if _client is None or _client.is_closed:
+    async with _client_lock:
+        if _client is None or _client.is_closed:
+            _client = httpx.AsyncClient(
+                base_url=GO_SANDBOX_URL,
+                timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
+            )
+    return _client
+
+
+async def _reset_client(failed_client: httpx.AsyncClient) -> httpx.AsyncClient:
+    global _client
+    async with _client_lock:
+        # Another request may already have replaced the pool. Reuse it and
+        # never close a client that another in-flight request may still use.
+        if _client is not failed_client and _client is not None and not _client.is_closed:
+            return _client
         _client = httpx.AsyncClient(
             base_url=GO_SANDBOX_URL,
             timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
         )
-    return _client
-
-
-async def _reset_client() -> httpx.AsyncClient:
-    global _client
-    old = _client
-    _client = None
-    if old is not None and not old.is_closed:
-        await old.aclose()
-    return await _get_client()
+        return _client
 
 
 async def proxy_ws(websocket: WebSocket):
@@ -2181,7 +2188,7 @@ async def _forward(request: Request, go_path: str):
     except httpx.ConnectError:
         # A Go restart can leave httpx holding a dead keep-alive connection.
         # Recreate the pool and retry once before reporting the service down.
-        client = await _reset_client()
+        client = await _reset_client(client)
         try:
             resp = await client.request(**request_kwargs)
         except httpx.ConnectError:
