@@ -36,13 +36,13 @@ def _db_config() -> dict[str, Any]:
             value = ""
         return value or default
 
-    database = os.environ.get("MYSQL_DATABASE") or env_file.get("MYSQL_DATABASE") or get("MYSQL_DB", "rjfinshed_v8_import")
+    database = os.environ.get("MYSQL_DATABASE") or env_file.get("MYSQL_DATABASE") or get("MYSQL_DB", "rjfinshed")
 
     return {
         "host": get("MYSQL_HOST", "localhost"),
         "port": int(get("MYSQL_PORT", "3306")),
         "user": get("MYSQL_USER", "root"),
-        "password": get("MYSQL_PASSWORD", "123321"),
+        "password": get("MYSQL_PASSWORD", "030705"),
         "database": database,
         "charset": "utf8mb4",
         "autocommit": True,

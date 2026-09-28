@@ -4,14 +4,22 @@
 
 Forced re-optimization of dependencies
 
-  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1716[22m[2m[0m ms[22m
+  VITE v5.4.21  ready in 2109 ms
 
-  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3000[22m/[39m
-  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.21.8.169:[1m3000[22m/[39m
-[2m[32m  ➜[39m[22m[2m  press [22m[1mh + enter[22m[2m to show help[22m
-[2m15:30:11[22m [36m[1m[vite][22m[39m [32m✨ new dependencies optimized: [33melement-plus/es, element-plus/es/components/base/style/css, element-plus/es/components/tabs/style/css, element-plus/es/components/select/style/css, element-plus/es/components/option/style/css, element-plus/es/components/tab-pane/style/css, element-plus/es/components/form/style/css, element-plus/es/components/button/style/css, element-plus/es/components/checkbox/style/css, element-plus/es/components/form-item/style/css, element-plus/es/components/input/style/css[32m[39m
-[2m15:30:11[22m [36m[1m[vite][22m[39m [32m✨ optimized dependencies changed. reloading[39m
-[2m15:30:15[22m [36m[1m[vite][22m[39m [32m✨ new dependencies optimized: [33melement-plus/es/components/loading/style/css, element-plus/es/components/pagination/style/css, element-plus/es/components/empty/style/css, element-plus/es/components/alert/style/css[32m[39m
-[2m15:30:15[22m [36m[1m[vite][22m[39m [32m✨ optimized dependencies changed. reloading[39m
-[2m15:30:20[22m [36m[1m[vite][22m[39m [32m✨ new dependencies optimized: [33melement-plus/es/components/card/style/css, element-plus/es/components/collapse/style/css, element-plus/es/components/collapse-item/style/css, element-plus/es/components/row/style/css, element-plus/es/components/tag/style/css, element-plus/es/components/table/style/css, element-plus/es/components/table-column/style/css, element-plus/es/components/col/style/css, element-plus/es/components/divider/style/css, element-plus/es/components/dialog/style/css, element-plus/es/components/drawer/style/css, element-plus/es/components/input-number/style/css, element-plus/es/components/radio-group/style/css, element-plus/es/components/radio/style/css, element-plus/es/components/checkbox-group/style/css, element-plus/es/components/radio-button/style/css, element-plus/es/components/statistic/style/css, element-plus/es/components/collapse-transition/style/css, element-plus/es/components/dropdown/style/css, element-plus/es/components/dropdown-menu/style/css, element-plus/es/components/dropdown-item/style/css, element-plus/es/components/icon/style/css, element-plus/es/components/upload/style/css, element-plus/es/components/switch/style/css, element-plus/es/components/date-picker/style/css, element-plus/es/components/tooltip/style/css[32m[39m
-[2m15:30:20[22m [36m[1m[vite][22m[39m [32m✨ optimized dependencies changed. reloading[39m
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://172.21.8.140:3000/
+14:48:35 [vite] ✨ new dependencies optimized: element-plus/es, element-plus/es/components/base/style/css, element-plus/es/components/tabs/style/css, element-plus/es/components/select/style/css, element-plus/es/components/option/style/css, element-plus/es/components/tab-pane/style/css, element-plus/es/components/form/style/css, element-plus/es/components/button/style/css, element-plus/es/components/checkbox/style/css, element-plus/es/components/form-item/style/css, element-plus/es/components/input/style/css
+14:48:35 [vite] ✨ optimized dependencies changed. reloading
+14:48:42 [vite] ✨ new dependencies optimized: element-plus/es/components/loading/style/css, element-plus/es/components/card/style/css, element-plus/es/components/collapse/style/css, element-plus/es/components/collapse-item/style/css, element-plus/es/components/pagination/style/css, element-plus/es/components/row/style/css, element-plus/es/components/tag/style/css, element-plus/es/components/table/style/css, element-plus/es/components/table-column/style/css, element-plus/es/components/col/style/css, element-plus/es/components/alert/style/css, element-plus/es/components/divider/style/css, element-plus/es/components/dialog/style/css, element-plus/es/components/drawer/style/css, element-plus/es/components/input-number/style/css, element-plus/es/components/radio-group/style/css, element-plus/es/components/radio/style/css, element-plus/es/components/checkbox-group/style/css, element-plus/es/components/radio-button/style/css, element-plus/es/components/statistic/style/css, element-plus/es/components/collapse-transition/style/css, element-plus/es/components/dropdown/style/css, element-plus/es/components/dropdown-menu/style/css, element-plus/es/components/dropdown-item/style/css, element-plus/es/components/icon/style/css, element-plus/es/components/upload/style/css, element-plus/es/components/switch/style/css, element-plus/es/components/tooltip/style/css, element-plus/es/components/empty/style/css, element-plus/es/components/date-picker/style/css
+14:48:42 [vite] ✨ optimized dependencies changed. reloading
+14:50:33 [vite] ✨ new dependencies optimized: element-plus/es/components/image/style/css
+14:50:33 [vite] ✨ optimized dependencies changed. reloading
+14:52:01 [vite] ✨ new dependencies optimized: element-plus/es/components/timeline/style/css, element-plus/es/components/timeline-item/style/css, element-plus/es/components/popover/style/css
+14:52:01 [vite] ✨ optimized dependencies changed. reloading
+14:52:27 [vite] ✨ new dependencies optimized: element-plus/es/components/descriptions/style/css, element-plus/es/components/descriptions-item/style/css
+14:52:27 [vite] ✨ optimized dependencies changed. reloading
+18:50:01 [vite] hmr update /src/views/OrderAllocation.vue
+18:52:44 [vite] hmr update /src/views/ContractManage.vue
+19:01:11 [vite] hmr update /src/views/OrderAllocation.vue
+19:13:17 [vite] page reload src/router/index.ts
+19:14:20 [vite] page reload src/router/index.ts
