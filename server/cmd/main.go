@@ -21,9 +21,6 @@ import (
 
 func main() {
 	cfg := config.Load()
-	if err := cfg.Validate(); err != nil {
-		log.Fatalf("invalid configuration: %v", err)
-	}
 	fmt.Printf("Starting server on %s\n", cfg.HTTPAddr)
 
 	db, err := database.OpenMySQL(cfg)
