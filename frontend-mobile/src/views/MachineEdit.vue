@@ -628,9 +628,9 @@ const afterMachineRead = async (item: UploaderFileListItem | UploaderFileListIte
         await inventoryApi.savePhotoTaskRecognition(task.id, { source: 'qr_static', value: qrResult.value, field_code: 'component_serial_no', field_name: '标签编码' })
       }
     }
-    if (qrResult.ambiguous) showToast('检测到多个二维码，请重新拍摄或人工确认')
+    if (qrResult.ambiguous) showFailToast('检测到多个二维码，未写入编号，请重新拍摄或手工输入')
     else if (qrResult.value) showSuccessToast('已拍摄并覆盖当前机台全部任务，二维码已识别')
-    else showToast('已拍摄并覆盖当前机台全部任务，请手工确认编号')
+    else showFailToast('未识别到二维码，未写入编号，请重新拍摄或手工输入')
     await loadTasks()
   } catch (error: any) {
     showFailToast(error?.response?.data?.error || error.message || '统一拍摄失败')
