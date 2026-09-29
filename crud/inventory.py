@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 from database import get_engine, ensure_finished_goods_unique_serial
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 from crud.inbound_history import notify_inbound_completion, record_inbound_history
+from crud.inventory_guards import require_inventory_order
 from utils.cache import fetch_data_with_cache
 from utils.local_cache import ttl_cache
 
@@ -701,6 +702,8 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
         if not is_transfer and current_status.startswith("库存中"):
             trans.rollback()
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
+        if occupied_order_id and not scrap_slot:
+            require_inventory_order(conn, occupied_order_id)
         status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
         conn.execute(
             text(
@@ -820,6 +823,8 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
 
         # 更新入库（保持不变）
+        if occupied_order_id and not scrap_slot:
+            require_inventory_order(conn, occupied_order_id)
         status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
         conn.execute(
             text(

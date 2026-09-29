@@ -210,6 +210,12 @@ async def watch_finished_goods_db() -> None:
 
             if last_val is not None and val != last_val:
                 logger.info(f"finished_goods_data change detected: {last_val} -> {val}. Enqueueing wechat_batch_summary sync...")
+                from crud.inventory import clear_inventory_data_caches
+                from utils.cache import clear_cache_pattern
+                from api.websockets.manager import manager
+                clear_inventory_data_caches()
+                clear_cache_pattern()
+                await manager.broadcast({"type": "INVENTORY_UPDATE"})
                 enqueue_wechat_batch_summary_sync("db_change_auto_sync")
             last_val = val
         except Exception as e:

@@ -27,5 +27,6 @@ export const authApi = {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
   },
+  me: () => request.get<any, { user: LoginResponse['user'] }>('/auth/me'),
   register: (payload: RegisterPayload) => request.post('/users/register', payload),
 }

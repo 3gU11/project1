@@ -37,16 +37,36 @@
           </div>
         </div>
 
-        <div class="section-title">在库机台</div>
-        <div v-if="currentSlotMachines.length" class="machine-list">
+        <div class="popup-actions">
+          <van-button block round @click="showSlotPopup = false">关闭</van-button>
+          <van-button
+            block
+            round
+            type="primary"
+            :loading="submitting"
+            :disabled="!canTransfer"
+            style="margin-left: 16px;"
+            @click="confirmTransfer"
+          >
+            确认调拨
+          </van-button>
+        </div>
+        <div class="selected-summary">已选机台：{{ selectedSerialNo || "请选择机台" }} · 目标库位：{{ targetSlotCode || "请选择库位" }}</div>
+        <div class="section-title">{{ focusedMachine ? "调拨机台" : "选择调拨机台" }}</div>
+        <div v-if="visibleMachines.length" class="machine-list">
           <div
-            v-for="item in currentSlotMachines"
+            v-for="item in visibleMachines"
             :key="item.serialNo"
             class="machine-card"
             :class="{ 'machine-card--active': selectedSerialNo === item.serialNo }"
+            role="button"
+            tabindex="0"
+            :aria-pressed="selectedSerialNo === item.serialNo"
+            @keydown.enter="selectedSerialNo = item.serialNo"
+            @keydown.space.prevent="selectedSerialNo = item.serialNo"
             @click="selectedSerialNo = item.serialNo"
           >
-            <div class="machine-card__model">{{ item.model || '-' }}</div>
+            <div class="machine-card__model">{{ item.model || '-' }} <span v-if="selectedSerialNo === item.serialNo">✓ 已选</span></div>
             <div class="machine-card__meta">批次号：{{ item.batchNo || '-' }}</div>
             <div class="machine-card__meta">流水号：{{ item.serialNo || '-' }}</div>
           </div>
@@ -76,20 +96,7 @@
           <van-empty v-else description="没有匹配的可用库位" />
         </div>
 
-        <div class="popup-actions">
-          <van-button block round @click="showSlotPopup = false">关闭</van-button>
-          <van-button
-            block
-            round
-            type="primary"
-            :loading="submitting"
-            :disabled="!canTransfer"
-            style="margin-left: 16px;"
-            @click="confirmTransfer"
-          >
-            确认调拨
-          </van-button>
-        </div>
+
       </div>
     </van-popup>
   </div>
@@ -113,6 +120,8 @@ const submitting = ref(false)
 const serialKeyword = ref('')
 const searching = ref(false)
 const searchedMachine = ref<MobileMachine | null>(null)
+const focusedMachine = ref<MobileMachine | null>(null)
+const visibleMachines = computed(() => focusedMachine.value ? [focusedMachine.value] : currentSlotMachines.value)
 
 const currentSlotMachines = computed(() => {
   const code = currentSlot.value?.code || ''
@@ -121,11 +130,13 @@ const currentSlotMachines = computed(() => {
 })
 
 const canTransfer = computed(() => !!selectedSerialNo.value && !!targetSlotCode.value.trim())
-const targetSlotOptions = computed(() => inventoryStore.slots
+const availableTargets = computed(() => inventoryStore.slots
   .filter((slot) => slot.code !== currentSlot.value?.code
     && !slot.status.includes('锁定')
     && !slot.status.includes('异常')
     && (slot.unlimited || slot.max === null || slot.current < slot.max))
+)
+const targetSlotOptions = computed(() => availableTargets.value
   .filter((slot) => !targetSlotKeyword.value.trim() || slot.code.toLowerCase().includes(targetSlotKeyword.value.trim().toLowerCase()))
   .map((slot) => ({
     text: `${slot.code}：${slot.current}/${slot.unlimited || slot.max === null ? '不限' : slot.max}`,
@@ -152,6 +163,7 @@ const loadData = async () => {
 }
 
 const openSlot = (slot: MobileSlot) => {
+  focusedMachine.value = null
   currentSlot.value = slot
   selectedSerialNo.value = ''
   targetSlotCode.value = ''
@@ -174,6 +186,7 @@ const findMachine = async () => {
 const openMachineTransfer = (machine: MobileMachine) => {
   if (!machine.slotCode) { showToast('该机台当前没有库位'); return }
   currentSlot.value = inventoryStore.slots.find((slot) => slot.code === machine.slotCode) || { code: machine.slotCode, current: 0, max: null, unlimited: true, status: '' } as MobileSlot
+  focusedMachine.value = machine
   selectedSerialNo.value = machine.serialNo
   targetSlotCode.value = ''
   targetSlotKeyword.value = ''
@@ -185,7 +198,7 @@ const confirmTransfer = async () => {
     showToast('请选择调拨机台和目标库位')
     return
   }
-  const targetSlot = targetSlotOptions.value.find((slot) => slot.value === targetSlotCode.value)
+  const targetSlot = availableTargets.value.find((slot) => slot.code === targetSlotCode.value)
   if (!targetSlot) {
     showFailToast('目标库位不存在、已满或不可用，请重新选择')
     targetSlotCode.value = ''
@@ -378,6 +391,14 @@ useInventoryAutoRefresh(loadData)
 
 .popup-actions {
   display: flex;
-  margin-top: 24px;
+  position: sticky;
+  top: -16px;
+  z-index: 2;
+  background: white;
+  padding: 12px 0;
 }
+.selected-summary { padding: 8px 0; font-size: 13px; color: var(--van-primary-color); }
+.machine-card { cursor: pointer; touch-action: manipulation; }
+.active-slot :deep(.van-grid-item__content) { background: #e8f3ff; box-shadow: inset 0 0 0 2px var(--van-primary-color); color: var(--van-primary-color); }
+.target-slot-option { overflow-wrap: anywhere; text-align: center; }
 </style>

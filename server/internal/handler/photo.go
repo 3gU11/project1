@@ -183,6 +183,10 @@ func (h *PhotoHandler) SaveModelDictionary(c *gin.Context) {
 	}
 
 	tx := h.db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
 	for _, row := range req.Rows {
 		name := strings.TrimSpace(row.ModelName)
 		updates := map[string]interface{}{
@@ -421,6 +425,14 @@ func (h *PhotoHandler) InitMachinePhotoTasks(c *gin.Context) {
 		return
 	}
 	tx := h.db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
+	createdBy := strings.TrimSpace(c.GetString("username"))
+	if runes := []rune(createdBy); len(runes) > 64 {
+		createdBy = string(runes[:64])
+	}
 	activeCodes := make([]string, 0, len(configRows))
 	for _, cfg := range configRows {
 		if cfg.Enabled {
@@ -468,7 +480,7 @@ ON DUPLICATE KEY UPDATE
 			cfg.OCREnabled,
 			cfg.OCRProfile,
 			cfg.SortOrder,
-			c.GetString("username"),
+			createdBy,
 		).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

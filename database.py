@@ -526,8 +526,11 @@ def init_mysql_tables():
         conn.execute(text("UPDATE factory_plan SET `订单号`=NULL WHERE `订单号`=''"))
         conn.execute(text(
             "UPDATE finished_goods_data fg LEFT JOIN sales_orders so ON fg.`占用订单号`=so.`订单号` "
-            "SET fg.`占用订单号`=NULL WHERE fg.`占用订单号` IS NOT NULL AND so.`订单号` IS NULL"
+            "SET fg.`占用订单号`=NULL WHERE fg.`占用订单号` IS NOT NULL AND so.`订单号` IS NULL "
+            "AND TRIM(COALESCE(fg.`状态`, '')) <> '待发货'"
         ))
+        # Pending shipments need an explicit, audited release with physical-stock
+        # evidence. Startup must not silently erase their dangling order reference.
         conn.execute(text(
             "UPDATE factory_plan fp LEFT JOIN sales_orders so ON fp.`订单号`=so.`订单号` "
             "SET fp.`订单号`=NULL WHERE fp.`订单号` IS NOT NULL AND so.`订单号` IS NULL"

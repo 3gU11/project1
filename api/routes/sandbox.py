@@ -119,16 +119,58 @@ def _ensure_permission(user_ctx: dict, method: str, go_path: str = "") -> None:
 
 
 _client: Optional[httpx.AsyncClient] = None
+_client_lock = asyncio.Lock()
+_client_refs: dict[httpx.AsyncClient, int] = {}
+_retired_clients: set[httpx.AsyncClient] = set()
 
 
 async def _get_client() -> httpx.AsyncClient:
     global _client
-    if _client is None or _client.is_closed:
+    async with _client_lock:
+        if _client is None or _client.is_closed:
+            _client = httpx.AsyncClient(
+                base_url=GO_SANDBOX_URL,
+                timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
+            )
+    return _client
+
+
+async def _acquire_client() -> httpx.AsyncClient:
+    client = await _get_client()
+    async with _client_lock:
+        _client_refs[client] = _client_refs.get(client, 0) + 1
+    return client
+
+
+async def _release_client(client: httpx.AsyncClient) -> None:
+    async with _client_lock:
+        refs = max(0, _client_refs.get(client, 1) - 1)
+        if refs:
+            _client_refs[client] = refs
+            return
+        _client_refs.pop(client, None)
+        if client in _retired_clients:
+            _retired_clients.remove(client)
+            await client.aclose()
+
+
+async def _reset_client(failed_client: httpx.AsyncClient) -> httpx.AsyncClient:
+    global _client
+    async with _client_lock:
+        # Another request may already have replaced the pool. Reuse it and
+        # never close a client that another in-flight request may still use.
+        if _client is not failed_client and _client is not None and not _client.is_closed:
+            return _client
+        if not failed_client.is_closed:
+            _retired_clients.add(failed_client)
+            if _client_refs.get(failed_client, 0) == 0:
+                _retired_clients.remove(failed_client)
+                await failed_client.aclose()
         _client = httpx.AsyncClient(
             base_url=GO_SANDBOX_URL,
             timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
         )
-    return _client
+        return _client
 
 
 async def proxy_ws(websocket: WebSocket):
@@ -2157,22 +2199,34 @@ async def _forward(request: Request, go_path: str):
                 go_headers["Content-Type"] = ct
 
     query_string = str(request.url.query) if request.url.query else ""
-    client = await _get_client()
+    client = await _acquire_client()
     timeout = _get_timeout(go_path)
-
+    request_kwargs = dict(
+        method=request.method,
+        url=go_path,
+        headers=go_headers,
+        content=body,
+        params=dict(pair.split("=", 1) for pair in query_string.split("&") if "=" in pair) if query_string else None,
+        timeout=timeout,
+    )
     try:
-        resp = await client.request(
-            method=request.method,
-            url=go_path,
-            headers=go_headers,
-            content=body,
-            params=dict(pair.split("=", 1) for pair in query_string.split("&") if "=" in pair) if query_string else None,
-            timeout=timeout,
-        )
+        resp = await client.request(**request_kwargs)
     except httpx.ConnectError:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="沙盘服务不可用，请确认 Go 服务已启动")
+        # A Go restart can leave httpx holding a dead keep-alive connection.
+        # Recreate the pool and retry once before reporting the service down.
+        failed_client = client
+        await _release_client(failed_client)
+        client = await _reset_client(failed_client)
+        async with _client_lock:
+            _client_refs[client] = _client_refs.get(client, 0) + 1
+        try:
+            resp = await client.request(**request_kwargs)
+        except httpx.ConnectError:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="沙盘服务不可用，请确认 Go 服务已启动")
     except httpx.TimeoutException:
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="沙盘服务响应超时，请稍后重试")
+    finally:
+        await _release_client(client)
 
     if resp.status_code >= 400:
         try:

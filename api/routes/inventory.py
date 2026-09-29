@@ -40,6 +40,7 @@ from api.routes.auth import get_current_operator_name, get_current_user_context,
 from api.websockets.manager import manager
 from database import get_engine
 from crud.inventory_scope import inventory_relationship_join_sql, joined_pending_scope_sql
+from crud.inventory_guards import validate_shipping_rows
 
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
@@ -1243,6 +1244,10 @@ def confirm_shipping(
             hit_rows = conn.execute(select_stmt, {"sns": sns}).mappings().all()
             if not hit_rows:
                 raise HTTPException(status_code=422, detail="所选机台不存在")
+            try:
+                validate_shipping_rows(conn, hit_rows, sns)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             scrapped_sns = [
                 str(row.get("流水号", "") or "").strip()
                 for row in hit_rows

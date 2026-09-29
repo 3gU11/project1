@@ -7,19 +7,13 @@ const request = axios.create({
 })
 
 request.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  let token = ''
+  try {
+    const persisted = JSON.parse(localStorage.getItem('v8-mobile-user') || '{}')
+    token = String(persisted?.token || '')
+  } catch { /* ignore invalid persisted state */ }
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
-  }
-  const rawUserInfo = localStorage.getItem('userInfo')
-  if (rawUserInfo) {
-    try {
-      const userInfo = JSON.parse(rawUserInfo)
-      if (userInfo?.username) config.headers['X-Username'] = userInfo.username
-      if (userInfo?.role) config.headers['X-Role'] = userInfo.role
-    } catch {
-      // ignore broken cached user info
-    }
   }
   return config
 })
@@ -30,6 +24,7 @@ request.interceptors.response.use(
     if (error?.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('userInfo')
+      localStorage.removeItem('v8-mobile-user')
       if (window.location.pathname !== '/login') {
         // Reload the app so Pinia cannot keep an expired in-memory token.
         window.location.replace('/login')

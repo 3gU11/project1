@@ -1,867 +1,582 @@
-[2m13:19:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+14:46:47 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m13:19:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+14:46:48 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m13:19:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+16:50:08 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m13:19:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+21:24:17 [vite] ws proxy error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m13:19:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+21:24:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m13:19:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+21:24:17 [vite] ws proxy error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m13:19:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/?status=approved&page=1&page_size=50[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m13:19:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m16:58:30[22m [31m[1m[vite][22m[39m [31mws proxy socket error:[39m
+21:24:17 [vite] ws proxy error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m19:50:37[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+21:24:17 [vite] ws proxy error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m19:50:37[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m19:50:37[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m19:50:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m19:50:41[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m19:50:41[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m19:50:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m19:50:45[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m19:50:45[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:33:05[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:33:05[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:33:05[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:33:05[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:33:05[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:33:08[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:33:08[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:33:09[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:33:09[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:33:09[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:36:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:36:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:36:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:36:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:36:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:36:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:36:29[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:36:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:36:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:36:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:36:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:42:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:42:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:42:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:42:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m09:42:28[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:42:29[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:42:29[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:42:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:42:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m09:42:32[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:24[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:24[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: read ECONNRESET
-    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-[2m14:28:25[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+21:24:21 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:21 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:25 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:26 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:29 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:33 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:33 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:37 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:41 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:44 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:45 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:49 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:28[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:53 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:24:57 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:00 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:01 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:10 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:16 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:25 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:29 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:36 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:42 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:32[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:49 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:32[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:25:58 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:33[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:00 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:33[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:02 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:33[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:10 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:33[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:15 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:20 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:24 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:36[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:36[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:31 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:36[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:32 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:36[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:36 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:38[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:40 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:38[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:44 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:38[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:48 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:39[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:52 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:39[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:26:56 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:39[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:00 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:39[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:02 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:39[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:04 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:39[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:08 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:12 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:41[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:42[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:17 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:42[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:24 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:42[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:30 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:43[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:34 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:43[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:38 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:43[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:45 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:45[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:52 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:45[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:27:59 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:45[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:05 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:45[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:08 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:13 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:17 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:48[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:48[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:48[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:35 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:48[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:40 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:48[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:41 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:49[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:48 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:49[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:28:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:50[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:03 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:50[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:11 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:51[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:14 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:51[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:15 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:51[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:51[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:23 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:52[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:31 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:52[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:38 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:52[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:46 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:54[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:48 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:29:53 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:01 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:08 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:14 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:20 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:57[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:58[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:58[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:36 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:58[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:42 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:59[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:50 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:59[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:28:59[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:30:56 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:00[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:03 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:01[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:09 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:01[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:17 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:02[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:02[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:03[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:29 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:03[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:31 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:04[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:34 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:04[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:41 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:04[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:48 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:04[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:53 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:04[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:31:58 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:05[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:05 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:05[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:06 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:14 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:19 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:23 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:27 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:31 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:35 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:36 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:08[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:39 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:10[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:43 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:10[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:47 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:11[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:51 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:11[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:12[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:32:59 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:03 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:07 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:13[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:07 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:13[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:11 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:15[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:16 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:15[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:15[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:16[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:16[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:35 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:17[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:40 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:19[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:42 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:19[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:50 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:19[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:33:58 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:19[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:05 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:20[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:11 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:21[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:13 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:21[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:22[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:18 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:25 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:32 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:23[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:40 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:24[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:44 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:25[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:48 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:52 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:34:58 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:26[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:05 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:12 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:16 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:27[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:29[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:20 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:29[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:29[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:33 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:29[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:38 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:46 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:30[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:49 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:31[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:35:59 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:31[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:05 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:32[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:13 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:33[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:33[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:19 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:23 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:25 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:32 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:37 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:35[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:42 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:36[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:47 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:38[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:39[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:36:58 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:40[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:03 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:41[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:09 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:42[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:17 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:42[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:42[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:21 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:43[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:27 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:33 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:44[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:34 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:45[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:39 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:46[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:44 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:50 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:47[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:37:58 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:49[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:38:05 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:50[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:38:08 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:50[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:38:10 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:50[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:38:15 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:51[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:38:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:52[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+21:38:23 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:54[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:55[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:57[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:59[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:59[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:29:59[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:00[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:01[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:02[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:02[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:03[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:03[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:03[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:04[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:04[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:06[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:07[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:08[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:09[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:10[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:10[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:11[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:12[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/dealer-orders/pending-count[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:14[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:15[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:16[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:16[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
-[2m14:30:16[22m [31m[1m[vite][22m[39m [31mws proxy error:[39m
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
