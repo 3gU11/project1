@@ -41,7 +41,7 @@
       <el-divider />
 
       <el-row :gutter="16">
-        <el-col :span="15">
+        <el-col :xs="24" :sm="24" :md="11" :lg="10">
           <div class="summary-top">
             <div class="summary-title">📦 当前总库存 (Total)</div>
             <div class="summary-value">{{ totalCount }} 台</div>
@@ -55,11 +55,22 @@
               <div class="summary-title">⏳ 待入库 (Pending)</div>
               <div class="summary-value">{{ pendingCount }}</div>
             </div>
+          </div>
+          <div class="summary-row queue-summary-row">
             <div class="summary-block">
               <div class="summary-title" title="仍在产线生产且绑定订单或合同；独立统计，不与库存总数相加">在产已绑定</div>
               <div class="summary-value">{{ boundCount }}</div>
             </div>
+            <div class="summary-block" data-testid="queue-unit-total">
+              <div class="summary-title" title="待排产队列中的机台总数，包含待产已订">待产总数</div>
+              <div class="summary-value">{{ queueUnavailable ? '--' : queueUnitTotal }}</div>
+            </div>
+            <div class="summary-block" data-testid="queue-ordered-total">
+              <div class="summary-title" title="待产机台中已绑定合同或订单的数量">待产已订</div>
+              <div class="summary-value">{{ queueUnavailable ? '--' : queueOrderedTotal }}</div>
+            </div>
           </div>
+          <el-alert v-if="queueError" :title="queueError" type="error" :closable="false" />
           <div class="summary-title chart-title">机型分布</div>
           <div class="donut-wrap" v-if="top10Dist.length > 0">
             <div class="donut-chart" :class="{ 'with-decor': donutDecorReady }">
@@ -98,17 +109,16 @@
           </div>
           <div v-else class="chart-empty">暂无机型分布数据</div>
         </el-col>
-        <el-col :span="9">
+        <el-col :xs="24" :sm="24" :md="13" :lg="14">
           <el-table
-            v-if="selectedModels.length === 0"
             :data="modelSummary"
             border
             stripe
             size="small"
             class="model-summary-table"
-            height="620"
+            :height="selectedModels.length ? 220 : 620"
           >
-            <el-table-column prop="机型" label="机型" min-width="160" />
+            <el-table-column prop="机型" label="机型" min-width="160" fixed="left" />
             <el-table-column label="库存中" width="90" align="center">
               <template #default="{ row }">
                 <span v-if="row.库存中 > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.库存中 }}</span>
@@ -127,6 +137,20 @@
                 <span v-else style="color: #dcdfe6;">-</span>
               </template>
             </el-table-column>
+            <el-table-column label="待产" width="90" align="center">
+              <template #default="{ row }">
+                <span v-if="queueUnavailable" style="color: #dcdfe6;">--</span>
+                <span v-else-if="row.pending > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.pending }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="待产已订" width="100" align="center">
+              <template #default="{ row }">
+                <span v-if="queueUnavailable" style="color: #dcdfe6;">--</span>
+                <span v-else-if="row.ordered > 0" style="font-weight: 800; color: #0f172a; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.ordered }}</span>
+                <span v-else style="color: #dcdfe6;">-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="加高" width="80" align="center">
               <template #default="{ row }">
                 <span v-if="row.加高 > 0" style="font-weight: 800; color: #d4380d; background: #fff2e8; padding: 2px 8px; border-radius: 4px; display: inline-block;">{{ row.加高 }}</span>
@@ -139,7 +163,7 @@
               </template>
             </el-table-column>
           </el-table>
-          <div v-else class="model-detail-virtual-table">
+          <div v-if="selectedModels.length" class="model-detail-virtual-table">
             <div class="model-detail-header">
               <div>#</div>
               <div>批次号</div>
@@ -232,6 +256,33 @@ import { getModelOrderList } from '../utils/modelOrder'
 import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount } from '../utils/inventoryStats'
 import { getBindingTitle, getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from '../utils/inventoryState'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
+import { apiGet, getApiErrorMessage } from '../utils/request'
+import { compareModels } from '../utils/modelOrder'
+
+type QueueModelSummary = { model: string; pending: number; ordered: number; batch_ids: string[] }
+const queueModels = ref<QueueModelSummary[]>([])
+const queueLoading = ref(false)
+const queueError = ref('')
+const filteredQueueModels = computed(() => queueModels.value
+  .filter(row => !selectedModels.value.length || selectedModels.value.includes(row.model))
+  .filter(row => !highOnly.value || row.model.includes('加高'))
+  .sort((a, b) => compareModels(a.model, b.model)))
+const queueUnavailable = computed(() => queueLoading.value || Boolean(queueError.value))
+const queueUnitTotal = computed(() => filteredQueueModels.value.reduce((sum, row) => sum + row.pending, 0))
+const queueOrderedTotal = computed(() => filteredQueueModels.value.reduce((sum, row) => sum + row.ordered, 0))
+const fetchQueueSummary = async () => {
+  queueLoading.value = true
+  queueError.value = ''
+  try {
+    const result = await apiGet<{ data: QueueModelSummary[]; batch_count: number }>('/inventory/production-queue-summary')
+    queueModels.value = result.data
+  } catch (error) {
+    queueModels.value = []
+    queueError.value = getApiErrorMessage(error) || '待排产数据读取失败，请刷新重试'
+  } finally {
+    queueLoading.value = false
+  }
+}
 
 const loading = ref(false)
 const inventoryList = ref<any[]>([])
@@ -252,7 +303,7 @@ const pageSize = ref(50)
 const fetchData = async (force = false) => {
   loading.value = true
   try {
-    const data = await inventoryStore.fetchInventory(force)
+    const [data] = await Promise.all([inventoryStore.fetchInventory(force), fetchQueueSummary()])
     inventoryList.value = data
   } catch (error) {
     console.error('Fetch inventory failed', error)
@@ -266,7 +317,11 @@ const handleSearch = () => {
 }
 
 const modelOptions = computed(() => {
-  return getModelOrderList()
+  return [...new Set([
+    ...getModelOrderList(),
+    ...inventoryList.value.map(row => String(row['机型'] || '').trim()),
+    ...queueModels.value.map(row => row.model),
+  ].filter(Boolean))].sort(compareModels)
 })
 
 const indexedRows = computed(() => buildInventoryIndex(inventoryList.value))
@@ -323,7 +378,19 @@ const modelSummarySource = computed(() => {
 })
 
 const modelSummary = computed(() => {
-  return sortModelInventorySummary(modelSummarySource.value)
+  const rows = new Map(modelSummarySource.value.map(row => [row.机型, {
+    ...row, pending: 0, ordered: 0,
+  }]))
+  for (const queueModel of filteredQueueModels.value) {
+    const row = rows.get(queueModel.model) || {
+      机型: queueModel.model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0,
+      pending: 0, ordered: 0,
+    }
+    row.pending = queueModel.pending
+    row.ordered = queueModel.ordered
+    rows.set(queueModel.model, row)
+  }
+  return sortModelInventorySummary([...rows.values()])
 })
 
 const modelSummaryByCount = computed(() => {
@@ -439,6 +506,7 @@ onActivated(() => {
 </script>
 
 <style scoped>
+
 .inventory-container {
   height: 100%;
 }
@@ -494,6 +562,17 @@ onActivated(() => {
 .summary-block {
   margin-bottom: var(--space-2);
 }
+.queue-summary-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: none;
+}
+.queue-summary-row .summary-title {
+  font-size: 15px;
+  min-height: 40px;
+}
+.queue-summary-row .summary-value {
+  font-size: 40px;
+}
 .summary-title {
   color: var(--color-gray-700);
   font-size: 18px;
@@ -517,6 +596,7 @@ onActivated(() => {
 }
 .donut-wrap {
   display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   align-items: center;
   max-width: 760px;
@@ -590,7 +670,8 @@ onActivated(() => {
 .donut-legend {
   display: grid;
   gap: 6px;
-  min-width: 360px;
+  min-width: 240px;
+  flex: 1;
 }
 .legend-row {
   display: grid;
@@ -662,7 +743,7 @@ onActivated(() => {
   justify-content: flex-start;
 }
 .model-summary-table {
-  max-width: 680px;
+  width: 100%;
 }
 .model-detail-virtual-table {
   width: 100%;

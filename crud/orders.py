@@ -379,6 +379,12 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
             """).bindparams(bindparam("sns", expanding=True)), {"sns": serial_nos}).mappings().all()
             unit_by_sn = {str(row["serial_no"]).strip(): dict(row) for row in active_units}
 
+            from crud.batch_planning import pending_review_order
+            for sn in serial_nos:
+                reservation = pending_review_order(conn, sn)
+                if reservation:
+                    raise ValueError(f"机台 {sn} 已由订单 {reservation} 预占，请通过二次确认入口配货")
+
             stock_rows = conn.execute(text("""
                 SELECT `流水号` AS serial_no, `机型` AS model_type, COALESCE(`状态`, '') AS status,
                        COALESCE(`占用订单号`, '') AS sales_id, COALESCE(`合同号`, '') AS contract_no,
