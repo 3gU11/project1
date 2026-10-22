@@ -2,6 +2,7 @@ from datetime import datetime
 from functools import lru_cache
 import json
 import uuid
+from contextlib import nullcontext
 
 import pandas as pd
 from sqlalchemy import text, bindparam
@@ -124,7 +125,7 @@ def get_orders_v2():
         return pd.DataFrame(columns=ORDER_COLS)
 
 
-def save_orders(df):
+def save_orders(df, conn=None):
     get_orders.cache_clear()
     get_orders_v2.cache_clear()  # 同时清除 v2 版本缓存
     try:
@@ -149,11 +150,11 @@ def save_orders(df):
         df["订单号"] = df["订单号"].astype(str).str.strip()
         df = df[df["订单号"] != ""].copy()
         df = df.drop_duplicates(subset=["订单号"], keep="last")
-        with get_engine().begin() as conn:
+        with (nullcontext(conn) if conn is not None else get_engine().begin()) as active_conn:
             if not df.empty:
                 tmp_table = f"tmp_sales_orders_save_{uuid.uuid4().hex}"
                 try:
-                    df[ORDER_COLS].to_sql(tmp_table, conn, if_exists='replace', index=False, method='multi', chunksize=500)
+                    df[ORDER_COLS].to_sql(tmp_table, active_conn, if_exists='replace', index=False, method='multi', chunksize=500)
                     cols_sql = ", ".join(f"`{col}`" for col in ORDER_COLS)
                     select_sql = ", ".join(f"t.`{col}`" for col in ORDER_COLS)
                     update_assignments = []
@@ -172,25 +173,33 @@ def save_orders(df):
                         else:
                             update_assignments.append(f"so.`{col}` = t.`{col}`")
                     update_sql = ", ".join(update_assignments)
-                    upsert_sql = ", ".join(f"`{col}`=VALUES(`{col}`)" for col in ORDER_COLS if col != "订单号")
-                    conn.execute(text(f"""
+                    # Deletion is terminal for ordinary saves, including stale
+                    # snapshots and concurrent INSERT/UPDATE races. Assign status
+                    # last so every expression checks the persisted old status.
+                    upsert_cols = [col for col in ORDER_COLS if col not in {"订单号", "status"}] + ["status"]
+                    upsert_sql = ", ".join(
+                        f"`{col}`=IF(sales_orders.status='deleted',sales_orders.`{col}`,VALUES(`{col}`))" for col in upsert_cols)
+                    active_conn.execute(text(f"""
                         UPDATE sales_orders so
-                        INNER JOIN `{tmp_table}` t ON so.`订单号` = t.`订单号`
+                        INNER JOIN `{tmp_table}` t ON so.`订单号` COLLATE utf8mb4_general_ci = t.`订单号` COLLATE utf8mb4_general_ci
                         SET {update_sql}
+                        WHERE COALESCE(so.status,'') <> 'deleted'
                     """))
-                    conn.execute(text(f"""
+                    active_conn.execute(text(f"""
                         INSERT INTO sales_orders ({cols_sql})
                         SELECT {select_sql} FROM `{tmp_table}` t
                         WHERE NOT EXISTS (
-                            SELECT 1 FROM sales_orders so WHERE so.`订单号` = t.`订单号`
+                            SELECT 1 FROM sales_orders so WHERE so.`订单号` COLLATE utf8mb4_general_ci = t.`订单号` COLLATE utf8mb4_general_ci
                         )
                         ON DUPLICATE KEY UPDATE {upsert_sql}
                     """))
                 finally:
                     try:
-                        conn.execute(text(f"DROP TABLE IF EXISTS `{tmp_table}`"))
+                        active_conn.execute(text(f"DROP TABLE IF EXISTS `{tmp_table}`"))
                     except Exception:
                         pass
+        get_orders.cache_clear()
+        get_orders_v2.cache_clear()
     except (OperationalError, Exception) as e:
         raise RuntimeError(f"订单保存失败: {e}") from e
 

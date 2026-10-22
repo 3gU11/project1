@@ -81,7 +81,7 @@
               @click="handleSlotClick(s)"
             >
               <div class="card-head">
-                <div class="code">{{ s.code }}</div>
+                <div class="code">{{ s.slot_name || s.code }}</div>
                 <div class="badge" :class="s.statusClass">{{ s.statusText }}</div>
               </div>
               <div class="count-row"><span class="count-num">{{ s.count }}</span><span class="count-max">/ {{ slotCapacityText(s) }}</span></div>
@@ -110,7 +110,7 @@
               @click="handleSlotClick(s)"
             >
               <div class="card-head">
-                <div class="code">{{ s.code }}</div>
+                <div class="code">{{ s.slot_name || s.code }}</div>
                 <div class="badge" :class="s.statusClass">{{ s.statusText }}</div>
               </div>
               <div class="count-row"><span class="count-num">{{ s.count }}</span><span class="count-max">/ {{ slotCapacityText(s) }}</span></div>
@@ -472,7 +472,9 @@ const doDirectInbound = async () => {
   if (!currentSlot.value || !directSn.value.trim()) return
   saving.value = true
   try {
-    await apiPost('/inventory/inbound-to-slot', { serial_no: directSn.value.trim(), slot_code: currentSlot.value.code })
+    const workflowResponse = await apiPost('/inventory/inbound-to-slot', { serial_no: directSn.value.trim(), slot_code: currentSlot.value.code })
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    
     ElMessage.success('入库成功')
     directSn.value = ''
     await loadData(true)
@@ -490,7 +492,9 @@ const doTransfer = async () => {
   }
   saving.value = true
   try {
-    await apiPost('/inventory/inbound-to-slot', { serial_no: transferSn.value.trim(), slot_code: targetSlot.value, is_transfer: true })
+    const workflowResponse = await apiPost('/inventory/inbound-to-slot', { serial_no: transferSn.value.trim(), slot_code: targetSlot.value, is_transfer: true })
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    
     ElMessage.success('调拨成功')
     transferSn.value = ''
     targetSlot.value = ''

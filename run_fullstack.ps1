@@ -175,6 +175,27 @@ function Start-LoggedProcess(
   Add-StartedProcess -name $name -processId $proc.Id
   return $proc
 }
+function Ensure-FrontendDependencies([string]$directory, [string]$label) {
+  $packageJson = Join-Path $directory 'package.json'
+  $lockFile = Join-Path $directory 'package-lock.json'
+  $viteBin = Join-Path $directory 'node_modules\.bin\vite.cmd'
+  if (-not (Test-Path -LiteralPath $packageJson)) { return }
+  if (Test-Path -LiteralPath $viteBin) { return }
+  if (-not (Test-Path -LiteralPath $lockFile)) {
+    Fail "$label dependencies are missing and package-lock.json was not found: $directory" 1
+  }
+  Log "Installing $label dependencies..."
+  Push-Location $directory
+  try {
+    & $npmCmd ci
+    if ($LASTEXITCODE -ne 0) { Fail "$label dependency installation failed." 1 }
+  } finally {
+    Pop-Location
+  }
+  if (-not (Test-Path -LiteralPath $viteBin)) {
+    Fail "$label dependencies installed but Vite was not found: $viteBin" 1
+  }
+}
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
@@ -253,6 +274,10 @@ if (-not $npmCmd -and (Test-Path -LiteralPath 'C:\Program Files\nodejs\npm.cmd')
 if (-not $npmCmd) { $npmCmd = Resolve-CommandSource 'npm' }
 if (-not $npmCmd) { Fail 'npm not found in PATH.' 1 }
 Log "npm: $npmCmd"
+if (-not $DryRun) {
+  Ensure-FrontendDependencies -directory $frontendDir -label 'frontend'
+  Ensure-FrontendDependencies -directory $mobileDir -label 'mobile frontend'
+}
 
 $goCache = Join-Path $serverDir '.gocache-build'
 $goModCache = if ($goCmd) { (& $goCmd env GOMODCACHE).Trim() } else { Join-Path $serverDir '.gomodcache-build' }

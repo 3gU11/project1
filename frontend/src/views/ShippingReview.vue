@@ -2,7 +2,7 @@
   <div class="ship-page">
     <PageHeader title="🚛 发货复核">
       <template #actions>
-        <el-button type="primary" :loading="loading || returnLoading" @click="refreshActive">刷新数据</el-button>
+        <el-button type="primary" :loading="loading || returnLoading || shippedLoading" @click="refreshActive">刷新数据</el-button>
       </template>
     </PageHeader>
 
@@ -68,7 +68,6 @@
                 </el-table>
                 <div class="ops">
                   <el-button type="primary" :loading="saving" @click="confirmShip">🚚 确认发货</el-button>
-                  <el-button :loading="saving" @click="revertShip">🔄 发货撤回</el-button>
                 </div>
 
                 <div v-if="selectedRows.length > 0" class="photo-preview">
@@ -114,6 +113,31 @@
             </el-card>
           </el-col>
         </el-row>
+      </el-tab-pane>
+
+      <el-tab-pane label="已发货记录" name="shipped">
+        <div class="return-filters">
+          <el-input v-model="shippedKeyword" clearable placeholder="搜索流水号/客户/订单号" @keyup.enter="loadShipped" @clear="loadShipped" />
+          <el-date-picker v-model="shippedDate" type="date" value-format="YYYY-MM-DD" clearable placeholder="选择发货日期" @change="loadShipped" />
+          <el-button type="primary" :loading="shippedLoading" @click="loadShipped">查询</el-button>
+        </div>
+        <el-card>
+          <el-table ref="shippedTable" v-loading="shippedLoading" :data="shippedRows" row-key="流水号" border stripe height="560" @selection-change="onShippedSelectionChange">
+            <el-table-column type="selection" width="48" />
+            <el-table-column prop="流水号" label="流水号" width="150" />
+            <el-table-column prop="机型" label="机型" min-width="150" />
+            <el-table-column prop="占用订单号" label="订单号" min-width="190" />
+            <el-table-column prop="客户" label="客户" min-width="150" />
+            <el-table-column prop="合同号" label="合同号" min-width="170" />
+            <el-table-column prop="发货时间" label="发货时间" width="160" />
+            <el-table-column prop="状态" label="当前状态" width="150" />
+            <el-table-column prop="合同备注" label="合同备注" min-width="160" />
+          </el-table>
+          <div class="ops">
+            <el-button type="warning" :loading="shippedSaving" :disabled="shippedSerials.length === 0 || shippedLoading" @click="revertShip">发货撤回</el-button>
+            <span class="empty-tip">已选择 {{ shippedSerials.length }} 台；撤回后按流程生成重入库任务。</span>
+          </div>
+        </el-card>
       </el-tab-pane>
 
       <el-tab-pane label="退换货处理" name="returns">
@@ -245,7 +269,36 @@ type ReturnOrder = { key: string; date: string; orderId: string; customer: strin
 type ReturnDateGroup = { date: string; total: number; orders: ReturnOrder[] }
 
 const cacheStore = useCacheStore()
-const activeTab = ref<'shipping' | 'returns'>('shipping')
+const activeTab = ref<'shipping' | 'shipped' | 'returns'>('shipping')
+const shippedLoading = ref(false)
+const shippedSaving = ref(false)
+const shippedRows = ref<Row[]>([])
+const shippedSerials = ref<string[]>([])
+const shippedKeyword = ref('')
+const shippedDate = ref('')
+const shippedTable = ref<{ clearSelection: () => void } | null>(null)
+
+const onShippedSelectionChange = (rows: Row[]) => {
+  shippedSerials.value = rows.map(row => String(row['流水号'] || '').trim()).filter(Boolean)
+}
+
+const loadShipped = async () => {
+  shippedLoading.value = true
+  shippedSerials.value = []
+  shippedTable.value?.clearSelection()
+  try {
+    const params = new URLSearchParams()
+    if (shippedKeyword.value.trim()) params.set('keyword', shippedKeyword.value.trim())
+    if (shippedDate.value) params.set('date', shippedDate.value)
+    const res = await apiGet<ListResponse>(`/inventory/shipping/returned-candidates?${params}`)
+    shippedRows.value = res.data || []
+  } catch (err: any) {
+    shippedRows.value = []
+    ElMessage.error(getApiErrorMessage(err) || '读取已发货记录失败')
+  } finally {
+    shippedLoading.value = false
+  }
+}
 
 const loading = ref(false)
 const saving = ref(false)
@@ -422,7 +475,12 @@ const confirmShip = async () => {
   }
   saving.value = true
   try {
-    const res = await apiPost<MessageResponse>('/inventory/shipping/confirm', { serial_nos: selectedSerials.value })
+    const res = await apiPost<MessageResponse>('/inventory/shipping/confirm', {
+      serial_nos: selectedSerials.value,
+      expected_order_no: selectedOrderId.value,
+    })
+    if ((res as any)?.approval_pending) { ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    
     if (res.warning) {
       ElMessage.warning(res.warning)
     } else {
@@ -440,22 +498,34 @@ const confirmShip = async () => {
 }
 
 const revertShip = async () => {
-  if (selectedSerials.value.length === 0) {
+  if (shippedSaving.value) return
+  if (shippedSerials.value.length === 0) {
     ElMessage.warning('请先勾选至少 1 台机台')
     return
   }
-  saving.value = true
+  const serials = [...shippedSerials.value]
+  const reason = await ElMessageBox.prompt(`确认撤回所选 ${serials.length} 台机台的发货？请输入撤回原因。`, '发货撤回', { inputValidator: (v: string) => v.trim() ? true : '请输入撤回原因' }).catch(() => null)
+  if (!reason) return
+  shippedSaving.value = true
   try {
-    const res = await apiPost<MessageResponse>('/inventory/shipping/revert', { serial_nos: selectedSerials.value })
-    ElMessage.success(res.message || '撤回成功')
-    selectedSerials.value = []
-    selectedRows.value = []
-    revokePreviewUrls()
+    const created: any = await apiPost('/workflows/reverse/instances', {
+      workflow_key: 'shipment-recall', business_type: '机台', business_id: serials[0],
+      idempotency_key: `shipment-recall:${[...serials].sort().join(',')}:${Date.now()}`,
+      reason: reason.value,
+      items: serials.map((serial) => ({ object_type: '机台', object_id: serial }))
+    })
+    const status = created?.data?.status
+    if (status === '待派生处理') ElMessage.success('发货已自动撤回，机台已生成重入库任务')
+    else if (status === '已完成') ElMessage.success('发货已自动撤回完成')
+    else if (status === '已通过') ElMessage.success('流程已自动通过，等待执行')
+    else ElMessage.success('逆向审批已提交，请由审批人进入审批中心处理')
+    cacheStore.remove('allocation:orders')
+    await loadShipped()
     await loadPending()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '发货撤回失败')
+    ElMessage.error(getApiErrorMessage(err) || '提交发货撤回审批失败')
   } finally {
-    saving.value = false
+    shippedSaving.value = false
   }
 }
 
@@ -624,7 +694,9 @@ const returnSelected = async (action: 'reallocate' | 'cancel_order') => {
 }
 
 const refreshActive = async () => {
-  if (activeTab.value === 'returns') {
+  if (activeTab.value === 'shipped') {
+    await loadShipped()
+  } else if (activeTab.value === 'returns') {
     await loadReturnCandidates()
   } else {
     await loadPending()
@@ -632,6 +704,7 @@ const refreshActive = async () => {
 }
 
 watch(activeTab, (tab) => {
+  if (tab === 'shipped') void loadShipped()
   if (tab === 'returns' && returnRows.value.length === 0) {
     void loadReturnCandidates()
   }

@@ -151,6 +151,46 @@ def init_mysql_tables():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
+        CREATE TABLE IF NOT EXISTS customer_machine_plans (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `serial_no` VARCHAR(100) NOT NULL,
+            `customer` VARCHAR(200) DEFAULT '',
+            `order_no` VARCHAR(100) DEFAULT '',
+            `contract_no` VARCHAR(100) DEFAULT '',
+            `plan_status` VARCHAR(50) DEFAULT '待规划',
+            `project_name` VARCHAR(300) DEFAULT '',
+            `customer_machine_no` VARCHAR(150) DEFAULT '',
+            `planned_install_date` DATE NULL,
+            `planner` VARCHAR(100) DEFAULT '',
+            `remark` TEXT,
+            `created_at` DATETIME NULL,
+            `updated_at` DATETIME NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_customer_machine_plan_serial` (`serial_no`),
+            INDEX `idx_customer_machine_plan_customer` (`customer`),
+            INDEX `idx_customer_machine_plan_status` (`plan_status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS machine_transfer_history (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `serial_no` VARCHAR(100) NOT NULL,
+            `from_location` VARCHAR(100) DEFAULT '',
+            `to_location` VARCHAR(100) DEFAULT '',
+            `from_status` VARCHAR(50) DEFAULT '',
+            `to_status` VARCHAR(50) DEFAULT '',
+            `flow_type` VARCHAR(50) DEFAULT '',
+            `order_no` VARCHAR(100) DEFAULT '',
+            `contract_no` VARCHAR(100) DEFAULT '',
+            `operator` VARCHAR(100) DEFAULT '',
+            `operate_time` DATETIME NULL,
+            `remark` TEXT,
+            PRIMARY KEY (`id`),
+            INDEX `idx_machine_transfer_serial` (`serial_no`),
+            INDEX `idx_machine_transfer_time` (`operate_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
         CREATE TABLE IF NOT EXISTS audit_log (
             `id`        INT NOT NULL AUTO_INCREMENT,
             `timestamp` DATETIME NULL,
@@ -834,7 +874,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 17
+CURRENT_SCHEMA_VERSION = 18
 
 
 def ensure_finished_goods_unique_serial(conn):
@@ -1661,6 +1701,15 @@ def init_mysql_tables_v2():
             conn.execute(text("ALTER TABLE contract_notifications ADD COLUMN planned_by VARCHAR(100) NULL"))
             conn.execute(text("ALTER TABLE contract_notifications ADD COLUMN planned_at DATETIME(6) NULL"))
             _record_schema_version(conn, 17, "add planned stage to contract notifications")
+
+        if current_version < 18:
+            # Optimistic concurrency marker used by approval workflows. Existing
+            # rows start at version 1 and are advanced by business updates.
+            for table_name in ('finished_goods_data', 'sales_orders', 'units',
+                               'customer_machine_plans', 'model_dictionary', 'shipping_history'):
+                if _table_exists(conn, table_name) and not _column_exists_in_table(conn, table_name, 'row_version'):
+                    conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `row_version` BIGINT NOT NULL DEFAULT 1"))
+            _record_schema_version(conn, 18, "add row_version for reverse workflow optimistic concurrency")
 
         return {
             "initialized": True,

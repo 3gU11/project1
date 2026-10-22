@@ -474,6 +474,11 @@ def convert_to_contract(
 
         # 5. Create contracts via shared logic
         current_user = ctx if isinstance(ctx, dict) else {"username": operator, "role": ""}
+        from crud.forward_entries import submit_entry
+        payload.contract_no = contract_no
+        workflow_response = submit_entry('contract-create', payload, current_user, request, business_id=contract_no, origin={'dealer_order_no': order_no})
+        if workflow_response is not None:
+            return workflow_response
         result = _process_contracts_batch(
             add_list=add_list,
             rush_source_rows=rush_source_rows,
@@ -578,14 +583,15 @@ def seed_test_dealer_order(
         conn.execute(
             text(
                 "INSERT INTO dealer_orders "
-                "(order_no, line_no, dealer_id, dealer_name, dealer_phone, customer_name, "
+                "(order_no, line_no, dealer_id, dealer_name, dealer_phone, regional_manager_name, customer_name, "
                 "contact_name, contact_phone, model, batch_no, eta, inventory_type, "
-                "quantity, approved_qty, allocated_qty, delivery_date, remark, status, "
+                "quantity, approved_qty, allocated_qty, extra_remark, ERMQ, factory_pending, source, "
+                "sync_status, delivery_date, remark, status, regional_review_status, "
                 "created_at, updated_at) "
                 "VALUES "
-                "(:order_no, :line_no, :dealer_id, :dealer_name, '', :customer_name, "
+                "(:order_no, :line_no, :dealer_id, :dealer_name, '', '', :customer_name, "
                 ":contact_name, :contact_phone, :model, :batch_no, '', :inventory_type, "
-                ":quantity, 0, 0, :delivery_date, :remark, 'pending', "
+                ":quantity, 0, 0, '', 0, 0, 'test', 'pending', :delivery_date, :remark, 'pending', 'pending', "
                 ":now, :now)"
             ),
             {

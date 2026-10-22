@@ -667,6 +667,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, Document, UploadFilled } from '@element-plus/icons-vue'
+import { contractPreviewHtml } from '../utils/contractPreview'
 import { apiGet, apiGetAll, apiPost, apiPut, apiDelete, apiDownloadBlob, getApiErrorMessage } from '../utils/request'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { useContractsStore } from '../store/contracts'
@@ -1402,8 +1403,8 @@ const cancelSelectedContract = async () => {
   const contract = selectedContract.value
   if (!contract) return
   try {
-    await ElMessageBox.confirm(`确认取消合同「${contract.id}」？取消后将同步清理预测沙盒并重算。`, '取消合同', {
-      confirmButtonText: '确认取消',
+    await ElMessageBox.confirm(`确认申请取消合同「${contract.id}」？系统将按账号权限发起审批或自动执行；需要重入库的机台将交由入库员处理。`, '取消合同', {
+      confirmButtonText: '提交申请',
       cancelButtonText: '返回',
       type: 'warning',
     })
@@ -1411,9 +1412,19 @@ const cancelSelectedContract = async () => {
     return
   }
   await submitWithLock(executing, async () => {
-    await apiPost(`/planning/contract/${encodeURIComponent(contract.id)}/status`, { status: '已取消' })
+    const result = await apiPost<{ data: { instance_no: string; status: string } }>('/workflows/reverse/instances', {
+      workflow_key: 'contract-cancel',
+      business_type: '合同',
+      business_id: contract.id,
+      idempotency_key: `contract-cancel:${contract.id}:${Date.now()}`,
+      reason: `申请取消合同 ${contract.id}`,
+    })
+    const workflow = result.data
+    ElMessage.success(workflow.status === '待审批'
+      ? `取消合同申请已提交，请在审批中心查看进度（${workflow.instance_no}）`
+      : `取消合同流程已提交，当前状态：${workflow.status}，请在审批中心查看进度`)
     await fetchContracts(true)
-  }, { successMessage: '合同已取消，预测沙盒已同步重算', errorMessage: '取消合同失败' })
+  }, { errorMessage: '取消合同失败' })
 }
 
 const markSelectedContractPlanned = async () => {
@@ -1707,6 +1718,8 @@ const submitBatchContracts = async () => {
       save_mode: saveMode,
       dealer_order_no: dealerOrderSource.value,
     })
+    if ((res as any)?.approval_pending) { ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    
 
     if (batchPickedFiles.value.length > 0) {
       for (const f of batchPickedFiles.value) {
@@ -1792,21 +1805,6 @@ const downloadAttachment = async (contractId: string, fileName: string) => {
   }
 }
 
-const buildPreviewHtml = (bodyHtml: string) => `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <style>
-    body { margin: 0; padding: 24px 32px; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.7; }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-    td, th { border: 1px solid #d8dee8; padding: 6px 8px; vertical-align: top; }
-    img { max-width: 100%; height: auto; }
-    p { margin: 0 0 10px; }
-  </style>
-</head>
-<body>${bodyHtml || '<p>文档无可预览内容</p>'}</body>
-</html>`
-
 const previewAttachment = async (contractId: string, fileName: string) => {
   previewingFile.value = fileName
   previewLoading.value = true
@@ -1817,6 +1815,14 @@ const previewAttachment = async (contractId: string, fileName: string) => {
   previewHtml.value = ''
   previewMessage.value = ''
   try {
+    if (fileName.toLowerCase().endsWith('.docx')) {
+      const bytes = await apiGet<ArrayBuffer>(`/planning/contract/${encodeURIComponent(contractId)}/files/${encodeURIComponent(fileName)}/download`, {
+        responseType: 'arraybuffer', timeout: 120000,
+      })
+      previewHtml.value = await contractPreviewHtml(bytes)
+      previewType.value = 'html'
+      return
+    }
     const res: any = await apiGet(`/planning/contract/${encodeURIComponent(contractId)}/files/${encodeURIComponent(fileName)}/preview`, {
       timeout: 120000,
     })
@@ -1826,7 +1832,7 @@ const previewAttachment = async (contractId: string, fileName: string) => {
       previewUrl.value = String(res.url || '')
     } else if (res.type === 'html') {
       previewType.value = 'html'
-      previewHtml.value = buildPreviewHtml(String(res.html || ''))
+      throw new Error('请下载后查看该文件')
     } else {
       previewType.value = 'unsupported'
       previewMessage.value = String(res.message || (ext === '.doc' ? 'DOC 为旧版 Word 格式，请下载后用 Word/WPS 查看。' : '该文件类型暂不支持在线预览。'))

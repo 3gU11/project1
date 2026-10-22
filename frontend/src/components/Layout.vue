@@ -31,12 +31,19 @@
           @click="go(item.path)"
         >
           {{ item.label }}
+        </button>
+      </div>
+      <div v-if="!sidebarCollapsed" class="menu-group workflow-group">
+        <div class="group-title">🔄 工作流程</div>
+        <button v-for="item in workflowMenus" :key="item.path" type="button" class="menu-btn" :class="{ active: isActive(item.path) }" @mouseenter="preloadRoute(item.path)" @click="go(item.path)">
+          {{ item.label }}
           <span v-if="item.path === '/dealer-orders' && dealerPendingCount > 0" class="menu-badge">{{ dealerPendingCount }}</span>
+          <span v-if="(item.path === '/approval-center' || item.path === '/workflow/models') && workflowPendingCount > 0" class="menu-badge">{{ workflowPendingCount > 99 ? '99+' : workflowPendingCount }}</span>
         </button>
       </div>
     </aside>
     <main class="main-content" :class="{ expanded: sidebarCollapsed }">
-      <div v-if="isBoss" class="notification-toolbar"><ContractNotifications /></div>
+      <div class="notification-toolbar"><MessageCenter /></div>
       <router-view />
     </main>
   </div>
@@ -51,7 +58,7 @@ import { getAccessibleMenus } from '../router'
 import { cancelIdleRun, runWhenIdle } from '../utils/compat'
 import { normalizeRole } from '../utils/roles'
 import { apiGet } from '../utils/request'
-import ContractNotifications from './ContractNotifications.vue'
+import MessageCenter from './MessageCenter.vue'
 
 const userStore = useUserStore()
 const modelDictionaryStore = useModelDictionaryStore()
@@ -61,6 +68,8 @@ const isMobile = ref(false)
 const mobileMenuOpen = ref(false)
 let warmupHandle: number | null = null
 const dealerPendingCount = ref(0)
+const workflowPendingCount = ref(0)
+let workflowPendingTimer: ReturnType<typeof setInterval> | null = null
 let dealerPendingTimer: ReturnType<typeof setInterval> | null = null
 
 let globalWs: WebSocket | null = null
@@ -156,6 +165,17 @@ const fetchDealerPendingCount = async () => {
   }
 }
 
+const fetchWorkflowPendingCount = async () => {
+  if (!userStore.isAuthenticated) { workflowPendingCount.value = 0; return }
+  try {
+    const res = await apiGet<{ data?: any[] }>('/workflows/tasks?status=%E5%BE%85%E5%A4%84%E7%90%86&limit=500')
+    const username = String(userStore.userInfo?.username || '')
+    workflowPendingCount.value = (res.data || []).filter((task: any) => String(task.assignee_id || '') === username).length
+  } catch { /* Badge is best effort. */ }
+  try {
+  } catch { /* Badge is best effort. */ }
+}
+
 const handleOrdersUpdated = (e?: Event) => {
   if (!userStore.userInfo?.permissions?.includes('DEALER_ORDER_REVIEW')) {
     dealerPendingCount.value = 0
@@ -171,16 +191,25 @@ const handleOrdersUpdated = (e?: Event) => {
 const visibleMenus = computed(() => {
   const onHome = router.currentRoute.value.path === '/'
   return getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
+    if (m.path.startsWith('/workflow/') || m.path === '/approval-center' || m.path === '/dealer-orders') return false
     if (onHome) {
       // 在首页时，侧边栏仅保留高频入口
-      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban', '/dealer-orders']
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban']
       return allowedInHome.includes(m.path)
     }
     return true
   })
 })
+const workflowMenus = computed(() => {
+  const isPrivileged = ['admin', 'boss'].includes(String(userStore.userInfo?.role || '').toLowerCase())
+  const menus = getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
+    if (m.path === '/workflow/instances' || m.path === '/workflow/tasks') return isPrivileged
+    return m.path.startsWith('/workflow/') || m.path === '/approval-center'
+  })
+  const dealerReview = getAccessibleMenus(userStore.userInfo?.permissions).find(m => m.path === '/dealer-orders')
+  return dealerReview ? [...menus, dealerReview] : menus
+})
 const roleLabel = computed(() => userStore.userInfo?.role || '-')
-const isBoss = computed(() => normalizeRole(userStore.userInfo?.role) === 'Boss' && userStore.hasPermission('NOTIFICATION_VIEW'))
 const warmedPaths = new Set<string>()
 
 const preloadRoute = (path: string) => {
@@ -241,12 +270,15 @@ onMounted(() => {
   syncViewport()
   window.addEventListener('resize', syncViewport)
   window.addEventListener('dealer-orders-updated', handleOrdersUpdated)
+  window.addEventListener('workflow-pending-updated', fetchWorkflowPendingCount)
   warmupHandle = runWhenIdle(() => warmupByRole(), 400)
   if (userStore.isAuthenticated) {
     modelDictionaryStore.ensureLoaded().catch(() => {
       // Keep default order when dictionary API is temporarily unavailable.
     })
     fetchDealerPendingCount()
+    fetchWorkflowPendingCount()
+    workflowPendingTimer = setInterval(fetchWorkflowPendingCount, 30000)
     connectDealerOrdersWs()
     dealerPendingTimer = setInterval(fetchDealerPendingCount, 60000)
   }
@@ -255,9 +287,11 @@ onBeforeUnmount(() => {
   cancelIdleRun(warmupHandle)
   warmupHandle = null
   if (dealerPendingTimer) { clearInterval(dealerPendingTimer); dealerPendingTimer = null }
+  if (workflowPendingTimer) { clearInterval(workflowPendingTimer); workflowPendingTimer = null }
   disconnectDealerOrdersWs()
   window.removeEventListener('resize', syncViewport)
   window.removeEventListener('dealer-orders-updated', handleOrdersUpdated)
+  window.removeEventListener('workflow-pending-updated', fetchWorkflowPendingCount)
 })
 watch(() => router.currentRoute.value.path, () => {
   if (isMobile.value) closeMobileMenu()

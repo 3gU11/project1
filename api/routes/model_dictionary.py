@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from api.routes.auth import get_current_user_token, require_permissions
 from crud.audit_logs import append_audit_log
@@ -30,6 +31,12 @@ class ModelDictionaryDeletePayload(BaseModel):
     model_name: str
 
 
+def get_existing_model_ids() -> set[int]:
+    from database import get_engine
+    with get_engine().connect() as conn:
+        return {int(value) for value in conn.execute(text("SELECT id FROM model_dictionary")).scalars().all()}
+
+
 @router.get("/")
 def get_dictionary_rows():
     try:
@@ -46,6 +53,10 @@ def save_dictionary_rows(
     _ctx: dict = Depends(require_permissions("MODEL_DICTIONARY")),
 ):
     try:
+        incoming_ids = {int(row['id']) for row in payload.rows if row.get('id') is not None}
+        removed_ids = get_existing_model_ids() - incoming_ids
+        if removed_ids:
+            raise HTTPException(status_code=409, detail="机型删除必须逐项发起逆向审批，不能通过整表保存删除")
         count = save_model_dictionary(payload.rows)
         operator = str(_ctx.get("name") or _ctx.get("username") or "system").strip()
         append_audit_log(
@@ -57,6 +68,8 @@ def save_dictionary_rows(
             username=operator,
         )
         return {"message": f"机型字典已保存（{count} 条）", "count": count}
+    except HTTPException:
+        raise
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -92,6 +105,7 @@ def delete_model_name(
     _ctx: dict = Depends(require_permissions("MODEL_DICTIONARY")),
 ):
     try:
+        raise HTTPException(status_code=409, detail="机型删除必须先发起逆向审批流程")
         deleted = delete_model_dictionary_item(payload.model_name, payload.id)
         if deleted <= 0:
             raise HTTPException(status_code=404, detail="机型不存在或已删除")

@@ -153,7 +153,7 @@
               <el-table-column prop="合同备注" label="合同备注" min-width="160" />
             </el-table>
             <div class="ops">
-              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
+              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 提交撤回审批</el-button>
               <el-button type="success" :loading="saving" @click="completeAllocation">配货完成</el-button>
             </div>
             </template>
@@ -182,7 +182,6 @@ import { compareModels, normalizeModelName, sortRowsByModel } from '../utils/mod
 import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type ListResponse<T = any> = { data: T[] }
-type ReleaseResponse = { message?: string; released?: number }
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 type Row = Record<string, any>
@@ -651,9 +650,11 @@ const allocateSelected = async () => {
 
   saving.value = true
   try {
-    await apiPost(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`, {
+    const workflowResponse = await apiPost(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`, {
       selected_serial_nos: selectedCandidateSerials.value,
     })
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    
     ElMessage.success('配货复核已确认')
     selectedCandidateSerials.value = []
     await refreshCurrentOrder()
@@ -672,15 +673,18 @@ const releaseSelected = async () => {
   }
   saving.value = true
   try {
-    const res = await apiPost<ReleaseResponse>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/release`, {
-      selected_serial_nos: selectedAllocatedSerials.value,
-      all: false,
+    const serials = [...selectedAllocatedSerials.value]
+    const res = await apiPost<{ data?: { instance_no?: string }; created?: boolean }>('/workflows/reverse/instances', {
+      workflow_key: 'allocation-recall',
+      business_type: '订单配货',
+      business_id: selectedOrderId.value,
+      idempotency_key: `allocation-recall:${selectedOrderId.value}:${serials.slice().sort().join(',')}:${Date.now()}`,
+      reason: `订单 ${selectedOrderId.value} 撤回配货：${serials.join('、')}`,
+      items: serials.map((serialNo) => ({ object_type: '机台', object_id: serialNo })),
     })
-    const released = Number(res.released || 0)
-    if (released > 0) ElMessage.success(res.message || `已释放 ${released} 台机台`)
-    else ElMessage.warning(res.message || '当前没有可释放机台')
+    ElMessage.success(`撤回审批已提交${res.data?.instance_no ? `：${res.data.instance_no}` : ''}`)
     selectedAllocatedSerials.value = []
-    await refreshCurrentOrder(released > 0 ? 'active' : undefined)
+    await refreshCurrentOrder()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '释放失败')
   } finally {
@@ -703,6 +707,7 @@ const completeAllocation = async () => {
 }
 
 const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
+  if (o.order_status_label) return { text: o.order_status_label, type: o.order_status_label === '已完成' ? 'success' : 'primary' }
   const s = String(o.status || 'active')
   if (s === 'pending_review') return { text: o.reservation?.label || '待核查预占', type: 'warning' }
   if (s === 'packed') return { text: '已打包', type: 'primary' }

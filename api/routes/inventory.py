@@ -1,7 +1,9 @@
 from io import BytesIO
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 from datetime import datetime
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import requests
@@ -37,10 +39,11 @@ from crud.logs import append_log
 from crud.model_dictionary import find_disabled_models, get_model_dictionary, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound, save_orders
 from crud.order_reservations import release_completed_order_reservations
-from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
+from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token, require_permissions
 from api.websockets.manager import manager
 from database import get_engine
 from crud.inventory_scope import inventory_relationship_join_sql, joined_pending_scope_sql
+from crud.workflows import forward_workflow_enabled, record_forward_instance
 
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
@@ -403,6 +406,7 @@ class ImportStagingDeletePayload(BaseModel):
 
 class ShippingActionPayload(BaseModel):
     serial_nos: List[str] = Field(default_factory=list)
+    expected_order_no: str | None = None
 
 
 class ShippingReturnPayload(BaseModel):
@@ -439,6 +443,7 @@ def get_inventory(
     keyword: str = Query("", description="按流水号/订单号/批次号过滤"),
     exclude_shipped: bool = Query(False, description="排除已出库"),
     include_scrap: bool = Query(False, description="是否包含报废机台"),
+    actual_only: bool = Query(False, description="仅统计计入工厂实际库存的机台"),
 ):
     """分页获取库存数据。"""
     try:
@@ -447,6 +452,8 @@ def get_inventory(
 
         if exclude_shipped:
             where_clauses.append("COALESCE(`状态`, '') <> '已出库'")
+        if actual_only:
+            where_clauses.append("COALESCE(`Location_Code`, '') NOT IN ('DG-WH', 'DONGGUAN', '东莞仓库')")
 
         if str(status).strip():
             where_clauses.append("`状态` = :status")
@@ -489,6 +496,237 @@ def get_inventory(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/customer-sales-orders")
+def get_customer_sales_orders(
+    keyword: str = Query(""),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Dongguan orders, including those without finished machines or shipments."""
+    clauses = ["`客户名` LIKE :customer"]
+    params = {"customer": "%东莞%", "skip": skip, "limit": limit}
+    if keyword.strip():
+        clauses.append("(`订单号` LIKE :keyword OR `客户名` LIKE :keyword OR `需求机型` LIKE :keyword)")
+        params["keyword"] = f"%{keyword.strip()}%"
+    where = " AND ".join(clauses)
+    with get_engine().connect() as conn:
+        total = conn.execute(text(f"SELECT COUNT(*) FROM sales_orders WHERE {where}"), params).scalar()
+        records = [dict(row) for row in conn.execute(text(
+            f"SELECT `订单号`, `客户名`, `需求机型`, `下单时间`, status FROM sales_orders WHERE {where} "
+            "ORDER BY `下单时间` DESC, `订单号` DESC LIMIT :limit OFFSET :skip"
+        ), params).mappings()]
+    from api.routes.planning import get_order_progress
+    progress = get_order_progress([r["订单号"] for r in records], include_machines=True)
+    for record in records:
+        record.update(progress.get(str(record["订单号"]).strip(), {"order_status_label": "订单不存在", "machines": []}))
+    return {"data": records, "total": int(total or 0)}
+
+
+@router.get("/customer-finished-goods")
+def get_customer_finished_goods(
+    customer: str = Query("东莞"),
+    keyword: str = Query(""),
+    limit: int = Query(50, ge=1, le=2000),
+    skip: int = Query(0, ge=0),
+    machine_status: str = Query(""),
+):
+    clauses = ["(fg.`客户` LIKE :customer OR so.`客户名` LIKE :customer OR fg.`Location_Code`='DG-WH')"]
+    params = {"customer": f"%{customer.strip()}%", "limit": limit, "skip": skip}
+    if keyword.strip():
+        clauses.append("(fg.`流水号` LIKE :keyword OR fg.`机型` LIKE :keyword OR fg.`占用订单号` LIKE :keyword OR fg.`合同号` LIKE :keyword)")
+        params["keyword"] = f"%{keyword.strip()}%"
+    order_join = """FROM finished_goods_data fg
+        LEFT JOIN sales_orders so
+          ON so.`订单号` COLLATE utf8mb4_general_ci = fg.`占用订单号` COLLATE utf8mb4_general_ci"""
+    status_sql = "SELECT DISTINCT fg.`状态` " + order_join + " WHERE " + " AND ".join(clauses) + " ORDER BY fg.`状态`"
+    if machine_status.strip():
+        clauses.append("fg.`状态` = :machine_status")
+        params["machine_status"] = machine_status.strip()
+    count_sql = "SELECT COUNT(*) " + order_join + " WHERE " + " AND ".join(clauses)
+    # Fetch the candidate set before pagination.  The customer-finished-goods
+    # view must filter machine-level "待发货" rows by the shared order progress
+    # label, otherwise an incompletely allocated order can look ready to ship.
+    sql = """
+        SELECT fg.*, so.status AS order_status,
+               COALESCE(mp.project_name, '') AS project_name,
+               COALESCE(mp.customer_machine_no, '') AS customer_machine_no,
+               mp.planned_install_date, COALESCE(mp.planner, '') AS planner,
+               COALESCE(mp.remark, '') AS plan_remark
+        FROM finished_goods_data fg
+        LEFT JOIN sales_orders so
+          ON so.`订单号` COLLATE utf8mb4_general_ci = fg.`占用订单号` COLLATE utf8mb4_general_ci
+        LEFT JOIN customer_machine_plans mp
+          ON mp.serial_no COLLATE utf8mb4_general_ci = fg.`流水号` COLLATE utf8mb4_general_ci
+        WHERE """ + " AND ".join(clauses) + " ORDER BY fg.`更新时间` DESC, fg.`流水号` DESC"
+    with get_engine().begin() as conn:
+        # The planning table is created lazily by the save endpoint in older
+        # deployments. Ensure the read path is also safe on first visit.
+        conn.execute(text("""CREATE TABLE IF NOT EXISTS customer_machine_plans (`id` BIGINT NOT NULL AUTO_INCREMENT, `serial_no` VARCHAR(100) NOT NULL, `customer` VARCHAR(200) DEFAULT '', `order_no` VARCHAR(100) DEFAULT '', `contract_no` VARCHAR(100) DEFAULT '', `plan_status` VARCHAR(50) DEFAULT '待规划', `project_name` VARCHAR(300) DEFAULT '', `customer_machine_no` VARCHAR(150) DEFAULT '', `planned_install_date` DATE NULL, `planner` VARCHAR(100) DEFAULT '', `remark` TEXT, `created_at` DATETIME NULL, `updated_at` DATETIME NULL, PRIMARY KEY (`id`), UNIQUE KEY `uq_customer_machine_plan_serial` (`serial_no`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""))
+        total = int(conn.execute(text(count_sql), params).scalar() or 0)
+        statuses = [str(value) for value in conn.execute(text(status_sql), params).scalars() if value]
+        df = pd.read_sql(text(sql), conn, params=params)
+    from api.routes.planning import get_order_progress
+    records = df.astype(object).where(df.notnull(), None).to_dict(orient="records")
+    progress = get_order_progress([r.get("占用订单号") for r in records])
+    visible_records = []
+    for record in records:
+        oid = str(record.get("占用订单号") or "").strip()
+        order_progress = progress.get(oid, {"order_status_label": "订单不存在" if oid else "未关联订单"})
+        record.update(order_progress)
+        # A machine row can be marked 待发货 before the order has actually
+        # been fully allocated.  Keep other machine states visible, but do not
+        # present this inconsistent combination as customer-ready shipping.
+        if str(record.get("状态") or "").strip() == "待发货" and order_progress.get("order_status_label") != "待发货":
+            continue
+        visible_records.append(record)
+    total = len(visible_records)
+    page = visible_records[skip:skip + limit]
+    return {"data": page, "total": total, "statuses": statuses, "skip": skip, "limit": limit}
+
+
+class CustomerOrderActionPayload(BaseModel):
+    serial_nos: list[str] = Field(min_length=1, max_length=500)
+    action: Literal["mark_shipped", "mark_in_stock"]
+    remark: str = Field(default="", max_length=1000)
+    expected: dict[str, str] = Field(default_factory=dict)
+
+
+def _customer_order_action_preview(payload):
+    from api.routes.planning import get_order_progress, _get_explicit_order_allocations, _inventory_rows_satisfy_order
+    sns = sorted({s.strip() for s in payload.serial_nos if s.strip()})
+    if not sns:
+        raise HTTPException(status_code=422, detail="请选择机台")
+    with get_engine().connect() as conn:
+        selected = conn.execute(text("SELECT * FROM finished_goods_data WHERE `流水号` IN :sns").bindparams(bindparam("sns", expanding=True)), {"sns": sns}).mappings().all()
+        if len(selected) != len(sns):
+            raise HTTPException(status_code=422, detail="部分机台已不存在，请刷新列表")
+        if any(not str(r.get("占用订单号") or "").strip() for r in selected):
+            raise HTTPException(status_code=422, detail="所选机台中存在未关联原销售订单的机台")
+        ids = sorted({str(r["占用订单号"]).strip() for r in selected})
+        orders = conn.execute(text("SELECT * FROM sales_orders WHERE `订单号` IN :ids").bindparams(bindparam("ids", expanding=True)), {"ids": ids}).mappings().all()
+        if len(orders) != len(ids):
+            raise HTTPException(status_code=422, detail="部分原销售订单不存在")
+        all_stock = conn.execute(text("SELECT * FROM finished_goods_data WHERE `占用订单号` IN :ids").bindparams(bindparam("ids", expanding=True)), {"ids": ids}).mappings().all()
+    progress = get_order_progress(ids)
+    result = []
+    for raw in orders:
+        order = dict(raw)
+        oid = str(order["订单号"]).strip()
+        picks = [r for r in selected if str(r["占用订单号"]).strip() == oid]
+        if not all("东莞" in str(order.get("客户名") or "") or "东莞" in str(r.get("客户") or "") or r.get("Location_Code") == "DG-WH" for r in picks):
+            raise HTTPException(status_code=422, detail="只能操作东莞客户机台的原销售订单")
+        status = str(order.get("status") or "active").strip()
+        pending = [dict(r) for r in all_stock if str(r.get("占用订单号") or "").strip() == oid and str(r.get("状态") or "").strip() == "待发货"]
+        allocation = _get_explicit_order_allocations(oid)
+        shipped = [dict(r) for r in all_stock if str(r.get("占用订单号") or "").strip() == oid and (str(r.get("状态") or "").strip() == "已出库" or (str(r.get("状态") or "").startswith("库存中") and str(r.get("Location_Code") or "") == "DG-WH"))]
+        serials = sorted({str(r["流水号"]).strip() for r in pending}) if payload.action == "mark_shipped" else sorted({str(r["流水号"]).strip() for r in shipped})
+        reason = ""
+        if payload.action == "mark_shipped" and (status in {"done", "deleted", "canceled", "cancelled", "pending_review"} or progress.get(oid, {}).get("order_status_label") == "已完成"):
+            reason = "已完成、已取消、已删除或待二次确认的订单不能执行此操作"
+        elif payload.action == "mark_shipped":
+            if status not in {"ready", "allocated", "packed"}:
+                reason = "该订单当前不允许发货"
+            elif progress.get(oid, {}).get("order_status_label") != "待发货":
+                reason = "订单配货尚未完成，不能执行发货"
+            elif not pending:
+                reason = "该订单没有待发货现货机台"
+        elif not shipped:
+            reason = "该订单没有可恢复为库存中的已发货机台"
+        fingerprint = hashlib.sha256(json.dumps({"order": order, "action": payload.action, "pending": pending,
+            "allocation": allocation.to_dict(orient="records"), "progress": progress.get(oid)}, sort_keys=True, default=str, ensure_ascii=False).encode()).hexdigest()
+        result.append({"order_no": oid, "customer": order.get("客户名") or "", "order_status": progress.get(oid, {}).get("order_status_label", status),
+            "serial_nos": serials, "machine_count": len(serials), "can_execute": not reason, "reason": reason, "fingerprint": fingerprint})
+    return sorted(result, key=lambda row: row["order_no"])
+
+
+@router.post("/customer-order-actions/preview")
+def preview_customer_order_actions(payload: CustomerOrderActionPayload, current_user: dict = Depends(get_current_user_context)):
+    permission = "SHIP_CONFIRM"
+    require_permissions(permission)(current_user)
+    return {"data": _customer_order_action_preview(payload)}
+
+
+@router.post("/customer-order-actions/execute")
+def execute_customer_order_actions(payload: CustomerOrderActionPayload, request: Request, current_user: dict = Depends(get_current_user_context)):
+    permission = "SHIP_CONFIRM"
+    require_permissions(permission)(current_user)
+    preview = _customer_order_action_preview(payload)
+    if any(payload.expected.get(row["order_no"]) != row["fingerprint"] for row in preview):
+        raise HTTPException(status_code=409, detail="订单或配货情况已变化，请重新预览后确认")
+    if any(not row["can_execute"] for row in preview):
+        raise HTTPException(status_code=422, detail="存在不可操作订单，请调整选择并重新预览")
+    operator = current_user.get("name") or current_user.get("username") or "System"
+    results = []
+    for row in preview:
+        try:
+            from api.routes.workflows import submit_reverse_instance, ReverseCreateRequest, ReverseItem
+            key = 'customer-order-shipped' if payload.action == 'mark_shipped' else 'customer-finished-recall'
+            submission = submit_reverse_instance(ReverseCreateRequest(
+                workflow_key=key, business_type='客户成品订单', business_id=row['order_no'],
+                idempotency_key=f"{key}:{row['order_no']}:{row['fingerprint']}",
+                reason=payload.remark or ('客户成品发货' if payload.action == 'mark_shipped' else '客户成品撤回发货'),
+                items=[ReverseItem(object_type='机台', object_id=sn) for sn in row['serial_nos']],
+            ), ctx=current_user)
+            flow = submission['data']
+            ret = {'message': f"流程 {flow['instance_no']}：{flow['status']}", 'warning': ''}
+            results.append({"order_no": row["order_no"], "success": True, "workflow_status": flow["status"], "instance_no": flow["instance_no"], "message": ret.get("message", "操作完成"), "warning": ret.get("warning", "")})
+            try:
+                append_audit_log(module="客户成品", action_type="发起发货流程" if payload.action == "mark_shipped" else "发起撤回流程", biz_type="订单",
+                    content=f"流程：{flow['instance_no']}；状态：{flow['status']}；原订单：{row['order_no']}；机台：{', '.join(row['serial_nos'])}；备注：{payload.remark.strip()}",
+                    user_id=current_user.get("username"), username=operator)
+            except Exception:
+                logging.exception("Customer order action remark audit failed")
+                results[-1]["warning"] += " 流程已提交，但附加备注日志保存失败"
+        except Exception as exc:
+            results.append({"order_no": row["order_no"], "success": False, "message": str(exc.detail) if isinstance(exc, HTTPException) else "执行异常，请刷新核实订单进度后重试"})
+    return {"data": results}
+
+
+class CustomerMachinePlanPayload(BaseModel):
+    serial_nos: list[str] = Field(default_factory=list)
+    project_name: str = ""
+    customer_machine_no: str = ""
+    planned_install_date: str | None = None
+    planner: str = ""
+    remark: str = ""
+
+
+@router.post("/customer-machine-plans")
+def save_customer_machine_plans(payload: CustomerMachinePlanPayload, request: Request = None, current_user: dict = Depends(get_current_user_context)):
+    sns = sorted({str(x).strip() for x in payload.serial_nos if str(x).strip()})
+    if not sns:
+        raise HTTPException(status_code=422, detail="请选择至少一台机台")
+    from api.routes.workflows import submit_reverse_instance, ReverseCreateRequest, ReverseItem
+    from uuid import uuid4
+    ensure_customer_plan_table()
+    flow = submit_reverse_instance(ReverseCreateRequest(
+        workflow_key='customer-machine-plan', business_type='客户机台规划', business_id=sns[0],
+        idempotency_key='customer-machine-plan:' + uuid4().hex,
+        reason=payload.remark, execution_data=payload.model_dump(),
+        items=[ReverseItem(object_type='机台', object_id=sn) for sn in sns],
+    ), ctx=current_user)['data']
+    return {'message': f"规划流程 {flow['instance_no']}：{flow['status']}", 'count': len(sns), 'data': flow}
+
+
+def ensure_customer_plan_table():
+    with get_engine().begin() as conn:
+        conn.execute(text("""CREATE TABLE IF NOT EXISTS customer_machine_plans (`id` BIGINT NOT NULL AUTO_INCREMENT, `serial_no` VARCHAR(100) NOT NULL, `customer` VARCHAR(200) DEFAULT '', `order_no` VARCHAR(100) DEFAULT '', `contract_no` VARCHAR(100) DEFAULT '', `plan_status` VARCHAR(50) DEFAULT '待规划', `project_name` VARCHAR(300) DEFAULT '', `customer_machine_no` VARCHAR(150) DEFAULT '', `planned_install_date` DATE NULL, `planner` VARCHAR(100) DEFAULT '', `remark` TEXT, `created_at` DATETIME NULL, `updated_at` DATETIME NULL, PRIMARY KEY (`id`), UNIQUE KEY `uq_customer_machine_plan_serial` (`serial_no`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""))
+
+
+def persist_customer_machine_plans(conn, payload, operator):
+    sns = sorted({str(x).strip() for x in payload.serial_nos if str(x).strip()})
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(text("SELECT `流水号`,`客户`,`占用订单号`,`合同号` FROM finished_goods_data WHERE `流水号` IN :sns").bindparams(bindparam("sns", expanding=True)), {"sns": sns}).mappings().all()
+    if len(rows) != len(sns):
+        raise HTTPException(status_code=404, detail="存在不存在的机台流水号")
+    conn.execute(text("""
+        INSERT INTO customer_machine_plans
+        (`serial_no`,`customer`,`order_no`,`contract_no`,`project_name`,`customer_machine_no`,`planned_install_date`,`planner`,`remark`,`created_at`,`updated_at`)
+        VALUES (:serial_no,:customer,:order_no,:contract_no,:project_name,:customer_machine_no,:planned_install_date,:planner,:remark,:created_at,:updated_at)
+        ON DUPLICATE KEY UPDATE project_name=VALUES(project_name), customer_machine_no=VALUES(customer_machine_no), planned_install_date=VALUES(planned_install_date), planner=VALUES(planner), remark=VALUES(remark), updated_at=VALUES(updated_at)
+    """), [{"serial_no": r["流水号"], "customer": r.get("客户") or "", "order_no": r.get("占用订单号") or "", "contract_no": r.get("合同号") or "", "project_name": payload.project_name.strip(), "customer_machine_no": payload.customer_machine_no.strip(), "planned_install_date": payload.planned_install_date or None, "planner": payload.planner.strip() or operator, "remark": payload.remark.strip(), "created_at": now, "updated_at": now} for r in rows])
 
 
 @router.get("/production-queue-summary")
@@ -1033,6 +1271,10 @@ def inbound_machine_to_slot(
     request: Request,
     current_user: dict = Depends(get_current_user_context)
 ):
+    from crud.forward_entries import submit_entry
+    workflow_response = submit_entry('stock-transfer' if payload.is_transfer else 'stock-inbound', payload, current_user, request, business_id=str(payload.serial_no))
+    if workflow_response is not None:
+        return workflow_response
     try:
         operator = current_user.get("name") or current_user.get("username") or "System"
         result = cache.inventory.inbound_to_slot(
@@ -1047,6 +1289,17 @@ def inbound_machine_to_slot(
             raise HTTPException(status_code=422, detail=result)
         
         action = "调拨机台" if payload.is_transfer else "机台入库"
+        workflow_key = "stock-transfer" if payload.is_transfer else "stock-inbound"
+        if forward_workflow_enabled(workflow_key):
+            record_forward_instance(
+                workflow_key=workflow_key,
+                business_type="库位转移" if payload.is_transfer else "成品入库",
+                business_id=str(payload.serial_no).strip(),
+                operator=operator,
+                idempotency_key=f"{workflow_key}:{str(payload.serial_no).strip()}:{str(payload.slot_code).strip()}",
+                request_id=str((request.headers.get("X-Request-ID") if request else "") or ""),
+                target_state={"serial_no": str(payload.serial_no).strip(), "slot_code": str(payload.slot_code).strip()},
+            )
         append_audit_log(
             user_id=current_user.get("username"),
             username=operator,
@@ -1250,11 +1503,26 @@ def get_shipping_pending():
 
 
 @router.post("/shipping/confirm")
+def confirm_shipping_api(
+    payload: ShippingActionPayload,
+    request: Request,
+    current_operator: str = Depends(get_current_operator_name),
+    current_user: dict = Depends(get_current_user_context),
+):
+    from crud.forward_entries import submit_entry
+    workflow_response = submit_entry('shipment-confirm', payload, current_user, request)
+    if workflow_response is not None:
+        return workflow_response
+    return confirm_shipping(payload, request, current_operator, current_user)
+
+
 def confirm_shipping(
     payload: ShippingActionPayload,
     request: Request,
     current_operator: str = Depends(get_current_operator_name),
     current_user: dict = Depends(get_current_user_context),
+    additional_workflow: dict | None = None,
+    workflow_execution: dict | None = None,
 ):
     try:
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
@@ -1275,11 +1543,47 @@ def confirm_shipping(
             .bindparams(bindparam("sns", expanding=True))
         )
 
+        with get_engine().begin() as schema_conn:
+            schema_conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS machine_transfer_history (
+                        `id` BIGINT NOT NULL AUTO_INCREMENT,
+                        `serial_no` VARCHAR(100) NOT NULL,
+                        `from_location` VARCHAR(100) DEFAULT '',
+                        `to_location` VARCHAR(100) DEFAULT '',
+                        `from_status` VARCHAR(50) DEFAULT '',
+                        `to_status` VARCHAR(50) DEFAULT '',
+                        `flow_type` VARCHAR(50) DEFAULT '',
+                        `order_no` VARCHAR(100) DEFAULT '',
+                        `contract_no` VARCHAR(100) DEFAULT '',
+                        `operator` VARCHAR(100) DEFAULT '',
+                        `operate_time` DATETIME NULL,
+                        `remark` TEXT,
+                        PRIMARY KEY (`id`),
+                        INDEX `idx_machine_transfer_serial` (`serial_no`),
+                        INDEX `idx_machine_transfer_time` (`operate_time`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """))
+
         now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
         with get_engine().begin() as conn:
+            if workflow_execution:
+                from crud.workflows import _assert_lease_alive
+                _assert_lease_alive(conn, workflow_execution['lease'])
             hit_rows = conn.execute(select_stmt, {"sns": sns}).mappings().all()
+            if workflow_execution:
+                from crud.workflows import _validate_machine_snapshots
+                _validate_machine_snapshots(workflow_execution['items'], {str(r['流水号']).strip(): r for r in hit_rows})
             if not hit_rows:
                 raise HTTPException(status_code=422, detail="所选机台不存在")
+            if payload.expected_order_no:
+                if len(hit_rows) != len(sns) or any(
+                    str(r.get("占用订单号") or "").strip() != payload.expected_order_no
+                    or str(r.get("状态") or "").strip() != "待发货" for r in hit_rows
+                ):
+                    raise HTTPException(status_code=409, detail="待发货机台或关联订单已变化，请重新预览")
+                current_status = conn.execute(text("SELECT status FROM sales_orders WHERE `订单号`=:oid FOR UPDATE"), {"oid": payload.expected_order_no}).scalar()
+                if current_status not in {"ready", "allocated", "packed"}:
+                    raise HTTPException(status_code=409, detail="订单已不满足确认发货条件，请重新预览")
             scrapped_sns = [
                 str(row.get("流水号", "") or "").strip()
                 for row in hit_rows
@@ -1296,6 +1600,86 @@ def confirm_shipping(
                 return {"message": "所选机台已发货，无需重复确认", "warning": "", "cloud_synced": 0}
             sns_to_ship = [str(row.get("流水号", "") or "").strip() for row in rows_to_ship if str(row.get("流水号", "") or "").strip()]
             conn.execute(update_stmt, {"sns": sns_to_ship, "now_text": now_text})
+            if forward_workflow_enabled("shipment-confirm"):
+                for serial_no in sns_to_ship:
+                    shipped_row = next((r for r in rows_to_ship if str(r.get("流水号") or "").strip() == serial_no), {})
+                    order_no = str(shipped_row.get("占用订单号") or "").strip()
+                    record_forward_instance(
+                        workflow_key="shipment-confirm",
+                        business_type="发货确认",
+                        business_id=serial_no,
+                        operator=current_operator,
+                        idempotency_key=f"shipment-confirm:{serial_no}:{order_no}",
+                        request_id=str((request.headers.get("X-Request-ID") if request else "") or ""),
+                        target_state={"serial_no": serial_no, "order_no": order_no},
+                        conn=conn,
+                    )
+            if additional_workflow and forward_workflow_enabled(additional_workflow["workflow_key"]):
+                record_forward_instance(
+                    workflow_key=additional_workflow["workflow_key"],
+                    business_type=additional_workflow["business_type"],
+                    business_id=additional_workflow["business_id"],
+                    operator=current_operator,
+                    idempotency_key=additional_workflow["idempotency_key"],
+                    request_id=str((request.headers.get("X-Request-ID") if request else "") or ""),
+                    target_state=additional_workflow.get("target_state"),
+                    conn=conn,
+                )
+            # Dongguan customer shipments are transferred into the customer
+            # warehouse.  Keep the machine in an inventory state so it can be
+            # planned from customer finished-goods management; the warehouse
+            # slot metadata excludes it from factory actual-inventory totals.
+            dongguan_order_ids = {
+                str(row.get("占用订单号") or "").strip()
+                for row in rows_to_ship
+                if str(row.get("占用订单号") or "").strip()
+            }
+            dongguan_customer_orders = set()
+            for order_id in dongguan_order_ids:
+                try:
+                    customer_name = conn.execute(
+                        text("SELECT `客户名` FROM sales_orders WHERE `订单号`=:order_id"),
+                        {"order_id": order_id},
+                    ).scalar() or ""
+                except Exception as customer_exc:
+                    # Lightweight SQLite fixtures may omit optional customer metadata.
+                    if "no such column" in str(customer_exc).lower() or "unknown column" in str(customer_exc).lower():
+                        customer_name = ""
+                    else:
+                        raise
+                if "东莞" in str(customer_name):
+                    dongguan_customer_orders.add(str(order_id).strip())
+            dongguan_order_ids = dongguan_customer_orders
+            dongguan_sns = [
+                str(row.get("流水号") or "").strip()
+                for row in rows_to_ship
+                if "东莞" in str(row.get("客户") or "").strip()
+                or str(row.get("占用订单号") or "").strip() in dongguan_order_ids
+            ]
+            if dongguan_sns:
+                transfer_rows = [row for row in rows_to_ship if str(row.get("流水号") or "").strip() in dongguan_sns]
+
+                conn.execute(
+                    text(
+                        "UPDATE finished_goods_data SET `状态`='库存中（DG-WH）', `Location_Code`='DG-WH', `更新时间`=:now_text "
+                        "WHERE `流水号` IN :sns"
+                    ).bindparams(bindparam("sns", expanding=True)),
+                    {"sns": dongguan_sns, "now_text": now_text},
+                )
+                conn.execute(text("""
+                    INSERT INTO machine_transfer_history
+                    (`serial_no`,`from_location`,`to_location`,`from_status`,`to_status`,`flow_type`,`order_no`,`contract_no`,`operator`,`operate_time`)
+                    VALUES (:serial_no,:from_location,'DG-WH',:from_status,'库存中（DG-WH）','发货入客户仓',:order_no,:contract_no,:operator,:operate_time)
+                """), [
+                    {"serial_no": str(row.get("流水号") or "").strip(), "from_location": str(row.get("Location_Code") or "").strip(),
+                     "from_status": str(row.get("状态") or "").strip(), "order_no": str(row.get("占用订单号") or "").strip(),
+                     "contract_no": str(row.get("合同号") or "").strip(), "operator": current_operator, "operate_time": now_text}
+                    for row in transfer_rows
+                ])
+            if workflow_execution:
+                from crud.workflows import _finish_reverse_execution
+                _finish_reverse_execution(conn, workflow_execution['instance'], workflow_execution['lease'],
+                    workflow_execution['operator'], {'serial_nos': sns_to_ship}, force_reinbound=False)
         cache.inventory.cache_clear()
         enqueue_wechat_batch_summary_sync("shipping_confirm_inventory")
 
@@ -1315,13 +1699,26 @@ def confirm_shipping(
             shipped_counts: dict[str, int] = {}
             shipped_count_stmt = text(
                 "SELECT COUNT(*) FROM finished_goods_data "
-                "WHERE `状态`='已出库' AND TRIM(COALESCE(`占用订单号`, '')) = :order_id"
+                "WHERE (`状态`='已出库' OR (`状态` LIKE '库存中%' AND `Location_Code`='DG-WH')) "
+                "AND TRIM(COALESCE(`占用订单号`, '')) = :order_id"
             )
             with get_engine().connect() as conn:
                 for order_id in impacted_order_ids:
-                    shipped_counts[order_id] = int(
-                        conn.execute(shipped_count_stmt, {"order_id": order_id}).scalar() or 0
-                    )
+                        try:
+                            shipped_counts[order_id] = int(
+                                conn.execute(shipped_count_stmt, {"order_id": order_id}).scalar() or 0
+                            )
+                        except Exception as shipped_count_exc:
+                            if "no such column" in str(shipped_count_exc).lower() or "unknown column" in str(shipped_count_exc).lower():
+                                fallback_stmt = text(
+                                    "SELECT COUNT(*) FROM finished_goods_data "
+                                    "WHERE `状态`='已出库' AND TRIM(COALESCE(`占用订单号`, '')) = :order_id"
+                                )
+                                shipped_counts[order_id] = int(
+                                    conn.execute(fallback_stmt, {"order_id": order_id}).scalar() or 0
+                                )
+                            else:
+                                raise
             for idx, row in orders_df.iterrows():
                 order_id = str(row.get("订单号", "") or "").strip()
                 if order_id not in impacted_order_ids:
@@ -1408,6 +1805,7 @@ def revert_shipping(
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        raise HTTPException(status_code=409, detail="请先发起逆向审批流程，审批通过后由执行器撤回发货")
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
         if not sns:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 台机台")
@@ -1435,7 +1833,14 @@ def get_shipping_return_candidates(
     try:
         kw = str(keyword or "").strip()
         date_filter = str(date or "").strip()
-        where_clauses = ["TRIM(COALESCE(fg.`状态`, '')) = '已出库'"]
+        # Dongguan customer-warehouse shipments remain inventory records in
+        # DG-WH, but they are still shipped machines and must be eligible for
+        # the same return workflow as ordinary 已出库 machines.
+        where_clauses = [
+            "(TRIM(COALESCE(fg.`状态`, '')) = '已出库' OR "
+            "(TRIM(COALESCE(fg.`状态`, '')) LIKE '库存中%' "
+            "AND TRIM(COALESCE(fg.`Location_Code`, '')) IN ('DG-WH', 'DONGGUAN', '东莞仓库')))"
+        ]
         params: Dict[str, Any] = {}
         if kw:
             where_clauses.append(
@@ -1554,7 +1959,14 @@ def return_shipped_machines(
             invalid_rows = [
                 str(row.get("流水号") or "").strip()
                 for row in rows
-                if str(row.get("状态") or "").strip() != "已出库"
+                if not (
+                    str(row.get("状态") or "").strip() == "已出库"
+                    or (
+                        str(row.get("状态") or "").strip().startswith("库存中")
+                        and str(row.get("Location_Code") or "").strip()
+                        in {"DG-WH", "DONGGUAN", "东莞仓库"}
+                    )
+                )
             ]
             if invalid_rows:
                 raise HTTPException(status_code=422, detail=f"仅允许退回已出库机台: {', '.join(invalid_rows[:10])}")

@@ -233,14 +233,7 @@
         <el-table-column prop="订单号" label="订单号" width="170" />
         <el-table-column label="订单状态" width="130">
           <template #default="scope">
-            <el-tag
-              v-if="String(scope.row.status || '') === 'pending_review'"
-              type="warning"
-              size="small"
-            >待二次确认</el-tag>
-            <el-tag v-else-if="String(scope.row.status || '') === 'done'" type="success" size="small">已完成</el-tag>
-            <el-tag v-else-if="String(scope.row.status || '') === 'deleted'" type="info" size="small">已删除</el-tag>
-            <el-tag v-else type="primary" size="small">进行中</el-tag>
+            <el-tag :type="scope.row.order_status_label === '已完成' ? 'success' : 'primary'" size="small">{{ scope.row.order_status_label || '待规划' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="客户名" label="客户名" min-width="160" />
@@ -283,8 +276,10 @@
           <h4 class="merge-title">🔒 已删除订单操作：{{ editingId }}</h4>
           <div class="delete-box">
             <div class="field-label" style="color: var(--color-gray-600); margin-bottom: 16px;">
-              该订单已被标记删除。您可以选择将其还原到正常列表中，或者永久从系统数据库中清除。
+              该订单已被标记删除。您可以选择将其还原到正常列表中，或提交彻底删除审批（审批通过后由系统执行删除）。
             </div>
+            <div class="field-label">删除原因 (彻底删除时必填):</div>
+            <el-input v-model="deleteReason" placeholder="例如：客户取消、重复下单等" />
             <div class="delete-actions">
               <el-button type="success" :loading="saving" @click="restoreOrder">🔄 还原订单</el-button>
               <el-button type="danger" plain :loading="saving" @click="hardDeleteOrder">🗑️ 彻底删除</el-button>
@@ -378,12 +373,12 @@
         <el-input v-model="editSourceText" />
 
           <el-divider />
-          <div class="field-label">删除原因 (若仅标记删除建议填写)</div>
+          <div class="field-label">删除原因 (必填，删除需经逆向审批)</div>
           <el-input v-model="deleteReason" placeholder="例如：客户取消、重复下单等" />
 
           <div class="edit-actions">
             <el-button type="danger" :loading="saving" @click="saveEdit">💾 保存修改</el-button>
-            <el-button :loading="saving" @click="deleteOrder">🗑 删除订单</el-button>
+            <el-button :loading="saving" @click="deleteOrder">🗑 提交删除审批</el-button>
           </div>
         </template>
       </template>
@@ -396,7 +391,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { ElTable } from 'element-plus'
-import { apiDelete, apiGet, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
+import { apiGet, apiGetAll, apiPost, apiPut, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
@@ -761,7 +756,7 @@ const createManualOrder = async () => {
   const finalNote = noteParts.filter(Boolean).join(' ')
 
   await submitWithLock(saving, async () => {
-    await apiPost('/planning/orders', {
+    const workflowResponse = await apiPost('/planning/orders', {
       客户名: manualForm.customer,
       代理商: manualForm.agent,
       需求机型: modelTokens.join(';'),
@@ -770,12 +765,14 @@ const createManualOrder = async () => {
       备注: finalNote,
       包装选项: manualForm.needPack ? '需要包装' : '',
     })
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    
     ElMessage.success('订单已创建')
     manualRows.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
     manualForm.note = ''
     manualForm.source = ''
     await refreshLoadedData()
-  }, { successMessage: '订单已创建', errorMessage: '创建失败' })
+  }, { errorMessage: '创建失败' })
 }
 
 const createOrderFromPlanned = async () => {
@@ -825,7 +822,7 @@ const createOrderFromPlanned = async () => {
     }))
 
   await submitWithLock(saving, async () => {
-    await apiPost('/planning/orders', {
+    const workflowResponse = await apiPost('/planning/orders', {
       客户名: mergeDraft.customer,
       代理商: mergeDraft.agent,
       需求机型: modelTokens.join(';'),
@@ -836,6 +833,8 @@ const createOrderFromPlanned = async () => {
       contract_ids: selectedImportContractIds.value,
       明细: detailPayload,
     })
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    
     ElMessage.success('已转换为订单')
     selectedImportContractIds.value = []
     selectedPlannedImportRows.value = []
@@ -1074,19 +1073,31 @@ const saveEdit = async () => {
   }, { errorMessage: '保存失败' })
 }
 
+/** 发起订单删除逆向审批（后端已禁止直连删除，必须走 order-delete 审批流） */
+const submitOrderDeleteApproval = async (orderId: string, reason: string) => {
+  await apiPost('/workflows/reverse/instances', {
+    workflow_key: 'order-delete',
+    business_type: '订单',
+    business_id: orderId,
+    idempotency_key: `order-delete:${orderId}:${Date.now()}`,
+    reason: `删除订单 ${orderId}：${reason}`,
+    items: [{ object_type: '订单', object_id: orderId }],
+  })
+}
+
 const deleteOrder = async () => {
   if (!editingId.value) return
+  const reason = deleteReason.value.trim()
+  if (!reason) {
+    ElMessage.warning('请填写删除原因（删除订单需发起逆向审批）')
+    return
+  }
   await submitWithLock(saving, async () => {
-    const reason = deleteReason.value.trim()
-    const deletedNote = [editForm.备注.trim(), reason ? `[删除原因]${reason}` : '[删除原因]未填写'].filter(Boolean).join(' ')
-    await apiPut(`/planning/orders/${encodeURIComponent(editingId.value)}`, {
-      status: 'deleted',
-      备注: deletedNote,
-    })
-    ElMessage.success('订单已标记删除')
+    await submitOrderDeleteApproval(editingId.value, reason)
+    ElMessage.success('已提交删除审批，审批通过后订单将被删除')
     clearEditPanel()
     await refreshLoadedData()
-  }, { errorMessage: '删除失败' })
+  }, { errorMessage: '提交删除审批失败' })
 }
 
 const restoreOrder = async () => {
@@ -1103,15 +1114,20 @@ const restoreOrder = async () => {
 
 const hardDeleteOrder = async () => {
   if (!editingId.value) return
-  const ok = await confirm('⚠️ 确定要从数据库中彻底删除这条订单吗？该操作不可撤销且会清除所有订单记录。', '危险操作')
+  const reason = deleteReason.value.trim()
+  if (!reason) {
+    ElMessage.warning('请填写删除原因（彻底删除需发起逆向审批）')
+    return
+  }
+  const ok = await confirm('⚠️ 彻底删除需先发起逆向审批，审批通过后由系统执行删除。确定提交审批吗？', '删除审批')
   if (!ok) return
 
   await submitWithLock(saving, async () => {
-    await apiDelete(`/planning/orders/${encodeURIComponent(editingId.value)}`)
-    ElMessage.success('订单已从数据库永久清除')
+    await submitOrderDeleteApproval(editingId.value, `[彻底删除]${reason}`)
+    ElMessage.success('已提交彻底删除审批，审批通过后由系统执行')
     clearEditPanel()
     await refreshLoadedData()
-  }, { errorMessage: '彻底删除失败' })
+  }, { errorMessage: '提交删除审批失败' })
 }
 
 /** 辅助确认弹窗 */

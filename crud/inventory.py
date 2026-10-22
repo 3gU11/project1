@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 INVENTORY_COLS = ["批次号", "机型", "流水号", "状态", "预计入库时间", "更新时间", "占用订单号", "客户", "代理商", "合同备注", "Location_Code", "合同号"]
 IMPORT_COLS = ["流水号", "批次号", "机型", "状态", "预计入库时间", "客户", "代理商", "合同备注", "合同号", "订单号"]
 WAREHOUSE_MAX_CAPACITY = 5
+CUSTOMER_WAREHOUSE_MAX_CAPACITY = 500
 LARGE_WAREHOUSE_MAX_CAPACITY = 15
 SCRAP_WAREHOUSE_MAX_CAPACITY = 5
 UNLIMITED_WAREHOUSE_CAPACITY = float("inf")
@@ -45,8 +46,25 @@ REQUIRED_SLOT_CODES = tuple(
     + ["闲置区01", "闲置区02", "实验室区01"]
     + list(OLD_FACTORY_SLOT_CODES)
     + list(EMERGENCY_BUFFER_SLOT_CODES)
+    + ["DG-WH"]
     + ["报废区01"]
 )
+
+CUSTOMER_WAREHOUSE_SLOT_TYPE = "customer_warehouse"
+
+def is_customer_warehouse_slot(slot_code: str, slots=None) -> bool:
+    code = canonical_slot_code(slot_code)
+    for slot in (slots or []):
+        if isinstance(slot, dict) and canonical_slot_code(slot.get("code")) == code:
+            slot_type = str(slot.get("slot_type") or slot.get("type") or "").strip().lower()
+            if slot_type == CUSTOMER_WAREHOUSE_SLOT_TYPE:
+                return True
+            if str(slot.get("customer_name") or slot.get("customer") or "").strip() == "东莞":
+                return True
+    return code.upper() in {"DG-WH", "DONGGUAN", "东莞仓库"}
+
+def slot_counts_as_actual_inventory(slot_code: str, slots=None) -> bool:
+    return not is_customer_warehouse_slot(slot_code, slots)
 
 
 def _normalize_slot_code(slot_code):
@@ -79,6 +97,8 @@ def _find_layout_slot(slots, slot_code):
 
 def get_slot_capacity(slot_code):
     normalized = _normalize_slot_code(slot_code)
+    if normalized.upper() == "DG-WH":
+        return CUSTOMER_WAREHOUSE_MAX_CAPACITY
     if is_unlimited_slot(slot_code):
         return UNLIMITED_WAREHOUSE_CAPACITY
     if any(normalized.startswith(prefix) for prefix in ("大机型区域", "闲置区", "实验室区")):
@@ -114,7 +134,7 @@ def merge_required_warehouse_slots(slots):
             slot_id = f"{base_id}-{suffix}"
             suffix += 1
         used_ids.add(slot_id)
-        existing.append({
+        slot_data = {
             "id": slot_id,
             "code": code,
             "x": 20 + (index % columns) * (width + gap_x),
@@ -122,7 +142,10 @@ def merge_required_warehouse_slots(slots):
             "w": width,
             "h": height,
             "status": "正常",
-        })
+        }
+        if code == "DG-WH":
+            slot_data.update({"slot_name": "东莞库存", "slot_type": CUSTOMER_WAREHOUSE_SLOT_TYPE, "customer_name": "东莞", "include_in_actual_inventory": False})
+        existing.append(slot_data)
     return existing
 
 
@@ -137,6 +160,11 @@ def enrich_warehouse_layout(layout_json):
         if not isinstance(raw_slot, dict):
             continue
         slot = deepcopy(raw_slot)
+        if _normalize_slot_code(slot.get("code")).upper() == "DG-WH":
+            slot["slot_name"] = "东莞库存"
+            slot["slot_type"] = CUSTOMER_WAREHOUSE_SLOT_TYPE
+            slot["customer_name"] = "东莞"
+            slot["include_in_actual_inventory"] = False
         capacity = get_slot_capacity(slot.get("code"))
         unlimited = capacity == UNLIMITED_WAREHOUSE_CAPACITY
         slot["capacity"] = None if unlimited else int(capacity)
@@ -610,9 +638,13 @@ def get_warehouse_layout(layout_id="default"):
                 {"layout_id": layout_id},
             ).fetchone()
         if row is None:
-            return {"layout_id": layout_id, "layout_json": {"slots": []}, "update_time": ""}
+            return {"layout_id": layout_id, "layout_json": enrich_warehouse_layout({"slots": merge_required_warehouse_slots([])}), "update_time": ""}
         raw_json = row[0] if len(row) > 0 else "{}"
         parsed = json.loads(raw_json) if raw_json else {"slots": []}
+        # Required business slots are materialized in the response as well as
+        # when layouts are saved, so older persisted layouts receive DG-WH
+        # without requiring a manual reset.
+        parsed["slots"] = merge_required_warehouse_slots(parsed.get("slots") or [])
         return {"layout_id": layout_id, "layout_json": enrich_warehouse_layout(parsed), "update_time": str(row[1] or "")}
     except Exception as e:
         raise RuntimeError(f"读取库位布局失败: {e}") from e
@@ -726,6 +758,8 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
                 status_before=current_status,
                 status_after=status_after,
             )
+            from crud.workflows import complete_reinbound_tasks_for_machine
+            complete_reinbound_tasks_for_machine(conn, serial_no, operator)
         trans.commit()
         completed_batches = []
         if not is_transfer:
@@ -850,6 +884,8 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
                 status_before=current_status,
                 status_after=status_after,
             )
+            from crud.workflows import complete_reinbound_tasks_for_machine
+            complete_reinbound_tasks_for_machine(conn, serial_no, operator)
         trans.commit()
         completed_batches = []
         if not is_transfer:

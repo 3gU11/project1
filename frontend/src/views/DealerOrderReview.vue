@@ -2,6 +2,7 @@
   <div class="dealer-review-page">
     <PageHeader title="经销商订单审核">
       <template #actions>
+        <el-button @click="contractDraftReview?.open()">合同附件审批</el-button>
         <el-button :loading="syncing" @click="syncCloudOrders">同步云端</el-button>
         <el-button :loading="inventorySyncing" @click="syncCloudInventory">同步库存到云端</el-button>
         <el-button :loading="completedSyncing" @click="syncCompletedCloud">同步完成状态</el-button>
@@ -9,6 +10,7 @@
       </template>
     </PageHeader>
 
+    <ContractDraftReview ref="contractDraftReview" />
     <div v-if="cloudSyncStatus.pending || cloudSyncStatus.failed" class="cloud-sync-strip">
       <span>Cloud pending: <strong>{{ cloudSyncStatus.pending }}</strong></span>
       <span>Failed: <strong :class="{ danger: cloudSyncStatus.failed > 0 }">{{ cloudSyncStatus.failed }}</strong></span>
@@ -28,15 +30,15 @@
         @clear="loadOrders"
       />
       <el-radio-group v-model="filters.status" class="status-tabs" @change="onStatusChange">
-        <el-radio-button label="">全部订单</el-radio-button>
-        <el-radio-button label="todo">待审核</el-radio-button>
-        <el-radio-button label="approved">已通过</el-radio-button>
-        <el-radio-button label="contracted">已转合同</el-radio-button>
-        <el-radio-button label="partial_allocated">部分配货</el-radio-button>
-        <el-radio-button label="allocated">已配货</el-radio-button>
-        <el-radio-button label="rejected">已驳回</el-radio-button>
-        <el-radio-button label="cancelled">已取消</el-radio-button>
-        <el-radio-button label="completed">已完成</el-radio-button>
+        <el-radio-button value="">全部订单</el-radio-button>
+        <el-radio-button value="todo">待审核</el-radio-button>
+        <el-radio-button value="approved">已通过</el-radio-button>
+        <el-radio-button value="contracted">已转合同</el-radio-button>
+        <el-radio-button value="partial_allocated">部分配货</el-radio-button>
+        <el-radio-button value="allocated">已配货</el-radio-button>
+        <el-radio-button value="rejected">已驳回</el-radio-button>
+        <el-radio-button value="cancelled">已取消</el-radio-button>
+        <el-radio-button value="completed">已完成</el-radio-button>
       </el-radio-group>
       <el-button @click="loadOrders">查询</el-button>
     </div>
@@ -298,10 +300,12 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
+import ContractDraftReview from '../components/ContractDraftReview.vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
+const contractDraftReview = ref<InstanceType<typeof ContractDraftReview>>()
 
 type DealerOrder = {
   id: number
@@ -963,6 +967,11 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
     }
     const res = await apiPost<MessageResponse>(`/dealer-orders/${encodeURIComponent(convertForm.sourceOrderNo)}/convert-to-contract`, payload)
     
+    if ((res as any)?.approval_pending) {
+      ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）')
+      window.dispatchEvent(new Event('workflow-pending-updated'))
+      return
+    }
     // 上传附件（如果有选中文件）
     if (convertPickedFiles.value.length > 0) {
       const contractNoStr = res.contract_no || convertForm.contractNo || ''

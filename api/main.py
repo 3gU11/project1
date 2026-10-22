@@ -6,9 +6,10 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode, notifications
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode, notifications, workflows
 
 logger = logging.getLogger(__name__)
+from api.routes import contract_drafts
 
 app = FastAPI(
     title="V8betaVer1.0 API",
@@ -19,6 +20,8 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def on_startup():
+    from contract_bridge.worker import worker_loop
+    app.state.contract_bridge_task = asyncio.create_task(worker_loop())
     from database import init_mysql_tables_v2
     try:
         result = init_mysql_tables_v2()
@@ -26,6 +29,17 @@ async def on_startup():
             logger.info("DB migration: %s", result.get("message", ""))
     except Exception as e:
         logger.warning("DB migration skipped: %s", e)
+    try:
+        from crud.workflows import ensure_workflow_tables, seed_phase1_models, migrate_phase1_workflow_metadata
+        ensure_workflow_tables()
+        from crud.personal_messages import ensure_message_reads
+        ensure_message_reads()
+        from crud.forward_entries import ensure_forward_receipts
+        ensure_forward_receipts()
+        seed_phase1_models()
+        migrate_phase1_workflow_metadata()
+    except Exception as e:
+        logger.warning("workflow tables not started: %s", e)
     try:
         from crud.cloud_sync_outbox import cloud_sync_worker_loop, ensure_cloud_sync_outbox_table
         ensure_cloud_sync_outbox_table()
@@ -50,6 +64,13 @@ async def on_startup():
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    contract_task = getattr(app.state, "contract_bridge_task", None)
+    if contract_task:
+        contract_task.cancel()
+        try:
+            await contract_task
+        except asyncio.CancelledError:
+            pass
     task = getattr(app.state, "cloud_sync_worker_task", None)
     if task:
         task.cancel()
@@ -98,6 +119,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["Workflows"])
 app.include_router(inventory.router, prefix="/api/v1/inventory", tags=["Inventory"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(planning.router, prefix="/api/v1/planning", tags=["Planning"])
@@ -109,6 +131,7 @@ app.include_router(model_dictionary.router, prefix="/api/v1/model-dictionary", t
 app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles"])
 app.include_router(sandbox.router, prefix="/api/v1/sandbox", tags=["Sandbox"])
 app.include_router(dealer_orders.router, prefix="/api/v1/dealer-orders", tags=["DealerOrders"])
+app.include_router(contract_drafts.router, prefix="/api/v1/contract-drafts", tags=["ContractDrafts"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(repair_identity.router, prefix="/api/v1/repair-identity", tags=["RepairIdentity"])
 app.include_router(repair_catalog.router, prefix="/api/v1/repair-model-components", tags=["RepairCatalog"])

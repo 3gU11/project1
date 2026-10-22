@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 from math import ceil
+from functools import wraps
+import time
 from typing import Any
 
 from sqlalchemy import bindparam, text
+from sqlalchemy.exc import OperationalError
 
 from database import get_engine
 from crud.cloud_sync_outbox import (
@@ -575,6 +578,22 @@ def _group_orders(rows: list[dict]) -> list[dict]:
     return orders
 
 
+def _retry_schema_changed_transaction(read):
+    @wraps(read)
+    def wrapped(*args, **kwargs):
+        for attempt in range(3):
+            try:
+                return read(*args, **kwargs)
+            except OperationalError as exc:
+                if getattr(exc.orig, "args", (None,))[0] != 1412 or attempt == 2:
+                    raise
+                # The failed begin() context has rolled back before retrying.
+                # Repeating a statement in the same InnoDB snapshot cannot recover.
+                time.sleep(0.05 * (attempt + 1))
+    return wrapped
+
+
+@_retry_schema_changed_transaction
 def list_dealer_orders(
     status: str = "",
     keyword: str = "",
@@ -704,16 +723,11 @@ def get_availability(conn, order: dict) -> dict:
     summary_batch = _summary_batch_no(order.get("batch_no"), order.get("inventory_type"))
     hold_batch = _order_hold_batch_no(order.get("batch_no"), order.get("inventory_type"))
     model = str(order.get("model") or "").strip()
-    summary_qty = int(
-        conn.execute(
-            text(
-                "SELECT COALESCE(SUM(quantity), 0) FROM wechat_batch_summary "
-                "WHERE batch_no=:batch_no AND model=:model"
-            ),
-            {"batch_no": summary_batch, "model": model},
-        ).scalar()
-        or 0
+    summary_stmt = text(
+        "SELECT COALESCE(SUM(quantity), 0) FROM wechat_batch_summary "
+        "WHERE batch_no=:batch_no AND model=:model"
     )
+    summary_qty = int(conn.execute(summary_stmt, {"batch_no": summary_batch, "model": model}).scalar() or 0)
     occupied_qty = int(
         conn.execute(
             text(
@@ -973,6 +987,7 @@ def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
     return decorated
 
 
+@_retry_schema_changed_transaction
 def preview_dealer_order(order_no: str) -> dict:
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:
