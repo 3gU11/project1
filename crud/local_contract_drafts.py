@@ -4,9 +4,14 @@ from datetime import datetime
 from typing import Any
 from sqlalchemy import text
 from database import get_engine
-from contract_bridge.renderer import render
+from contract_bridge.renderer import render_order_form
 
-REQUIRED = ("supplier_name", "buyer_name", "signing_place", "signed_date", "settlement_terms")
+# 「瑞钧科技办事处订货单」必填项：这四项都能从订单直接推导，缺了说明订单数据本身有问题
+REQUIRED = ("supplier_name", "dealer_name", "signed_date", "buyer_name")
+DEFAULT_SUPPLIER = "苏州瑞钧智能科技有限公司"
+ITEM_FIELDS = ("product", "spec", "qty", "tax")
+ITEM_ROWS = 4
+
 
 def _value(obj: dict[str, Any], *names: str) -> str:
     for name in names:
@@ -15,36 +20,50 @@ def _value(obj: dict[str, Any], *names: str) -> str:
             return str(value).strip()
     return ""
 
+
 def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
+    """把云端经销商订单映射成「订货单」字段。
+
+    表单是纯表格：值单元格一个字段，标签是固定文字，所以这里只产出值，不拼标签。
+    数据源缺字段时留空，由审批人在「编辑字段」里补齐，不要编造商业条款。
+    """
     items = order.get("items") if isinstance(order.get("items"), list) else [order]
+    # 顺序与表单从上到下一致，前端「编辑字段」按这个顺序展示
     fields = {
-        "supplier_name": _value(order, "supplierName", "supplier_name"),
-        "contract_no": _value(order, "contractNo", "contract_no"),
-        "buyer_name": _value(order, "customerName", "customer_name", "buyerName", "buyer_name"),
-        "signing_place": _value(order, "signingPlace", "signing_place"),
-        "signed_date": _value(order, "signedDate", "signed_date"),
-        "delivery_date": _value(order, "deliveryDate", "delivery_date", "expectedDeliveryDate"),
-        "settlement_terms": _value(order, "settlementTerms", "settlement_terms"),
-        "total_upper": _value(order, "totalUpper", "total_upper"),
-        "buyer_address": _value(order, "deliveryAddress", "delivery_address", "buyerAddress", "buyer_address"),
-        "contact_name": _value(order, "contactName", "contact_name"),
-        "contact_phone": _value(order, "contactPhone", "contact_phone"),
-        "special_requirements": _value(order, "specialRequirements", "special_requirements"),
-        "remark": _value(order, "remark", "remarks"),
-        "accessories": _value(order, "accessories"),
+        "supplier_name": _value(order, "supplierName", "supplier_name") or DEFAULT_SUPPLIER,
+        "dealer_name": _value(order, "dealerName", "dealer_name", "agentName", "agent_name"),
+        "office_name": _value(order, "officeName", "office_name", "belongOffice", "belong_office", "regionalOffice", "region"),
+        "signed_date": _value(order, "signedDate", "signed_date", "submitTime", "submit_time", "createdAt", "created_at"),
     }
-    for index in range(1, 5):
-        fields.update({f"item{index}_{suffix}": "" for suffix in ("product", "brand", "spec", "qty", "price")})
-    for index, item in enumerate(items[:4], 1):
+    for index in range(1, ITEM_ROWS + 1):
+        fields.update({f"item{index}_{suffix}": "" for suffix in ITEM_FIELDS})
+    for index, item in enumerate(items[:ITEM_ROWS], 1):
         if not isinstance(item, dict):
             continue
         fields.update({
-            f"item{index}_product": _value(item, "productName", "product_name", "model"),
-            f"item{index}_brand": _value(item, "brand"),
+            # 产品名称跟订单走，订单没传就留空，由审批人补
+            f"item{index}_product": _value(item, "productName", "product_name"),
             f"item{index}_spec": _value(item, "productCode", "product_code", "spec", "model"),
             f"item{index}_qty": _value(item, "quantity", "qty"),
-            f"item{index}_price": _value(item, "unitPrice", "unit_price", "price"),
+            # 税票（含税/不含税）目前订单里没有采集，留空等审批人补
+            f"item{index}_tax": _value(item, "taxIncluded", "tax_included", "tax", "invoiceType", "taxType"),
         })
+    fields.update({
+        "remark": _value(order, "remark", "remarks"),
+        "delivery_date": _value(order, "deliveryDate", "delivery_date", "expectedDeliveryDate"),
+        "settlement_terms": _value(order, "settlementTerms", "settlement_terms"),
+        "buyer_name": _value(order, "customerName", "customer_name", "buyerName", "buyer_name"),
+        "buyer_address": _value(order, "deliveryAddress", "delivery_address", "buyerAddress", "buyer_address"),
+        "contact_name": _value(order, "contactName", "contact_name"),
+        "contact_phone": _value(order, "contactPhone", "contact_phone"),
+        "office_branch": _value(order, "officeBranch", "office_branch", "serviceOffice", "service_office"),
+        # 区域经理通常就是办事处的对接人，订单没有单独的办事处联系人时用它兜底
+        "office_contact": _value(order, "officeContact", "office_contact")
+        or _value(order, "regionalManagerName", "regional_manager_name"),
+        "office_phone": _value(order, "officePhone", "office_phone"),
+        "special_requirements": _value(order, "specialRequirements", "special_requirements",
+                                       "extraRemark", "extra_remark"),
+    })
     return fields
 
 def missing_required(fields: dict[str, str]) -> list[str]:
@@ -129,7 +148,7 @@ def update(draft_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
 def prepare(draft_id: str) -> dict[str, Any]:
     row = get(draft_id)
     if not row: raise KeyError('合同草稿不存在')
-    content, template_hash = render(row['fields'])
+    content, template_hash = render_order_form(row['fields'])
     digest = hashlib.sha256(content).hexdigest()
     with get_engine().begin() as conn:
         conn.execute(text("UPDATE v8_contract_drafts SET state='preview_ready', preview=:preview, preview_hash=:hash, template_hash=:template, updated_at=:now WHERE id=:id"), {"preview": content, "hash": digest, "template": template_hash, "now": datetime.now(), "id": draft_id})
