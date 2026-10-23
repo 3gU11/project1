@@ -11,7 +11,8 @@ class OrderProgressTests(unittest.TestCase):
         return {"流水号": sn, "机型": model, **extra}
 
     def test_planning_stages(self):
-        self.assertEqual(self.progress(), "待规划")
+        # 没挂合同和「合同未规划」是两回事，分别给标签
+        self.assertEqual(self.progress(), "未关联合同")
         self.assertEqual(self.progress(contracts=[{"状态": "已规划"}]), "已规划")
         self.assertEqual(self.progress(contracts=[{"状态": "已规划"}, {"状态": "待规划"}]), "待规划")
 
