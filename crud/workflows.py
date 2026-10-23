@@ -244,7 +244,7 @@ def seed_phase1_models() -> None:
         ('contract-cancel', '取消合同', '合同流程', '逆向', '需要审批', '合同', '整单', 0),
         ('model-dict-delete', '删除机型字典', '基础资料流程', '逆向', '需要审批', '机型字典', '基础资料对象', 0),
         ('order-delete', '删除订单', '订单流程', '逆向', '需要审批', '订单', '整单', 0),
-        ('allocation-recall', '撤回配货', '配货流程', '逆向', '需要审批', '配货单', '整单', 0),
+        ('allocation-recall', '撤回配货', '配货流程', '逆向', '自动通过', '配货单', '整单', 0),
         ('shipment-recall', '发货撤回', '发货流程', '逆向', '自动通过', '发货单', '整单', 0),
         ('customer-finished-recall', '客户成品核销发货撤回', '客户成品流程', '逆向', '需要审批', '客户成品', '整单', 0),
     ]
@@ -253,8 +253,7 @@ def seed_phase1_models() -> None:
             conn.execute(text("""INSERT INTO workflow_models
                 (workflow_key,name,category_key,direction,processing_type,business_object,execution_scope,is_required,status)
                 VALUES (:key,:name,:category,:direction,:processing,:object,:scope,:required,'已发布')
-                ON DUPLICATE KEY UPDATE name=VALUES(name), category_key=VALUES(category_key),
-                    processing_type=VALUES(processing_type)"""), {
+                ON DUPLICATE KEY UPDATE name=VALUES(name), category_key=VALUES(category_key)"""), {
                     'key': key, 'name': name, 'category': category, 'direction': direction,
                     'processing': processing, 'object': obj, 'scope': scope, 'required': required,
                 })
@@ -337,14 +336,14 @@ def migrate_phase1_workflow_metadata() -> None:
             if changed:
                 conn.execute(text("UPDATE workflow_model_versions SET node_snapshot=:snapshot WHERE id=:id"),
                              {'id': row['id'], 'snapshot': _json(snapshot)})
-        # Existing phase-one snapshots for automatic shipment recalls were
-        # created before the no-approval policy. Replace only the known
-        # default graph; custom snapshots are left untouched.
-        automatic_recall_keys = ('shipment-recall',)
+        # Existing phase-one snapshots for automatic recalls were created before
+        # the no-approval policy. Replace only the known default graph; custom
+        # 撤回类流程只在「图还没建」时补一张默认图（发起→执行→通知入库员→结束）；
+        # 已经有图的版本一律不动，审批节点由流程模型编辑器决定。
         rows = conn.execute(text("""SELECT v.id, m.workflow_key, v.node_snapshot
             FROM workflow_model_versions v
             JOIN workflow_models m ON m.id=v.model_id
-            WHERE m.workflow_key IN ('shipment-recall')
+            WHERE m.workflow_key IN ('shipment-recall', 'allocation-recall')
               AND v.status='已发布'""")).mappings().all()
         for row in rows:
             raw = row.get('node_snapshot')
@@ -353,15 +352,8 @@ def migrate_phase1_workflow_metadata() -> None:
             except (TypeError, ValueError):
                 snapshot = {}
             nodes = snapshot.get('nodes') if isinstance(snapshot, dict) else None
-            node_types = {str(node.get('type') or '') for node in nodes} if isinstance(nodes, list) else set()
-            has_inbound_notify = any(
-                isinstance(node, dict)
-                and str(node.get('type') or '') == 'notify'
-                and 'Inbound' in (node.get('notifyRoles') or [])
-                for node in (nodes or [])
-            )
-            if node_types == {'start', 'execute', 'notify', 'end'} and has_inbound_notify:
-                continue
+            if isinstance(nodes, list) and nodes:
+                continue  # 已有模型图，保留用户配置
             snapshot = {
                 'nodes': [
                     {'id': 'start', 'type': 'start', 'label': '发起', 'x': 35, 'y': 120},
@@ -377,8 +369,6 @@ def migrate_phase1_workflow_metadata() -> None:
             }
             conn.execute(text("UPDATE workflow_model_versions SET node_snapshot=:snapshot WHERE id=:id"),
                          {'id': row['id'], 'snapshot': _json(snapshot)})
-            conn.execute(text("UPDATE workflow_models SET processing_type='自动通过' WHERE workflow_key=:key"),
-                         {'key': row['workflow_key']})
 
 
 
@@ -556,6 +546,12 @@ REVERSE_WORKFLOW_KEYS = set(FORWARD_ENTRY_ACTIONS) | {
     'allocation-recall', 'shipment-recall', 'customer-finished-recall',
 }
 
+# 这两条撤回默认自动通过；是否审批由流程模型图的节点决定，可在模型编辑器里改。
+AUTO_APPROVAL_RECALLS = {
+    'shipment-recall': '发货撤回',
+    'allocation-recall': '撤回配货',
+}
+
 # Phase 1 business policy. Execution and derived-task creation are implemented
 # in later phases; keeping the policy centralized prevents each executor from
 # inventing its own approval semantics.
@@ -563,7 +559,7 @@ REVERSE_WORKFLOW_RULES = {
     'contract-cancel': {'approval': 'required', 'derived_task': 'conditional-reinbound'},
     'model-dict-delete': {'approval': 'required', 'derived_task': 'none'},
     'order-delete': {'approval': 'required', 'derived_task': 'conditional-reinbound'},
-    'allocation-recall': {'approval': 'required', 'derived_task': 'conditional-reinbound'},
+    'allocation-recall': {'approval': 'automatic', 'derived_task': 'conditional-reinbound'},
     'shipment-recall': {'approval': 'automatic', 'derived_task': 'conditional-reinbound'},
     # 发货撤回及客户成品核销撤回均自动通过；需要回库时只派生重入库通知。
     'customer-finished-recall': {'approval': 'required', 'derived_task': 'conditional-reinbound'},
@@ -759,8 +755,6 @@ def validate_workflow_snapshot(snapshot: dict, workflow_key: str | None = None) 
 
     min_approvals, max_approvals, min_executes, max_executes = count_path(start_nodes[0])
     approval_nodes = [node for node in by_id.values() if str(node.get('type') or '').lower() in {'approval', 'approve'}]
-    if workflow_key == 'shipment-recall' and approval_nodes:
-        raise ValueError('发货撤回按业务规则自动通过，不能配置审批节点')
     if len(approval_nodes) > 1 or max_approvals > 1:
         raise ValueError('当前流程运行时只支持一个审批节点，且必须供所有分支共用')
     if approval_nodes and min_approvals != 1:

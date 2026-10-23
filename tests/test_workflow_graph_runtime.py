@@ -1,6 +1,9 @@
 import pytest
 
-from crud.workflows import _advance_approved_graph, validate_workflow_snapshot, workflow_action_for_instance
+from crud.workflows import (
+    _advance_approved_graph, _snapshot_requires_approval,
+    validate_workflow_snapshot, workflow_action_for_instance,
+)
 
 
 class ScalarResult:
@@ -212,12 +215,17 @@ def test_reverse_model_requires_compatible_action_on_every_path():
     assert validate_workflow_snapshot(snapshot, 'contract-cancel') is snapshot
 
 
-def test_shipment_recall_model_cannot_add_an_approval_node():
-    snapshot = {
+@pytest.mark.parametrize('workflow_key,action', [
+    ('shipment-recall', 'recall_shipment'),
+    ('allocation-recall', 'recall_allocation'),
+])
+def test_recall_models_follow_the_graph_when_deciding_approval(workflow_key, action):
+    """撤回类流程是否审批，只看模型图里有没有审批节点，代码不再拦。"""
+    with_approval = {
         'nodes': [
             {'id': 'start', 'type': 'start'},
             {'id': 'approval', 'type': 'approval', 'approvalRoles': ['Boss']},
-            {'id': 'execute', 'type': 'execute', 'action': 'recall_shipment'},
+            {'id': 'execute', 'type': 'execute', 'action': action},
             {'id': 'end', 'type': 'end'},
         ],
         'edges': [
@@ -226,5 +234,19 @@ def test_shipment_recall_model_cannot_add_an_approval_node():
             {'source': 'execute', 'target': 'end'},
         ],
     }
-    with pytest.raises(ValueError, match='发货撤回按业务规则自动通过'):
-        validate_workflow_snapshot(snapshot, 'shipment-recall')
+    validate_workflow_snapshot(with_approval, workflow_key)
+    assert _snapshot_requires_approval(with_approval) is True
+
+    auto = {
+        'nodes': [
+            {'id': 'start', 'type': 'start'},
+            {'id': 'execute', 'type': 'execute', 'action': action},
+            {'id': 'end', 'type': 'end'},
+        ],
+        'edges': [
+            {'source': 'start', 'target': 'execute'},
+            {'source': 'execute', 'target': 'end'},
+        ],
+    }
+    validate_workflow_snapshot(auto, workflow_key)
+    assert _snapshot_requires_approval(auto) is False
