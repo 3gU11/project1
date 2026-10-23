@@ -7,6 +7,8 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 const API_TARGET = process.env.VITE_PROXY_TARGET || 'http://localhost:8000'
 const PHOTO_API_TARGET = process.env.VITE_PHOTO_API_TARGET || 'http://localhost:3001'
+// 受限环境下（沙箱只读 src）构建会卡在写 *.d.ts，用 VITE_SKIP_DTS=1 跳过声明文件生成。
+const DTS = process.env.VITE_SKIP_DTS ? false : undefined
 const photoApiProxy = {
   target: PHOTO_API_TARGET,
   changeOrigin: true,
@@ -18,11 +20,11 @@ export default defineConfig({
     AutoImport({
       imports: ['vue', 'vue-router', 'pinia'],
       resolvers: [ElementPlusResolver()],
-      dts: 'src/auto-imports.d.ts',
+      dts: DTS === false ? false : 'src/auto-imports.d.ts',
     }),
     Components({
       resolvers: [ElementPlusResolver({ importStyle: 'css' })],
-      dts: 'src/components.d.ts',
+      dts: DTS === false ? false : 'src/components.d.ts',
     }),
   ],
   resolve: {

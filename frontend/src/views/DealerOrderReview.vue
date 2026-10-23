@@ -2,7 +2,6 @@
   <div class="dealer-review-page">
     <PageHeader title="经销商订单审核">
       <template #actions>
-        <el-button @click="contractDraftReview?.open()">合同附件审批</el-button>
         <el-button :loading="syncing" @click="syncCloudOrders">同步云端</el-button>
         <el-button :loading="inventorySyncing" @click="syncCloudInventory">同步库存到云端</el-button>
         <el-button :loading="completedSyncing" @click="syncCompletedCloud">同步完成状态</el-button>
@@ -10,7 +9,13 @@
       </template>
     </PageHeader>
 
-    <ContractDraftReview ref="contractDraftReview" />
+    <ContractDraftReview
+      ref="contractDraftReview"
+      :confirm-order-approve="approveContractReviewOrder"
+      :can-approve-order="!!contractReviewOrder && canApprove(contractReviewOrder)"
+      @done="onContractReviewDone"
+      @approve-order="onApproveWithoutContract"
+    />
     <div v-if="cloudSyncStatus.pending || cloudSyncStatus.failed" class="cloud-sync-strip">
       <span>Cloud pending: <strong>{{ cloudSyncStatus.pending }}</strong></span>
       <span>Failed: <strong :class="{ danger: cloudSyncStatus.failed > 0 }">{{ cloudSyncStatus.failed }}</strong></span>
@@ -88,10 +93,12 @@
       <el-table-column prop="remark" label="原备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="extra_remark" label="附加备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="ERMQ" label="需改数量" width="80" align="center" />
-      <el-table-column label="操作" width="260" align="center" fixed="right">
+      <el-table-column label="操作" width="300" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
-            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="approveOrder(row)">通过</el-button>
+            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="openContractReview(row)">
+              {{ isFactoryPending(row) ? '通过' : '预览并审批' }}
+            </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
             <el-button size="small" type="warning" :disabled="!canConvertDealerOrder(row)" @click.stop="openConvertDialog(row._order || row)">
               转合同
@@ -181,7 +188,9 @@
         <div class="note-box">{{ selectedOrder.review_note || '-' }}</div>
 
         <div class="drawer-actions">
-          <el-button :disabled="!canApprove(selectedOrder)" @click="approveOrder(selectedOrder)">通过</el-button>
+          <el-button :disabled="!canApprove(selectedOrder)" @click="openContractReview(selectedOrder)">
+            {{ isFactoryPending(selectedOrder) ? '通过' : '预览并审批' }}
+          </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
           <el-button type="warning" :disabled="!canConvertDealerOrder(selectedOrder)" @click="openConvertDialog(selectedOrder)">转合同</el-button>
         </div>
@@ -871,6 +880,49 @@ const approveOrder = async (row: DealerOrder) => {
   } catch (err: any) {
     if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '操作失败')
   }
+}
+
+// 合同附件审批已并入订单行：点"预览并审批"只加载该订单自己的合同附件。
+const contractReviewOrder = ref<DealerOrder | null>(null)
+
+const openContractReview = async (row: DealerOrder) => {
+  const target = (row as DealerOrderTableRow)._order || row
+  if (!canApprove(target)) return
+  // 新备注复审不是合同审批，沿用原来的直接通过。
+  if (isFactoryPending(target)) {
+    await approveOrder(target)
+    return
+  }
+  contractReviewOrder.value = target
+  await contractDraftReview.value?.openForOrder(target.order_no)
+}
+
+const approveContractReviewOrder = async () => {
+  const target = contractReviewOrder.value
+  if (!target) throw new Error('未选择订单')
+  await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/approve`, {
+    note: String(target.remark || ''),
+  })
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  void loadOrders(true)
+}
+
+const onContractReviewDone = async () => {
+  contractReviewOrder.value = null
+  await loadOrders()
+  if (selectedOrderNo.value) {
+    try {
+      await loadPreview(selectedOrderNo.value)
+    } catch {
+      preview.value = null
+    }
+  }
+}
+
+const onApproveWithoutContract = async () => {
+  const target = contractReviewOrder.value
+  contractReviewOrder.value = null
+  if (target) await approveOrder(target)
 }
 
 const rejectOrder = async (row: DealerOrder) => {
