@@ -1385,9 +1385,18 @@ def execute_allocation_recall(instance_no: str, worker_id: str):
             sales_id=NULL, due_date=NULL, is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
             WHERE serial_no IN :sns OR forecast_serial_no IN :sns""").bindparams(bindparam('sns', expanding=True)), {'sns': serials})
         order_ids = sorted({str(r.get('占用订单号') or '').strip() for r in rows if str(r.get('占用订单号') or '').strip()})
-        if order_ids:
-            conn.execute(text("""UPDATE sales_orders SET status='active'
-                WHERE `订单号` IN :orders AND status IN ('ready','allocated','packed')""").bindparams(bindparam('orders', expanding=True)), {'orders': order_ids})
+        rolled_back_contracts = {}
+        order_status_after = {}
+        for recalled_order_id in order_ids:
+            # 机台和 units 都已释放，合同如果实际没有占用就该回到待规划并解绑，
+            # 否则派生标签仍按"已转订单 + 有批次预占"算成已规划，订单继续留在配货列表里。
+            rolled = _rollback_unallocated_contracts(conn, recalled_order_id)
+            if rolled:
+                rolled_back_contracts[recalled_order_id] = rolled
+            # 按剩余占用重新判定订单状态，不再只认 ready/allocated/packed 三个值。
+            new_status = _recompute_order_status_after_recall(conn, recalled_order_id)
+            if new_status:
+                order_status_after[recalled_order_id] = new_status
         conn.execute(text("""UPDATE workflow_execution_attempts SET status='已完成', completed_at=CURRENT_TIMESTAMP(6),
             validation_result=:validation WHERE id=:attempt AND lease_token=:token AND status='执行中'"""), {
             'attempt': lease['id'], 'token': lease['lease_token'],
@@ -1406,14 +1415,22 @@ def execute_allocation_recall(instance_no: str, worker_id: str):
             VALUES (:id,'执行完成',:worker,'执行中',:after,:detail)"""), {
             'id': instance['id'], 'worker': worker_id,
                 'after': final_status,
-            'detail': _json({'count': len(serials), 'action': 'allocation-recall'}),
+            'detail': _json({'count': len(serials), 'action': 'allocation-recall',
+                             'rolled_back_contracts': rolled_back_contracts,
+                             'order_status_after': order_status_after}),
         })
         conn.execute(text("""INSERT INTO workflow_outbox_events
             (instance_id,event_type,idempotency_key,payload)
             VALUES (:id,'逆向执行完成',:key,:payload)
             ON DUPLICATE KEY UPDATE idempotency_key=idempotency_key"""),
             {'id': instance['id'], 'key': f"{instance_no}:completed", 'payload': _json({'workflow_key': instance['workflow_key'], 'count': len(serials)})})
-        return {'instance_no': instance_no, 'status': final_status, 'count': len(serials), 'serials': serials, 'derived_tasks': derived_tasks}
+        result_payload = {'instance_no': instance_no, 'status': final_status, 'count': len(serials),
+                          'serials': serials, 'derived_tasks': derived_tasks,
+                          'rolled_back_contracts': rolled_back_contracts,
+                          'order_status_after': order_status_after}
+    # 提交之后再清缓存，避免读线程用旧数据把缓存又填满。
+    _clear_order_planning_caches()
+    return result_payload
 
 
 def _shipment_recall_eligible(machine):
@@ -1617,6 +1634,126 @@ def mark_execution_failure(instance_no: str, worker_id: str, error: str):
         return True
 
 
+_SPOT_ONLY_BATCHES = {'现货(spot)', '现货', 'spot', '库存中', 'finished-stock', '库存'}
+
+
+def _rollback_unallocated_contracts(conn, order_id: str) -> list[str]:
+    """把"已转订单但实际没占用任何机台"的合同恢复为待规划并解绑。
+
+    判定口径：合同下没有已出库/已发货/库存中的机台，也没有任何 units 预占，
+    且 `指定批次/来源` 为空或只写了"现货/库存"这类非生产批次。
+    配现货本身不锁实物（真实占用一定落在 units / finished_goods_data 上），
+    所以空壳单回滚是安全的；真正锁定了生产批次的合同（如 {"09-11": 1}）不动，需走撤销规划流程。
+
+    调用前必须已经清空该订单的 finished_goods_data 占用与 units 绑定，否则 NOT EXISTS 不成立。
+    返回被回滚的合同号列表。
+    """
+    candidates = conn.execute(text("""
+        SELECT `合同号`, `指定批次/来源` FROM factory_plan
+        WHERE TRIM(COALESCE(`订单号`, ''))=:oid
+          AND TRIM(COALESCE(`状态`, ''))='已转订单'
+          AND NOT EXISTS (
+              SELECT 1 FROM finished_goods_data fg
+              WHERE TRIM(COALESCE(fg.`合同号`, ''))=TRIM(COALESCE(factory_plan.`合同号`, ''))
+                AND TRIM(COALESCE(fg.`状态`, '')) IN ('已出库', '已发货', '库存中')
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM units u
+              WHERE TRIM(COALESCE(u.contract_no, ''))=TRIM(COALESCE(factory_plan.`合同号`, ''))
+                AND TRIM(COALESCE(u.status, '')) IN ('Confirmed', 'In_Production')
+          )
+    """), {'oid': order_id}).mappings().all()
+    rollback_contract_ids = []
+    for candidate in candidates:
+        candidate_cid = str(candidate.get('合同号') or '').strip()
+        raw_batch = candidate.get('指定批次/来源')
+        if not candidate_cid:
+            continue
+        try:
+            parsed_batch = json.loads(raw_batch) if isinstance(raw_batch, str) and raw_batch.strip() else (raw_batch or {})
+        except (TypeError, ValueError):
+            parsed_batch = None
+        if parsed_batch is None:
+            continue  # 批次内容解析不了就不动，留给人工确认
+        if isinstance(parsed_batch, dict):
+            batch_keys = []
+            for key, value in parsed_batch.items():
+                try:
+                    if float(value or 0) <= 0:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+                batch_keys.append(str(key).strip())
+        elif isinstance(parsed_batch, list):
+            batch_keys = [str(key).strip() for key in parsed_batch]
+        else:
+            batch_keys = []
+        if all(key.lower() in _SPOT_ONLY_BATCHES for key in batch_keys):
+            rollback_contract_ids.append(candidate_cid)
+    if not rollback_contract_ids:
+        return []
+    conn.execute(text("""UPDATE factory_plan SET `状态`='待规划', `订单号`=NULL, `指定批次/来源`=NULL
+        WHERE `合同号` COLLATE utf8mb4_general_ci IN :cids""").bindparams(
+            bindparam('cids', expanding=True)), {'cids': rollback_contract_ids})
+    if conn.execute(text("SHOW TABLES LIKE 'plan_import'")).first():
+        try:
+            conn.execute(text("""UPDATE plan_import SET `订单号`=NULL
+                WHERE `合同号` COLLATE utf8mb4_general_ci IN :cids""").bindparams(
+                    bindparam('cids', expanding=True)), {'cids': rollback_contract_ids})
+        except Exception:
+            pass
+    return rollback_contract_ids
+
+
+def _recompute_order_status_after_recall(conn, order_id: str) -> str | None:
+    """撤回后按"实际还剩多少机台占用"重新判定订单状态。
+
+    原来只写死 `status IN ('ready','allocated','packed')`，撤回发生在别的状态
+    （如批次预占的 pending_review）时 UPDATE 命中 0 行，订单状态原地不动。
+    这里改为看残留：没有任何机台/units 占用就回到 active，否则保持原状态不动。
+    终态（deleted/done/shipped 等）一律不碰。
+    """
+    remaining_row = conn.execute(text("""
+        SELECT COUNT(*) AS n FROM finished_goods_data
+        WHERE TRIM(COALESCE(`占用订单号`, ''))=:oid
+          AND TRIM(COALESCE(`状态`, '')) IN ('待发货', '机台')
+    """), {'oid': order_id}).mappings().first()
+    remaining = int((remaining_row or {}).get('n') or 0)
+    if remaining == 0:
+        remaining_row = conn.execute(text("""
+            SELECT COUNT(*) AS n FROM units
+            WHERE TRIM(COALESCE(sales_id, ''))=:oid
+              AND TRIM(COALESCE(status, '')) IN ('Confirmed', 'In_Production')
+        """), {'oid': order_id}).mappings().first()
+        remaining = int((remaining_row or {}).get('n') or 0)
+    if remaining:
+        return None
+    changed = conn.execute(text("""
+        UPDATE sales_orders SET status='active'
+        WHERE TRIM(COALESCE(`订单号`, ''))=:oid
+          AND status IN ('ready', 'allocated', 'packed', 'pending_review')
+    """), {'oid': order_id})
+    return 'active' if changed.rowcount else None
+
+
+def _clear_order_planning_caches():
+    """订单/合同/库存读接口都有缓存，业务写完必须显式清，否则页面读到旧数据。"""
+    try:
+        from crud.orders import get_orders, get_orders_v2
+        for _loader in (get_orders, get_orders_v2):
+            if hasattr(_loader, 'cache_clear'):
+                _loader.cache_clear()
+    except Exception:
+        pass
+    try:
+        from crud.planning import get_factory_plan, get_factory_plan_v2
+        for _loader in (get_factory_plan, get_factory_plan_v2):
+            if hasattr(_loader, 'cache_clear'):
+                _loader.cache_clear()
+    except Exception:
+        pass
+
+
 def execute_order_delete(instance_no: str, worker_id: str):
     """Soft-delete an order after approval and release only non-shipped allocations."""
     ensure_workflow_tables()
@@ -1664,67 +1801,9 @@ def execute_order_delete(instance_no: str, worker_id: str):
         conn.execute(text("""UPDATE units SET contract_no=NULL, customer=NULL, dealer_name=NULL,
             sales_id=NULL, due_date=NULL, is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
             WHERE TRIM(COALESCE(sales_id, ''))=:oid"""), {'oid': order_id})
-        # 订单删除后，把"已转订单但实际没有占用任何机台"的合同恢复为待规划并解绑。
+        # 订单删除后，把"已转订单但实际没有占用任何机台"的合同恢复为待规划并解绑，
         # 否则合同会永久停在已转订单、绑定一个已删除订单：既不能再做批次规划，也不能取消。
-        # 判定口径：合同下没有已出库/已发货/库存中的机台，也没有任何 units 预占，
-        # 且 `指定批次/来源` 为空或只写了"现货/库存"这类非生产批次。
-        # 配现货本身不锁实物（真实占用一定落在 units / finished_goods_data 上），
-        # 所以"现货假规划"的空壳单删除后应当回滚，否则合同就卡死在已转订单。
-        # 真正锁定了生产批次的合同（如 {"09-11": 1}）不动，需走撤销规划流程。
-        _spot_only_batches = {'现货(spot)', '现货', 'spot', '库存中', 'finished-stock', '库存'}
-        rollback_contract_ids = []
-        rollback_candidates = conn.execute(text("""
-            SELECT `合同号`, `指定批次/来源` FROM factory_plan
-            WHERE TRIM(COALESCE(`订单号`, ''))=:oid
-              AND TRIM(COALESCE(`状态`, ''))='已转订单'
-              AND NOT EXISTS (
-                  SELECT 1 FROM finished_goods_data fg
-                  WHERE TRIM(COALESCE(fg.`合同号`, ''))=TRIM(COALESCE(factory_plan.`合同号`, ''))
-                    AND TRIM(COALESCE(fg.`状态`, '')) IN ('已出库', '已发货', '库存中')
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM units u
-                  WHERE TRIM(COALESCE(u.contract_no, ''))=TRIM(COALESCE(factory_plan.`合同号`, ''))
-                    AND TRIM(COALESCE(u.status, '')) IN ('Confirmed', 'In_Production')
-              )
-        """), {'oid': order_id}).fetchall()
-        for candidate in rollback_candidates:
-            candidate_cid = str(candidate[0] or '').strip()
-            raw_batch = candidate[1]
-            if not candidate_cid:
-                continue
-            try:
-                parsed_batch = json.loads(raw_batch) if isinstance(raw_batch, str) and raw_batch.strip() else (raw_batch or {})
-            except (TypeError, ValueError):
-                parsed_batch = None
-            if parsed_batch is None:
-                continue  # 批次内容解析不了就不动，留给人工确认
-            if isinstance(parsed_batch, dict):
-                batch_keys = []
-                for key, value in parsed_batch.items():
-                    try:
-                        if float(value or 0) <= 0:
-                            continue
-                    except (TypeError, ValueError):
-                        pass
-                    batch_keys.append(str(key).strip())
-            elif isinstance(parsed_batch, list):
-                batch_keys = [str(key).strip() for key in parsed_batch]
-            else:
-                batch_keys = []
-            if all(key.lower() in _spot_only_batches for key in batch_keys):
-                rollback_contract_ids.append(candidate_cid)
-        if rollback_contract_ids:
-            conn.execute(text("""UPDATE factory_plan SET `状态`='待规划', `订单号`=NULL, `指定批次/来源`=NULL
-                WHERE `合同号` COLLATE utf8mb4_general_ci IN :cids""").bindparams(
-                    bindparam('cids', expanding=True)), {'cids': rollback_contract_ids})
-            if conn.execute(text("SHOW TABLES LIKE 'plan_import'")).first():
-                try:
-                    conn.execute(text("""UPDATE plan_import SET `订单号`=NULL
-                        WHERE `合同号` COLLATE utf8mb4_general_ci IN :cids""").bindparams(
-                            bindparam('cids', expanding=True)), {'cids': rollback_contract_ids})
-                except Exception:
-                    pass
+        _rollback_unallocated_contracts(conn, order_id)
         changed = conn.execute(text("UPDATE sales_orders SET status='deleted', delete_reason=:reason, row_version=COALESCE(row_version, 1)+1 WHERE `订单号`=:oid AND COALESCE(row_version, 1)=:version"),
                      {'oid': order_id, 'reason': f'逆向审批删除:{instance_no}', 'version': order['_row_version']})
         if changed.rowcount != 1:
@@ -1742,16 +1821,7 @@ def execute_order_delete(instance_no: str, worker_id: str):
                                   force_reinbound=use_reinbound,
                                   reinbound_object_ids=reinbound_object_ids)
     # Clear only after commit, so readers cannot refill caches from pre-delete data.
-    from crud.orders import get_orders, get_orders_v2
-    get_orders.cache_clear()
-    get_orders_v2.cache_clear()
-    try:
-        from crud.planning import get_factory_plan, get_factory_plan_v2
-        for _loader in (get_factory_plan, get_factory_plan_v2):
-            if hasattr(_loader, "cache_clear"):
-                _loader.cache_clear()
-    except Exception:
-        pass
+    _clear_order_planning_caches()
     return {'instance_no': instance_no, 'status': '已完成', 'business_id': order_id}
 
 
