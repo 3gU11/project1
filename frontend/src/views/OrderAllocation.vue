@@ -153,7 +153,7 @@
               <el-table-column prop="合同备注" label="合同备注" min-width="160" />
             </el-table>
             <div class="ops">
-              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 提交撤回审批</el-button>
+              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 撤回配货</el-button>
               <el-button type="success" :loading="saving" @click="completeAllocation">配货完成</el-button>
             </div>
             </template>
@@ -673,7 +673,7 @@ const releaseSelected = async () => {
   saving.value = true
   try {
     const serials = [...selectedAllocatedSerials.value]
-    const res = await apiPost<{ data?: { instance_no?: string }; created?: boolean }>('/workflows/reverse/instances', {
+    const res = await apiPost<{ data?: { instance_no?: string; status?: string }; created?: boolean }>('/workflows/reverse/instances', {
       workflow_key: 'allocation-recall',
       business_type: '订单配货',
       business_id: selectedOrderId.value,
@@ -681,7 +681,11 @@ const releaseSelected = async () => {
       reason: `订单 ${selectedOrderId.value} 撤回配货：${serials.join('、')}`,
       items: serials.map((serialNo) => ({ object_type: '机台', object_id: serialNo })),
     })
-    ElMessage.success(`撤回审批已提交${res.data?.instance_no ? `：${res.data.instance_no}` : ''}`)
+    // 撤回配货已改为自动通过：正常情况下直接执行完，返回 待派生处理/已完成
+    const status = res.data?.status
+    if (status === '待派生处理') ElMessage.success('已撤回，机台回到待入库并已生成重入库任务')
+    else if (status === '已完成') ElMessage.success('已撤回，机台回到待入库')
+    else ElMessage.success('已提交，等待执行')
     selectedAllocatedSerials.value = []
     await refreshCurrentOrder()
   } catch (err: any) {

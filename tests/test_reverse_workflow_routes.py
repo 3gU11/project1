@@ -68,18 +68,19 @@ def test_only_boss_submission_executes_approved_contract_automatically(monkeypat
     assert result['data']['status'] == ('已完成' if expected else '审批中')
 
 
-def test_shipment_recall_submission_runs_automatically_and_uses_model_action(monkeypatch):
+def test_reverse_submission_runs_automatically_and_uses_model_action(monkeypatch):
+    """自动通过的逆向流程：提交后立即执行并派发通知。"""
     calls = []
     monkeypatch.setattr(workflow_routes, 'create_reverse_instance', lambda **_kwargs: ({'instance_no': 'WF-1', 'status': '已通过'}, True))
     monkeypatch.setattr(workflow_routes, 'acquire_execution_lease', lambda no, user: calls.append(('lease', no, user)))
-    monkeypatch.setattr(workflow_routes, 'workflow_action_for_instance', lambda no: 'recall_shipment')
-    monkeypatch.setattr(workflow_routes, 'execute_shipment_recall', lambda no, user: calls.append(('execute', no, user)) or {'instance_no': no, 'status': '待派生处理'})
+    monkeypatch.setattr(workflow_routes, 'workflow_action_for_instance', lambda no: 'recall_allocation')
+    monkeypatch.setattr(workflow_routes, 'execute_allocation_recall', lambda no, user: calls.append(('execute', no, user)) or {'instance_no': no, 'status': '待派生处理'})
     monkeypatch.setattr(workflow_routes, 'dispatch_pending_model_notifications', lambda no: calls.append(('notify', no)))
 
     result = workflow_routes.submit_reverse_instance(
         ReverseCreateRequest(
-            workflow_key='shipment-recall', business_type='机台', business_id='SN-1',
-            idempotency_key='shipment-recall:SN-1', items=[{'object_type': '机台', 'object_id': 'SN-1'}],
+            workflow_key='allocation-recall', business_type='订单配货', business_id='SO-1',
+            idempotency_key='allocation-recall:SO-1', items=[{'object_type': '机台', 'object_id': 'SN-1'}],
         ),
         {'username': 'shipper'},
     )
@@ -88,21 +89,35 @@ def test_shipment_recall_submission_runs_automatically_and_uses_model_action(mon
     assert calls == [('lease', 'WF-1', 'shipper'), ('execute', 'WF-1', 'shipper'), ('notify', 'WF-1')]
 
 
-def test_shipment_recall_notification_error_does_not_fail_completed_business_action(monkeypatch):
+def test_reverse_notification_error_does_not_fail_completed_business_action(monkeypatch):
     monkeypatch.setattr(workflow_routes, 'create_reverse_instance', lambda **_kwargs: ({'instance_no': 'WF-2', 'status': '已通过'}, True))
     monkeypatch.setattr(workflow_routes, 'acquire_execution_lease', lambda *_args: None)
-    monkeypatch.setattr(workflow_routes, 'workflow_action_for_instance', lambda _no: 'recall_shipment')
-    monkeypatch.setattr(workflow_routes, 'execute_shipment_recall', lambda *_args: {'instance_no': 'WF-2', 'status': '已完成'})
+    monkeypatch.setattr(workflow_routes, 'workflow_action_for_instance', lambda _no: 'recall_allocation')
+    monkeypatch.setattr(workflow_routes, 'execute_allocation_recall', lambda *_args: {'instance_no': 'WF-2', 'status': '已完成'})
     monkeypatch.setattr(workflow_routes, 'dispatch_pending_model_notifications', lambda _no: (_ for _ in ()).throw(RuntimeError('offline')))
     monkeypatch.setattr(workflow_routes, 'mark_execution_failure', lambda *_args: pytest.fail('business success must not be marked failed'))
 
     result = workflow_routes.submit_reverse_instance(
         ReverseCreateRequest(
-            workflow_key='shipment-recall', business_type='机台', business_id='SN-2',
-            idempotency_key='shipment-recall:SN-2', items=[{'object_type': '机台', 'object_id': 'SN-2'}],
+            workflow_key='allocation-recall', business_type='订单配货', business_id='SO-2',
+            idempotency_key='allocation-recall:SO-2', items=[{'object_type': '机台', 'object_id': 'SN-2'}],
         ),
         {'username': 'shipper'},
     )
 
     assert result['data']['status'] == '已完成'
     assert result['data']['notification_delivery_pending'] is True
+
+
+def test_shipment_recall_is_rejected_because_shipped_machines_cannot_be_recalled():
+    """发货撤回只允许在待发货阶段做；已发货的机台必须走退换货处理。"""
+    with pytest.raises(HTTPException) as excinfo:
+        workflow_routes.submit_reverse_instance(
+            ReverseCreateRequest(
+                workflow_key='shipment-recall', business_type='机台', business_id='SN-9',
+                idempotency_key='shipment-recall:SN-9', items=[{'object_type': '机台', 'object_id': 'SN-9'}],
+            ),
+            {'username': 'shipper'},
+        )
+    assert excinfo.value.status_code == 409
+    assert '退换货处理' in str(excinfo.value.detail)

@@ -165,6 +165,10 @@ def submit_reverse_instance(payload: ReverseCreateRequest,
         from crud.forward_entries import submitting
         if payload.workflow_key in FORWARD_ENTRY_ACTIONS and not submitting():
             raise ValueError('请从对应业务页面发起此流程')
+        # 发货撤回只允许在「待发货」阶段做（走 allocation-recall）。
+        # 机台一旦已出库/已发货，就只能走退换货处理，不能再撤回。
+        if payload.workflow_key == 'shipment-recall':
+            raise ValueError('已发货的机台不能撤回，请到「发货复核 → 退换货处理」办理退回')
         if payload.workflow_key in {'order-delete', 'contract-cancel'}:
             column = '占用订单号' if payload.workflow_key == 'order-delete' else '合同号'
             operation = '订单删除' if payload.workflow_key == 'order-delete' else '合同取消'
