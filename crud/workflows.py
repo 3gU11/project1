@@ -1374,7 +1374,8 @@ def execute_allocation_recall(instance_no: str, worker_id: str):
         for sn in serials:
             _assert_lease_alive(conn, lease)
             changed = conn.execute(text("""UPDATE finished_goods_data
-                SET `状态`='待入库', `占用订单号`='', `更新时间`=CURRENT_TIMESTAMP, `row_version`=`row_version`+1
+                SET `状态`='待入库', `占用订单号`='', `合同号`='', `客户`='', `代理商`='',
+                    `更新时间`=CURRENT_TIMESTAMP, `row_version`=`row_version`+1
                 WHERE TRIM(`流水号`)=:sn AND `状态`='待发货' AND `row_version`=:version"""), {'sn': sn, 'version': by_sn[sn].get('row_version') or 1})
             if changed.rowcount != 1:
                 raise ValueError(f'机台 {sn} 状态并发变化，整单回滚')
