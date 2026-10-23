@@ -1075,6 +1075,19 @@ def _ensure_free_text_columns(conn):
     _ensure_text_columns(conn, "units", ["order_remark"])
 
 
+# 逆向流程的乐观锁列。版本 18 的迁移会加，但如果库是从旧备份恢复的，
+# 版本号已经是 18、列却没了，那条迁移永远不会再跑 —— 所以每次启动都兜底校验一次。
+ROW_VERSION_TABLES = ('finished_goods_data', 'sales_orders', 'units',
+                      'customer_machine_plans', 'model_dictionary', 'shipping_history')
+
+
+def _ensure_row_version_columns(conn):
+    """补上缺失的 row_version 列，避免撤回/删除等逆向流程整片报 1054。"""
+    for table_name in ROW_VERSION_TABLES:
+        if _table_exists(conn, table_name) and not _column_exists_in_table(conn, table_name, 'row_version'):
+            conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `row_version` BIGINT NOT NULL DEFAULT 1"))
+
+
 def init_mysql_tables_v2():
     """
     优化版数据库初始化：使用 Schema 版本控制，避免每次启动全量迁移
@@ -1088,6 +1101,9 @@ def init_mysql_tables_v2():
 
         # 获取当前版本
         current_version = _get_current_schema_version(conn)
+
+        # 每次都校验一遍：库从旧备份恢复后版本号可能已经是最新，但列丢了
+        _ensure_row_version_columns(conn)
 
         # 如果已经是最新版本，跳过大部分初始化
         if current_version >= CURRENT_SCHEMA_VERSION:
@@ -1705,10 +1721,7 @@ def init_mysql_tables_v2():
         if current_version < 18:
             # Optimistic concurrency marker used by approval workflows. Existing
             # rows start at version 1 and are advanced by business updates.
-            for table_name in ('finished_goods_data', 'sales_orders', 'units',
-                               'customer_machine_plans', 'model_dictionary', 'shipping_history'):
-                if _table_exists(conn, table_name) and not _column_exists_in_table(conn, table_name, 'row_version'):
-                    conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `row_version` BIGINT NOT NULL DEFAULT 1"))
+            _ensure_row_version_columns(conn)
             _record_schema_version(conn, 18, "add row_version for reverse workflow optimistic concurrency")
 
         return {
