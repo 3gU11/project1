@@ -1835,7 +1835,14 @@ def revert_shipping(
 def get_shipping_return_candidates(
     keyword: str = Query(""),
     date: str = Query(""),
+    page: int = Query(0, ge=0),
+    page_size: int = Query(0, ge=0),
 ):
+    """已发货机台列表。
+
+    page_size>0 时按页返回（page 从 1 开始），否则保持原样返回全部 ——
+    退换货页要按日期分组，必须拿全量，所以分页只能由调用方显式开启。
+    """
     try:
         kw = str(keyword or "").strip()
         date_filter = str(date or "").strip()
@@ -1866,7 +1873,7 @@ def get_shipping_return_candidates(
         with get_engine().connect() as conn:
             has_shipping_history = conn.execute(text("SHOW TABLES LIKE 'shipping_history'")).fetchone() is not None
             if has_shipping_history:
-                sql = f"""
+                base_sql = f"""
                     SELECT
                         fg.`批次号`,
                         fg.`机型`,
@@ -1889,11 +1896,11 @@ def get_shipping_return_candidates(
                         GROUP BY `流水号`
                     ) sh ON sh.`流水号` COLLATE utf8mb4_general_ci = fg.`流水号` COLLATE utf8mb4_general_ci
                     WHERE {where_sql}
-                    ORDER BY COALESCE(sh.`更新时间`, fg.`更新时间`) DESC, fg.`流水号` ASC
                 """
+                order_by = "COALESCE(sh.`更新时间`, fg.`更新时间`) DESC, fg.`流水号` ASC"
             else:
                 where_sql_no_history = where_sql.replace("COALESCE(sh.`更新时间`, fg.`更新时间`)", "fg.`更新时间`")
-                sql = f"""
+                base_sql = f"""
                     SELECT
                         fg.`批次号`,
                         fg.`机型`,
@@ -1911,11 +1918,26 @@ def get_shipping_return_candidates(
                         DATE_FORMAT(fg.`更新时间`, '%Y-%m-%d %H:%i') AS `发货时间`
                     FROM finished_goods_data fg
                     WHERE {where_sql_no_history}
-                    ORDER BY fg.`更新时间` DESC, fg.`流水号` ASC
                 """
+                order_by = "fg.`更新时间` DESC, fg.`流水号` ASC"
+
+            sql = f"{base_sql} ORDER BY {order_by}"
+            total = None
+            if page_size > 0:
+                # 先数总数，再只取当前页，避免把整表读进内存
+                total = int(conn.execute(text(f"SELECT COUNT(*) AS n FROM ({base_sql}) t"), params).scalar() or 0)
+                sql += " LIMIT :limit OFFSET :offset"
+                params = {**params, "limit": int(page_size),
+                          "offset": max(0, int(page) - 1) * int(page_size)}
             df = pd.read_sql(text(sql), conn, params=params)
         df = df.where(df.notnull(), None)
-        return {"data": df.to_dict(orient="records"), "total": len(df)}
+        records = df.to_dict(orient="records")
+        return {
+            "data": records,
+            "total": total if total is not None else len(records),
+            "page": page,
+            "page_size": page_size,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取退换候选机台失败: {e}")
 
