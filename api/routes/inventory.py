@@ -1748,7 +1748,12 @@ def confirm_shipping(
             if changed:
                 save_orders(orders_df)
 
-        archive_shipped_data(shipped_rows)
+        archive_warning = ""
+        try:
+            archive_shipped_data(shipped_rows)
+        except Exception as archive_exc:
+            logger.exception("发货归档失败")
+            archive_warning = f"发货已生效，但发货归档失败（将影响保修日期查询）：{archive_exc}"
         append_log("正式发货", sns_to_ship, operator=current_operator)
         append_audit_log(
             module="发货复核",
@@ -1758,7 +1763,7 @@ def confirm_shipping(
             user_id=current_user.get("username"),
             username=current_operator,
         )
-        cloud_warning = ""
+        cloud_warning = archive_warning
         cloud_synced = 0
         if impacted_order_ids:
             try:

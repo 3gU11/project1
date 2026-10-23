@@ -1,6 +1,8 @@
 from pathlib import Path
 import asyncio
 import logging
+import os
+import time
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +49,21 @@ async def on_startup():
     except Exception as e:
         logger.warning("cloud sync worker not started: %s", e)
     try:
+        from v8_sync.scheduler import run_startup_sync
+        app.state.v8_sync_startup_result = await run_startup_sync()
+        logging.getLogger("uvicorn.error").info(
+            "V8 sync bridge startup result=%s event_id=%s",
+            app.state.v8_sync_startup_result.get("status"),
+            app.state.v8_sync_startup_result.get("event_id", ""),
+        )
+    except Exception as e:
+        logger.warning("V8 sync bridge not started: %s", e)
+    try:
+        from v8_sync.scheduler import run_sync_loop
+        app.state.v8_sync_loop_task = asyncio.create_task(run_sync_loop())
+    except Exception as e:
+        logger.warning("V8 sync loop not started: %s", e)
+    try:
         from crud.cloud_dealer_order_sync import cloud_pull_worker_loop
         app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
     except Exception as e:
@@ -84,6 +101,14 @@ async def on_shutdown():
         pull_task.cancel()
         try:
             await pull_task
+        except asyncio.CancelledError:
+            pass
+
+    v8_sync_task = getattr(app.state, "v8_sync_loop_task", None)
+    if v8_sync_task:
+        v8_sync_task.cancel()
+        try:
+            await v8_sync_task
         except asyncio.CancelledError:
             pass
 
@@ -222,8 +247,18 @@ async def watch_finished_goods_db() -> None:
     logger.info("Finished goods database change monitor started")
     
     last_val = None
+    try:
+        snapshot_interval = max(30, int(os.getenv("V8_ORDERING_SNAPSHOT_INTERVAL_SECONDS", "300") or "300"))
+    except ValueError:
+        snapshot_interval = 300
+    last_snapshot_at = 0.0
     while True:
         try:
+            now = time.monotonic()
+            if now - last_snapshot_at >= snapshot_interval:
+                enqueue_wechat_batch_summary_sync("scheduled_snapshot")
+                last_snapshot_at = now
+
             with get_engine().begin() as conn:
                 table_check = conn.execute(text("SHOW TABLES LIKE 'finished_goods_data'")).fetchone()
                 if table_check:

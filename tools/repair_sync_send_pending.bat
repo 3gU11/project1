@@ -2,8 +2,8 @@
 setlocal
 cd /d "%~dp0.."
 if exist ".venv\Scripts\python.exe" (
-  ".venv\Scripts\python.exe" -m repair_sync send-pending %*
+  ".venv\Scripts\python.exe" -m v8_sync send-pending %*
 ) else (
-  python -m repair_sync send-pending %*
+  python -m v8_sync send-pending %*
 )
 exit /b %ERRORLEVEL%

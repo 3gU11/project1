@@ -90,7 +90,7 @@
           <el-button
             v-if="canDecide"
             type="primary"
-            :disabled="!verified || busy || !!currentDraft?.missing_fields?.length"
+            :disabled="!verified || busy || !canApproveOrder || !!currentDraft?.missing_fields?.length"
             @click="decide('approved')"
           >
             审批通过
@@ -134,10 +134,10 @@ type Draft = {
 }
 
 const props = defineProps<{
-  /** 通过订单本身（含库存校验）。由订单页提供，失败时抛错，合同附件不会被归档。 */
-  confirmOrderApprove?: () => Promise<void>
+  /** 通过订单本身（含库存校验）；返回 false 时合同附件不会归档。 */
+  confirmOrderApprove: () => Promise<boolean>
   /** 当前订单是否还能通过；不能通过时只允许查看合同。 */
-  canApproveOrder?: boolean
+  canApproveOrder: boolean
 }>()
 
 const emit = defineEmits<{
@@ -186,12 +186,13 @@ const fieldLabels: Record<string, string> = {
 
 const dialogTitle = computed(() => (orderNo.value ? `合同附件预览与审批 · ${orderNo.value}` : '合同附件预览与审批'))
 const currentDraft = computed(() => drafts.value.find((draft) => draft.id === activeDraftId.value) || null)
-const canDecide = computed(() => currentDraft.value?.state === 'preview_ready')
+const canDecide = computed(() => currentDraft.value?.state === 'preview_ready' && props.canApproveOrder)
 const footerHint = computed(() => {
   if (!currentDraft.value) return '该订单没有合同附件，可直接审核订单'
   if (currentDraft.value.missing_fields?.length) return `请先补全 ${currentDraft.value.missing_fields.length} 项字段后再审批`
   if (currentDraft.value.state === 'approved') return '该合同附件已归档'
   if (currentDraft.value.state === 'rejected') return '该合同附件已驳回'
+  if (!props.canApproveOrder) return '当前订单不可通过，只能查看合同附件'
   if (!verified.value) return '预览加载中…'
   return '请核对固定条款、产品数量、单价、结算期限及签署信息'
 })
@@ -223,8 +224,13 @@ function reset() {
 }
 
 async function openForOrder(no: string) {
+  const normalizedOrderNo = String(no || '').trim()
+  if (!normalizedOrderNo) {
+    ElMessage.warning('订单号为空，无法加载合同附件')
+    return
+  }
   reset()
-  orderNo.value = String(no || '').trim()
+  orderNo.value = normalizedOrderNo
   visible.value = true
   await loadDrafts()
 }
@@ -351,9 +357,10 @@ async function decide(decision: 'approved' | 'rejected') {
 
   busy.value = true
   try {
-    if (decision === 'approved' && props.confirmOrderApprove) {
+    if (decision === 'approved') {
       // 先过订单（含库存校验）：订单过不了就不要归档附件，避免出现"附件已归档但订单未通过"。
-      await props.confirmOrderApprove()
+      const orderApproved = await props.confirmOrderApprove()
+      if (!orderApproved) return
     }
     await apiPost(
       `/contract-drafts/local/${draft.id}/review`,

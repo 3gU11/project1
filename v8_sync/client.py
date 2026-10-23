@@ -10,11 +10,12 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .config import RepairSyncConfig, get_config
+from .config import V8SyncConfig, get_config
 from .signer import sign_request
 
 logger = logging.getLogger(__name__)
 MAX_UNCOMPRESSED_SNAPSHOT_BYTES = 8 * 1024 * 1024
+MACHINE_BRIDGE_PATHS = frozenset({"/api/v8-sync/machines", "/api/integrations/v8/snapshots"})
 
 
 class SyncDisabledError(RuntimeError):
@@ -36,14 +37,40 @@ def _json_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(public_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def _validate_config(config: RepairSyncConfig) -> None:
+def _machine_bridge_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    tables = payload.get("tables")
+    machines = tables.get("machines") if isinstance(tables, dict) else None
+    if not isinstance(machines, list):
+        raise SyncConfigurationError("machine bridge payload requires tables.machines")
+    fields = ("machine_no", "model", "customer", "customer_name", "shipping_date",
+              "shipping_confirm_operation_date", "status", "source_updated_at")
+    return {
+        "snapshotId": payload.get("snapshotId"),
+        "tables": {
+            "machines": [
+                {key: row[key] for key in fields if key in row}
+                for row in machines
+                if isinstance(row, dict)
+            ]
+        },
+    }
+
+
+def _payload_for_path(payload: dict[str, Any], snapshot_path: str) -> dict[str, Any]:
+    path = snapshot_path if snapshot_path.startswith("/") else f"/{snapshot_path}"
+    if path.rstrip("/") in MACHINE_BRIDGE_PATHS:
+        return _machine_bridge_payload(payload)
+    return payload
+
+
+def _validate_config(config: V8SyncConfig) -> None:
     if not config.enabled:
-        raise SyncDisabledError("repair snapshot upload is disabled (REPAIR_SYNC_ENABLED=false)")
+        raise SyncDisabledError("v8 snapshot upload is disabled (V8_SYNC_ENABLED=false)")
     if not config.base_url:
-        raise SyncConfigurationError("REPAIR_SYNC_BASE_URL is not configured")
+        raise SyncConfigurationError("V8_SYNC_BASE_URL is not configured")
     parsed = urlparse(config.base_url)
     if parsed.scheme not in {"https", "http"} or not parsed.netloc:
-        raise SyncConfigurationError("REPAIR_SYNC_BASE_URL must be an absolute HTTP(S) URL")
+        raise SyncConfigurationError("V8_SYNC_BASE_URL must be an absolute HTTP(S) URL")
     if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise SyncConfigurationError("repair sync only permits HTTPS outside localhost")
     if not config.client_id or not config.key_id or not config.hmac_secret:
@@ -54,20 +81,21 @@ def upload_snapshot(
     payload: dict[str, Any],
     *,
     idempotency_key: str,
-    config: RepairSyncConfig | None = None,
+    config: V8SyncConfig | None = None,
 ) -> dict[str, Any]:
     config = config or get_config()
     _validate_config(config)
-    raw = _json_bytes(payload)
+    path = config.snapshot_path if config.snapshot_path.startswith("/") else f"/{config.snapshot_path}"
+    upload_payload = _payload_for_path(payload, path)
+    raw = _json_bytes(upload_payload)
     if len(raw) > MAX_UNCOMPRESSED_SNAPSHOT_BYTES:
         raise SyncConfigurationError("uncompressed snapshot body exceeds the 8 MB first-version limit")
     body = gzip.compress(raw)
     max_body = config.max_body_mb * 1024 * 1024
     if len(body) > max_body:
         raise SyncConfigurationError(
-            f"compressed snapshot body exceeds REPAIR_SYNC_MAX_BODY_MB ({config.max_body_mb} MB)"
+            f"compressed snapshot body exceeds V8_SYNC_MAX_BODY_MB ({config.max_body_mb} MB)"
         )
-    path = config.snapshot_path if config.snapshot_path.startswith("/") else f"/{config.snapshot_path}"
     signed = sign_request(
         method="POST",
         request_path=path,
@@ -109,9 +137,9 @@ def upload_snapshot(
         raise NonRetryableSyncError(f"repair snapshot non-retryable response: HTTP {response.status_code}")
     if not 200 <= response.status_code < 300:
         category = "client_error" if response.status_code < 500 else "server_error"
-        raise RuntimeError(f"repair snapshot upload {category}: HTTP {response.status_code}")
+        raise RuntimeError(f"v8 snapshot upload {category}: HTTP {response.status_code}")
     logger.info(
-        "repair snapshot uploaded snapshot_id=%s sha256=%s status=%s elapsed_ms=%s",
+        "v8 snapshot uploaded snapshot_id=%s sha256=%s status=%s elapsed_ms=%s",
         payload.get("snapshotId"),
         hashlib.sha256(raw).hexdigest(),
         response.status_code,
@@ -124,7 +152,7 @@ def upload_snapshot(
     return {"status_code": response.status_code, "response": response_data}
 
 
-def verify_config(config: RepairSyncConfig | None = None) -> dict[str, Any]:
+def verify_config(config: V8SyncConfig | None = None) -> dict[str, Any]:
     config = config or get_config()
     result = {
         "enabled": config.enabled,

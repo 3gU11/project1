@@ -17,6 +17,8 @@ from crud.dealer_orders import ensure_dealer_order_tables
 from crud.cloud_bridge_auth import signed_headers, snapshot_content_id
 from database import get_engine
 
+BRIDGE_STOCK_STATUS_PREDICATE = "TRIM(COALESCE(`状态`, '')) LIKE '库存中%'"
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -565,7 +567,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       GROUP BY raw.source_batch_no, raw.source_expected_inbound_time, raw.base_model, raw.is_high
                       UNION ALL
                       SELECT
-                        IF(raw.is_high, '加高', '库存中') AS batch_no,
+                        '库存中' AS batch_no,
                         CAST(NULL AS DATETIME) AS expected_inbound_time,
                         raw.base_model AS model,
                         COUNT(*) AS quantity,
@@ -585,7 +587,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                           ) AS is_high
                         FROM finished_goods_data
                         WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                          AND TRIM(COALESCE(`状态`, '')) = '库存中'
+                          AND {BRIDGE_STOCK_STATUS_PREDICATE}
                       ) raw
                       WHERE NULLIF(raw.base_model, '') IS NOT NULL
                       GROUP BY raw.base_model, raw.is_high, IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '')
@@ -1116,7 +1118,11 @@ async def cloud_pull_worker_loop() -> None:
 
     # Orders are time-sensitive; keep the default at the configured safety
     # floor while allowing deployments to raise it when the cloud API is busy.
-    interval_str = os.getenv("CLOUD_PULL_INTERVAL_SECONDS", "10").strip()
+    interval_str = (
+        os.getenv("CLOUD_PULL_INTERVAL_SECONDS")
+        or _read_dotenv_value("CLOUD_PULL_INTERVAL_SECONDS")
+        or "10"
+    ).strip()
     try:
         interval = max(10, int(interval_str))  # minimum 10 seconds to avoid overloading
     except ValueError:

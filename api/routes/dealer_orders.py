@@ -537,8 +537,9 @@ def seed_test_dealer_order(
     quantity = max(1, int(payload.quantity or 1))
 
     # Determine wechat_batch_summary batch for availability check
-    from crud.dealer_orders import _summary_batch_no
+    from crud.dealer_orders import _order_hold_batch_no, _summary_batch_no
     summary_batch = _summary_batch_no(batch_no, inventory_type)
+    hold_batch = _order_hold_batch_no(batch_no, inventory_type)
 
     with get_engine().begin() as conn:
         # Ensure wechat_batch_summary has enough quantity for approval
@@ -551,16 +552,13 @@ def seed_test_dealer_order(
         ).scalar() or 0
 
         # Count existing pending/approved orders for this model+batch (include self)
-        held_qty = conn.execute(
-            text(
-                "SELECT COALESCE(SUM(GREATEST(quantity - allocated_qty, 0)), 0) "
-                "FROM dealer_orders "
-                "WHERE batch_no = :batch AND model = :model "
-                "AND status IN ('pending', 'approved') "
-                "AND quantity > allocated_qty"
-            ),
-            {"batch": str(inventory_type).strip().lower() == "finished" and "FINISHED-STOCK" or batch_no, "model": model},
-        ).scalar() or 0
+        from crud.dealer_orders import _occupied_qty_for_pool
+        held_qty = _occupied_qty_for_pool(
+            conn,
+            model,
+            hold_batch,
+            statuses=("pending", "approved"),
+        )
 
         needed = max(0, (held_qty + quantity) - existing)
         if needed > 0:

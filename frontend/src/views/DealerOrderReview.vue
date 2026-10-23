@@ -855,6 +855,7 @@ const syncCompletedCloud = async () => {
 }
 
 const approveOrder = async (row: DealerOrder) => {
+  let res: { message?: string; warning?: string }
   try {
     const factoryPending = isFactoryPending(row)
     const note = await ElMessageBox.prompt(factoryPending ? '复审备注（可选）' : '审核备注（可选）', factoryPending ? '新备注复审通过' : '通过订单', {
@@ -864,11 +865,17 @@ const approveOrder = async (row: DealerOrder) => {
       cancelButtonText: '取消',
     })
     const endpoint = factoryPending ? 'extra-review/approve' : 'approve'
-    const res = await apiPost<{ message?: string; warning?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/${endpoint}`, {
+    res = await apiPost<{ message?: string; warning?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/${endpoint}`, {
       note: note.value || '',
     })
-    ElMessage.success(res.warning || res.message || (factoryPending ? '新备注复审通过' : '已通过'))
-    window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  } catch (err: any) {
+    if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '操作失败')
+    return false
+  }
+
+  ElMessage.success(res.warning || res.message || (isFactoryPending(row) ? '新备注复审通过' : '已通过'))
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  try {
     await loadOrders()
     if (selectedOrderNo.value) {
       try {
@@ -877,9 +884,11 @@ const approveOrder = async (row: DealerOrder) => {
         preview.value = null
       }
     }
-  } catch (err: any) {
-    if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '操作失败')
+  } catch {
+    preview.value = null
+    ElMessage.warning('订单已通过，但订单列表刷新失败')
   }
+  return true
 }
 
 // 合同附件审批已并入订单行：点"预览并审批"只加载该订单自己的合同附件。
@@ -897,7 +906,7 @@ const openContractReview = async (row: DealerOrder) => {
   await contractDraftReview.value?.openForOrder(target.order_no)
 }
 
-const approveContractReviewOrder = async () => {
+const approveContractReviewOrder = async (): Promise<boolean> => {
   const target = contractReviewOrder.value
   if (!target) throw new Error('未选择订单')
   await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/approve`, {
@@ -905,6 +914,7 @@ const approveContractReviewOrder = async () => {
   })
   window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
   void loadOrders(true)
+  return true
 }
 
 const onContractReviewDone = async () => {
