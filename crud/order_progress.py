@@ -41,7 +41,10 @@ def calculate_progress(status, required, shipped, allocated, contracts, variant_
         label = "待发货"
     elif shipped or allocated or status in {"ready", "allocated", "packed", "shipped", "done"}:
         label = "待配齐"
-    elif contracts and all(contract_is_planned(r) for r in contracts):
+    elif not contracts:
+        # 订单没有关联任何合同：与"合同未规划"是两回事，不能都叫待规划。
+        label = "未关联合同"
+    elif all(contract_is_planned(r) for r in contracts):
         label = "已规划"
     else:
         label = "待规划"

@@ -323,10 +323,9 @@ const parseDemandEntries = (order: Row | null) => {
   return entries
 }
 
-const isActiveOrder = (order: Row) => {
-  const status = String(order.status || 'active').toLowerCase()
-  return !['done', 'shipped', 'completed', 'canceled', 'deleted'].includes(status)
-}
+// 可配货与否只以后端派生的 can_allocate 为准（与接口过滤、状态标签同一口径）。
+// 前端不再用 sales_orders.status 二次判断，避免"标签说已完成、列表还在等配货"这类矛盾。
+const isActiveOrder = (order: Row) => order.can_allocate !== false
 
 const orderContainsModel = (order: Row, modelFilter: string) => {
   if (!modelFilter) return true
@@ -447,7 +446,7 @@ const confirmedRows = computed(() => {
 })
 const confirmedAllocatedTotal = computed(() => confirmedRows.value.length)
 
-const CACHE_ORDERS = 'allocation:orders'
+const CACHE_ORDERS = 'allocation:orders:v2'
 const loadData = async (force = false) => {
   loading.value = true
   try {
@@ -459,7 +458,7 @@ const loadData = async (force = false) => {
         return
       }
     }
-    const nextOrders = await apiGetAll<Row>('/planning/orders')
+    const nextOrders = await apiGetAll<Row>('/planning/orders?allocatable=1')
     orders.value = nextOrders
     cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)
     await tryAutoSelectOrderFromQuery()
@@ -706,8 +705,24 @@ const completeAllocation = async () => {
   }
 }
 
+// 标签配色跟随后端 order_status_label，不同状态必须能一眼区分：
+// 已规划=橙（可配未配）、待配齐=红、待发货=蓝、已完成=绿、未关联合同/待规划=灰
+const ORDER_STATE_TYPES: Record<string, TagType> = {
+  已规划: 'warning',
+  待配齐: 'danger',
+  待发货: 'primary',
+  已完成: 'success',
+  待二次确认: 'warning',
+  待规划: 'info',
+  未关联合同: 'info',
+  已取消: 'info',
+  已删除: 'info',
+}
+
 const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
-  if (o.order_status_label) return { text: o.order_status_label, type: o.order_status_label === '已完成' ? 'success' : 'primary' }
+  if (o.order_status_label) {
+    return { text: o.order_status_label, type: ORDER_STATE_TYPES[o.order_status_label] || 'primary' }
+  }
   const s = String(o.status || 'active')
   if (s === 'pending_review') return { text: o.reservation?.label || '待核查预占', type: 'warning' }
   if (s === 'packed') return { text: '已打包', type: 'primary' }

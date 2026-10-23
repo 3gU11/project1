@@ -99,10 +99,22 @@ def get(draft_id: str) -> dict[str, Any] | None:
     result["missing_fields"] = missing_required(result["fields"])
     return result
 
-def list_drafts(page=1, size=100):
+def list_drafts(page=1, size=100, order_no: str = ''):
+    """列出合同草稿。
+
+    order_no 不为空时只返回该经销商订单的草稿：合同附件审批已经并入订单行，
+    审批人只能看到当前这张订单的合同，不再跨订单浏览。
+    """
     ensure_table()
+    order_no = str(order_no or '').strip()
     with get_engine().begin() as conn:
-        rows = conn.execute(text("SELECT * FROM v8_contract_drafts ORDER BY created_at DESC LIMIT :limit OFFSET :offset"), {"limit": size, "offset": (page-1)*size}).mappings().all()
+        if order_no:
+            rows = conn.execute(text(
+                "SELECT * FROM v8_contract_drafts WHERE TRIM(source_order_no)=:order_no "
+                "ORDER BY created_at DESC LIMIT :limit OFFSET :offset"),
+                {"order_no": order_no, "limit": size, "offset": (page-1)*size}).mappings().all()
+        else:
+            rows = conn.execute(text("SELECT * FROM v8_contract_drafts ORDER BY created_at DESC LIMIT :limit OFFSET :offset"), {"limit": size, "offset": (page-1)*size}).mappings().all()
     return [get(str(row["id"])) for row in rows]
 
 def update(draft_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:

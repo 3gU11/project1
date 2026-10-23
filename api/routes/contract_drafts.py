@@ -10,8 +10,9 @@ from crud import local_contract_drafts as local
 router = APIRouter(dependencies=[Depends(require_permissions('DEALER_ORDER_REVIEW'))])
 
 @router.get('/local')
-def local_contracts(page: int = Query(1, ge=1, le=10000)):
-    return local.list_drafts(page)
+def local_contracts(page: int = Query(1, ge=1, le=10000), order_no: str = Query('', max_length=100)):
+    """order_no 非空时只返回该订单的合同草稿（合同附件审批已并入订单行）。"""
+    return local.list_drafts(page, order_no=order_no)
 
 class LocalFields(BaseModel):
     fields: dict[str, Any]

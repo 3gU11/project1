@@ -125,7 +125,12 @@ def get_orders_v2():
         return pd.DataFrame(columns=ORDER_COLS)
 
 
-def save_orders(df, conn=None):
+def save_orders(df, conn=None, only_order_ids=None):
+    """保存订单表。
+
+    only_order_ids 不为空时，只写回这些订单号对应的行；用于"只改了一个订单"的场景，
+    避免用整表快照覆盖其他订单（尤其是刚被逆向流程改成 deleted/done 的订单）。
+    """
     get_orders.cache_clear()
     get_orders_v2.cache_clear()  # 同时清除 v2 版本缓存
     try:
@@ -150,6 +155,13 @@ def save_orders(df, conn=None):
         df["订单号"] = df["订单号"].astype(str).str.strip()
         df = df[df["订单号"] != ""].copy()
         df = df.drop_duplicates(subset=["订单号"], keep="last")
+        if only_order_ids is not None:
+            keep_ids = {str(item).strip() for item in only_order_ids if str(item or "").strip()}
+            if not keep_ids:
+                return
+            df = df[df["订单号"].isin(keep_ids)].copy()
+            if df.empty:
+                return
         with (nullcontext(conn) if conn is not None else get_engine().begin()) as active_conn:
             if not df.empty:
                 tmp_table = f"tmp_sales_orders_save_{uuid.uuid4().hex}"
@@ -621,7 +633,7 @@ def update_sales_order(order_id, new_data, force_unbind=False):
                     orders.loc[idx, col] = _normalize_source_json(val)
                 else:
                     orders.loc[idx, col] = str(val)
-        save_orders(orders)
+        save_orders(orders, only_order_ids=[order_id])
         msg_extra = f"已解绑 {len(sns_to_unbind)} 台关联机器。" if (has_allocation and force_unbind) else ""
         return True, f"订单更新成功！{msg_extra}"
     return False, "订单未找到"

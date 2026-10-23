@@ -12,6 +12,7 @@ from contextlib import nullcontext
 from datetime import datetime
 import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query, Request, BackgroundTasks
+from api.upload_guard import require_uploads_enabled
 import httpx
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -2546,12 +2547,19 @@ def get_order_progress(order_ids, include_machines=False):
     )
 
 
+# 订单配货页只处理"可配货"订单：已规划/待配齐/待发货/待二次确认。
+# 待规划（合同未规划或未关联合同）、已完成、已取消/已删除的订单不应出现在配货列表。
+ALLOCATABLE_ORDER_LABELS = frozenset({"已规划", "待配齐", "待发货", "待二次确认"})
+NON_ALLOCATABLE_STATUSES = ("deleted", "done", "shipped", "canceled", "cancelled", "completed")
+
+
 @router.get("/orders")
 def get_sales_orders(
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=2000),
     status: str = Query(""),
     keyword: str = Query(""),
+    allocatable: bool = Query(False),
 ):
     try:
         where_clauses = []
@@ -2562,6 +2570,16 @@ def get_sales_orders(
         if str(keyword).strip():
             where_clauses.append("(`订单号` LIKE :kw OR `客户名` LIKE :kw OR `代理商` LIKE :kw)")
             params["kw"] = f"%{str(keyword).strip()}%"
+        if allocatable:
+            where_clauses.append(
+                "COALESCE(`status`, '') NOT IN ("
+                + ", ".join(f"'{item}'" for item in NON_ALLOCATABLE_STATUSES)
+                + ")"
+            )
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM factory_plan fp WHERE "
+                "TRIM(COALESCE(fp.`订单号`, '')) = TRIM(COALESCE(sales_orders.`订单号`, '')))"
+            )
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         count_sql = f"SELECT COUNT(*) AS total FROM sales_orders{where_sql}"
@@ -2590,6 +2608,11 @@ def get_sales_orders(
                     record["reservation"] = batch_planning.reservation_info(record["订单号"])
                 except batch_planning.BatchPlanningError as exc:
                     record["reservation"] = {"label": "预占异常，待核查", "can_confirm": False, "risk": str(exc)}
+        for record in records:
+            record["can_allocate"] = record.get("order_status_label") in ALLOCATABLE_ORDER_LABELS
+        if allocatable:
+            records = [record for record in records if record["can_allocate"]]
+            total = len(records)
         return {"data": records, "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3340,7 +3363,7 @@ def update_sales_order_api(
                 df_orders.loc[mask, key] = pd.to_datetime(value, errors="coerce") if value else None
             else:
                 df_orders.loc[mask, key] = "" if value is None else str(value)
-        save_orders(df_orders)
+        save_orders(df_orders, only_order_ids=[order_id])
 
         sync_result: dict[str, Any] = {}
         if detail_items is not None:
@@ -3564,10 +3587,12 @@ def complete_order_allocation_api(
             raise HTTPException(status_code=404, detail="订单不存在")
         order_idx = hit.index[0]
         current_status = str(orders_df.at[order_idx, "status"] or "active")
-        if current_status in {"ready", "allocated"}:
+        # 状态可能残留为 ready（例如配货机台已被撤回，但订单状态没回滚），
+        # 此时不能再直接返回"已完成"，必须继续校验是否真的还有已配机台。
+        if current_status in {"ready", "allocated"} and not _get_explicit_order_allocations(order_id).empty:
             if current_status == "allocated":
                 orders_df.at[order_idx, "status"] = "ready"
-                save_orders(orders_df)
+                save_orders(orders_df, only_order_ids=[order_id])
             return {"message": "配货已完成，订单待发货", "completed": True, "logged": 0, "status": "ready"}
 
         required_variants = _order_required_variant_counts(order_id, hit.iloc[0])
@@ -3596,7 +3621,7 @@ def complete_order_allocation_api(
         production_count = int((allocated_df["货源"].astype(str) == "在产机器").sum())
         stock_count = int((allocated_df["货源"].astype(str) == "库存现货").sum())
         orders_df.at[order_idx, "status"] = "ready"
-        save_orders(orders_df)
+        save_orders(orders_df, only_order_ids=[order_id])
         append_audit_log(
             module="订单配货",
             action_type="配货完成",
@@ -3650,7 +3675,7 @@ def release_order_inventory_api(
             order_idx = hit.index[0]
             if str(orders_df.at[order_idx, "status"] or "active") in {"ready", "allocated"}:
                 orders_df.at[order_idx, "status"] = "active"
-                save_orders(orders_df)
+                save_orders(orders_df, only_order_ids=[order_id])
         append_audit_log(
             module="订单配货",
             action_type="释放",
@@ -4108,6 +4133,7 @@ async def upload_contract_file_api(
     customer_name: str = "",
     uploader_name: str = "",
     current_operator: str = Depends(get_current_operator_name),
+    _upload_enabled: None = Depends(require_uploads_enabled),
 ):
     try:
         ok, msg = await asyncio.to_thread(
@@ -4310,7 +4336,7 @@ def save_contract_plan(
                 hit = orders_df["订单号"].astype(str) == order_id
                 if hit.any():
                     orders_df.loc[hit, "指定批次/来源"] = [all_plans] * int(hit.sum())
-                    save_orders(orders_df)
+                    save_orders(orders_df, only_order_ids=[order_id])
 
         append_audit_log(
             module="合同管理",

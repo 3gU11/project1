@@ -1656,8 +1656,75 @@ def execute_order_delete(instance_no: str, worker_id: str):
             WHERE TRIM(`占用订单号`)=:oid
               AND TRIM(COALESCE(`状态`,'')) IN ('待发货','机台')"""), {'oid': order_id}).fetchall()
             if str(row[0] or '').strip()]
-        conn.execute(text("""UPDATE finished_goods_data SET `状态`='待入库', `占用订单号`='', `更新时间`=CURRENT_TIMESTAMP
+        conn.execute(text("""UPDATE finished_goods_data SET `状态`='待入库', `占用订单号`='',
+            `合同号`='', `客户`='', `代理商`='', `更新时间`=CURRENT_TIMESTAMP
             WHERE TRIM(`占用订单号`)=:oid AND TRIM(COALESCE(`状态`,'')) IN ('待发货','机台')"""), {'oid': order_id})
+        # 同步释放沙盘 units 上的预占：只清 finished_goods_data 会让订单进度仍把这批在产机台
+        # 算成"已配"，删除后订单在配货页继续显示"待发货"，机台也无法被其他订单使用。
+        conn.execute(text("""UPDATE units SET contract_no=NULL, customer=NULL, dealer_name=NULL,
+            sales_id=NULL, due_date=NULL, is_locked=0, locked_by=NULL, locked_at=NULL, updated_at=NOW()
+            WHERE TRIM(COALESCE(sales_id, ''))=:oid"""), {'oid': order_id})
+        # 订单删除后，把"已转订单但实际没有占用任何机台"的合同恢复为待规划并解绑。
+        # 否则合同会永久停在已转订单、绑定一个已删除订单：既不能再做批次规划，也不能取消。
+        # 判定口径：合同下没有已出库/已发货/库存中的机台，也没有任何 units 预占，
+        # 且 `指定批次/来源` 为空或只写了"现货/库存"这类非生产批次。
+        # 配现货本身不锁实物（真实占用一定落在 units / finished_goods_data 上），
+        # 所以"现货假规划"的空壳单删除后应当回滚，否则合同就卡死在已转订单。
+        # 真正锁定了生产批次的合同（如 {"09-11": 1}）不动，需走撤销规划流程。
+        _spot_only_batches = {'现货(spot)', '现货', 'spot', '库存中', 'finished-stock', '库存'}
+        rollback_contract_ids = []
+        rollback_candidates = conn.execute(text("""
+            SELECT `合同号`, `指定批次/来源` FROM factory_plan
+            WHERE TRIM(COALESCE(`订单号`, ''))=:oid
+              AND TRIM(COALESCE(`状态`, ''))='已转订单'
+              AND NOT EXISTS (
+                  SELECT 1 FROM finished_goods_data fg
+                  WHERE TRIM(COALESCE(fg.`合同号`, ''))=TRIM(COALESCE(factory_plan.`合同号`, ''))
+                    AND TRIM(COALESCE(fg.`状态`, '')) IN ('已出库', '已发货', '库存中')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM units u
+                  WHERE TRIM(COALESCE(u.contract_no, ''))=TRIM(COALESCE(factory_plan.`合同号`, ''))
+                    AND TRIM(COALESCE(u.status, '')) IN ('Confirmed', 'In_Production')
+              )
+        """), {'oid': order_id}).fetchall()
+        for candidate in rollback_candidates:
+            candidate_cid = str(candidate[0] or '').strip()
+            raw_batch = candidate[1]
+            if not candidate_cid:
+                continue
+            try:
+                parsed_batch = json.loads(raw_batch) if isinstance(raw_batch, str) and raw_batch.strip() else (raw_batch or {})
+            except (TypeError, ValueError):
+                parsed_batch = None
+            if parsed_batch is None:
+                continue  # 批次内容解析不了就不动，留给人工确认
+            if isinstance(parsed_batch, dict):
+                batch_keys = []
+                for key, value in parsed_batch.items():
+                    try:
+                        if float(value or 0) <= 0:
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+                    batch_keys.append(str(key).strip())
+            elif isinstance(parsed_batch, list):
+                batch_keys = [str(key).strip() for key in parsed_batch]
+            else:
+                batch_keys = []
+            if all(key.lower() in _spot_only_batches for key in batch_keys):
+                rollback_contract_ids.append(candidate_cid)
+        if rollback_contract_ids:
+            conn.execute(text("""UPDATE factory_plan SET `状态`='待规划', `订单号`=NULL, `指定批次/来源`=NULL
+                WHERE `合同号` COLLATE utf8mb4_general_ci IN :cids""").bindparams(
+                    bindparam('cids', expanding=True)), {'cids': rollback_contract_ids})
+            if conn.execute(text("SHOW TABLES LIKE 'plan_import'")).first():
+                try:
+                    conn.execute(text("""UPDATE plan_import SET `订单号`=NULL
+                        WHERE `合同号` COLLATE utf8mb4_general_ci IN :cids""").bindparams(
+                            bindparam('cids', expanding=True)), {'cids': rollback_contract_ids})
+                except Exception:
+                    pass
         changed = conn.execute(text("UPDATE sales_orders SET status='deleted', delete_reason=:reason, row_version=COALESCE(row_version, 1)+1 WHERE `订单号`=:oid AND COALESCE(row_version, 1)=:version"),
                      {'oid': order_id, 'reason': f'逆向审批删除:{instance_no}', 'version': order['_row_version']})
         if changed.rowcount != 1:
@@ -1678,6 +1745,13 @@ def execute_order_delete(instance_no: str, worker_id: str):
     from crud.orders import get_orders, get_orders_v2
     get_orders.cache_clear()
     get_orders_v2.cache_clear()
+    try:
+        from crud.planning import get_factory_plan, get_factory_plan_v2
+        for _loader in (get_factory_plan, get_factory_plan_v2):
+            if hasattr(_loader, "cache_clear"):
+                _loader.cache_clear()
+    except Exception:
+        pass
     return {'instance_no': instance_no, 'status': '已完成', 'business_id': order_id}
 
 

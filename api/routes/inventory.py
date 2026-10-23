@@ -12,6 +12,7 @@ import re
 import tempfile
 import aiofiles
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Request, Response, BackgroundTasks
+from api.upload_guard import require_uploads_enabled
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -963,7 +964,7 @@ def _recompute_order_status_after_shipping_return(order_id: str) -> str:
 
     if current_status != new_status:
         orders_df.at[idx, "status"] = new_status
-        save_orders(orders_df)
+        save_orders(orders_df, only_order_ids=[order_id])
     return new_status
 
 
@@ -2221,7 +2222,8 @@ async def machine_archive_upload(
     label: str = Form(""), 
     files: List[UploadFile] = File(...),
     request: Request = None,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(get_current_user_context),
+    _upload_enabled: None = Depends(require_uploads_enabled),
 ):
     try:
         if not files:
