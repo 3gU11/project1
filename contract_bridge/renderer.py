@@ -11,10 +11,45 @@ NS = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
 W = '{' + NS['w'] + '}'
 
 PLACEHOLDER = re.compile(r'\{\{\s*([A-Za-z0-9_]+)\s*\}\}')
+ITEM_PLACEHOLDER = re.compile(r'\{\{item(\d+)_[A-Za-z]+\}\}')
+ITEM_KEY = re.compile(r'item(\d+)_[A-Za-z]+')
 
 
 def _text_of(node) -> str:
     return ''.join(child.data for child in node.childNodes if child.nodeType == child.TEXT_NODE)
+
+
+def _expand_item_rows(root, fields: dict[str, str]) -> None:
+    """明细行不够时复制模板里的最后一行，让预览和合同附件自动加行。
+
+    订货单模板固定 4 行明细；订单机型超过 4 种时，多出来的行按模板行整行复制
+    （边框、行高、列宽都跟着走），再把占位符里的行号换掉。
+    """
+    template_row, template_index = None, 0
+    for row in root.getElementsByTagNameNS(NS['w'], 'tr'):
+        for text in row.getElementsByTagNameNS(NS['w'], 't'):
+            if not text.firstChild or text.firstChild.nodeType != text.TEXT_NODE:
+                continue
+            for match in ITEM_PLACEHOLDER.finditer(text.firstChild.data):
+                index = int(match.group(1))
+                if index > template_index:
+                    template_index, template_row = index, row
+    if template_row is None or template_index == 0:
+        return
+    required = 0
+    for key in fields:
+        match = ITEM_KEY.fullmatch(key)
+        if match:
+            required = max(required, int(match.group(1)))
+    anchor = template_row
+    for index in range(template_index + 1, required + 1):
+        clone = template_row.cloneNode(True)
+        for text in clone.getElementsByTagNameNS(NS['w'], 't'):
+            if text.firstChild and text.firstChild.nodeType == text.TEXT_NODE:
+                text.firstChild.data = text.firstChild.data.replace(
+                    f'item{template_index}_', f'item{index}_')
+        anchor.parentNode.insertBefore(clone, anchor.nextSibling)
+        anchor = clone
 
 
 def _repack(package: ZipFile, root, output: BytesIO) -> bytes:
@@ -36,6 +71,7 @@ def render_order_form(fields: dict[str, str], template: Path = ORDER_FORM_TEMPLA
     source = template.read_bytes()
     with ZipFile(BytesIO(source)) as package:
         root = minidom.parseString(package.read('word/document.xml'))
+        _expand_item_rows(root, fields)
         for paragraph in root.getElementsByTagNameNS(NS['w'], 'p'):
             texts = list(paragraph.getElementsByTagNameNS(NS['w'], 't'))
             if not texts:
