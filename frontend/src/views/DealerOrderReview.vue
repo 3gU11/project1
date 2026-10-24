@@ -1030,7 +1030,7 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
     const res = await apiPost<MessageResponse>(`/dealer-orders/${encodeURIComponent(convertForm.sourceOrderNo)}/convert-to-contract`, payload)
     
     if ((res as any)?.approval_pending) {
-      ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）')
+      ElMessage.info((res as any).message)
       window.dispatchEvent(new Event('workflow-pending-updated'))
       return
     }

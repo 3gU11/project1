@@ -765,7 +765,7 @@ const createManualOrder = async () => {
       备注: finalNote,
       包装选项: manualForm.needPack ? '需要包装' : '',
     })
-    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     ElMessage.success('订单已创建')
     manualRows.value = [{ model: '', qty: 1, high: false, rowNote: '' }]
@@ -833,7 +833,7 @@ const createOrderFromPlanned = async () => {
       contract_ids: selectedImportContractIds.value,
       明细: detailPayload,
     })
-    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     ElMessage.success('已转换为订单')
     selectedImportContractIds.value = []

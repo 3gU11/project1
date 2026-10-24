@@ -473,7 +473,7 @@ const doDirectInbound = async () => {
   saving.value = true
   try {
     const workflowResponse = await apiPost('/inventory/inbound-to-slot', { serial_no: directSn.value.trim(), slot_code: currentSlot.value.code })
-    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     ElMessage.success('入库成功')
     directSn.value = ''
@@ -493,7 +493,7 @@ const doTransfer = async () => {
   saving.value = true
   try {
     const workflowResponse = await apiPost('/inventory/inbound-to-slot', { serial_no: transferSn.value.trim(), slot_code: targetSlot.value, is_transfer: true })
-    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     ElMessage.success('调拨成功')
     transferSn.value = ''

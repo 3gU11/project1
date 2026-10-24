@@ -373,7 +373,7 @@ const executeActions = async () => {
     const failed = response.data.filter(row => !row.success);
     if (pending.length) {
       void ElMessageBox.alert(
-        pending.map(row => `订单 ${row.order_no}：审批已发起，等待审批人处理。流程编号：${row.instance_no || "—"}`).join("\n") +
+        pending.map(row => `订单 ${row.order_no}：审批已发起，等待审批人处理`).join("\n") +
           "\n审批通过后系统会自动执行，审批前订单状态保持不变。" +
           (failed.length ? `\n另有 ${failed.length} 张订单提交失败，请查看处理结果。` : ""),
         "审批已发起",
@@ -469,7 +469,7 @@ const confirmCustomerShipping = async () => {
   shippingBusy.value = true;
   try {
     const workflowResponse = await apiPost("/inventory/shipping/confirm", { serial_nos: [serialNo], expected_order_no: orderNo }, { timeout: 120000 });
-    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     ElMessage.success("确认出货成功");
     fileVisible.value = false;

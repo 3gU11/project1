@@ -4,23 +4,26 @@ from database import get_engine
 
 
 SOURCE = """
-SELECT CONCAT('task:',t.id,':',t.status) message_key, '待我审批' title,
- CONCAT(i.business_id,' · ',i.workflow_key) content, t.assigned_at event_at,
- '/approval-center' target
+SELECT CONCAT('task:',t.id,':',t.status) message_key, '待审批' title,
+ CONCAT('请审批', COALESCE(NULLIF(TRIM(i.business_type),''),'流程'), '：', i.business_id) content,
+ t.assigned_at event_at, '/approval-center' target
  FROM workflow_tasks t JOIN workflow_instances i ON i.id=t.instance_id
  WHERE t.assignee_id=:username AND t.status='待处理' AND i.status='审批中'
 UNION ALL
-SELECT CONCAT('instance:',id,':',status), CONCAT('流程',status),
- CONCAT(business_id,' · ',workflow_key,' · ',instance_no),
+SELECT CONCAT('instance:',id,':',status), '流程进度',
+ CONCAT(COALESCE(NULLIF(TRIM(business_type),''),'流程'), ' ', business_id, ' ', status),
  COALESCE(completed_at,created_at), '/approval-center'
  FROM workflow_instances WHERE initiator_id=:username
 UNION ALL
-SELECT CONCAT('derived:',id,':',status), CONCAT(task_type,'任务 · ',status),
- CONCAT(object_id,' · ',task_no), COALESCE(completed_at,created_at), '/inbound'
+SELECT CONCAT('derived:',id,':',status), CONCAT('待', task_type),
+ CASE WHEN task_type='重入库' THEN CONCAT('请将机台 ', object_id, ' 重新入库')
+      ELSE CONCAT('请处理', task_type, '：', object_id) END,
+ COALESCE(completed_at,created_at), '/inbound'
  FROM workflow_derived_tasks WHERE assignee_id=:username
 UNION ALL
 SELECT CONCAT('notice:',id),title,content,created_at,''
  FROM workflow_notifications WHERE recipient_id=:username
+   AND notification_type <> '重入库'  -- 重入库已由派生任务条目承载，避免同一条消息出现两次
 """
 
 

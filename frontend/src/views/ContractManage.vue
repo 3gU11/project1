@@ -1421,7 +1421,7 @@ const cancelSelectedContract = async () => {
     })
     const workflow = result.data
     ElMessage.success(workflow.status === '待审批'
-      ? `取消合同申请已提交，请在审批中心查看进度（${workflow.instance_no}）`
+      ? `取消合同申请已提交，请在审批中心查看进度`
       : `取消合同流程已提交，当前状态：${workflow.status}，请在审批中心查看进度`)
     await fetchContracts(true)
   }, { errorMessage: '取消合同失败' })
@@ -1718,7 +1718,7 @@ const submitBatchContracts = async () => {
       save_mode: saveMode,
       dealer_order_no: dealerOrderSource.value,
     })
-    if ((res as any)?.approval_pending) { ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((res as any)?.approval_pending) { ElMessage.info((res as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
 
     if (batchPickedFiles.value.length > 0) {

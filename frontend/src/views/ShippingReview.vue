@@ -432,7 +432,7 @@ const confirmShip = async () => {
       serial_nos: selectedSerials.value,
       expected_order_no: selectedOrderId.value,
     })
-    if ((res as any)?.approval_pending) { ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((res as any)?.approval_pending) { ElMessage.info((res as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     if (res.warning) {
       ElMessage.warning(res.warning)

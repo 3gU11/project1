@@ -24,7 +24,7 @@ const complete = async (row: any) => {
   if (!prompt) return
   try {
     const result = await apiPost<any>('/inventory/inbound-to-slot', { serial_no: row.object_id, slot_code: prompt.value.trim() })
-    if ((result as any)?.approval_pending) { ElMessage.info((result as any).message + '（' + (result as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((result as any)?.approval_pending) { ElMessage.info((result as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     if (!result?.ok) throw new Error(result?.message || '入库失败')
     await apiPost(`/workflows/derived-tasks/${encodeURIComponent(row.task_no)}/complete`, { reason: `入库工作台确认，库位：${prompt.value.trim()}` })

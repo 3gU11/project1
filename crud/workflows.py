@@ -618,9 +618,9 @@ def create_reinbound_tasks(conn, instance: dict, operator_id: str = '', force: b
         conn.execute(text("UPDATE workflow_derived_tasks SET assignee_id=:assignee WHERE task_no=:task_no AND (assignee_id IS NULL OR assignee_id='')"), {'assignee': assignee, 'task_no': task_no})
         conn.execute(text("""INSERT INTO workflow_notifications
             (recipient_id,notification_type,reference_no,title,content)
-            VALUES (:recipient,'重入库','%s','待处理重入库任务',:content)
+            VALUES (:recipient,'重入库','%s','待重新入库',:content)
             ON DUPLICATE KEY UPDATE reference_no=VALUES(reference_no)""" % task_no), {
-            'recipient': assignee, 'content': f'机台 {item["object_id"]} 需要退回工厂重新入库。'})
+            'recipient': assignee, 'content': f'请将机台 {item["object_id"]} 重新入库'})
         created.append({'task_no': task_no, 'object_id': str(item['object_id']).strip(), 'assignee_id': assignee, 'status': '待处理'})
     return created
 
@@ -807,8 +807,8 @@ def _emit_model_notification(conn, instance, node, recipients):
             VALUES (:recipient,'流程通知',:reference,:title,:content)
             ON DUPLICATE KEY UPDATE reference_no=VALUES(reference_no)"""), {
             'recipient': recipient, 'reference': reference,
-            'title': str(node.get('label') or '流程通知')[:200],
-            'content': f"流程 {instance['instance_no']}（{instance['business_id']}）已到达通知节点。",
+            'title': '待处理',
+            'content': f"请处理{str(instance.get('business_type') or '').strip() or '流程'}：{instance['business_id']}",
         })
 
 

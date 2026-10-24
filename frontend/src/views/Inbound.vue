@@ -216,7 +216,7 @@ const loadDerivedTasks = async () => { derivedLoading.value = true; try { const 
 const reinboundSlotOptions = computed(() => slotButtons.value.filter((slot: any) => !slotStats.value[slot.code]?.isOverflow))
 const reinbound = (row: any) => { reinboundTask.value = row; selectedReinboundSlot.value = ''; reinboundDialogVisible.value = true }
 const confirmReinbound = async () => { const row = reinboundTask.value; const slot = selectedReinboundSlot.value; if (!row || !slot) return; reinboundSubmitting.value = true; try { const result = await apiPost<any>('/inventory/inbound-to-slot', { serial_no: row.object_id, slot_code: slot });
-if ((result as any)?.approval_pending) { ElMessage.info((result as any).message + '（' + (result as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+if ((result as any)?.approval_pending) { ElMessage.info((result as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
  if (!result?.ok) throw new Error(result?.message || '入库失败'); await apiPost(`/workflows/derived-tasks/${encodeURIComponent(row.task_no)}/complete`, { reason: `成品入库页面确认，库位：${slot}` }); reinboundDialogVisible.value = false; await loadDerivedTasks(); window.dispatchEvent(new Event('workflow-pending-updated')) } catch (err: any) { ElMessage.error(err?.message || '重新入库失败') } finally { reinboundSubmitting.value = false } }
 const loading = ref(false)
 const error = ref('')

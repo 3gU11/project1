@@ -652,7 +652,7 @@ const allocateSelected = async () => {
     const workflowResponse = await apiPost(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`, {
       selected_serial_nos: selectedCandidateSerials.value,
     })
-    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message + '（' + (workflowResponse as any).instance_no + '）'); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
     
     ElMessage.success('配货复核已确认')
     selectedCandidateSerials.value = []
