@@ -12,6 +12,7 @@
     <ContractDraftReview
       ref="contractDraftReview"
       :confirm-order-approve="approveContractReviewOrder"
+      :confirm-order-reject="rejectContractReviewOrder"
       :can-approve-order="!!contractReviewOrder && canApprove(contractReviewOrder)"
       @done="onContractReviewDone"
       @approve-order="onApproveWithoutContract"
@@ -100,7 +101,13 @@
               {{ isFactoryPending(row) ? '通过' : '预览并审批' }}
             </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
-            <el-button size="small" type="warning" :disabled="!canConvertDealerOrder(row)" @click.stop="openConvertDialog(row._order || row)">
+            <el-button
+              size="small"
+              type="warning"
+              :disabled="!canConvertDealerOrder(row)"
+              :title="canConvertDealerOrder(row) ? '' : '请先审核通过后再转合同'"
+              @click.stop="openConvertDialog(row._order || row)"
+            >
               转合同
             </el-button>
           </div>
@@ -192,7 +199,12 @@
             {{ isFactoryPending(selectedOrder) ? '通过' : '预览并审批' }}
           </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
-          <el-button type="warning" :disabled="!canConvertDealerOrder(selectedOrder)" @click="openConvertDialog(selectedOrder)">转合同</el-button>
+          <el-button
+            type="warning"
+            :disabled="!canConvertDealerOrder(selectedOrder)"
+            :title="canConvertDealerOrder(selectedOrder) ? '' : '请先审核通过后再转合同'"
+            @click="openConvertDialog(selectedOrder)"
+          >转合同</el-button>
         </div>
       </template>
     </el-drawer>
@@ -514,7 +526,7 @@ const hasFactoryRemark = (row: DealerOrder) => {
 const isFactoryPending = (row: DealerOrder) => Number(row.factory_pending || 0) === 1 && !['complete', 'completed'].includes(row.status)
 const canApprove = (row: DealerOrder) => isFactoryPending(row) || row.status === 'pending'
 const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemark(row) : ['pending', 'approved'].includes(row.status))
-const canConvertDealerOrder = (row: DealerOrder) => ['pending', 'approved'].includes(String(row.status || '').trim()) && !isFactoryPending(row)
+const canConvertDealerOrder = (row: DealerOrder) => String(row.status || '').trim() === 'approved' && !isFactoryPending(row)
 
 const modelDictionaryStore = useModelDictionaryStore()
 const modelOptions = computed(() => modelDictionaryStore.rows
@@ -592,7 +604,7 @@ const normalizeDealerOrderItems = (order: DealerOrder) => {
 
 const openConvertDialog = async (order: DealerOrder) => {
   if (!canConvertDealerOrder(order)) {
-    ElMessage.warning('只有待审核或已通过的经销商订单可以转合同')
+    ElMessage.warning('只有审核通过的经销商订单可以转合同，请先在「预览并审批」中完成审核')
     return
   }
   const rows = normalizeDealerOrderItems(order)
@@ -912,6 +924,16 @@ const approveContractReviewOrder = async (): Promise<boolean> => {
   await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/approve`, {
     note: String(target.remark || ''),
   })
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  void loadOrders(true)
+  return true
+}
+
+const rejectContractReviewOrder = async (reason: string): Promise<boolean> => {
+  const target = contractReviewOrder.value
+  if (!target) throw new Error('未选择订单')
+  // 订单与合同附件一起驳回；后端会把该订单未归档的草稿同步置为 rejected。
+  await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/reject`, { reason })
   window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
   void loadOrders(true)
   return true

@@ -163,3 +163,25 @@ def review(draft_id: str, preview_hash: str, decision: str, reviewer: str, note:
     with get_engine().begin() as conn:
         conn.execute(text("UPDATE v8_contract_drafts SET state=:state, reviewer=:reviewer, review_note=:note, updated_at=:now WHERE id=:id"), {"state": decision, "reviewer": reviewer, "note": note, "now": datetime.now(), "id": draft_id})
     return get(draft_id)
+
+
+def reject_for_order(order_no: str, reviewer: str, reason: str = '') -> int:
+    """订单被驳回时，把它尚未归档的合同附件一并驳回。
+
+    只处理 submitted / preview_ready 两种状态的草稿：已归档（approved）是历史审批结果，
+    已驳回（rejected）无需重复处理；返回值是被联动驳回的草稿数量。
+    """
+    ensure_table()
+    cleaned_order_no = str(order_no or '').strip()
+    if not cleaned_order_no:
+        return 0
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            text(
+                "UPDATE v8_contract_drafts SET state='rejected', reviewer=:reviewer, "
+                "review_note=:note, updated_at=:now "
+                "WHERE TRIM(source_order_no)=:order_no AND state IN ('submitted','preview_ready')"
+            ),
+            {"order_no": cleaned_order_no, "reviewer": reviewer, "note": reason, "now": datetime.now()},
+        )
+        return int(result.rowcount or 0)

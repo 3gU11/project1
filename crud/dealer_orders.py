@@ -20,7 +20,7 @@ from crud.cloud_sync_outbox import (
 
 ACTIVE_HOLD_STATUSES = ("regional_pending", "pending", "approved")
 
-CONVERTIBLE_STATUSES = ("pending", "approved")
+CONVERTIBLE_STATUSES = ("approved",)
 
 
 def _enqueue_cloud_sync(conn, event_type: str, order_no: str, payload: dict[str, Any]) -> None:
@@ -1187,7 +1187,15 @@ def reject_dealer_order(order_no: str, reviewer: str, reason: str = "") -> dict:
             order_no,
             {"order_no": order_no, "status": "rejected", "reviewer": reviewer, "note": reason},
         )
-    return preview_dealer_order(order_no)
+    result = preview_dealer_order(order_no)
+    # 驳回订单时同步驳回它尚未归档的合同附件，避免出现"订单已驳回、附件还挂在待审批"。
+    try:
+        from crud.local_contract_drafts import reject_for_order
+        result["rejected_contract_drafts"] = reject_for_order(order_no, reviewer, reason)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("dealer order %s rejected but contract drafts were not updated", order_no)
+    return result
 
 
 def mark_dealer_order_allocated(order_no: str, allocated_qty: int, v7_order_no: str = "", reviewer: str = "") -> dict:
@@ -1230,7 +1238,7 @@ def validate_dealer_order_convertible(order_no: str) -> list[dict]:
         if any(int(item.get("factory_pending") or 0) for item in items):
             raise ValueError("当前经销商订单已冻结：订单有新备注待复审，复审通过后才可以转为合同")
         if any(item.get("status") not in CONVERTIBLE_STATUSES for item in items):
-            raise ValueError("只有待审核或已通过的订单可以转为合同")
+            raise ValueError("只有审核通过的订单可以转为合同，请先完成订单审核")
         return items
 
 
@@ -1296,6 +1304,13 @@ def reject_dealer_order_extra_review(order_no: str, reviewer: str, reason: str =
         )
     result = preview_dealer_order(order_no)
     result["cascade_cancel"] = cascade_result
+    # 新备注复审驳回同样会让订单失效，未归档的合同附件一并驳回。
+    try:
+        from crud.local_contract_drafts import reject_for_order
+        result["rejected_contract_drafts"] = reject_for_order(order_no, reviewer, reason)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("dealer order %s extra-review rejected but contract drafts were not updated", order_no)
     return result
 
 

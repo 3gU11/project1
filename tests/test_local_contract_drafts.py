@@ -100,6 +100,27 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertNotIn('{{', text)
         self.assertIn('客户甲', text)
 
+    def test_reject_for_order_rejects_unarchived_drafts_only(self):
+        """订单驳回时，只连带驳回未归档的草稿；已归档的审批记录保持不动。"""
+        base = {
+            'orderNo': 'ORD-R1', 'customerName': '客户甲', 'dealerName': '经销商甲',
+            'signedDate': '2026-10-24',
+        }
+        pending = drafts.prepare(drafts.create_from_order(base)['id'])
+        archived = drafts.prepare(drafts.create_from_order({**base, 'remark': '第二版'})['id'])
+        drafts.review(archived['id'], archived['preview_hash'], 'approved', 'boss', '核对无误')
+
+        self.assertEqual(1, drafts.reject_for_order('ORD-R1', 'boss', '库存不足'))
+        rejected = drafts.get(pending['id'])
+        self.assertEqual('rejected', rejected['state'])
+        self.assertEqual('库存不足', rejected['review_note'])
+        self.assertEqual('boss', rejected['reviewer'])
+        self.assertEqual('approved', drafts.get(archived['id'])['state'])
+
+        # 已经全部处理过的订单、空订单号都不应报错
+        self.assertEqual(0, drafts.reject_for_order('ORD-R1', 'boss', '再次驳回'))
+        self.assertEqual(0, drafts.reject_for_order('', 'boss'))
+
 
 if __name__ == '__main__':
     unittest.main()

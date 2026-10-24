@@ -86,7 +86,8 @@
         <span class="draft-footer-hint">{{ footerHint }}</span>
         <div class="draft-footer-actions">
           <el-button @click="visible = false">关闭</el-button>
-          <el-button v-if="canDecide" :disabled="busy" @click="decide('rejected')">驳回</el-button>
+          <el-button v-if="currentDraft?.state === 'rejected'" :disabled="busy" @click="resubmit">重新提交审批</el-button>
+          <el-button v-if="canDecide" :disabled="busy || !verified" @click="decide('rejected')">驳回</el-button>
           <el-button
             v-if="canDecide"
             type="primary"
@@ -131,11 +132,15 @@ type Draft = {
   source_order_snapshot: Record<string, any>
   fields: Record<string, string>
   missing_fields: string[]
+  reviewer?: string
+  review_note?: string
 }
 
 const props = defineProps<{
   /** 通过订单本身（含库存校验）；返回 false 时合同附件不会归档。 */
   confirmOrderApprove: () => Promise<boolean>
+  /** 驳回订单：订单与其未归档的合同附件一起驳回；返回 false 时弹窗保持打开。 */
+  confirmOrderReject?: (reason: string) => Promise<boolean>
   /** 当前订单是否还能通过；不能通过时只允许查看合同。 */
   canApproveOrder: boolean
 }>()
@@ -207,9 +212,12 @@ const currentDraft = computed(() => drafts.value.find((draft) => draft.id === ac
 const canDecide = computed(() => currentDraft.value?.state === 'preview_ready' && props.canApproveOrder)
 const footerHint = computed(() => {
   if (!currentDraft.value) return '该订单没有合同附件，可直接审核订单'
-  if (currentDraft.value.missing_fields?.length) return `请先补全 ${currentDraft.value.missing_fields.length} 项字段后再审批`
   if (currentDraft.value.state === 'approved') return '该合同附件已归档'
-  if (currentDraft.value.state === 'rejected') return '该合同附件已驳回'
+  if (currentDraft.value.state === 'rejected') {
+    const reason = String(currentDraft.value.review_note || '').trim()
+    return reason ? `该合同附件已驳回：${reason}` : '该合同附件已驳回'
+  }
+  if (currentDraft.value.missing_fields?.length) return `请先补全 ${currentDraft.value.missing_fields.length} 项字段后再审批`
   if (!props.canApproveOrder) return '当前订单不可通过，只能查看合同附件'
   if (!verified.value) return '预览加载中…'
   return '请核对固定条款、产品数量、单价、结算期限及签署信息'
@@ -337,6 +345,22 @@ async function saveFields() {
   }
 }
 
+// 已驳回的草稿重新走一遍"提交 → 生成预览"，避免旧版本驳回后弹窗变成死路。
+async function resubmit() {
+  const draft = currentDraft.value
+  if (!draft) return
+  busy.value = true
+  try {
+    await apiPut<Draft>(`/contract-drafts/local/${draft.id}`, { fields: draft.fields }, { timeout: 65000 })
+    ElMessage.success('已重新提交，正在生成新的预览')
+    await loadDrafts()
+  } catch (error: any) {
+    notifyError(error, '重新提交失败')
+  } finally {
+    busy.value = false
+  }
+}
+
 function download() {
   const draft = currentDraft.value
   if (!previewBytes.value || !draft) return
@@ -352,12 +376,17 @@ function download() {
 
 async function decide(decision: 'approved' | 'rejected') {
   const draft = currentDraft.value
-  if (!draft || !verified.value) return
+  if (!draft) return
+  if (!verified.value) {
+    // 预览没加载完就点决策会被误当成"按钮没反应"，这里明确提示而不是静默返回。
+    ElMessage.warning('预览尚未加载完成，请稍候再操作')
+    return
+  }
   let note = ''
   try {
     if (decision === 'rejected') {
       note = (
-        await ElMessageBox.prompt('填写驳回原因', '驳回合同附件', {
+        await ElMessageBox.prompt('填写驳回原因（订单与合同附件将一并驳回）', '驳回订单', {
           inputType: 'textarea',
           inputValidator: (value) => (String(value || '').trim() ? true : '请填写原因'),
         })
@@ -379,13 +408,25 @@ async function decide(decision: 'approved' | 'rejected') {
       // 先过订单（含库存校验）：订单过不了就不要归档附件，避免出现"附件已归档但订单未通过"。
       const orderApproved = await props.confirmOrderApprove()
       if (!orderApproved) return
+      await apiPost(
+        `/contract-drafts/local/${draft.id}/review`,
+        { decision, previewHash: draft.preview_hash, note },
+        { timeout: 65000 },
+      )
+      ElMessage.success('审批通过，合同附件已归档')
+    } else if (props.confirmOrderReject) {
+      // 驳回是一次动作：订单与未归档的合同附件一起驳回，由订单接口统一落库。
+      const orderRejected = await props.confirmOrderReject(note)
+      if (!orderRejected) return
+      ElMessage.success('订单与合同附件已驳回')
+    } else {
+      await apiPost(
+        `/contract-drafts/local/${draft.id}/review`,
+        { decision, previewHash: draft.preview_hash, note },
+        { timeout: 65000 },
+      )
+      ElMessage.success('已驳回合同附件')
     }
-    await apiPost(
-      `/contract-drafts/local/${draft.id}/review`,
-      { decision, previewHash: draft.preview_hash, note },
-      { timeout: 65000 },
-    )
-    ElMessage.success(decision === 'approved' ? '审批通过，合同附件已归档' : '已驳回')
     visible.value = false
     emit('done')
   } catch (error: any) {
