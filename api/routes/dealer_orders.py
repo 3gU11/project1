@@ -349,6 +349,60 @@ def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ct
         raise HTTPException(status_code=500, detail=f"标记配货失败: {exc}")
 
 
+def _attach_order_form_to_contracts(
+    order_no: str,
+    contract_ids: list[str],
+    customer: str,
+    operator: str,
+) -> list[str]:
+    """把系统生成的订货单作为合同附件归档到新合同。
+
+    转合同成功后调用：取该经销商订单最新一版订货单（优先已生成的预览），
+    落到每个新合同的附件目录并写入 contract_records，合同管理页即可看到。
+    单个合同附件失败只记日志，不能反过来判定转合同失败。
+    """
+    import io
+    import logging
+
+    from core.file_manager import contract_file_exists, save_contract_file
+    from crud.local_contract_drafts import latest_document
+
+    try:
+        document = latest_document(order_no)
+    except Exception:
+        logging.getLogger(__name__).exception("dealer order %s order form document unavailable", order_no)
+        return []
+    if not document:
+        logging.getLogger(__name__).info("dealer order %s has no contract draft, skip attaching order form", order_no)
+        return []
+
+    content, file_name = document
+    saved: list[str] = []
+    for raw_contract_id in contract_ids or []:
+        contract_id = str(raw_contract_id or "").strip()
+        if not contract_id:
+            continue
+        try:
+            if contract_file_exists(contract_id, file_name):
+                continue
+            buffer = io.BytesIO(content)
+            buffer.name = file_name
+            ok, message = save_contract_file(
+                buffer, customer, contract_id, operator, convert_to_docx=False
+            )
+            if ok:
+                saved.append(contract_id)
+            else:
+                logging.getLogger(__name__).warning(
+                    "order form attach failed contract=%s: %s", contract_id, message
+                )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "order form attach raised contract=%s", contract_id
+            )
+    return saved
+
+
 @router.post("/{order_no}/convert-to-contract")
 def convert_to_contract(
     order_no: str,
@@ -498,10 +552,13 @@ def convert_to_contract(
             username=operator,
         )
 
+        order_form_contracts = _attach_order_form_to_contracts(order_no, contract_ids, customer, operator)
+
         return {
             "message": f"已成功转为合同 {contract_no_str}",
             "contract_no": contract_no_str,
             "save_mode": save_mode,
+            "order_form_attached_contracts": order_form_contracts,
             **{k: v for k, v in result.items() if k not in ("message", "save_mode", "contract_ids")},
         }
     except HTTPException:

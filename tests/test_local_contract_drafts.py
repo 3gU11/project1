@@ -243,6 +243,27 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertFalse(resubmitted['review_note'])
         self.assertFalse(resubmitted['reviewed_at'])
 
+    def test_latest_document_returns_docx_for_contract_conversion(self):
+        """转合同时要能拿到系统生成的订货单文件。"""
+        base = {
+            'orderNo': 'ORD-DOC1', 'customerName': '客户甲', 'dealerName': '经销商甲',
+            'signedDate': '2026-10-24',
+        }
+        created = drafts.create_from_order(base)
+
+        content, file_name = drafts.latest_document('ORD-DOC1')
+        self.assertTrue(content.startswith(b'PK'))
+        self.assertEqual('ORD-DOC1-订货单.docx', file_name)
+
+        # 生成过预览后优先复用预览内容，不再重复渲染
+        prepared = drafts.prepare(created['id'])
+        preview_content, _ = drafts.latest_document('ORD-DOC1')
+        self.assertTrue(preview_content.startswith(b'PK'))
+        self.assertEqual(64, len(prepared['preview_hash']))
+
+        self.assertIsNone(drafts.latest_document('ORD-NONE'))
+        self.assertIsNone(drafts.latest_document(''))
+
 
 if __name__ == '__main__':
     unittest.main()

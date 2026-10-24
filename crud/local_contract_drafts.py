@@ -305,3 +305,39 @@ def list_latest_states(order_nos: list[str]) -> dict[str, dict[str, Any]]:
             "reviewed_at": _iso(row["reviewed_at"]),
         }
     return latest
+
+
+def latest_document(order_no: str) -> tuple[bytes, str] | None:
+    """返回经销商订单最新一版可归档的订货单（docx 字节, 建议文件名）。
+
+    转合同时用它把"系统生成的订货单"一起挂到合同附件里，避免合同只剩人工上传的文件。
+    优先复用已生成并可能已审批的预览；没有预览时按当前字段重新渲染（旧草稿字段已在 get() 里升级）。
+    找不到任何草稿时返回 None，由调用方决定是否跳过。
+    """
+    cleaned_order_no = str(order_no or '').strip()
+    if not cleaned_order_no:
+        return None
+    ensure_table()
+    with get_engine().begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT id FROM v8_contract_drafts WHERE TRIM(source_order_no)=:order_no "
+                "ORDER BY CASE state WHEN 'approved' THEN 0 WHEN 'preview_ready' THEN 1 ELSE 2 END, "
+                "created_at DESC LIMIT 1"
+            ),
+            {"order_no": cleaned_order_no},
+        ).mappings().first()
+        if not row:
+            return None
+        preview = conn.execute(
+            text("SELECT preview FROM v8_contract_drafts WHERE id=:id"),
+            {"id": str(row["id"])},
+        ).scalar()
+    if preview:
+        content = bytes(preview)
+    else:
+        draft = get(str(row["id"]))
+        if not draft:
+            return None
+        content, _ = render_order_form(draft['fields'])
+    return content, f"{cleaned_order_no}-订货单.docx"
