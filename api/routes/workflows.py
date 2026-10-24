@@ -23,6 +23,35 @@ from crud.workflows import workflow_action_for_instance, dispatch_pending_model_
 router = APIRouter()
 
 
+def _action_executor(action: str):
+    """Resolve a workflow action to its executor.
+
+    All three execution entry points (auto submit, approval, manual retry) must
+    go through here. Three hand-maintained copies of this map previously drifted
+    apart and the retry endpoint silently lost 'create_shipment_recall'.
+    """
+    from crud.forward_entries import execute_forward_entry
+    from crud.workflows import FORWARD_ENTRY_ACTIONS
+
+    executors = {name: execute_forward_entry for name in FORWARD_ENTRY_ACTIONS.values()}
+    executors.update({
+        'recall_allocation': execute_allocation_recall,
+        'recall_shipment': execute_shipment_recall,
+        'recall_customer_finished': execute_customer_finished_recall,
+        'ship_customer_order': execute_customer_order_shipped,
+        'save_customer_machine_plan': execute_customer_machine_plan,
+        'delete_order': execute_order_delete,
+        'delete_order_reinbound': execute_order_delete,
+        'disable_model': execute_model_dict_delete,
+        'cancel_contract': execute_contract_cancel,
+        'cancel_contract_reinbound': execute_contract_cancel,
+        'create_shipment_recall': create_and_execute_shipment_recall,
+    })
+    if action not in executors:
+        raise ValueError(f'流程动作没有对应执行器：{action}')
+    return executors[action]
+
+
 class ReverseItem(BaseModel):
     object_type: str
     object_id: str
@@ -234,23 +263,7 @@ def submit_reverse_instance(payload: ReverseCreateRequest,
             acquire_execution_lease(row['instance_no'], ctx['username'])
             auto_execution_started = True
             action = workflow_action_for_instance(row['instance_no'])
-            executors = {
-                'recall_allocation': execute_allocation_recall,
-                'recall_shipment': execute_shipment_recall,
-                'recall_customer_finished': execute_customer_finished_recall,
-                'ship_customer_order': execute_customer_order_shipped,
-        'save_customer_machine_plan': execute_customer_machine_plan,
-                'delete_order': execute_order_delete,
-                'delete_order_reinbound': execute_order_delete,
-                'disable_model': execute_model_dict_delete,
-                'cancel_contract': execute_contract_cancel,
-                'cancel_contract_reinbound': execute_contract_cancel,
-                'create_shipment_recall': create_and_execute_shipment_recall,
-            }
-            from crud.forward_entries import execute_forward_entry
-            from crud.workflows import FORWARD_ENTRY_ACTIONS
-            executors.update({a: execute_forward_entry for a in FORWARD_ENTRY_ACTIONS.values()})
-            execution_result = executors[action](row['instance_no'], ctx['username'])
+            execution_result = _action_executor(action)(row['instance_no'], ctx['username'])
             try:
                 dispatch_pending_model_notifications(row['instance_no'])
             except Exception:
@@ -276,23 +289,7 @@ def _execute_approved_workflow(instance_no: str, operator_id: str):
     """Execute an approved workflow immediately; approval is the confirmation."""
     acquire_execution_lease(instance_no, operator_id)
     action = workflow_action_for_instance(instance_no)
-    from crud.forward_entries import execute_forward_entry
-    from crud.workflows import FORWARD_ENTRY_ACTIONS
-    action_executor = {
-        **{a: execute_forward_entry for a in FORWARD_ENTRY_ACTIONS.values()},
-        'recall_allocation': execute_allocation_recall,
-        'recall_shipment': execute_shipment_recall,
-        'recall_customer_finished': execute_customer_finished_recall,
-                'ship_customer_order': execute_customer_order_shipped,
-        'save_customer_machine_plan': execute_customer_machine_plan,
-        'delete_order': execute_order_delete,
-        'delete_order_reinbound': execute_order_delete,
-        'disable_model': execute_model_dict_delete,
-        'cancel_contract': execute_contract_cancel,
-        'cancel_contract_reinbound': execute_contract_cancel,
-        'create_shipment_recall': create_and_execute_shipment_recall,
-    }[action]
-    result = action_executor(instance_no, operator_id)
+    result = _action_executor(action)(instance_no, operator_id)
     try:
         dispatch_pending_model_notifications(instance_no)
     except Exception:
@@ -370,22 +367,7 @@ def execute_workflow(instance_no: str, ctx: dict = Depends(require_roles('admin'
         if status in {'已通过', '执行异常', '重试中'}:
             acquire_execution_lease(instance_no, ctx['username'])
         action = workflow_action_for_instance(instance_no)
-        from crud.forward_entries import execute_forward_entry
-        from crud.workflows import FORWARD_ENTRY_ACTIONS
-        action_executor = {
-            **{a: execute_forward_entry for a in FORWARD_ENTRY_ACTIONS.values()},
-            'recall_allocation': execute_allocation_recall,
-            'recall_shipment': execute_shipment_recall,
-            'recall_customer_finished': execute_customer_finished_recall,
-                'ship_customer_order': execute_customer_order_shipped,
-        'save_customer_machine_plan': execute_customer_machine_plan,
-            'delete_order': execute_order_delete,
-            'delete_order_reinbound': execute_order_delete,
-            'disable_model': execute_model_dict_delete,
-            'cancel_contract': execute_contract_cancel,
-            'cancel_contract_reinbound': execute_contract_cancel,
-        }[action]
-        result = action_executor(instance_no, ctx['username'])
+        result = _action_executor(action)(instance_no, ctx['username'])
         try:
             dispatch_pending_model_notifications(instance_no)
         except Exception:

@@ -2017,7 +2017,9 @@ def return_shipped_machines(
                         SELECT `流水号`
                         FROM finished_goods_data
                         WHERE TRIM(COALESCE(`占用订单号`, '')) = :order_id
-                          AND TRIM(COALESCE(`状态`, '')) = '已出库'
+                          AND (TRIM(COALESCE(`状态`, '')) = '已出库'
+                               OR (TRIM(COALESCE(`状态`, '')) LIKE '库存中%'
+                                   AND TRIM(COALESCE(`Location_Code`, '')) IN ('DG-WH', 'DONGGUAN', '东莞仓库')))
                     """),
                     {"order_id": order_id},
                 ).fetchall()

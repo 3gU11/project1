@@ -1647,6 +1647,10 @@ def mark_execution_failure(instance_no: str, worker_id: str, error: str):
             SET status='执行异常', result='失败', failure_reason=:error
             WHERE id=:id AND status='执行中'"""),
                      {'id': instance['id'], 'error': message})
+        # 业务事务已回滚，对象没有被改动，锁必须随之释放，
+        # 否则该机台/订单会被永久占用，再也发不起新的逆向流程。
+        conn.execute(text("""UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP
+            WHERE instance_id=:id AND lock_status='占用中'"""), {'id': instance['id']})
         conn.execute(text("""INSERT INTO workflow_audit_logs
             (instance_id,action,operator_id,before_state,after_state,detail)
             VALUES (:id,'执行异常',:worker,'执行中','执行异常',:detail)"""),
@@ -2086,6 +2090,8 @@ def reclaim_expired_execution_leases(limit: int = 100):
         for row in rows:
             conn.execute(text("UPDATE workflow_execution_attempts SET status='执行异常', completed_at=CURRENT_TIMESTAMP(6), failure_reason='执行租约已过期' WHERE id=:id AND status='执行中'"), {'id': row['id']})
             conn.execute(text("UPDATE workflow_instances SET status='执行异常', result='失败', failure_reason='执行租约已过期' WHERE id=:id AND status='执行中'"), {'id': row['instance_id']})
+            conn.execute(text("""UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP
+                WHERE instance_id=:id AND lock_status='占用中'"""), {'id': row['instance_id']})
             conn.execute(text("""INSERT INTO workflow_audit_logs (instance_id,action,operator_id,before_state,after_state,detail)
                 VALUES (:id,'租约回收','system','执行中','执行异常',:detail)"""), {'id': row['instance_id'], 'detail': _json({'reason': 'lease_expired'})})
         return [dict(row) for row in rows]
