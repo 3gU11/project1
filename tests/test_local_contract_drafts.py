@@ -106,6 +106,37 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('俞文涛', filled['office_contact'])
         self.assertEqual('13003767856', filled['office_phone'])
 
+    def test_office_contact_is_not_backfilled_from_regional_manager(self):
+        """办事处联系人只认云端 officeContact；大区经理不再兜底成办事处联系人。"""
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-O3', 'customerName': '客户甲',
+            'regionalManagerName': '朱宸',
+        })
+        self.assertEqual('', fields['office_contact'])
+        self.assertEqual('', fields['office_branch'])
+        self.assertEqual('', fields['office_phone'])
+        # 云端真给了办事处联系人时照常带出
+        with_contact = drafts.map_order_to_contract({
+            'orderNo': 'ORD-O4', 'customerName': '客户甲',
+            'regionalManagerName': '朱宸', 'officeContact': '俞文涛',
+        })
+        self.assertEqual('俞文涛', with_contact['office_contact'])
+
+    def test_stored_office_contact_filled_by_old_fallback_is_cleared(self):
+        """旧草稿里用大区经理兜底填的办事处联系人，读取时清掉，等云端补真值。"""
+        row = drafts.create_from_order({
+            'orderNo': 'ORD-O5', 'customerName': '客户甲', 'dealerName': '经销商甲',
+            'signedDate': '2026-10-24', 'regionalManagerName': '朱宸',
+            'items': [{'model': 'FH-300C', 'quantity': 1}],
+        })
+        legacy = dict(row['fields'], office_contact='朱宸')
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
+                         {'f': json.dumps(legacy, ensure_ascii=False), 'id': row['id']})
+
+        healed = drafts.get(row['id'])
+        self.assertEqual('', healed['fields']['office_contact'])
+
     def test_signed_date_is_formatted_like_paper_form(self):
         """签订时间按纸质单写成中文日期；已是中文日期或自由文本则原样保留。"""
         iso = drafts.map_order_to_contract({

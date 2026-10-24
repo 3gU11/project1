@@ -262,9 +262,6 @@ def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
         })
     for name in TERMS_FIELDS + BUYER_FIELDS + OFFICE_FIELDS + EXTRA_FIELDS:
         fields[name] = _lookup(order, FIELD_ALIASES[name])
-    if not fields["office_contact"]:
-        # 办事处信息非必填：订单没有单独的办事处联系人时，用所属大区经理兜底
-        fields["office_contact"] = _lookup(order, ("regionalManagerName", "regional_manager_name"))
     return fields
 
 
@@ -344,6 +341,8 @@ def _normalize_stored_fields(fields: dict[str, Any],
     - 明细合并：旧草稿按云端批次行逐行存（同型号拆成多行、每行 1 台），数量口径没被人工
       改过时按当前「型号 + 加高」合并规则重排，加高机型顺带补上「（加高）」标记；
       一旦人工改过数量/型号（按型号汇总的数量对不上快照）就保持原样，不覆盖审批人的修改。
+    - 办事处联系人：旧草稿里可能是早年用所属大区经理兜底填进去的，云端补出真值前先清掉，
+      避免把大区经理当成办事处对接人印到合同上。
     - 最后按订货单栏位顺序重排，前端「编辑字段」直接按这个顺序展示。
     """
     signed_date = str(fields.get("signed_date") or "").strip()
@@ -355,6 +354,10 @@ def _normalize_stored_fields(fields: dict[str, Any],
         if has_content and not str(fields.get(f"item{index}_tax") or "").strip():
             fields[f"item{index}_tax"] = DEFAULT_TAX
     if isinstance(snapshot, dict) and snapshot:
+        regional_manager = _lookup(snapshot, ("regionalManagerName", "regional_manager_name"))
+        if (regional_manager and not _lookup(snapshot, FIELD_ALIASES["office_contact"])
+                and str(fields.get("office_contact") or "").strip() == regional_manager):
+            fields["office_contact"] = ""
         stored_rows = _stored_item_rows(fields)
         derived = map_order_to_contract(snapshot)
         derived_rows = _stored_item_rows(derived)
