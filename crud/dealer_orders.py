@@ -522,6 +522,9 @@ def _aggregate_status(items: list[dict]) -> str:
     statuses = [str(item.get("status") or "") for item in items]
     if statuses and all(status in {"complete", "completed"} for status in statuses):
         return "completed"
+    # 单行订单直接使用云端状态，避免 allocated_qty>0 把 rejected/contracted 误判成部分配货。
+    if statuses and len(set(statuses)) == 1:
+        return statuses[0]
     if statuses and all(status == "allocated" for status in statuses):
         return "allocated"
     if any(status == "allocated" or (int(item.get("allocated_qty") or 0) > 0 and status != "completed") for status, item in zip(statuses, items)):
@@ -578,6 +581,14 @@ def _group_orders(rows: list[dict]) -> list[dict]:
 
     orders = []
     for order_no, items in grouped.items():
+        # 同一订单号可能同时存在旧 wechat 镜像行和 SpringBoot 云端镜像行；
+        # 云端镜像存在时只使用它，避免数量/备注被旧行重复累加。
+        cloud_items = [
+            item for item in items
+            if str(item.get("source") or "").strip().lower() == "springboot"
+        ]
+        if cloud_items:
+            items = cloud_items
         base = dict(items[0])
         base["order_no"] = order_no
         base["items"] = items
@@ -615,6 +626,24 @@ def _retry_schema_changed_transaction(read):
                 # Repeating a statement in the same InnoDB snapshot cannot recover.
                 time.sleep(0.05 * (attempt + 1))
     return wrapped
+
+
+def _attach_contract_draft_states(orders: list[dict]) -> None:
+    """给审核列表补上每个订单最新一版合同附件草稿的状态与审批留痕。"""
+    if not orders:
+        return
+    try:
+        from crud.local_contract_drafts import list_latest_states
+        states = list_latest_states([str(order.get("order_no") or "") for order in orders])
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("contract draft states unavailable")
+        return
+    for order in orders:
+        info = states.get(str(order.get("order_no") or "").strip()) or {}
+        order["contract_draft_state"] = str(info.get("state") or "")
+        order["contract_draft_reviewed_by"] = str(info.get("reviewer") or "")
+        order["contract_draft_reviewed_at"] = str(info.get("reviewed_at") or "")
 
 
 @_retry_schema_changed_transaction
@@ -724,6 +753,7 @@ def list_dealer_orders(
     total = len(grouped)
     offset = (page - 1) * page_size
     data = grouped[offset : offset + page_size]
+    _attach_contract_draft_states(data)
     return {
         "data": data,
         "total": total,

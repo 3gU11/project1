@@ -1,9 +1,10 @@
+import json
 import re
 import unittest
 import zipfile
 from io import BytesIO
 from unittest.mock import patch
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 from crud import local_contract_drafts as drafts
@@ -96,9 +97,100 @@ class LocalContractDraftTests(unittest.TestCase):
         from contract_bridge.renderer import render_order_form
 
         blob, _ = render_order_form(drafts.map_order_to_contract({'orderNo': 'ORD-5', 'customerName': '客户甲'}))
-        text = document_text(blob)
-        self.assertNotIn('{{', text)
-        self.assertIn('客户甲', text)
+        text_content = document_text(blob)
+        self.assertNotIn('{{', text_content)
+        self.assertIn('客户甲', text_content)
+
+    def test_quantity_drops_trailing_zeros(self):
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-7', 'customerName': '客户甲',
+            'items': [{'productName': '设备A', 'quantity': '5.000'}, {'productName': '设备B', 'quantity': 5.5}],
+        })
+        self.assertEqual('5', fields['item1_qty'])
+        self.assertEqual('5.5', fields['item2_qty'])
+
+    def test_legacy_draft_fields_are_upgraded_from_snapshot(self):
+        """换模板之前生成的草稿只有旧字段集，读取时要按快照补齐新模板需要的键。"""
+        order = {
+            'orderNo': 'ORD-6', 'dealerName': '陈利春', 'customerName': '青岛铭青',
+            'contactName': '高望', 'contactPhone': '16651615305',
+            'items': [{'productCode': 'FR-400XS(PRO)', 'quantity': '5.000'}],
+        }
+        row = drafts.create_from_order(order)
+        legacy = {
+            'supplier_name': '', 'contract_no': '', 'buyer_name': '青岛铭青', 'signing_place': '',
+            'signed_date': '', 'delivery_date': '', 'settlement_terms': '', 'total_upper': '',
+            'buyer_address': '', 'contact_name': '高望', 'contact_phone': '16651615305',
+            'special_requirements': '', 'remark': '', 'accessories': '',
+            'item1_product': 'FR-400XS(PRO)', 'item1_brand': '', 'item1_spec': 'FR-400XS(PRO)',
+            'item1_qty': '5.000', 'item1_price': '',
+        }
+        for index in range(2, 5):
+            for suffix in ('product', 'brand', 'spec', 'qty', 'price'):
+                legacy[f'item{index}_{suffix}'] = ''
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
+                         {'f': json.dumps(legacy, ensure_ascii=False), 'id': row['id']})
+
+        healed = drafts.get(row['id'])
+        fields = healed['fields']
+        # 旧字段集没有的键被补上
+        self.assertEqual(drafts.DEFAULT_SUPPLIER, fields['supplier_name'])
+        self.assertEqual('陈利春', fields['dealer_name'])
+        self.assertIn('office_branch', fields)
+        self.assertIn('item1_tax', fields)
+        # 旧键清掉，编辑弹窗不再出现无效项
+        self.assertNotIn('contract_no', fields)
+        self.assertNotIn('item1_price', fields)
+        # 旧值里的 5.000 也顺手规整成 5
+        self.assertEqual('5', fields['item1_qty'])
+        # 缺失清单按新字段集算，需方不再算缺失
+        self.assertNotIn('dealer_name', healed['missing_fields'])
+        self.assertIn('signed_date', healed['missing_fields'])
+
+    def test_current_field_set_is_not_touched(self):
+        """新字段集的草稿不能被"升级"逻辑改写，审批人改过的值要保留。"""
+        row = drafts.create_from_order({'orderNo': 'ORD-8', 'dealerName': '原值', 'customerName': '客户甲'})
+        updated = drafts.update(row['id'], dict(row['fields'], dealer_name='人工改过'))
+        healed = drafts.get(row['id'])
+        self.assertEqual('人工改过', healed['fields']['dealer_name'])
+        self.assertEqual(updated['fields']['supplier_name'], healed['fields']['supplier_name'])
+
+    def test_product_name_defaults_only_when_model_present(self):
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-9', 'customerName': '客户甲',
+            'items': [{'productCode': 'FR-500XS', 'quantity': 1}, {'quantity': 2}],
+        })
+        self.assertEqual(drafts.DEFAULT_PRODUCT, fields['item1_product'])
+        self.assertEqual('', fields['item2_product'])
+
+    def test_chinese_and_alternative_field_names_are_recognized(self):
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-10', '经销商': '陈利春', '购货单位': '青岛铭青',
+            '结算方式': '月结 30 天', '交货时间': '2026 年 11 月', '所属办事处': '浙江办',
+            'items': [{'规格型号': 'FR-400XS(PRO)', '数量': 5, '税票': '含税'}],
+        })
+        self.assertEqual('陈利春', fields['dealer_name'])
+        self.assertEqual('青岛铭青', fields['buyer_name'])
+        self.assertEqual('月结 30 天', fields['settlement_terms'])
+        self.assertEqual('2026 年 11 月', fields['delivery_date'])
+        self.assertEqual('浙江办', fields['office_name'])
+        self.assertEqual('FR-400XS(PRO)', fields['item1_spec'])
+        self.assertEqual('5', fields['item1_qty'])
+        self.assertEqual('含税', fields['item1_tax'])
+
+    def test_extra_item_rows_are_added_when_order_has_more_models(self):
+        from contract_bridge.renderer import render_order_form
+
+        items = [{'productCode': f'M{i}', 'quantity': i} for i in range(1, 7)]
+        blob, _ = render_order_form(drafts.map_order_to_contract(
+            {'orderNo': 'ORD-11', 'customerName': '客户甲', 'items': items}))
+        content = document_text(blob)
+        self.assertNotIn('{{', content)
+        for index in range(1, 7):
+            self.assertIn(f'M{index}', content)
+        # 6 行都补上了产品名称
+        self.assertEqual(6, content.count(drafts.DEFAULT_PRODUCT))
 
     def test_reject_for_order_rejects_unarchived_drafts_only(self):
         """订单驳回时，只连带驳回未归档的草稿；已归档的审批记录保持不动。"""
@@ -120,6 +212,36 @@ class LocalContractDraftTests(unittest.TestCase):
         # 已经全部处理过的订单、空订单号都不应报错
         self.assertEqual(0, drafts.reject_for_order('ORD-R1', 'boss', '再次驳回'))
         self.assertEqual(0, drafts.reject_for_order('', 'boss'))
+
+    def test_list_latest_states_reports_newest_version_and_review_audit(self):
+        base = {
+            'orderNo': 'ORD-L1', 'customerName': '客户甲', 'dealerName': '经销商甲',
+            'signedDate': '2026-10-24',
+        }
+        drafts.prepare(drafts.create_from_order(base)['id'])
+        latest = drafts.prepare(drafts.create_from_order({**base, 'remark': '第二版'})['id'])
+        drafts.review(latest['id'], latest['preview_hash'], 'approved', 'boss', '核对无误')
+
+        states = drafts.list_latest_states(['ORD-L1', 'ORD-NONE', ''])
+        self.assertEqual('approved', states['ORD-L1']['state'])
+        self.assertEqual('boss', states['ORD-L1']['reviewer'])
+        self.assertTrue(states['ORD-L1']['reviewed_at'])
+        self.assertNotIn('ORD-NONE', states)
+        self.assertEqual({}, drafts.list_latest_states([]))
+
+    def test_resubmit_clears_previous_review_audit(self):
+        base = {
+            'orderNo': 'ORD-RS', 'customerName': '客户甲', 'dealerName': '经销商甲',
+            'signedDate': '2026-10-24',
+        }
+        draft = drafts.prepare(drafts.create_from_order(base)['id'])
+        drafts.review(draft['id'], draft['preview_hash'], 'rejected', 'boss', '信息不全')
+
+        resubmitted = drafts.update(draft['id'], draft['fields'])
+        self.assertEqual('submitted', resubmitted['state'])
+        self.assertFalse(resubmitted['reviewer'])
+        self.assertFalse(resubmitted['review_note'])
+        self.assertFalse(resubmitted['reviewed_at'])
 
 
 if __name__ == '__main__':

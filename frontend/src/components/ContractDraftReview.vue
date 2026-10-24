@@ -12,9 +12,9 @@
     <div v-loading="busy" class="draft-wrap">
       <el-empty
         v-if="!loading && !currentDraft"
-        :description="`订单 ${orderNo || ''} 暂无可审批的合同附件`"
+        :description="canApproveOrder ? `订单 ${orderNo || ''} 暂无合同附件，可直接审核订单` : `订单 ${orderNo || ''} 暂无合同附件`"
       >
-        <el-button type="primary" :disabled="!canApproveOrder || busy" @click="approveWithoutDraft">
+        <el-button v-if="canApproveOrder" type="primary" :disabled="busy" @click="approveWithoutDraft">
           直接审核订单
         </el-button>
       </el-empty>
@@ -26,6 +26,10 @@
             {{ labels[currentDraft.state] || currentDraft.state }}
           </el-tag>
           <span class="draft-meta">提交时间 {{ currentDraft.created_at }}</span>
+          <span v-if="currentDraft.reviewer" class="draft-meta">
+            {{ currentDraft.state === 'rejected' ? '驳回人' : '审批人' }} {{ currentDraft.reviewer }}
+            <template v-if="currentDraft.reviewed_at"> · {{ currentDraft.reviewed_at }}</template>
+          </span>
           <span v-if="currentDraft.missing_fields?.length" class="draft-warn">
             待补 {{ currentDraft.missing_fields.length }} 项字段
           </span>
@@ -86,7 +90,7 @@
         <span class="draft-footer-hint">{{ footerHint }}</span>
         <div class="draft-footer-actions">
           <el-button @click="visible = false">关闭</el-button>
-          <el-button v-if="currentDraft?.state === 'rejected'" :disabled="busy" @click="resubmit">重新提交审批</el-button>
+          <el-button v-if="currentDraft?.state === 'rejected' && canApproveOrder" :disabled="busy" @click="resubmit">重新提交审批</el-button>
           <el-button v-if="canDecide" :disabled="busy || !verified" @click="decide('rejected')">驳回</el-button>
           <el-button
             v-if="canDecide"
@@ -134,6 +138,7 @@ type Draft = {
   missing_fields: string[]
   reviewer?: string
   review_note?: string
+  reviewed_at?: string
 }
 
 const props = defineProps<{
@@ -211,8 +216,13 @@ const dialogTitle = computed(() => (orderNo.value ? `合同附件预览与审批
 const currentDraft = computed(() => drafts.value.find((draft) => draft.id === activeDraftId.value) || null)
 const canDecide = computed(() => currentDraft.value?.state === 'preview_ready' && props.canApproveOrder)
 const footerHint = computed(() => {
-  if (!currentDraft.value) return '该订单没有合同附件，可直接审核订单'
-  if (currentDraft.value.state === 'approved') return '该合同附件已归档'
+  if (!currentDraft.value) {
+    return props.canApproveOrder ? '该订单没有合同附件，可直接审核订单' : '该订单没有合同附件'
+  }
+  if (currentDraft.value.state === 'approved') {
+    const note = String(currentDraft.value.review_note || '').trim()
+    return note ? `该合同附件已归档：${note}` : '该合同附件已归档'
+  }
   if (currentDraft.value.state === 'rejected') {
     const reason = String(currentDraft.value.review_note || '').trim()
     return reason ? `该合同附件已驳回：${reason}` : '该合同附件已驳回'

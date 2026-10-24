@@ -71,7 +71,7 @@
           <el-tag :type="statusMeta(row).type">{{ statusMeta(row).text }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="regional_manager_name" label="经销商" width="90" show-overflow-tooltip />
+      <el-table-column prop="dealer_name" label="经销商" width="90" show-overflow-tooltip />
       <el-table-column prop="customer_name" label="客户名" min-width="390" show-overflow-tooltip />
       <el-table-column prop="model" label="机型明细" min-width="150" show-overflow-tooltip />
       <el-table-column prop="batch_no" label="批次/来源" width="120" show-overflow-tooltip>
@@ -94,11 +94,19 @@
       <el-table-column prop="remark" label="原备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="extra_remark" label="附加备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="ERMQ" label="需改数量" width="80" align="center" />
+      <el-table-column label="合同附件" width="110" align="center">
+        <template #default="{ row }">
+          <el-tag v-if="draftStateMeta(row.contract_draft_state).text" size="small" :type="draftStateMeta(row.contract_draft_state).type">
+            {{ draftStateMeta(row.contract_draft_state).text }}
+          </el-tag>
+          <span v-else>无</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="300" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
-            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="openContractReview(row)">
-              {{ isFactoryPending(row) ? '通过' : '预览并审批' }}
+            <el-button size="small" type="success" @click.stop="openContractReview(row)">
+              {{ reviewButtonLabel(row) }}
             </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
             <el-button
@@ -195,8 +203,8 @@
         <div class="note-box">{{ selectedOrder.review_note || '-' }}</div>
 
         <div class="drawer-actions">
-          <el-button :disabled="!canApprove(selectedOrder)" @click="openContractReview(selectedOrder)">
-            {{ isFactoryPending(selectedOrder) ? '通过' : '预览并审批' }}
+          <el-button @click="openContractReview(selectedOrder)">
+            {{ reviewButtonLabel(selectedOrder) }}
           </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
           <el-button
@@ -364,6 +372,9 @@ type DealerOrder = {
   summary_qty?: number
   occupied_qty?: number
   available_qty?: number
+  contract_draft_state?: string
+  contract_draft_reviewed_by?: string
+  contract_draft_reviewed_at?: string
   items?: DealerOrder[]
 }
 
@@ -527,6 +538,21 @@ const isFactoryPending = (row: DealerOrder) => Number(row.factory_pending || 0) 
 const canApprove = (row: DealerOrder) => isFactoryPending(row) || row.status === 'pending'
 const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemark(row) : ['pending', 'approved'].includes(row.status))
 const canConvertDealerOrder = (row: DealerOrder) => String(row.status || '').trim() === 'approved' && !isFactoryPending(row)
+
+const draftStateMeta = (state?: string) => {
+  const value = String(state || '').trim()
+  if (value === 'approved') return { text: '已归档', type: 'success' as const }
+  if (value === 'rejected') return { text: '已驳回', type: 'danger' as const }
+  if (value === 'preview_ready') return { text: '待审批', type: 'warning' as const }
+  if (value === 'submitted') return { text: '待生成预览', type: 'info' as const }
+  return { text: '', type: 'info' as const }
+}
+
+// 待审核显示"预览并审批"，其它状态一律只读查看合同附件。
+const reviewButtonLabel = (row: DealerOrder) => {
+  if (isFactoryPending(row)) return '通过'
+  return canApprove(row) ? '预览并审批' : '查看合同'
+}
 
 const modelDictionaryStore = useModelDictionaryStore()
 const modelOptions = computed(() => modelDictionaryStore.rows
@@ -908,9 +934,8 @@ const contractReviewOrder = ref<DealerOrder | null>(null)
 
 const openContractReview = async (row: DealerOrder) => {
   const target = (row as DealerOrderTableRow)._order || row
-  if (!canApprove(target)) return
   // 新备注复审不是合同审批，沿用原来的直接通过。
-  if (isFactoryPending(target)) {
+  if (isFactoryPending(target) && canApprove(target)) {
     await approveOrder(target)
     return
   }
