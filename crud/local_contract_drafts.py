@@ -50,7 +50,7 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "contact_phone": ("contactPhone", "contact_phone", "phone", "联系电话", "联系方式"),
     # —— 办事处信息（非必填：云端没采集就留空，审批人可在编辑字段里补）——
     "office_branch": ("officeBranch", "office_branch", "serviceOffice", "service_office",
-                      "deliveryOffice", "delivery_office", "办事处"),
+                      "deliveryOffice", "delivery_office", "officeName", "office_name", "办事处"),
     "office_contact": ("officeContact", "office_contact", "办事处联系人"),
     "office_phone": ("officePhone", "office_phone", "办事处电话", "办事处联系方式"),
     # —— 其他特殊要求 ——

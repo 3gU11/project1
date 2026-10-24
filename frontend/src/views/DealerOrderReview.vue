@@ -72,7 +72,9 @@
         </template>
       </el-table-column>
       <el-table-column prop="dealer_name" label="经销商" width="90" show-overflow-tooltip />
-      <el-table-column prop="customer_name" label="客户名" min-width="390" show-overflow-tooltip />
+      <el-table-column prop="customer_name" label="客户名" min-width="390" show-overflow-tooltip>
+        <template #default="{ row }">{{ customerDisplay(row) }}</template>
+      </el-table-column>
       <el-table-column prop="model" label="机型明细" min-width="150" show-overflow-tooltip />
       <el-table-column prop="batch_no" label="批次/来源" width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ displayBatch(row.batch_no, row.inventory_type) }}</template>
@@ -134,6 +136,11 @@
           <span>订单号</span><strong>{{ selectedOrder.order_no }}</strong>
           <span>经销商</span><strong>{{ selectedOrder.dealer_name || '-' }}</strong>
           <span>客户</span><strong>{{ selectedOrder.customer_name || '-' }}</strong>
+          <span>地址</span><strong>{{ selectedOrder.delivery_address || '-' }}</strong>
+          <span>客户名（地址合并）</span><strong>{{ customerDisplay(selectedOrder) }}</strong>
+          <span>办事处</span><strong>{{ selectedOrder.office_name || '-' }}</strong>
+          <span>办事处联系人</span><strong>{{ selectedOrder.office_contact || '-' }}</strong>
+          <span>办事处联系方式</span><strong>{{ selectedOrder.office_phone || '-' }}</strong>
           <span>联系人</span><strong>{{ selectedOrder.contact_name || '-' }}</strong>
           <span>电话</span><strong>{{ selectedOrder.contact_phone || '-' }}</strong>
           <span>当前状态</span><strong>{{ statusMeta(selectedOrder).text }}</strong>
@@ -338,6 +345,10 @@ type DealerOrder = {
   dealer_phone?: string
   regional_manager_name?: string
   customer_name?: string
+  delivery_address?: string
+  office_name?: string
+  office_contact?: string
+  office_phone?: string
   contact_name?: string
   contact_phone?: string
   model: string
@@ -606,6 +617,13 @@ const normalizeDealerOrderItems = (order: DealerOrder) => {
       return { model, qty, high, rowNote, remark, extraRemark, ermq }
     })
     .filter((item) => item.model)
+}
+
+const customerDisplay = (order: DealerOrder | Record<string, any>) => {
+  const customer = String((order as any).customer_name || '').trim()
+  const address = String((order as any).delivery_address || '').trim()
+  if (!address) return customer || '-'
+  return `${address}（${customer || '-'}）`
 }
 
 const openConvertDialog = async (order: DealerOrder) => {

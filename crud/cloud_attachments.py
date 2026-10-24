@@ -187,7 +187,7 @@ def _already_synced(conn, attachment_id: str) -> dict | None:
 def _contract_record_exists(conn, contract_id: str, file_path: str) -> bool:
     row = conn.execute(
         text(
-            "SELECT id FROM contract_records WHERE contract_id = :contract_id "
+            "SELECT 1 FROM contract_records WHERE contract_id = :contract_id "
             "AND file_path = :file_path LIMIT 1"
         ),
         {"contract_id": contract_id, "file_path": file_path},
