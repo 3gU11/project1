@@ -953,6 +953,31 @@ REVERSE_WORKFLOW_ACTIONS = {
     'contract-cancel': {'cancel_contract', 'cancel_contract_reinbound'},
 }
 
+# 编辑器渲染用的白名单目录。前端不再维护自己的一份动作/字段清单，
+# 一律以这里为准，避免前后端校验规则漂移。
+CONDITION_FIELDS = [
+    {'value': 'bound_machine_count', 'label': '绑定机台数量'},
+    {'value': 'shipped_machine_count', 'label': '已发货机台数量'},
+    {'value': 'item_count', 'label': '流程对象数量'},
+    {'value': 'has_bound_machines', 'label': '绑定机台数量（兼容别名）'},
+    {'value': 'object_count', 'label': '流程对象数量（兼容别名）'},
+]
+
+CONDITION_OPERATORS = [
+    {'value': 'gt', 'label': '大于'},
+    {'value': 'eq', 'label': '等于'},
+    {'value': 'exists', 'label': '存在'},
+]
+
+
+def workflow_editor_catalog():
+    """Return the whitelists the model editor must render, owned by the server."""
+    return {
+        'actions': {key: sorted(actions) for key, actions in REVERSE_WORKFLOW_ACTIONS.items()},
+        'condition_fields': CONDITION_FIELDS,
+        'condition_operators': CONDITION_OPERATORS,
+    }
+
 
 def dispatch_pending_model_notifications(instance_no: str):
     ensure_workflow_tables()
@@ -2085,14 +2110,97 @@ def save_workflow_draft(workflow_key: str, snapshot: dict, operator_id: str):
     validate_workflow_snapshot(snapshot, workflow_key)
     with get_engine().begin() as conn:
         model = conn.execute(text('SELECT id,current_version FROM workflow_models WHERE workflow_key=:key FOR UPDATE'), {'key': workflow_key}).mappings().first()
-        if not model or not model['current_version']:
-            raise ValueError('流程模型尚未初始化版本')
+        if not model:
+            raise ValueError('流程模型不存在')
         draft = conn.execute(text("SELECT id FROM workflow_model_versions WHERE model_id=:id AND status='草稿' LIMIT 1 FOR UPDATE"), {'id': model['id']}).first()
+        # 草稿被删除或模型从未发布过时 current_version 可能为 0，版本号按现有最大值续编。
+        next_version = int(conn.execute(text('SELECT COALESCE(MAX(version_no),0)+1 FROM workflow_model_versions WHERE model_id=:id'), {'id': model['id']}).scalar() or 1)
         if draft:
             conn.execute(text("UPDATE workflow_model_versions SET node_snapshot=:snapshot,published_by=:operator WHERE id=:id"), {'snapshot': _json(snapshot), 'operator': operator_id, 'id': draft[0]})
         else:
-            conn.execute(text("INSERT INTO workflow_model_versions (model_id,version_no,status,node_snapshot,runtime_enabled,published_by) VALUES (:id,:version,'草稿',:snapshot,0,:operator)"), {'id': model['id'], 'version': int(model['current_version']) + 1, 'snapshot': _json(snapshot), 'operator': operator_id})
-        return {'workflow_key': workflow_key, 'version': model['current_version'], 'status': '草稿已保存'}
+            conn.execute(text("INSERT INTO workflow_model_versions (model_id,version_no,status,node_snapshot,runtime_enabled,published_by) VALUES (:id,:version,'草稿',:snapshot,0,:operator)"), {'id': model['id'], 'version': next_version, 'snapshot': _json(snapshot), 'operator': operator_id})
+        return {'workflow_key': workflow_key, 'version': int(model['current_version'] or next_version), 'status': '草稿已保存'}
+
+
+def duplicate_workflow_model(workflow_key: str, operator_id: str):
+    """Copy a model (with its current graph) into a new unpublished draft model."""
+    ensure_workflow_tables()
+    with get_engine().begin() as conn:
+        source = conn.execute(text('SELECT * FROM workflow_models WHERE workflow_key=:key'), {'key': workflow_key}).mappings().first()
+        if not source:
+            raise ValueError('流程模型不存在')
+        raw_snapshot = conn.execute(text('''SELECT node_snapshot FROM workflow_model_versions
+            WHERE model_id=:id AND version_no=:version'''), {'id': source['id'], 'version': source['current_version']}).scalar()
+        base_key = f"{workflow_key}-copy"
+        new_key, suffix = base_key, 1
+        while conn.execute(text('SELECT 1 FROM workflow_models WHERE workflow_key=:key'), {'key': new_key}).first():
+            suffix += 1
+            new_key = f'{base_key}{suffix}'
+        new_name = f"{source['name']}（副本）"
+        conn.execute(text('''INSERT INTO workflow_models
+            (workflow_key,name,category_key,direction,processing_type,business_object,execution_scope,
+             status,is_required,current_version,created_by,updated_by)
+            VALUES (:key,:name,:category,:direction,:processing,:object,:scope,'草稿',0,1,:operator,:operator)'''), {
+            'key': new_key, 'name': new_name, 'category': source['category_key'],
+            'direction': source['direction'], 'processing': source['processing_type'],
+            'object': source['business_object'], 'scope': source['execution_scope'],
+            'operator': operator_id,
+        })
+        model_id = conn.execute(text('SELECT id FROM workflow_models WHERE workflow_key=:key'), {'key': new_key}).scalar()
+        conn.execute(text('''INSERT INTO workflow_model_versions
+            (model_id,version_no,status,node_snapshot,runtime_enabled,published_by)
+            VALUES (:id,1,'草稿',:snapshot,0,:operator)'''), {
+            'id': model_id, 'snapshot': raw_snapshot if isinstance(raw_snapshot, str) else _json(raw_snapshot or {}),
+            'operator': operator_id,
+        })
+        return {'workflow_key': new_key, 'name': new_name, 'status': '草稿'}
+
+
+def set_workflow_model_enabled(workflow_key: str, enabled: bool, operator_id: str):
+    """停用/启用已发布的模型：停用后业务侧 create_reverse_instance 查不到可运行版本。"""
+    ensure_workflow_tables()
+    with get_engine().begin() as conn:
+        model = conn.execute(text('SELECT * FROM workflow_models WHERE workflow_key=:key FOR UPDATE'), {'key': workflow_key}).mappings().first()
+        if not model:
+            raise ValueError('流程模型不存在')
+        if enabled:
+            version = conn.execute(text("""SELECT id FROM workflow_model_versions
+                WHERE model_id=:id AND version_no=:version AND status='已发布'"""),
+                {'id': model['id'], 'version': model['current_version']}).first()
+            if not version:
+                raise ValueError('当前版本不是已发布版本，请先发布新版本')
+            conn.execute(text("UPDATE workflow_model_versions SET runtime_enabled=1 WHERE id=:id"), {'id': version[0]})
+            conn.execute(text("UPDATE workflow_models SET status='已发布',updated_by=:operator WHERE id=:id"), {'operator': operator_id, 'id': model['id']})
+            return {'workflow_key': workflow_key, 'status': '已发布'}
+        published = conn.execute(text("""SELECT 1 FROM workflow_model_versions
+            WHERE model_id=:id AND status='已发布' LIMIT 1"""), {'id': model['id']}).first()
+        if not published:
+            raise ValueError('该流程尚未发布，无需停用')
+        conn.execute(text('UPDATE workflow_model_versions SET runtime_enabled=0 WHERE model_id=:id'), {'id': model['id']})
+        conn.execute(text("UPDATE workflow_models SET status='已停用',updated_by=:operator WHERE id=:id"), {'operator': operator_id, 'id': model['id']})
+        return {'workflow_key': workflow_key, 'status': '已停用'}
+
+
+def delete_workflow_draft(workflow_key: str, operator_id: str):
+    ensure_workflow_tables()
+    with get_engine().begin() as conn:
+        model = conn.execute(text('SELECT * FROM workflow_models WHERE workflow_key=:key FOR UPDATE'), {'key': workflow_key}).mappings().first()
+        if not model:
+            raise ValueError('流程模型不存在')
+        deleted = conn.execute(text("DELETE FROM workflow_model_versions WHERE model_id=:id AND status='草稿'"), {'id': model['id']}).rowcount
+        if not deleted:
+            raise ValueError('该流程没有草稿可删除')
+        # current_version 若指向刚被删掉的草稿（复制出来的模型），回退到最近的已发布版本。
+        still_exists = conn.execute(text('''SELECT 1 FROM workflow_model_versions
+            WHERE model_id=:id AND version_no=:version'''), {'id': model['id'], 'version': model['current_version']}).first()
+        if not still_exists:
+            fallback = conn.execute(text("""SELECT MAX(version_no) FROM workflow_model_versions
+                WHERE model_id=:id AND status='已发布'"""), {'id': model['id']}).scalar()
+            conn.execute(text('UPDATE workflow_models SET current_version=:version,updated_by=:operator WHERE id=:id'), {
+                'version': int(fallback or 0), 'operator': operator_id, 'id': model['id'],
+            })
+        return {'workflow_key': workflow_key, 'deleted': int(deleted), 'status': '草稿已删除'}
+
 
 
 def execute_customer_machine_plan(instance_no: str, worker_id: str):

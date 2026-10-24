@@ -25,7 +25,7 @@
         <span class="group-count">{{ group.items.length }} 个流程</span>
       </button>
       <div v-if="isExpanded(group.title)" class="table-wrap">
-        <el-table :data="group.items" stripe>
+        <el-table v-loading="loading" :data="group.items" stripe>
           <el-table-column prop="name" label="流程名称" min-width="180" />
           <el-table-column label="方向" width="90">
             <template #default="{ row }"><el-tag :type="row.direction === '逆向' ? 'warning' : 'success'" effect="plain">{{ row.direction }}</el-tag></template>
@@ -84,7 +84,7 @@
         <aside class="node-properties" :class="{ 'preview-properties': preview }">
           <strong>节点属性</strong>
           <template v-if="selectedNode">
-            <el-form label-position="top" size="small"><el-form-item label="节点名称"><el-input v-model="selectedNode.label" /></el-form-item><el-form-item label="节点类型"><el-input :model-value="selectedNode.type" disabled /></el-form-item><el-form-item v-if="selectedNode.type === 'approval' || selectedNode.type === 'start'" :label="selectedNode.type === 'start' ? '发起人' : '审批角色'"><el-select v-if="selectedNode.type === 'approval'" v-model="selectedNode.approvalRoles" multiple collapse-tags placeholder="选择审批角色" style="width:100%"><el-option v-for="role in workflowRoles" :key="role.role_id" :label="role.role_name || role.role_id" :value="role.role_id" /></el-select><el-input v-else v-model="selectedNode.assigneesText" placeholder="发起人规则（可选）" /><small class="field-help">审批时按模型保存的角色自动生成任务，不在业务操作时临时选择人员。</small></el-form-item><el-form-item v-if="selectedNode.type === 'notify'" label="通知角色"><el-select v-model="selectedNode.notifyRoles" multiple collapse-tags collapse-tags-tooltip placeholder="选择接收通知的角色" style="width:100%"><el-option v-for="role in workflowRoles" :key="role.role_id" :label="role.role_name || role.role_id" :value="role.role_id" /></el-select><small class="field-help">仅在流程模型中配置角色，运行时自动通知该角色的用户。</small></el-form-item><el-form-item v-if="selectedNode.type === 'condition'" label="条件表达式"><el-select v-model="selectedNode.conditionField" placeholder="选择业务字段" style="width:100%"><el-option label="绑定机台数量" value="bound_machine_count"/><el-option label="已发货机台数量" value="shipped_machine_count"/><el-option label="流程对象数量" value="item_count"/></el-select><el-select v-model="selectedNode.conditionOperator" placeholder="比较符" style="width:100%;margin-top:6px"><el-option label=">" value="gt"/><el-option label="=" value="eq"/><el-option label="存在" value="exists"/></el-select><el-input-number v-model="selectedNode.conditionValue" :min="0" :precision="0" controls-position="right" style="width:100%;margin-top:6px"/><small class="field-help">条件节点的两条连线会自动标记为 true 和 false。</small></el-form-item><el-form-item v-if="selectedNode.type === 'execute'" label="业务动作"><el-select v-model="selectedNode.action" placeholder="选择已注册动作" style="width:100%"><el-option v-for="action in actionOptions" :key="action.value" :label="action.label" :value="action.value"/></el-select></el-form-item></el-form>
+            <el-form label-position="top" size="small"><el-form-item label="节点名称"><el-input v-model="selectedNode.label" /></el-form-item><el-form-item label="节点类型"><el-input :model-value="selectedNode.type" disabled /></el-form-item><el-form-item v-if="selectedNode.type === 'approval'" label="审批角色"><el-select v-model="selectedNode.approvalRoles" multiple collapse-tags placeholder="选择审批角色" style="width:100%"><el-option v-for="role in workflowRoles" :key="role.role_id" :label="role.role_name || role.role_id" :value="role.role_id" /></el-select><small class="field-help">审批时按模型保存的角色自动生成任务，不在业务操作时临时选择人员。</small></el-form-item><el-form-item v-if="selectedNode.type === 'notify'" label="通知角色"><el-select v-model="selectedNode.notifyRoles" multiple collapse-tags collapse-tags-tooltip placeholder="选择接收通知的角色" style="width:100%"><el-option v-for="role in workflowRoles" :key="role.role_id" :label="role.role_name || role.role_id" :value="role.role_id" /></el-select><small class="field-help">仅在流程模型中配置角色，运行时自动通知该角色的用户。</small></el-form-item><el-form-item v-if="selectedNode.type === 'condition'" label="条件表达式"><el-select v-model="selectedNode.conditionField" placeholder="选择业务字段" style="width:100%"><el-option v-for="field in conditionFields" :key="field.value" :label="field.label" :value="field.value"/></el-select><el-select v-model="selectedNode.conditionOperator" placeholder="比较符" style="width:100%;margin-top:6px"><el-option v-for="op in conditionOperators" :key="op.value" :label="op.label" :value="op.value"/></el-select><el-input-number v-model="selectedNode.conditionValue" :min="0" :precision="0" controls-position="right" style="width:100%;margin-top:6px"/><small class="field-help">条件节点的两条连线会自动标记为 true 和 false。</small></el-form-item><el-form-item v-if="selectedNode.type === 'execute'" label="业务动作"><el-select v-model="selectedNode.action" placeholder="选择已注册动作" style="width:100%"><el-option v-for="action in actionOptions" :key="action.value" :label="action.label" :value="action.value"/></el-select></el-form-item></el-form>
             <el-button type="danger" plain size="small" @click="removeNode(selectedNode.id)">删除节点</el-button>
           </template><el-empty v-else description="选择节点后编辑" :image-size="70" />
           <div class="edge-help"><template v-if="!preview"><b>创建连线</b><p>依次点击两个节点即可创建连线；条件节点的每条线需标记结果。</p></template><b v-else>流程连线</b><el-tag v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`" :closable="!preview" @close="!preview && removeEdge(edge)">{{ nodeLabel(edge.source) }} → {{ nodeLabel(edge.target) }}<template v-if="edge.sourceType === 'condition'">（{{ edge.branch || '未设置' }}）</template></el-tag></div>
@@ -115,14 +115,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiGet, apiPost } from '../../utils/request'
+import { apiDelete, apiGet, apiPost, getApiErrorMessage } from '../../utils/request'
 import { useUserStore } from '../../store/user'
 
 type Model = {
   name: string; category: string; direction: '正向' | '逆向'; mode: '自动通过' | '需要审批'; visibility: string
   key: string; object: string; form: string; status: '未发布' | '已发布' | '已停用'; version?: string; publishedAt?: string; snapshot?: { nodes: FlowNode[]; edges: FlowEdge[] }; draftSnapshot?: { nodes: FlowNode[]; edges: FlowEdge[] }
 }
-type FlowNode = { id: string; type: string; label: string; x: number; y: number; assigneesText?: string; targetState?: string; notifyRoles?: string[]; approvalRoles?: string[]; conditionField?: string; conditionOperator?: string; conditionValue?: number; branches?: { true?: string; false?: string }; action?: string }
+type FlowNode = { id: string; type: string; label: string; x: number; y: number;  notifyRoles?: string[]; approvalRoles?: string[]; conditionField?: string; conditionOperator?: string; conditionValue?: number; branches?: { true?: string; false?: string }; action?: string }
 type FlowEdge = { source: string; target: string; branch?: 'true' | 'false'; sourceType?: string }
 
 const keyword = ref('')
@@ -130,20 +130,7 @@ const direction = ref('')
 const mode = ref('')
 const expanded = ref(new Set(['合同流程', '订单流程', '发货流程', '库存流程', '配货流程', '客户成品流程', '基础资料流程', '数据清理流程']))
 
-const models = ref<Model[]>([
-  { name: '合同创建', category: '合同流程', direction: '正向', mode: '自动通过', visibility: '销售部', key: 'contract-create', object: '销售合同', form: '合同主表', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:20' },
-  { name: '取消合同', category: '合同流程', direction: '逆向', mode: '需要审批', visibility: '全体人员', key: 'contract-cancel', object: '销售合同', form: '逆向操作单', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:22' },
-  { name: '创建销售订单', category: '订单流程', direction: '正向', mode: '自动通过', visibility: '销售部', key: 'order-create', object: '销售订单', form: '订单主表', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:25' },
-  { name: '删除订单', category: '订单流程', direction: '逆向', mode: '需要审批', visibility: '全体人员', key: 'order-delete', object: '销售订单', form: '逆向操作单', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:27' },
-  { name: '订单配货', category: '配货流程', direction: '正向', mode: '自动通过', visibility: '仓储部', key: 'allocation-create', object: '配货单', form: '配货明细', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:30' },
-  { name: '撤回配货', category: '配货流程', direction: '逆向', mode: '需要审批', visibility: '全体人员', key: 'allocation-recall', object: '配货单', form: '逆向操作单', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:32' },
-  { name: '成品入库', category: '库存流程', direction: '正向', mode: '自动通过', visibility: '仓储部', key: 'stock-inbound', object: '机台', form: '入库单', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:35' },
-  { name: '发货确认', category: '发货流程', direction: '正向', mode: '自动通过', visibility: '仓储部', key: 'shipment-confirm', object: '发货单', form: '发货复核单', status: '已发布', version: 'v1.0', publishedAt: '2026-10-08 10:38' },
-  { name: '发货撤回', category: '发货流程', direction: '逆向', mode: '自动通过', visibility: '全体人员', key: 'shipment-recall', object: '发货单', form: '逆向操作单', status: '未发布' },
-  { name: '客户成品核销发货撤回', category: '客户成品流程', direction: '逆向', mode: '需要审批', visibility: '全体人员', key: 'customer-finished-recall', object: '客户成品', form: '核销单', status: '未发布' },
-  { name: '删除机型字典', category: '基础资料流程', direction: '逆向', mode: '需要审批', visibility: '全体人员', key: 'model-dict-delete', object: '机型字典', form: '逆向操作单', status: '未发布' },
-  { name: '数据清理', category: '数据清理流程', direction: '正向', mode: '自动通过', visibility: '管理员', key: 'data-cleanup', object: '业务数据', form: '清理任务单', status: '已停用', version: 'v1.0', publishedAt: '2026-09-30 16:00' },
-])
+const models = ref<Model[]>([])
 const loading = ref(false)
 const nodeTypes = [{ type: 'start', label: '发起', icon: '▶' }, { type: 'approval', label: '审批', icon: '✓' }, { type: 'execute', label: '自动执行', icon: '⚙' }, { type: 'condition', label: '条件分支', icon: '?' }, { type: 'notify', label: '通知', icon: '!' }, { type: 'end', label: '结束', icon: '■' }]
 const designer = ref<{ visible: boolean; model: Model | null; selectedId: string | null; draft: { nodes: FlowNode[]; edges: FlowEdge[] }; history: string[]; future: string[] }>({ visible: false, model: null, selectedId: null, draft: { nodes: [], edges: [] }, history: [], future: [] })
@@ -160,25 +147,39 @@ const workflowRoles = ref<any[]>([])
 const pendingCount = ref(0)
 const canEdit = computed(() => ['admin', 'boss'].includes(String(userStore.userInfo?.role || '').toLowerCase()))
 const selectedNode = computed(() => designer.value.draft.nodes.find(node => node.id === designer.value.selectedId))
-const actionRegistry = [
-  { label: '创建合同', value: 'create_contract', workflowKey: 'contract-create' },
-  { label: '创建销售订单', value: 'create_sales_order', workflowKey: 'order-create' },
-  { label: '执行订单配货', value: 'allocate_order', workflowKey: 'allocation-create' },
-  { label: '成品入库', value: 'inbound_machine', workflowKey: 'stock-inbound' },
-  { label: '库位转移', value: 'transfer_machine', workflowKey: 'stock-transfer' },
-  { label: '确认发货', value: 'confirm_shipment', workflowKey: 'shipment-confirm' },
-  { label: '保存客户机台规划', value: 'save_customer_machine_plan', workflowKey: 'customer-machine-plan' },
-  { label: '取消合同', value: 'cancel_contract', workflowKey: 'contract-cancel' },
-  { label: '取消合同并释放机台', value: 'cancel_contract_reinbound', workflowKey: 'contract-cancel' },
-  { label: '删除订单', value: 'delete_order', workflowKey: 'order-delete' },
-  { label: '删除订单并派生重入库', value: 'delete_order_reinbound', workflowKey: 'order-delete' },
-  { label: '撤回配货', value: 'recall_allocation', workflowKey: 'allocation-recall' },
-  { label: '撤回发货', value: 'recall_shipment', workflowKey: 'shipment-recall' },
-  { label: '撤回客户成品发货', value: 'recall_customer_finished', workflowKey: 'customer-finished-recall' },
-  { label: '客户成品订单发货', value: 'ship_customer_order', workflowKey: 'customer-order-shipped' },
-  { label: '停用机型', value: 'disable_model', workflowKey: 'model-dict-delete' },
-]
-const actionOptions = computed(() => actionRegistry.filter(action => action.workflowKey === designer.value.model?.key))
+// 动作清单由后端 catalog 下发，这里只保留中文标签。
+// 后端 WORKFLOW_ACTIONS 新增动作时，前端无需改动即可出现在下拉框（无标签时回退显示动作名）。
+const actionLabels: Record<string, string> = {
+  create_contract: '创建合同',
+  create_sales_order: '创建销售订单',
+  allocate_order: '执行订单配货',
+  inbound_machine: '成品入库',
+  transfer_machine: '库位转移',
+  confirm_shipment: '确认发货',
+  save_customer_machine_plan: '保存客户机台规划',
+  cancel_contract: '取消合同',
+  cancel_contract_reinbound: '取消合同并释放机台',
+  delete_order: '删除订单',
+  delete_order_reinbound: '删除订单并派生重入库',
+  recall_allocation: '撤回配货',
+  recall_shipment: '撤回发货',
+  recall_customer_finished: '撤回客户成品发货',
+  ship_customer_order: '客户成品订单发货',
+  disable_model: '停用机型',
+}
+const catalogActions = ref<Record<string, string[]>>({})
+const conditionFields = ref<{ value: string; label: string }[]>([
+  { value: 'bound_machine_count', label: '绑定机台数量' },
+  { value: 'shipped_machine_count', label: '已发货机台数量' },
+  { value: 'item_count', label: '流程对象数量' },
+])
+const conditionOperators = ref<{ value: string; label: string }[]>([
+  { value: 'gt', label: '大于' },
+  { value: 'eq', label: '等于' },
+  { value: 'exists', label: '存在' },
+])
+const allowedActions = (key: string) => catalogActions.value[key] || []
+const actionOptions = computed(() => allowedActions(designer.value.model?.key || '').map(value => ({ value, label: actionLabels[value] || value })))
 const normalizeSnapshot = (input: any) => {
   const snapshot = JSON.parse(JSON.stringify(input || { nodes: [], edges: [] }))
   const byId = new Map<string, any>((snapshot.nodes || []).map((node: any) => [String(node.id), node] as [string, any]))
@@ -219,8 +220,7 @@ const validateDraft = () => {
   const byId = new Map(nodes.map(node => [node.id, node]))
   const starts = nodes.filter(node => node.type === 'start')
   if (starts.length !== 1 || !nodes.some(node => node.type === 'end')) return '流程必须且只能有一个发起节点，并包含结束节点'
-  const reverseKeys = new Set(actionRegistry.map(action => action.workflowKey))
-  const isReverse = reverseKeys.has(designer.value.model?.key || '')
+  const isReverse = designer.value.model?.direction === '逆向'
   const outgoing = new Map<string, string[]>()
   const branches = new Map<string, Set<string>>()
   for (const edge of edges) {
@@ -245,7 +245,7 @@ const validateDraft = () => {
     if (node.type === 'approval' && !node.approvalRoles?.length) return '审批节点必须配置审批角色'
     if (node.type === 'notify' && !node.notifyRoles?.length) return '通知节点必须配置通知角色'
     if (node.type === 'execute' && !node.action) return '自动执行节点必须配置业务动作'
-    if (node.type === 'execute' && !actionRegistry.some(action => action.value === node.action && (!isReverse || action.workflowKey === designer.value.model?.key))) return `动作“${node.action}”不适用于当前流程`
+    if (node.type === 'execute' && !allowedActions(designer.value.model?.key || '').includes(node.action || '')) return `动作“${node.action}”不适用于当前流程`
     if (node.type === 'condition' && (!node.conditionField || !node.conditionOperator)) return '条件分支必须配置业务字段和比较符'
     if (node.type === 'condition' && !['bound_machine_count', 'shipped_machine_count', 'item_count'].includes(node.conditionField || '')) return '条件分支业务字段不受支持'
     if (node.type === 'condition' && !['gt', 'eq', 'exists'].includes(node.conditionOperator || '')) return '条件分支比较符不受支持'
@@ -290,7 +290,11 @@ const redo = () => { const next = designer.value.future.pop(); if (!next) return
 const loadModels = async () => {
   loading.value = true
   try {
-    const response = await apiGet<{ data: any[] }>('/workflows/models')
+    const response = await apiGet<{ data: any[]; catalog?: any }>('/workflows/models')
+    const catalog = response.catalog || {}
+    if (catalog.actions && typeof catalog.actions === 'object') catalogActions.value = catalog.actions
+    if (Array.isArray(catalog.condition_fields) && catalog.condition_fields.length) conditionFields.value = catalog.condition_fields
+    if (Array.isArray(catalog.condition_operators) && catalog.condition_operators.length) conditionOperators.value = catalog.condition_operators
     models.value = (response.data || []).map((item) => ({
       name: item.name, category: item.category_key, direction: item.direction,
       mode: item.processing_type, visibility: item.execution_scope, key: item.workflow_key,
@@ -301,6 +305,10 @@ const loadModels = async () => {
       snapshot: item.node_snapshot ? normalizeSnapshot(typeof item.node_snapshot === 'string' ? JSON.parse(item.node_snapshot) : item.node_snapshot) : undefined,
       draftSnapshot: item.draft_snapshot ? normalizeSnapshot(typeof item.draft_snapshot === 'string' ? JSON.parse(item.draft_snapshot) : item.draft_snapshot) : undefined,
     }))
+  } catch (err: any) {
+    // 接口失败时不能退回到本地假数据，否则会让人误判模型状态。
+    models.value = []
+    ElMessage.error(getApiErrorMessage(err) || '读取流程模型失败，请检查后端服务')
   } finally { loading.value = false }
 }
 const loadPendingCount = async () => {
@@ -333,20 +341,20 @@ const editModel = (row: Model, viewDraft = false) => {
     ? automatic
       ? [
         { id: 'start', type: 'start', label: '发起', x: 35, y: 120 },
-        { id: 'execute', type: 'execute', label: '自动执行', x: 220, y: 120, targetState: '按业务执行器处理' },
+        { id: 'execute', type: 'execute', label: '自动执行', x: 220, y: 120 },
         { id: 'notify', type: 'notify', label: '通知', x: 405, y: 120, notifyRoles: ['Inbound'] },
         { id: 'end', type: 'end', label: '结束', x: 590, y: 120 },
       ]
       : notifyAfterExecution ? [
         { id: 'start', type: 'start', label: '发起', x: 35, y: 120 },
         { id: 'approval', type: 'approval', label: '审批', x: 220, y: 120, approvalRoles: ['Boss'] },
-        { id: 'execute', type: 'execute', label: '自动执行', x: 405, y: 120, targetState: '按业务执行器处理' },
+        { id: 'execute', type: 'execute', label: '自动执行', x: 405, y: 120 },
         { id: 'notify', type: 'notify', label: '通知', x: 590, y: 120, notifyRoles: ['Inbound'] },
         { id: 'end', type: 'end', label: '结束', x: 775, y: 120 },
       ] : [
         { id: 'start', type: 'start', label: '发起', x: 35, y: 120 },
         { id: 'approval', type: 'approval', label: '审批', x: 220, y: 120, approvalRoles: ['Boss'] },
-        { id: 'execute', type: 'execute', label: '自动执行', x: 405, y: 120, targetState: '按业务执行器处理' },
+        { id: 'execute', type: 'execute', label: '自动执行', x: 405, y: 120 },
         { id: 'end', type: 'end', label: '结束', x: 590, y: 120 },
       ]
     : [{ id: 'start', type: 'start', label: '发起', x: 60, y: 120 }, { id: 'end', type: 'end', label: '结束', x: 430, y: 120 }]
@@ -361,14 +369,58 @@ const editModel = (row: Model, viewDraft = false) => {
 }
 const saveDraft = async () => { const error = validateDraft(); if (error) { ElMessage.error(error); return }; if (!designer.value.model) return; try { await apiPost(`/workflows/models/${encodeURIComponent(designer.value.model.key)}/draft`, { snapshot: designer.value.draft }); ElMessage.success('流程草稿已保存'); designer.value.visible = false; await loadModels() } catch { /* request interceptor displays the server error */ } }
 const publishDraft = async () => { const error = validateDraft(); if (error) { ElMessage.error(error); return }; if (!designer.value.model) return; try { await apiPost<{ data: { version: number } }>(`/workflows/models/${encodeURIComponent(designer.value.model.key)}/publish`, { snapshot: designer.value.draft }); ElMessage.success('流程新版本已发布并生效'); designer.value.visible = false; await loadModels() } catch { /* request interceptor displays the server error */ } }
-const copyModel = (row: Model) => { models.value.push({ ...row, name: `${row.name}（副本）`, key: `${row.key}-copy`, status: '未发布', version: undefined, publishedAt: undefined }); ElMessage.success('已复制为未发布草稿') }
-const publishModel = (row: Model) => { row.status = '已发布'; row.version = row.version || 'v1.0'; row.publishedAt = new Date().toLocaleString('zh-CN', { hour12: false }); ElMessage.success(`已发布「${row.name}」`) }
-const disableModel = (row: Model) => { row.status = '已停用'; ElMessage.success(`已停用「${row.name}」`) }
+const copyModel = async (row: Model) => {
+  try {
+    const res = await apiPost<{ data: { workflow_key: string; name: string } }>(`/workflows/models/${encodeURIComponent(row.key)}/duplicate`)
+    ElMessage.success(`已复制为未发布草稿「${res.data?.name || row.name}」`)
+    await loadModels()
+  } catch { /* 请求拦截器已提示后端错误 */ }
+}
+const publishModel = async (row: Model) => {
+  // 已停用的模型走“启用”，恢复原版本，不产生新版本。
+  if (row.status === '已停用') {
+    try {
+      await apiPost(`/workflows/models/${encodeURIComponent(row.key)}/enable`)
+      ElMessage.success(`已启用「${row.name}」`)
+      await loadModels()
+    } catch { /* 请求拦截器已提示 */ }
+    return
+  }
+  if (!row.snapshot?.nodes?.length) {
+    ElMessage.warning('该流程还没有可发布的流程图，请先打开编辑器设计并发布')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确认发布「${row.name}」的当前流程图？发布后立即对新发起的流程生效。`, '发布流程', { type: 'warning' })
+  } catch { return }
+  try {
+    await apiPost(`/workflows/models/${encodeURIComponent(row.key)}/publish`, { snapshot: row.snapshot })
+    ElMessage.success(`已发布「${row.name}」`)
+    await loadModels()
+  } catch { /* 请求拦截器已提示 */ }
+}
+const disableModel = async (row: Model) => {
+  try {
+    await ElMessageBox.confirm(`停用后「${row.name}」将无法再发起，在途流程不受影响。确认停用？`, '停用流程', { type: 'warning' })
+  } catch { return }
+  try {
+    await apiPost(`/workflows/models/${encodeURIComponent(row.key)}/disable`)
+    ElMessage.success(`已停用「${row.name}」`)
+    await loadModels()
+  } catch { /* 请求拦截器已提示 */ }
+}
 const handleCommand = async (command: string, row: Model) => {
   if (command === 'detail') { await ElMessageBox.alert(`<p><b>流程 Key：</b>${row.key}</p><p><b>业务对象：</b>${row.object}</p><p><b>处理方式：</b>${row.mode}</p>`, `流程详情：${row.name}`, { dangerouslyUseHTMLString: true }); return }
   if (command === 'history') { await openHistory(row); return }
-  if (row.status !== '未发布') { ElMessage.warning('只有未发布草稿可以删除'); return }
-  models.value = models.value.filter(item => item !== row); ElMessage.success('草稿已删除')
+  if (!row.draftSnapshot?.nodes?.length) { ElMessage.warning('该流程没有草稿可删除'); return }
+  try {
+    await ElMessageBox.confirm(`确认删除「${row.name}」的草稿？已发布版本不受影响。`, '删除草稿', { type: 'warning' })
+  } catch { return }
+  try {
+    await apiDelete(`/workflows/models/${encodeURIComponent(row.key)}/draft`)
+    ElMessage.success('草稿已删除')
+    await loadModels()
+  } catch { /* 请求拦截器已提示 */ }
 }
 const parseHistorySnapshot = (value: any): { nodes: FlowNode[]; edges: FlowEdge[] } => {
   if (!value) return { nodes: [], edges: [] }

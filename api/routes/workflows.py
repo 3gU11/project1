@@ -14,7 +14,9 @@ from crud.workflows import (ensure_workflow_tables, list_instances, list_models,
                             execute_model_dict_delete, claim_outbox_events,
                             complete_outbox_event, fail_outbox_event,
                             execute_contract_cancel, transfer_reverse_approval,
-                            requeue_outbox_event, reclaim_expired_execution_leases, publish_workflow_model)
+                            requeue_outbox_event, reclaim_expired_execution_leases, publish_workflow_model,
+                            duplicate_workflow_model, set_workflow_model_enabled, delete_workflow_draft,
+                            workflow_editor_catalog)
 from crud.workflows import REVERSE_WORKFLOW_RULES
 from crud.workflows import workflow_action_for_instance, dispatch_pending_model_notifications
 
@@ -60,7 +62,8 @@ def get_workflow_models(
     status: str | None = Query(default=None),
     _ctx: dict = Depends(get_current_user_context),
 ):
-    return {'data': list_models(direction=direction, status=status), 'rules': REVERSE_WORKFLOW_RULES, 'runtime': {
+    return {'data': list_models(direction=direction, status=status), 'rules': REVERSE_WORKFLOW_RULES,
+            'catalog': workflow_editor_catalog(), 'runtime': {
         'forward_enabled': True,
         'reverse_submission_enabled': True,
         'reverse_execution_enabled': True,
@@ -91,6 +94,38 @@ def publish_model(workflow_key: str, payload: WorkflowPublishRequest, ctx: dict 
 def save_model_draft(workflow_key: str, payload: WorkflowPublishRequest, ctx: dict = Depends(require_roles('admin', 'boss'))):
     try:
         return {'data': save_workflow_draft(workflow_key, payload.snapshot, ctx['username'])}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.delete('/models/{workflow_key}/draft')
+def remove_model_draft(workflow_key: str, ctx: dict = Depends(require_roles('admin', 'boss'))):
+    try:
+        return {'data': delete_workflow_draft(workflow_key, ctx['username'])}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post('/models/{workflow_key}/duplicate')
+def duplicate_model(workflow_key: str, ctx: dict = Depends(require_roles('admin', 'boss'))):
+    try:
+        return {'data': duplicate_workflow_model(workflow_key, ctx['username'])}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post('/models/{workflow_key}/disable')
+def disable_model(workflow_key: str, ctx: dict = Depends(require_roles('admin', 'boss'))):
+    try:
+        return {'data': set_workflow_model_enabled(workflow_key, False, ctx['username'])}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post('/models/{workflow_key}/enable')
+def enable_model(workflow_key: str, ctx: dict = Depends(require_roles('admin', 'boss'))):
+    try:
+        return {'data': set_workflow_model_enabled(workflow_key, True, ctx['username'])}
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
