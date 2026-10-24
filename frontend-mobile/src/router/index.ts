@@ -26,6 +26,12 @@ const routes = [
         meta: { roles: ['Inbound'] }
       },
       {
+        path: 'messages',
+        name: 'Messages',
+        component: () => import('../views/MessageCenter.vue'),
+        meta: { roles: ['Inbound'] }
+      },
+      {
         path: 'locator',
         name: 'InventoryLocator',
         component: () => import('../views/InventoryLocator.vue'),
