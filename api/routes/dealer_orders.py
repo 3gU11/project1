@@ -3,10 +3,16 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from api.routes.auth import require_permissions
 from crud.audit_logs import append_audit_log
+from crud.cloud_attachments import (
+    find_local_order_attachment,
+    list_local_order_attachments,
+    sync_cloud_order_attachments,
+)
 from crud.dealer_orders import (
     approve_dealer_order,
     approve_dealer_order_extra_review,
@@ -121,6 +127,71 @@ def get_pending_counts(ctx: dict = Depends(require_permissions("DEALER_ORDER_REV
         return get_dealer_orders_pending_counts()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"读取待审核数量失败: {exc}")
+
+
+@router.get("/{order_no}/attachments")
+def list_order_attachments(order_no: str):
+    """本地已回传的云端合同附件列表（供审核页/合同详情查看）。"""
+    try:
+        return {"orderNo": order_no, "data": list_local_order_attachments(order_no)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"读取订单附件失败: {exc}")
+
+
+@router.post("/{order_no}/attachments/sync")
+def sync_order_attachments(
+    order_no: str,
+    request: Request,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    """立即从云端拉取该订单的合同附件；日常由拉单 worker 自动完成。"""
+    operator = _operator(ctx)
+    try:
+        result = sync_cloud_order_attachments([{"order_no": order_no, "updated_at": ""}])
+        append_audit_log(
+            module="经销商订单",
+            action_type="同步云端附件",
+            biz_type="订单",
+            content=(
+                f"同步云端合同附件：{order_no}；"
+                f"synced={result.get('synced')}，skipped={result.get('skipped')}，failed={result.get('failed')}"
+            ),
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        return {"orderNo": order_no, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"同步订单附件失败: {exc}")
+
+
+def _local_attachment_or_404(order_no: str, attachment_id: str) -> dict:
+    attachment = find_local_order_attachment(order_no, attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="附件不存在或尚未回传")
+    return attachment
+
+
+@router.get("/{order_no}/attachments/{attachment_id}/download")
+def download_order_attachment(order_no: str, attachment_id: str):
+    attachment = _local_attachment_or_404(order_no, attachment_id)
+    return FileResponse(
+        path=attachment["absolutePath"],
+        filename=attachment["fileName"],
+        media_type=attachment["mimeType"],
+    )
+
+
+@router.get("/{order_no}/attachments/{attachment_id}/preview")
+def preview_order_attachment(order_no: str, attachment_id: str):
+    attachment = _local_attachment_or_404(order_no, attachment_id)
+    return FileResponse(
+        path=attachment["absolutePath"],
+        filename=attachment["fileName"],
+        media_type=attachment["mimeType"],
+        content_disposition_type="inline",
+    )
 
 
 @router.post("/sync-cloud")
@@ -349,6 +420,17 @@ def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ct
         raise HTTPException(status_code=500, detail=f"标记配货失败: {exc}")
 
 
+def _sync_cloud_attachments_for_order(order_no: str) -> dict[str, Any]:
+    """转合同后把云端上传的合同附件拉取到本地合同目录；失败只记日志。"""
+    import logging
+
+    try:
+        return sync_cloud_order_attachments([{"order_no": order_no, "updated_at": ""}])
+    except Exception:
+        logging.getLogger(__name__).exception("cloud attachments sync failed order=%s", order_no)
+        return {}
+
+
 def _attach_order_form_to_contracts(
     order_no: str,
     contract_ids: list[str],
@@ -553,12 +635,14 @@ def convert_to_contract(
         )
 
         order_form_contracts = _attach_order_form_to_contracts(order_no, contract_ids, customer, operator)
+        cloud_attachments = _sync_cloud_attachments_for_order(order_no)
 
         return {
             "message": f"已成功转为合同 {contract_no_str}",
             "contract_no": contract_no_str,
             "save_mode": save_mode,
             "order_form_attached_contracts": order_form_contracts,
+            "cloud_attachments": cloud_attachments,
             **{k: v for k, v in result.items() if k not in ("message", "save_mode", "contract_ids")},
         }
     except HTTPException:

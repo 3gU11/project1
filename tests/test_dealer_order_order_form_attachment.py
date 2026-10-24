@@ -42,3 +42,14 @@ def test_attach_order_form_does_not_break_conversion_on_failure():
         assert dealer_orders._attach_order_form_to_contracts(
             'DO-3', ['HT-9'], '客户甲', 'boss'
         ) == []
+
+
+def test_sync_cloud_attachments_returns_summary_and_swallows_errors():
+    summary = {'orders': 1, 'synced': 2, 'skipped': 0, 'failed': 0, 'errors': []}
+    with patch('api.routes.dealer_orders.sync_cloud_order_attachments', return_value=summary) as sync_mock:
+        assert dealer_orders._sync_cloud_attachments_for_order('DO-4') == summary
+    sync_mock.assert_called_once_with([{'order_no': 'DO-4', 'updated_at': ''}])
+
+    with patch('api.routes.dealer_orders.sync_cloud_order_attachments', side_effect=RuntimeError('cloud 401')):
+        assert dealer_orders._sync_cloud_attachments_for_order('DO-4') == {}
+

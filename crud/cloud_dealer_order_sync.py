@@ -1,18 +1,23 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
 import threading
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 from sqlalchemy import bindparam, text
 
 from crud.dealer_orders import ensure_dealer_order_tables
+from crud.cloud_bridge_auth import signed_headers, snapshot_content_id
 from database import get_engine
+
+BRIDGE_STOCK_STATUS_PREDICATE = "TRIM(COALESCE(`状态`, '')) LIKE '库存中%'"
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +34,10 @@ def _get_http_client() -> httpx.Client:
     if _http_client is None or _http_client.is_closed:
         with _http_lock:
             if _http_client is None or _http_client.is_closed:
-                _, api_key = _cloud_config()
+                _cloud_config()
                 _http_client = httpx.Client(
                     timeout=30.0,
                     trust_env=False,
-                    headers={"X-V7-API-KEY": api_key},
                     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
                 )
     return _http_client
@@ -161,8 +165,6 @@ def _cloud_config() -> tuple[str, str]:
     api_key = (os.getenv("V7_API_KEY") or _read_dotenv_value("V7_API_KEY")).strip()
     if not base_url:
         raise ValueError("WECHAT_CLOUD_API_BASE is not configured")
-    if not api_key:
-        raise ValueError("V7_API_KEY is not configured")
     return base_url, api_key
 
 
@@ -177,7 +179,14 @@ def _sync_secret() -> str:
 
 def _as_int(value: Any, default: int = 0) -> int:
     try:
-        return int(value if value is not None else default)
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        # bridge 返回的是 DECIMAL 字符串，例如 "5.000"
+        return int(float(str(value).strip()))
     except (TypeError, ValueError):
         return default
 
@@ -232,16 +241,21 @@ def _iter_cloud_items(order: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _fetch_cloud_dealer_orders_by_status(status: str, page_size: int = 100, max_pages: int = 20) -> list[dict[str, Any]]:
-    base_url, api_key = _cloud_config()
+    base_url, _ = _cloud_config()
     status = _normalize_status(status)
     page_size = min(max(1, int(page_size or 100)), 200)
     max_pages = max(1, int(max_pages or 1))
     orders: list[dict[str, Any]] = []
     client = _get_http_client()
+    secret = _sync_secret()
+    if not secret:
+        raise ValueError("V8_SYNC_SECRET is required for signed bridge requests")
     for page in range(1, max_pages + 1):
+        query = urlencode({"status": status, "page": page, "page_size": page_size})
+        request_path = f"/api/v8/bridge/orders?{query}"
         response = client.get(
-            f"{base_url}/api/v7/dealer-orders",
-            params={"status": status, "page": page, "page_size": page_size},
+            f"{base_url}{request_path}",
+            headers=signed_headers(secret, "GET", request_path, b""),
         )
         response.raise_for_status()
         payload = response.json()
@@ -292,19 +306,26 @@ def fetch_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max
 
 
 def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-    base_url, api_key = _cloud_config()
+    base_url, _ = _cloud_config()
     order_no = _clean(order_no)
     if not order_no:
         raise ValueError("order_no is required")
     client = _get_http_client()
-    headers = {"Idempotency-Key": idempotency_key}
     secret = _sync_secret()
-    if secret:
-        headers["X-V8-Sync-Secret"] = secret
+    if not secret:
+        raise ValueError("V8_SYNC_SECRET is required for signed bridge requests")
+    url = f"{base_url}/api/dealer/orders/{quote(order_no, safe='')}/{path_suffix}"
+    path = urlsplit(url).path
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotency_key,
+        **signed_headers(secret, "POST", path, body, idempotency_key=idempotency_key),
+    }
     response = client.post(
-        f"{base_url}/api/dealer/orders/{order_no}/v8-status",
+        url,
         headers=headers,
-        json=payload,
+        content=body,
     )
     if response.status_code == 404:
         # 404 means the order doesn't exist on the cloud yet.
@@ -553,7 +574,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       GROUP BY raw.source_batch_no, raw.source_expected_inbound_time, raw.base_model, raw.is_high
                       UNION ALL
                       SELECT
-                        IF(raw.is_high, '加高', '库存中') AS batch_no,
+                        '库存中' AS batch_no,
                         CAST(NULL AS DATETIME) AS expected_inbound_time,
                         raw.base_model AS model,
                         COUNT(*) AS quantity,
@@ -573,7 +594,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                           ) AS is_high
                         FROM finished_goods_data
                         WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                          AND TRIM(COALESCE(`状态`, '')) = '库存中'
+                          AND {BRIDGE_STOCK_STATUS_PREDICATE}
                       ) raw
                       WHERE NULLIF(raw.base_model, '') IS NOT NULL
                       GROUP BY raw.base_model, raw.is_high, IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '')
@@ -632,15 +653,60 @@ def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
     return [{key: _jsonable(value) for key, value in row.items()} for row in rows]
 
 
+def fetch_local_ordering_models() -> list[dict[str, Any]]:
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT model_name, model_family, sort_order, enabled
+                FROM model_dictionary
+                ORDER BY model_name
+                """
+            )
+        ).mappings().all()
+    return [
+        {
+            "model_name": _clean(row["model_name"]),
+            "model_family": _clean(row["model_family"]),
+            "sort_order": _as_int(row["sort_order"]),
+            "enabled": 1 if _as_int(row["enabled"], 1) else 0,
+        }
+        for row in rows
+    ]
+
+
 def push_wechat_batch_summary_to_cloud(rows: list[dict[str, Any]], idempotency_key: str | None = None) -> dict[str, Any]:
-    base_url, api_key = _cloud_config()
-    client = _get_http_client()
-    response = client.post(
-        f"{base_url}/api/v7/wechat-batch-summary/sync",
-        headers={"Idempotency-Key": idempotency_key or f"v8-outbox-wechat-batch-summary-{datetime.now().strftime('%Y%m%d%H%M%S')}"},
-        json={"mode": "replace", "rows": rows},
-        timeout=60.0,
-    )
+    base_url = (
+        os.getenv("WECHAT_CLOUD_API_BASE")
+        or _read_dotenv_value("WECHAT_CLOUD_API_BASE")
+    ).strip().rstrip("/")
+    if not base_url:
+        raise ValueError("WECHAT_CLOUD_API_BASE is not configured")
+    secret = _sync_secret()
+    if not secret:
+        raise ValueError("V8_SYNC_SECRET is required for signed bridge requests")
+
+    models = fetch_local_ordering_models()
+    snapshot_id = snapshot_content_id(rows, models)
+    payload = {
+        "schemaVersion": 1,
+        "snapshotId": snapshot_id,
+        "generatedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "rows": rows,
+        "models": models,
+    }
+    if (os.getenv("V8_BRIDGE_ALLOW_EMPTY_INVENTORY") or _read_dotenv_value("V8_BRIDGE_ALLOW_EMPTY_INVENTORY")).strip() == "1":
+        payload["allowEmptyInventory"] = True
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    path = "/api/v8/bridge/snapshot"
+    request_id = idempotency_key or snapshot_id
+    headers = {
+        "Content-Type": "application/json",
+        "Idempotency-Key": request_id,
+        **signed_headers(secret, "POST", path, body, idempotency_key=request_id),
+    }
+    with httpx.Client(timeout=60.0, trust_env=False) as client:
+        response = client.post(f"{base_url}{path}", headers=headers, content=body)
     response.raise_for_status()
     return response.json()
 
@@ -653,6 +719,7 @@ def sync_wechat_batch_summary_to_cloud() -> dict[str, Any]:
         "message": "wechat batch summary synced",
         "local_rows": local["rows"],
         "pushed_rows": len(rows),
+        "model_rows": len(fetch_local_ordering_models()),
         "cloud": cloud,
     }
 
@@ -1028,6 +1095,26 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
 
         if _clean(status).lower() in {"", "all", "*"}:
             pruned = _prune_cloud_deleted_local_orders(conn, seen_order_nos)
+            pruned["mirror_lines"] = _prune_stale_mirror_lines(conn, seen_lines, seen_order_nos)
+
+    # 订单落库后再拉云端合同附件；附件失败不能影响订单同步本身。
+    attachment_result: dict[str, Any] = {
+        "orders": 0, "scanned": 0, "synced": 0, "skipped": 0, "failed": 0, "errors": [],
+    }
+    try:
+        from crud.cloud_attachments import sync_cloud_order_attachments
+
+        unique_orders: dict[str, str] = {}
+        for raw_order in orders:
+            order_no = _clean(_pick(raw_order, "order_no", "orderNo", "id"))
+            if not order_no:
+                continue
+            unique_orders[order_no] = _clean(_pick(raw_order, "updated_at", "updatedAt"))
+        attachment_result = sync_cloud_order_attachments(
+            [{"order_no": no, "updated_at": updated} for no, updated in unique_orders.items()]
+        )
+    except Exception as exc:
+        logger.warning("cloud attachment sync unavailable: %s", exc)
 
     return {
         "message": "cloud dealer orders synced",
@@ -1040,9 +1127,38 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
         "factory_pending_orders": len(pending_order_nos),
         "pruned_cloud_deleted_orders": pruned["orders"],
         "pruned_cloud_deleted_lines": pruned["lines"],
+        "pruned_mirror_lines": pruned.get("mirror_lines", 0),
         "contract_drafts_created": contract_drafts_created,
         "contract_drafts_failed": contract_drafts_failed,
+        "attachments": attachment_result,
     }
+
+
+def _prune_stale_mirror_lines(conn: Any, seen_lines: set[tuple[str, int]], seen_order_nos: set[str]) -> int:
+    """删除云端已不再返回的 SpringBoot 镜像行（例如视图行号变化后的旧行）。"""
+    if not seen_order_nos:
+        return 0
+    rows = conn.execute(
+        text(
+            "SELECT order_no, line_no FROM dealer_orders "
+            "WHERE source = 'springboot' AND order_no IN :order_nos"
+        ).bindparams(bindparam("order_nos", expanding=True)),
+        {"order_nos": tuple(seen_order_nos)},
+    ).fetchall()
+    deleted = 0
+    for order_no, line_no in rows:
+        key = (_clean(order_no), _as_int(line_no))
+        if key in seen_lines:
+            continue
+        conn.execute(
+            text(
+                "DELETE FROM dealer_orders "
+                "WHERE source = 'springboot' AND order_no = :order_no AND line_no = :line_no"
+            ),
+            {"order_no": key[0], "line_no": key[1]},
+        )
+        deleted += 1
+    return deleted
 
 
 async def cloud_pull_worker_loop() -> None:
@@ -1056,11 +1172,17 @@ async def cloud_pull_worker_loop() -> None:
         logger.info("Cloud pull worker is disabled by ENABLE_CLOUD_PULL")
         return
 
-    interval_str = os.getenv("CLOUD_PULL_INTERVAL_SECONDS", "60").strip()
+    # Orders are time-sensitive; keep the default at the configured safety
+    # floor while allowing deployments to raise it when the cloud API is busy.
+    interval_str = (
+        os.getenv("CLOUD_PULL_INTERVAL_SECONDS")
+        or _read_dotenv_value("CLOUD_PULL_INTERVAL_SECONDS")
+        or "10"
+    ).strip()
     try:
         interval = max(10, int(interval_str))  # minimum 10 seconds to avoid overloading
     except ValueError:
-        interval = 60
+        interval = 10
 
     logger.info("Cloud pull worker started (interval = %ds)", interval)
 
