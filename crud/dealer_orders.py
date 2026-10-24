@@ -628,24 +628,6 @@ def _retry_schema_changed_transaction(read):
     return wrapped
 
 
-def _attach_contract_draft_states(orders: list[dict]) -> None:
-    """给审核列表补上每个订单最新一版合同附件草稿的状态与审批留痕。"""
-    if not orders:
-        return
-    try:
-        from crud.local_contract_drafts import list_latest_states
-        states = list_latest_states([str(order.get("order_no") or "") for order in orders])
-    except Exception:
-        import logging
-        logging.getLogger(__name__).exception("contract draft states unavailable")
-        return
-    for order in orders:
-        info = states.get(str(order.get("order_no") or "").strip()) or {}
-        order["contract_draft_state"] = str(info.get("state") or "")
-        order["contract_draft_reviewed_by"] = str(info.get("reviewer") or "")
-        order["contract_draft_reviewed_at"] = str(info.get("reviewed_at") or "")
-
-
 @_retry_schema_changed_transaction
 def list_dealer_orders(
     status: str = "",
@@ -753,7 +735,6 @@ def list_dealer_orders(
     total = len(grouped)
     offset = (page - 1) * page_size
     data = grouped[offset : offset + page_size]
-    _attach_contract_draft_states(data)
     return {
         "data": data,
         "total": total,

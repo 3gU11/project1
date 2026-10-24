@@ -94,14 +94,6 @@
       <el-table-column prop="remark" label="原备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="extra_remark" label="附加备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="ERMQ" label="需改数量" width="80" align="center" />
-      <el-table-column label="合同附件" width="110" align="center">
-        <template #default="{ row }">
-          <el-tag v-if="draftStateMeta(row.contract_draft_state).text" size="small" :type="draftStateMeta(row.contract_draft_state).type">
-            {{ draftStateMeta(row.contract_draft_state).text }}
-          </el-tag>
-          <span v-else>无</span>
-        </template>
-      </el-table-column>
       <el-table-column label="操作" width="300" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
@@ -372,9 +364,6 @@ type DealerOrder = {
   summary_qty?: number
   occupied_qty?: number
   available_qty?: number
-  contract_draft_state?: string
-  contract_draft_reviewed_by?: string
-  contract_draft_reviewed_at?: string
   items?: DealerOrder[]
 }
 
@@ -538,15 +527,6 @@ const isFactoryPending = (row: DealerOrder) => Number(row.factory_pending || 0) 
 const canApprove = (row: DealerOrder) => isFactoryPending(row) || row.status === 'pending'
 const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemark(row) : ['pending', 'approved'].includes(row.status))
 const canConvertDealerOrder = (row: DealerOrder) => String(row.status || '').trim() === 'approved' && !isFactoryPending(row)
-
-const draftStateMeta = (state?: string) => {
-  const value = String(state || '').trim()
-  if (value === 'approved') return { text: '已归档', type: 'success' as const }
-  if (value === 'rejected') return { text: '已驳回', type: 'danger' as const }
-  if (value === 'preview_ready') return { text: '待审批', type: 'warning' as const }
-  if (value === 'submitted') return { text: '待生成预览', type: 'info' as const }
-  return { text: '', type: 'info' as const }
-}
 
 // 待审核显示"预览并审批"，其它状态一律只读查看合同附件。
 const reviewButtonLabel = (row: DealerOrder) => {
