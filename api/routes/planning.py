@@ -3364,7 +3364,9 @@ def get_order_allocations_api(order_id: str):
         if review is not None:
             return {"data": review}
         rows = _get_order_contract_machine_rows(order_id)
-        rows = rows.where(rows.notnull(), None)
+        # Preserve missing values as JSON nulls. Replacing nulls on the original
+        # numeric dtypes casts None back to NaN, which Starlette refuses to encode.
+        rows = rows.astype(object).where(pd.notna(rows), None)
         return {"data": rows.to_dict(orient="records")}
     except HTTPException:
         raise
