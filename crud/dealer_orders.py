@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 from math import ceil
+from functools import wraps
+import time
 from typing import Any
 
 from sqlalchemy import bindparam, text
+from sqlalchemy.exc import OperationalError
 
 from database import get_engine
 from crud.cloud_sync_outbox import (
@@ -148,19 +151,43 @@ def ensure_dealer_order_tables() -> None:
             conn.execute(text("ALTER TABLE dealer_orders ADD UNIQUE KEY uq_dealer_order_line (order_no, line_no)"))
 
 
-def _summary_batch_no(batch_no: object, inventory_type: object = "") -> str:
+FINISHED_STOCK_BATCH_ALIASES = ("FINISHED-STOCK", "库存中", "现货", "现货库存")
+FINISHED_INVENTORY_TYPES = ("finished", "stock", "现货")
+
+
+def _is_finished_stock_order(batch_no: object, inventory_type: object = "") -> bool:
+    """判断订单行是否走「现货（库存中）」库存池。
+
+    除显式的成品/现货标记外，**批次为空也按现货处理**：外部系统（SpringBoot）
+    下单时不下发批次/来源，若不归一化会去 wechat_batch_summary 里查 batch_no=''
+    的汇总行，永远查到 0，导致这类订单全部无法审核通过。
+    """
     raw_batch = str(batch_no or "").strip()
     raw_type = str(inventory_type or "").strip().lower()
-    if raw_type == "finished" or raw_batch in {"FINISHED-STOCK", "库存中", "现货"}:
+    if raw_type in FINISHED_INVENTORY_TYPES:
+        return True
+    if not raw_batch:
+        return True
+    return raw_batch in FINISHED_STOCK_BATCH_ALIASES
+
+
+def _summary_batch_no(batch_no: object, inventory_type: object = "") -> str:
+    if _is_finished_stock_order(batch_no, inventory_type):
         return "库存中"
-    return raw_batch
+    return str(batch_no or "").strip()
 
 
 def _order_hold_batch_no(batch_no: object, inventory_type: object = "") -> str:
-    raw_batch = str(batch_no or "").strip()
-    raw_type = str(inventory_type or "").strip().lower()
-    if raw_type == "finished" or raw_batch in {"FINISHED-STOCK", "库存中", "现货"}:
+    if _is_finished_stock_order(batch_no, inventory_type):
         return "FINISHED-STOCK"
+    return str(batch_no or "").strip()
+
+
+def _batch_display_label(batch_no: object, inventory_type: object = "") -> str:
+    """审核界面/报错里展示的批次来源标签。"""
+    raw_batch = str(batch_no or "").strip()
+    if _is_finished_stock_order(batch_no, inventory_type):
+        return "库存中（未指定）" if not raw_batch else "库存中"
     return raw_batch
 
 
@@ -522,7 +549,7 @@ def _summarize_models(items: list[dict]) -> str:
 def _summarize_batches(items: list[dict]) -> str:
     batches: list[str] = []
     for item in items:
-        batch = str(item.get("batch_no") or "").strip() or "-"
+        batch = _batch_display_label(item.get("batch_no"), item.get("inventory_type")) or "-"
         if batch not in batches:
             batches.append(batch)
     return " / ".join(batches)
@@ -575,6 +602,22 @@ def _group_orders(rows: list[dict]) -> list[dict]:
     return orders
 
 
+def _retry_schema_changed_transaction(read):
+    @wraps(read)
+    def wrapped(*args, **kwargs):
+        for attempt in range(3):
+            try:
+                return read(*args, **kwargs)
+            except OperationalError as exc:
+                if getattr(exc.orig, "args", (None,))[0] != 1412 or attempt == 2:
+                    raise
+                # The failed begin() context has rolled back before retrying.
+                # Repeating a statement in the same InnoDB snapshot cannot recover.
+                time.sleep(0.05 * (attempt + 1))
+    return wrapped
+
+
+@_retry_schema_changed_transaction
 def list_dealer_orders(
     status: str = "",
     keyword: str = "",
@@ -700,33 +743,55 @@ def _get_order_lines_for_update(conn, order_no: str) -> list[dict]:
     return [_row_to_dict(row) for row in rows]
 
 
+def _occupied_qty_for_pool(conn, model: str, hold_batch: str, statuses=ACTIVE_HOLD_STATUSES) -> int:
+    """统计某个库存池已被待审/已通过订单占用的数量。
+
+    现货池（hold_batch=FINISHED-STOCK）要连带统计历史遗留的空批次行：外部系统
+    （SpringBoot）下单不下发批次，如果不一起统计，同一个「库存中」池子会被多张
+    空批次订单重复占用，造成超卖。
+    """
+    hold_where = [
+        "model=:model",
+        "status IN :active_hold_statuses",
+        "quantity > allocated_qty",
+    ]
+    hold_params: dict[str, Any] = {"model": model, "active_hold_statuses": tuple(statuses)}
+    if hold_batch == "FINISHED-STOCK":
+        aliases = ", ".join(f"'{alias}'" for alias in FINISHED_STOCK_BATCH_ALIASES)
+        types = ", ".join(f"'{item}'" for item in FINISHED_INVENTORY_TYPES)
+        hold_where.append(
+            "("
+            f"TRIM(COALESCE(batch_no, '')) IN ({aliases}) "
+            "OR TRIM(COALESCE(batch_no, '')) = '' "
+            f"OR LOWER(TRIM(COALESCE(inventory_type, ''))) IN ({types})"
+            ")"
+        )
+    else:
+        hold_where.append("TRIM(COALESCE(batch_no, '')) = :batch_no")
+        hold_params["batch_no"] = hold_batch
+
+    return int(
+        conn.execute(
+            text(
+                "SELECT COALESCE(SUM(GREATEST(quantity - allocated_qty, 0)), 0) "
+                "FROM dealer_orders WHERE " + " AND ".join(hold_where)
+            ).bindparams(bindparam("active_hold_statuses", expanding=True)),
+            hold_params,
+        ).scalar()
+        or 0
+    )
+
+
 def get_availability(conn, order: dict) -> dict:
     summary_batch = _summary_batch_no(order.get("batch_no"), order.get("inventory_type"))
     hold_batch = _order_hold_batch_no(order.get("batch_no"), order.get("inventory_type"))
     model = str(order.get("model") or "").strip()
-    summary_qty = int(
-        conn.execute(
-            text(
-                "SELECT COALESCE(SUM(quantity), 0) FROM wechat_batch_summary "
-                "WHERE batch_no=:batch_no AND model=:model"
-            ),
-            {"batch_no": summary_batch, "model": model},
-        ).scalar()
-        or 0
+    summary_stmt = text(
+        "SELECT COALESCE(SUM(quantity), 0) FROM wechat_batch_summary "
+        "WHERE batch_no=:batch_no AND model=:model"
     )
-    occupied_qty = int(
-        conn.execute(
-            text(
-                "SELECT COALESCE(SUM(GREATEST(quantity - allocated_qty, 0)), 0) "
-                "FROM dealer_orders "
-                "WHERE batch_no=:batch_no AND model=:model "
-                "AND status IN :active_hold_statuses "
-                "AND quantity > allocated_qty"
-            ).bindparams(bindparam("active_hold_statuses", expanding=True)),
-            {"batch_no": hold_batch, "model": model, "active_hold_statuses": ACTIVE_HOLD_STATUSES},
-        ).scalar()
-        or 0
-    )
+    summary_qty = int(conn.execute(summary_stmt, {"batch_no": summary_batch, "model": model}).scalar() or 0)
+    occupied_qty = _occupied_qty_for_pool(conn, model, hold_batch)
     current_unallocated = max(0, int(order.get("quantity") or 0) - int(order.get("allocated_qty") or 0))
     available_for_current = summary_qty - occupied_qty + current_unallocated
     return {
@@ -967,12 +1032,14 @@ def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
                 "summary_qty": availability["summary_qty"],
                 "occupied_qty": availability["occupied_qty"],
                 "available_qty": availability["available_for_current"],
+                "summary_batch_no": availability["summary_batch_no"],
             }
         )
         decorated.append(next_item)
     return decorated
 
 
+@_retry_schema_changed_transaction
 def preview_dealer_order(order_no: str) -> dict:
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:
@@ -1012,8 +1079,16 @@ def approve_dealer_order(order_no: str, reviewer: str, note: str = "") -> dict:
             availability = get_availability(conn, item)
             needed = max(0, int(item.get("quantity") or 0) - int(item.get("allocated_qty") or 0))
             if availability["available_for_current"] < needed:
+                batch_label = _batch_display_label(item.get("batch_no"), item.get("inventory_type"))
+                batch_hint = (
+                    "；该订单未下发批次，已按现货库存校验"
+                    if not str(item.get("batch_no") or "").strip()
+                    else ""
+                )
                 raise ValueError(
                     f"{item.get('model')} 可用数量不足：需要 {needed}，当前可用 {availability['available_for_current']}"
+                    f"（批次/来源：{batch_label}{batch_hint}；该批次库存 {availability['summary_qty']}，"
+                    f"已被待审/已通过订单占用 {availability['occupied_qty']}）"
                 )
         conn.execute(
             text(

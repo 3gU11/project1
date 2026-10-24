@@ -1,0 +1,247 @@
+{
+  "version": "dealer-contract-v1",
+  "source_sha256": "de89643146d428f46ca3b5ab11ac5435be4bdafd12942c3c06803b4f585188b9",
+  "method": "Word bookmarks; preserve labels and replace only blank values inside marked paragraphs",
+  "fields": [
+    {
+      "field": "supplier_header",
+      "label": "供方及合同编号",
+      "bookmark": "ct_supplier_header"
+    },
+    {
+      "field": "buyer_header",
+      "label": "需方及签订地点",
+      "bookmark": "ct_buyer_header"
+    },
+    {
+      "field": "signed_date",
+      "label": "签订日期",
+      "bookmark": "ct_signed_date"
+    },
+    {
+      "field": "delivery_date",
+      "label": "交提货时间",
+      "bookmark": "ct_delivery_date"
+    },
+    {
+      "field": "settlement_terms",
+      "label": "结算方式及期限",
+      "bookmark": "ct_settlement_terms"
+    },
+    {
+      "field": "item1_product",
+      "label": "第1行产品名称",
+      "bookmark": "ct_item1_product"
+    },
+    {
+      "field": "item1_brand",
+      "label": "第1行牌号",
+      "bookmark": "ct_item1_brand"
+    },
+    {
+      "field": "item1_spec",
+      "label": "第1行规格型号",
+      "bookmark": "ct_item1_spec"
+    },
+    {
+      "field": "item1_qty",
+      "label": "第1行数量",
+      "bookmark": "ct_item1_qty"
+    },
+    {
+      "field": "item1_price",
+      "label": "第1行单价及税务说明",
+      "bookmark": "ct_item1_price"
+    },
+    {
+      "field": "item2_product",
+      "label": "第2行产品名称",
+      "bookmark": "ct_item2_product"
+    },
+    {
+      "field": "item2_brand",
+      "label": "第2行牌号",
+      "bookmark": "ct_item2_brand"
+    },
+    {
+      "field": "item2_spec",
+      "label": "第2行规格型号",
+      "bookmark": "ct_item2_spec"
+    },
+    {
+      "field": "item2_qty",
+      "label": "第2行数量",
+      "bookmark": "ct_item2_qty"
+    },
+    {
+      "field": "item2_price",
+      "label": "第2行单价及税务说明",
+      "bookmark": "ct_item2_price"
+    },
+    {
+      "field": "item3_product",
+      "label": "第3行产品名称",
+      "bookmark": "ct_item3_product"
+    },
+    {
+      "field": "item3_brand",
+      "label": "第3行牌号",
+      "bookmark": "ct_item3_brand"
+    },
+    {
+      "field": "item3_spec",
+      "label": "第3行规格型号",
+      "bookmark": "ct_item3_spec"
+    },
+    {
+      "field": "item3_qty",
+      "label": "第3行数量",
+      "bookmark": "ct_item3_qty"
+    },
+    {
+      "field": "item3_price",
+      "label": "第3行单价及税务说明",
+      "bookmark": "ct_item3_price"
+    },
+    {
+      "field": "item4_product",
+      "label": "第4行产品名称",
+      "bookmark": "ct_item4_product"
+    },
+    {
+      "field": "item4_brand",
+      "label": "第4行牌号",
+      "bookmark": "ct_item4_brand"
+    },
+    {
+      "field": "item4_spec",
+      "label": "第4行规格型号",
+      "bookmark": "ct_item4_spec"
+    },
+    {
+      "field": "item4_qty",
+      "label": "第4行数量",
+      "bookmark": "ct_item4_qty"
+    },
+    {
+      "field": "item4_price",
+      "label": "第4行单价及税务说明",
+      "bookmark": "ct_item4_price"
+    },
+    {
+      "field": "accessories",
+      "label": "随机配件",
+      "bookmark": "ct_accessories"
+    },
+    {
+      "field": "total_upper",
+      "label": "合计金额大写",
+      "bookmark": "ct_total_upper"
+    },
+    {
+      "field": "buyer_name",
+      "label": "购货单位名称",
+      "bookmark": "ct_buyer_name"
+    },
+    {
+      "field": "buyer_address",
+      "label": "地址",
+      "bookmark": "ct_buyer_address"
+    },
+    {
+      "field": "contact_name",
+      "label": "联系人姓名",
+      "bookmark": "ct_contact_name"
+    },
+    {
+      "field": "contact_phone",
+      "label": "联系方式",
+      "bookmark": "ct_contact_phone"
+    },
+    {
+      "field": "special_requirements",
+      "label": "其他特殊要求",
+      "bookmark": "ct_special_requirements"
+    },
+    {
+      "field": "remark",
+      "label": "备注",
+      "bookmark": "ct_remark"
+    },
+    {
+      "field": "supplier_signature_1",
+      "label": "供方签署栏 单位名称：",
+      "bookmark": "ct_supplier_signature_1"
+    },
+    {
+      "field": "supplier_signature_2",
+      "label": "供方签署栏 开户银行：",
+      "bookmark": "ct_supplier_signature_2"
+    },
+    {
+      "field": "supplier_signature_3",
+      "label": "供方签署栏 帐　　号：",
+      "bookmark": "ct_supplier_signature_3"
+    },
+    {
+      "field": "supplier_signature_5",
+      "label": "供方签署栏 供货单位(章)：",
+      "bookmark": "ct_supplier_signature_5"
+    },
+    {
+      "field": "supplier_signature_6",
+      "label": "供方签署栏 负 责 人：",
+      "bookmark": "ct_supplier_signature_6"
+    },
+    {
+      "field": "supplier_signature_7",
+      "label": "供方签署栏 电话：                  传真：",
+      "bookmark": "ct_supplier_signature_7"
+    },
+    {
+      "field": "buyer_signature_1",
+      "label": "需方签署栏 单位名称 (章)：",
+      "bookmark": "ct_buyer_signature_1"
+    },
+    {
+      "field": "buyer_signature_2",
+      "label": "需方签署栏 单位地址：",
+      "bookmark": "ct_buyer_signature_2"
+    },
+    {
+      "field": "buyer_signature_3",
+      "label": "需方签署栏 法定代表人：",
+      "bookmark": "ct_buyer_signature_3"
+    },
+    {
+      "field": "buyer_signature_4",
+      "label": "需方签署栏 委托代理人：",
+      "bookmark": "ct_buyer_signature_4"
+    },
+    {
+      "field": "buyer_signature_5",
+      "label": "需方签署栏 开户银行：",
+      "bookmark": "ct_buyer_signature_5"
+    },
+    {
+      "field": "buyer_signature_6",
+      "label": "需方签署栏 帐　　号：",
+      "bookmark": "ct_buyer_signature_6"
+    },
+    {
+      "field": "buyer_signature_7",
+      "label": "需方签署栏 税    号：",
+      "bookmark": "ct_buyer_signature_7"
+    },
+    {
+      "field": "buyer_signature_8",
+      "label": "需方签署栏 电　　话：",
+      "bookmark": "ct_buyer_signature_8"
+    },
+    {
+      "field": "buyer_signature_9",
+      "label": "需方签署栏 传    真：",
+      "bookmark": "ct_buyer_signature_9"
+    }
+  ]
+}

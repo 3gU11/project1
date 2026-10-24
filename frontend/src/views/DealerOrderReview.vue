@@ -9,6 +9,13 @@
       </template>
     </PageHeader>
 
+    <ContractDraftReview
+      ref="contractDraftReview"
+      :confirm-order-approve="approveContractReviewOrder"
+      :can-approve-order="!!contractReviewOrder && canApprove(contractReviewOrder)"
+      @done="onContractReviewDone"
+      @approve-order="onApproveWithoutContract"
+    />
     <div v-if="cloudSyncStatus.pending || cloudSyncStatus.failed" class="cloud-sync-strip">
       <span>Cloud pending: <strong>{{ cloudSyncStatus.pending }}</strong></span>
       <span>Failed: <strong :class="{ danger: cloudSyncStatus.failed > 0 }">{{ cloudSyncStatus.failed }}</strong></span>
@@ -28,15 +35,15 @@
         @clear="loadOrders"
       />
       <el-radio-group v-model="filters.status" class="status-tabs" @change="onStatusChange">
-        <el-radio-button label="">全部订单</el-radio-button>
-        <el-radio-button label="todo">待审核</el-radio-button>
-        <el-radio-button label="approved">已通过</el-radio-button>
-        <el-radio-button label="contracted">已转合同</el-radio-button>
-        <el-radio-button label="partial_allocated">部分配货</el-radio-button>
-        <el-radio-button label="allocated">已配货</el-radio-button>
-        <el-radio-button label="rejected">已驳回</el-radio-button>
-        <el-radio-button label="cancelled">已取消</el-radio-button>
-        <el-radio-button label="completed">已完成</el-radio-button>
+        <el-radio-button value="">全部订单</el-radio-button>
+        <el-radio-button value="todo">待审核</el-radio-button>
+        <el-radio-button value="approved">已通过</el-radio-button>
+        <el-radio-button value="contracted">已转合同</el-radio-button>
+        <el-radio-button value="partial_allocated">部分配货</el-radio-button>
+        <el-radio-button value="allocated">已配货</el-radio-button>
+        <el-radio-button value="rejected">已驳回</el-radio-button>
+        <el-radio-button value="cancelled">已取消</el-radio-button>
+        <el-radio-button value="completed">已完成</el-radio-button>
       </el-radio-group>
       <el-button @click="loadOrders">查询</el-button>
     </div>
@@ -86,10 +93,12 @@
       <el-table-column prop="remark" label="原备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="extra_remark" label="附加备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="ERMQ" label="需改数量" width="80" align="center" />
-      <el-table-column label="操作" width="260" align="center" fixed="right">
+      <el-table-column label="操作" width="300" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
-            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="approveOrder(row)">通过</el-button>
+            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="openContractReview(row)">
+              {{ isFactoryPending(row) ? '通过' : '预览并审批' }}
+            </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
             <el-button size="small" type="warning" :disabled="!canConvertDealerOrder(row)" @click.stop="openConvertDialog(row._order || row)">
               转合同
@@ -179,7 +188,9 @@
         <div class="note-box">{{ selectedOrder.review_note || '-' }}</div>
 
         <div class="drawer-actions">
-          <el-button :disabled="!canApprove(selectedOrder)" @click="approveOrder(selectedOrder)">通过</el-button>
+          <el-button :disabled="!canApprove(selectedOrder)" @click="openContractReview(selectedOrder)">
+            {{ isFactoryPending(selectedOrder) ? '通过' : '预览并审批' }}
+          </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
           <el-button type="warning" :disabled="!canConvertDealerOrder(selectedOrder)" @click="openConvertDialog(selectedOrder)">转合同</el-button>
         </div>
@@ -298,10 +309,12 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
+import ContractDraftReview from '../components/ContractDraftReview.vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
+const contractDraftReview = ref<InstanceType<typeof ContractDraftReview>>()
 
 type DealerOrder = {
   id: number
@@ -842,6 +855,7 @@ const syncCompletedCloud = async () => {
 }
 
 const approveOrder = async (row: DealerOrder) => {
+  let res: { message?: string; warning?: string }
   try {
     const factoryPending = isFactoryPending(row)
     const note = await ElMessageBox.prompt(factoryPending ? '复审备注（可选）' : '审核备注（可选）', factoryPending ? '新备注复审通过' : '通过订单', {
@@ -851,11 +865,17 @@ const approveOrder = async (row: DealerOrder) => {
       cancelButtonText: '取消',
     })
     const endpoint = factoryPending ? 'extra-review/approve' : 'approve'
-    const res = await apiPost<{ message?: string; warning?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/${endpoint}`, {
+    res = await apiPost<{ message?: string; warning?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/${endpoint}`, {
       note: note.value || '',
     })
-    ElMessage.success(res.warning || res.message || (factoryPending ? '新备注复审通过' : '已通过'))
-    window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  } catch (err: any) {
+    if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '操作失败')
+    return false
+  }
+
+  ElMessage.success(res.warning || res.message || (isFactoryPending(row) ? '新备注复审通过' : '已通过'))
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  try {
     await loadOrders()
     if (selectedOrderNo.value) {
       try {
@@ -864,9 +884,55 @@ const approveOrder = async (row: DealerOrder) => {
         preview.value = null
       }
     }
-  } catch (err: any) {
-    if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '操作失败')
+  } catch {
+    preview.value = null
+    ElMessage.warning('订单已通过，但订单列表刷新失败')
   }
+  return true
+}
+
+// 合同附件审批已并入订单行：点"预览并审批"只加载该订单自己的合同附件。
+const contractReviewOrder = ref<DealerOrder | null>(null)
+
+const openContractReview = async (row: DealerOrder) => {
+  const target = (row as DealerOrderTableRow)._order || row
+  if (!canApprove(target)) return
+  // 新备注复审不是合同审批，沿用原来的直接通过。
+  if (isFactoryPending(target)) {
+    await approveOrder(target)
+    return
+  }
+  contractReviewOrder.value = target
+  await contractDraftReview.value?.openForOrder(target.order_no)
+}
+
+const approveContractReviewOrder = async (): Promise<boolean> => {
+  const target = contractReviewOrder.value
+  if (!target) throw new Error('未选择订单')
+  await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/approve`, {
+    note: String(target.remark || ''),
+  })
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  void loadOrders(true)
+  return true
+}
+
+const onContractReviewDone = async () => {
+  contractReviewOrder.value = null
+  await loadOrders()
+  if (selectedOrderNo.value) {
+    try {
+      await loadPreview(selectedOrderNo.value)
+    } catch {
+      preview.value = null
+    }
+  }
+}
+
+const onApproveWithoutContract = async () => {
+  const target = contractReviewOrder.value
+  contractReviewOrder.value = null
+  if (target) await approveOrder(target)
 }
 
 const rejectOrder = async (row: DealerOrder) => {
@@ -963,6 +1029,11 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
     }
     const res = await apiPost<MessageResponse>(`/dealer-orders/${encodeURIComponent(convertForm.sourceOrderNo)}/convert-to-contract`, payload)
     
+    if ((res as any)?.approval_pending) {
+      ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）')
+      window.dispatchEvent(new Event('workflow-pending-updated'))
+      return
+    }
     // 上传附件（如果有选中文件）
     if (convertPickedFiles.value.length > 0) {
       const contractNoStr = res.contract_no || convertForm.contractNo || ''

@@ -853,6 +853,25 @@ def _prune_cloud_deleted_local_orders(conn: Any, cloud_order_nos: set[str]) -> d
 def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_pages: int = 20) -> dict[str, Any]:
     ensure_dealer_order_tables()
     orders = fetch_cloud_dealer_orders(status=status, page_size=page_size, max_pages=max_pages)
+    contract_drafts_created = 0
+    contract_drafts_failed = 0
+    # Keep the original cloud form intact for contract generation. The dealer_orders
+    # table is intentionally a line-oriented projection and does not contain all fields.
+    try:
+        from crud.local_contract_drafts import create_from_order
+        for raw_order in orders:
+            raw_status = _clean(_pick(raw_order, "status")).lower()
+            if raw_status in {"cancelled", "canceled", "completed", "complete", "rejected"}:
+                continue
+            try:
+                draft = create_from_order(raw_order)
+                if draft and draft.get("_created"):
+                    contract_drafts_created += 1
+            except Exception as exc:
+                contract_drafts_failed += 1
+                logger.warning("local contract draft creation failed order=%s: %s", _pick(raw_order, "orderNo", "order_no", "id"), exc)
+    except Exception as exc:
+        logger.warning("local contract draft integration unavailable: %s", exc)
     inserted = 0
     updated = 0
     skipped = 0
@@ -1021,6 +1040,8 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
         "factory_pending_orders": len(pending_order_nos),
         "pruned_cloud_deleted_orders": pruned["orders"],
         "pruned_cloud_deleted_lines": pruned["lines"],
+        "contract_drafts_created": contract_drafts_created,
+        "contract_drafts_failed": contract_drafts_failed,
     }
 
 
