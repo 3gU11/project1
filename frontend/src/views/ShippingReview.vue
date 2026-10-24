@@ -2,7 +2,7 @@
   <div class="ship-page">
     <PageHeader title="🚛 发货复核">
       <template #actions>
-        <el-button type="primary" :loading="loading || returnLoading || shippedLoading" @click="refreshActive">刷新数据</el-button>
+        <el-button type="primary" :loading="loading || returnLoading" @click="refreshActive">刷新数据</el-button>
       </template>
     </PageHeader>
 
@@ -120,39 +120,6 @@
             </el-card>
           </el-col>
         </el-row>
-      </el-tab-pane>
-
-      <el-tab-pane label="已发货记录" name="shipped">
-        <div class="return-filters">
-          <el-input v-model="shippedKeyword" clearable placeholder="搜索流水号/客户/订单号" @keyup.enter="applyShippedFilters" @clear="applyShippedFilters" />
-          <el-date-picker v-model="shippedDate" type="date" value-format="YYYY-MM-DD" clearable placeholder="选择发货日期" @change="applyShippedFilters" />
-          <el-button type="primary" :loading="shippedLoading" @click="applyShippedFilters">查询</el-button>
-        </div>
-        <el-card>
-          <el-table v-loading="shippedLoading" :data="shippedRows" row-key="流水号" border stripe max-height="560">
-            <el-table-column prop="流水号" label="流水号" width="150" />
-            <el-table-column prop="机型" label="机型" min-width="150" />
-            <el-table-column prop="占用订单号" label="订单号" min-width="190" />
-            <el-table-column prop="客户" label="客户" min-width="150" />
-            <el-table-column prop="合同号" label="合同号" min-width="170" />
-            <el-table-column prop="发货时间" label="发货时间" width="160" />
-            <el-table-column prop="状态" label="当前状态" width="150" />
-            <el-table-column prop="合同备注" label="合同备注" min-width="160" />
-          </el-table>
-          <el-pagination
-            v-model:current-page="shippedPage"
-            class="shipped-pagination"
-            :page-size="SHIPPED_PAGE_SIZE"
-            :total="shippedTotal"
-            layout="total, prev, pager, next, jumper"
-            background
-            :disabled="shippedLoading"
-            @current-change="loadShipped"
-          />
-          <div class="ops">
-            <span class="empty-tip">已发货的机台不能撤回；需要退回请到「退换货处理」办理。</span>
-          </div>
-        </el-card>
       </el-tab-pane>
 
       <el-tab-pane label="退换货处理" name="returns">
@@ -284,47 +251,7 @@ type ReturnOrder = { key: string; date: string; orderId: string; customer: strin
 type ReturnDateGroup = { date: string; total: number; orders: ReturnOrder[] }
 
 const cacheStore = useCacheStore()
-const activeTab = ref<'shipping' | 'shipped' | 'returns'>('shipping')
-const shippedLoading = ref(false)
-const shippedRows = ref<Row[]>([])
-const shippedKeyword = ref('')
-const shippedDate = ref('')
-// 已发货记录走服务端分页，一次只取 10 行，避免整表加载把页面拖慢
-const SHIPPED_PAGE_SIZE = 10
-const shippedPage = ref(1)
-const shippedTotal = ref(0)
-
-const loadShipped = async () => {
-  shippedLoading.value = true
-  try {
-    const params = new URLSearchParams()
-    if (shippedKeyword.value.trim()) params.set('keyword', shippedKeyword.value.trim())
-    if (shippedDate.value) params.set('date', shippedDate.value)
-    params.set('page', String(shippedPage.value))
-    params.set('page_size', String(SHIPPED_PAGE_SIZE))
-    const res = await apiGet<ListResponse>(`/inventory/shipping/returned-candidates?${params}`)
-    shippedRows.value = res.data || []
-    shippedTotal.value = Number(res.total || 0)
-    // 撤回后当前页可能空了，回退到最后一页
-    if (shippedRows.value.length === 0 && shippedTotal.value > 0 && shippedPage.value > 1) {
-      shippedPage.value = Math.ceil(shippedTotal.value / SHIPPED_PAGE_SIZE)
-      await loadShipped()
-      return
-    }
-  } catch (err: any) {
-    shippedRows.value = []
-    shippedTotal.value = 0
-    ElMessage.error(getApiErrorMessage(err) || '读取已发货记录失败')
-  } finally {
-    shippedLoading.value = false
-  }
-}
-
-// 改查询条件要回到第一页，否则会停在一个已经不存在的页码上
-const applyShippedFilters = () => {
-  shippedPage.value = 1
-  loadShipped()
-}
+const activeTab = ref<'shipping' | 'returns'>('shipping')
 
 const loading = ref(false)
 const saving = ref(false)
@@ -561,7 +488,6 @@ const recallAllocation = async () => {
     cacheStore.remove('allocation:orders')
     selectedSerials.value = []
     await loadPending()
-    await loadShipped()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '提交发货撤回审批失败')
   } finally {
@@ -734,9 +660,7 @@ const returnSelected = async (action: 'reallocate' | 'cancel_order') => {
 }
 
 const refreshActive = async () => {
-  if (activeTab.value === 'shipped') {
-    await loadShipped()
-  } else if (activeTab.value === 'returns') {
+  if (activeTab.value === 'returns') {
     await loadReturnCandidates()
   } else {
     await loadPending()
@@ -744,7 +668,6 @@ const refreshActive = async () => {
 }
 
 watch(activeTab, (tab) => {
-  if (tab === 'shipped') void loadShipped()
   if (tab === 'returns' && returnRows.value.length === 0) {
     void loadReturnCandidates()
   }
@@ -844,10 +767,6 @@ onBeforeUnmount(() => {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
-}
-.shipped-pagination {
-  margin-top: var(--space-2);
-  justify-content: flex-end;
 }
 .return-filters {
   display: grid;
