@@ -31,13 +31,13 @@
           @click="go(item.path)"
         >
           {{ item.label }}
+          <span v-if="item.path === '/dealer-orders' && dealerPendingCount > 0" class="menu-badge">{{ dealerPendingCount }}</span>
         </button>
       </div>
-      <div v-if="!sidebarCollapsed" class="menu-group workflow-group">
+      <div v-if="!sidebarCollapsed && workflowMenus.length > 0" class="menu-group workflow-group">
         <div class="group-title">🔄 工作流程</div>
         <button v-for="item in workflowMenus" :key="item.path" type="button" class="menu-btn" :class="{ active: isActive(item.path) }" @mouseenter="preloadRoute(item.path)" @click="go(item.path)">
           {{ item.label }}
-          <span v-if="item.path === '/dealer-orders' && dealerPendingCount > 0" class="menu-badge">{{ dealerPendingCount }}</span>
           <span v-if="(item.path === '/approval-center' || item.path === '/workflow/models') && workflowPendingCount > 0" class="menu-badge">{{ workflowPendingCount > 99 ? '99+' : workflowPendingCount }}</span>
         </button>
       </div>
@@ -191,10 +191,10 @@ const handleOrdersUpdated = (e?: Event) => {
 const visibleMenus = computed(() => {
   const onHome = router.currentRoute.value.path === '/'
   return getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
-    if (m.path.startsWith('/workflow/') || m.path === '/approval-center' || m.path === '/dealer-orders') return false
+    if (m.path.startsWith('/workflow/') || m.path === '/approval-center') return false
     if (onHome) {
       // 在首页时，侧边栏仅保留高频入口
-      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban']
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban', '/dealer-orders']
       return allowedInHome.includes(m.path)
     }
     return true
@@ -202,12 +202,10 @@ const visibleMenus = computed(() => {
 })
 const workflowMenus = computed(() => {
   const isPrivileged = ['admin', 'boss'].includes(String(userStore.userInfo?.role || '').toLowerCase())
-  const menus = getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
+  return getAccessibleMenus(userStore.userInfo?.permissions).filter((m) => {
     if (m.path === '/workflow/instances' || m.path === '/workflow/tasks') return isPrivileged
     return m.path.startsWith('/workflow/') || m.path === '/approval-center'
   })
-  const dealerReview = getAccessibleMenus(userStore.userInfo?.permissions).find(m => m.path === '/dealer-orders')
-  return dealerReview ? [...menus, dealerReview] : menus
 })
 const roleLabel = computed(() => userStore.userInfo?.role || '-')
 const warmedPaths = new Set<string>()
