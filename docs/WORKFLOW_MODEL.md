@@ -77,6 +77,18 @@ Go 服务（`server/`）**不参与流程模型**，全部逻辑在 Python 侧�
 
 
 
+## 访问控制
+
+流程模型整个界面（含菜单、路由、数据接口）**仅 `admin` 与 `boss` 可访问**，其他角色既看不到菜单，直接输 URL 也会被拦到 403 页。
+
+| 层次 | 实现 |
+|------|------|
+| 菜单 | `router/index.ts` 的路由定义加 `roles: ['admin', 'boss']`，`getAccessibleMenus(permissions, role)` 按角色过滤 |
+| 路由守卫 | `canAccessPath(path, permissions, role)` 命中 `roles` 不匹配即跳 403 |
+| 接口 | `GET /workflows/models`、`GET /workflows/models/{key}/versions` 改为 `require_roles('admin','boss')`；写接口原本就限定这两个角色 |
+
+> 其他页面若要限定角色，给对应路由加 `roles: [...]` 即可，与 `permission` 是"与"关系。
+
 ## 编辑器接口
 
 | 操作 | 接口 | 说明 |

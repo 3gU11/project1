@@ -51,7 +51,7 @@ async function refresh() {
   finally { if (request === serial) loading.value = false }
 }
 function toggle() { open.value = !open.value; if (open.value) void refresh() }
-const canOpen = (item: Message) => !!item.target && canAccessPath(item.target, user.userInfo?.permissions)
+const canOpen = (item: Message) => !!item.target && canAccessPath(item.target, user.userInfo?.permissions, user.userInfo?.role)
 async function read(item: Message) {
   try {
     await apiPost('/workflows/personal-messages/read', { message_key: item.message_key })

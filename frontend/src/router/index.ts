@@ -1,11 +1,14 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '../store/user'
+import { roleIn } from '../utils/roles'
 import { ElMessage } from 'element-plus'
 
 export type AppMenuItem = {
   path: string
   label: string
   permission?: string
+  /** 限定可见角色（不填=不限）；与 permission 是"与"关系 */
+  roles?: string[]
   isManagement?: boolean
 }
 
@@ -15,6 +18,7 @@ type AppRouteDef = {
   label: string
   title: string
   permission?: string
+  roles?: string[]
   isManagement?: boolean
   component: () => Promise<unknown>
 }
@@ -39,7 +43,7 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/production-kanban', name: 'ProductionKanban', label: '🏭 生产看板', title: '生产看板', permission: 'KANBAN_VIEW', isManagement: true, component: () => import('../views/sandbox/ProductionKanban.vue') },
   { path: '/prediction-sandbox', name: 'PredictionSandbox', label: '👑 预测沙盘', title: '预测沙盘', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/BossPlan.vue') },
   { path: '/reports', name: 'Reports', label: '📊 报表管理', title: '报表管理', permission: 'REPORT_VIEW', isManagement: true, component: () => import('../views/ReportManagement.vue') },
-  { path: '/workflow/models', name: 'WorkflowModels', label: '🧩 流程模型', title: '流程模型', isManagement: true, component: () => import('../views/workflow/WorkflowModels.vue') },
+  { path: '/workflow/models', name: 'WorkflowModels', label: '🧩 流程模型', title: '流程模型', roles: ['admin', 'boss'], isManagement: true, component: () => import('../views/workflow/WorkflowModels.vue') },
   { path: '/workflow/instances', name: 'WorkflowInstances', label: '📝 流程实例', title: '流程实例', isManagement: true, component: () => import('../views/workflow/WorkflowInstances.vue') },
   { path: '/workflow/tasks', name: 'WorkflowTasks', label: '✅ 流程任务', title: '流程任务', isManagement: true, component: () => import('../views/workflow/WorkflowTasks.vue') },
   { path: '/approval-center', name: 'ApprovalCenter', label: '🛡️ 审批中心', title: '审批中心', isManagement: true, component: () => import('../views/workflow/ApprovalCenter.vue') },
@@ -49,6 +53,7 @@ export const appMenus: AppMenuItem[] = appRouteDefs.filter((r) => r.name !== 'Ph
   path: r.path,
   label: r.label,
   permission: r.permission,
+  roles: r.roles,
   isManagement: r.isManagement,
 }))
 
@@ -89,15 +94,16 @@ const ensureDynamicRoutes = (permissions?: string[] | null) => {
   injectedPermissionKey = permissionKey
 }
 
-export const getAccessibleMenus = (permissions?: string[] | null) => {
+export const getAccessibleMenus = (permissions?: string[] | null, role?: string | null) => {
   const permissionSet = new Set((permissions || []).map((p) => String(p).trim()).filter(Boolean))
-  return appMenus.filter((m) => !m.permission || permissionSet.has(m.permission))
+  return appMenus.filter((m) => (!m.permission || permissionSet.has(m.permission)) && roleIn(role, m.roles))
 }
 
-export const canAccessPath = (path: string, permissions?: string[] | null) => {
+export const canAccessPath = (path: string, permissions?: string[] | null, role?: string | null) => {
   const cleanPath = String(path || '').split('?')[0].split('#')[0]
   const menu = appMenus.find((m) => m.path === cleanPath)
   if (!menu) return true
+  if (!roleIn(role, menu.roles)) return false
   if (!menu.permission) return true
   const permissionList = Array.isArray(permissions) ? permissions : []
   return permissionList.map((p) => String(p).trim()).includes(menu.permission)
@@ -184,7 +190,7 @@ router.beforeEach((to, _from, next) => {
       next({ name: 'Home' })
       return
     }
-    if (!canAccessPath(to.path, userStore.userInfo?.permissions)) {
+    if (!canAccessPath(to.path, userStore.userInfo?.permissions, userStore.userInfo?.role)) {
       ElMessage.error('没有操作权限')
       next({ name: 'Forbidden' })
       return
@@ -199,7 +205,7 @@ router.beforeEach((to, _from, next) => {
     next({ name: 'Forbidden' })
     return
   }
-  if (!canAccessPath(to.path, userStore.userInfo?.permissions)) {
+  if (!canAccessPath(to.path, userStore.userInfo?.permissions, userStore.userInfo?.role)) {
     ElMessage.error('没有操作权限')
     next({ name: 'Forbidden' })
     return

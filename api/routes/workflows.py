@@ -60,7 +60,7 @@ class NotificationReadRequest(BaseModel):
 def get_workflow_models(
     direction: str | None = Query(default=None),
     status: str | None = Query(default=None),
-    _ctx: dict = Depends(get_current_user_context),
+    _ctx: dict = Depends(require_roles('admin', 'boss')),
 ):
     return {'data': list_models(direction=direction, status=status), 'rules': REVERSE_WORKFLOW_RULES,
             'catalog': workflow_editor_catalog(), 'runtime': {
@@ -70,7 +70,7 @@ def get_workflow_models(
     }}
 
 @router.get('/models/{workflow_key}/versions')
-def get_workflow_versions(workflow_key: str, _ctx: dict = Depends(get_current_user_context)):
+def get_workflow_versions(workflow_key: str, _ctx: dict = Depends(require_roles('admin', 'boss'))):
     return {'data': list_workflow_versions(workflow_key)}
 
 
