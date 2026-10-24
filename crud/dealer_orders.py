@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import OrderedDict
 from math import ceil
 from functools import wraps
@@ -21,6 +22,19 @@ from crud.cloud_sync_outbox import (
 ACTIVE_HOLD_STATUSES = ("regional_pending", "pending", "approved")
 
 CONVERTIBLE_STATUSES = ("approved",)
+
+# 合同取消时需要联动置为 cancelled 的订单行状态；已完成/已驳回/已取消的行不再处理。
+CANCELLABLE_DEALER_ORDER_STATUSES = ("pending", "approved", "contracted", "partial_allocated", "allocated")
+
+# 云端 v8-status 可写的订单状态；附加备注复审回传时若聚合状态不在此集合需回退，避免事件永久失败。
+CLOUD_WRITABLE_DEALER_ORDER_STATUSES = frozenset(
+    {"pending", "approved", "rejected", "contracted", "partial_allocated", "allocated", "completed"}
+)
+
+CANCELLED_CONTRACT_STATUS = "已取消"
+
+# 合同号文本（列表或 、/，/, 分隔的多合同）分隔符
+CONTRACT_NO_SEPARATOR = re.compile(r"[、，,/／;；\s]+")
 
 
 def _enqueue_cloud_sync(conn, event_type: str, order_no: str, payload: dict[str, Any]) -> None:
@@ -290,6 +304,183 @@ def _split_linked_values(raw_values: list[object]) -> list[str]:
             if value and value not in values:
                 values.append(value)
     return values
+
+
+def split_contract_nos(value: Any) -> list[str]:
+    """把合同号（列表，或 、/，/, 分隔的多合同文本）拆成去重后的合同号列表。"""
+    if value is None:
+        return []
+    raw_values = [value] if isinstance(value, str) else list(value)
+    contract_nos: list[str] = []
+    for raw in raw_values:
+        for part in CONTRACT_NO_SEPARATOR.split(str(raw or "")):
+            contract_no = part.strip()
+            if contract_no and contract_no not in contract_nos:
+                contract_nos.append(contract_no)
+    return contract_nos
+
+
+def load_factory_plan_contract_statuses(conn, contract_nos: Any) -> dict[str, set[str]]:
+    """返回 合同号 → factory_plan 中该合同出现过的全部状态集合（用于取消联动判定）。"""
+    contract_list = split_contract_nos(contract_nos)
+    if not contract_list:
+        return {}
+    rows = conn.execute(
+        text(
+            "SELECT TRIM(COALESCE(`合同号`, '')), TRIM(COALESCE(`状态`, '')) "
+            "FROM factory_plan "
+            "WHERE TRIM(COALESCE(`合同号`, '')) IN :contract_nos"
+        ).bindparams(bindparam("contract_nos", expanding=True)),
+        {"contract_nos": contract_list},
+    ).fetchall()
+    statuses: dict[str, set[str]] = {}
+    for contract_no, status in rows:
+        cid = str(contract_no or "").strip()
+        if not cid:
+            continue
+        statuses.setdefault(cid, set()).add(str(status or "").strip())
+    return statuses
+
+
+def cancel_dealer_orders_for_contracts(
+    conn,
+    contract_ids: Any,
+    operator: str = "system",
+    reason: str = "",
+    line_ids: list[int] | set[int] | None = None,
+) -> dict[str, Any]:
+    """合同取消时联动把关联经销商订单行置为 cancelled 并回传云端。
+
+    必须在调用方已经打开的事务连接 conn 上执行（不新开连接）：调用方负责先把
+    factory_plan 中对应合同状态改为「已取消」。
+
+    - contract_ids：合同号列表或 、/，/, 分隔字符串；
+    - 保守判定（与 tools/repair 一致）：只取消「引用了本次取消合同」且「其引用的
+      每一个合同都在 factory_plan 中存在、状态全部为已取消」的订单行，避免多合同
+      行误伤仍有有效合同的行；
+    - 命中行 status='cancelled'、factory_pending=0、allocated_qty=0，
+      reviewed_at=COALESCE(reviewed_at, NOW())，reviewed_by/review_note 记录操作人与原因；
+    - 按订单聚合入队 "dealer_order_cancelled"：整单取消不带 line_nos，部分行取消带 line_nos；
+      入队前先作废同订单旧的 pending/failed 回传事件（先作废再入队，避免作废本次事件）；
+    - 已取消行不会再次命中（幂等），无实际变化时不入队事件；
+    - line_ids 可选：仅取消指定订单行（历史数据修复脚本判定整单合同都取消后使用）。
+    """
+    contract_set = set(split_contract_nos(contract_ids))
+    result: dict[str, Any] = {"contracts": sorted(contract_set), "orders": [], "lines": 0, "events": []}
+    if not contract_set:
+        return result
+
+    operator = str(operator or "system").strip() or "system"
+    note = str(reason or "").strip() or "关联合同已取消"
+
+    restricted_ids: set[int] | None = None
+    if line_ids is not None:
+        restricted_ids = set()
+        for raw in line_ids:
+            try:
+                restricted_ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+        if not restricted_ids:
+            return result
+
+    rows = conn.execute(
+        text(
+            "SELECT id, order_no, line_no, contract_no, status FROM dealer_orders "
+            "WHERE COALESCE(TRIM(contract_no), '') <> '' "
+            "AND status IN :cancellable_statuses"
+        ).bindparams(bindparam("cancellable_statuses", expanding=True)),
+        {"cancellable_statuses": tuple(CANCELLABLE_DEALER_ORDER_STATUSES)},
+    ).mappings().all()
+
+    candidates: list[tuple[Any, list[str]]] = []
+    referenced_contract_nos: list[str] = []
+    for row in rows:
+        row_id = int(row["id"])
+        if restricted_ids is not None and row_id not in restricted_ids:
+            continue
+        row_contracts = split_contract_nos(row["contract_no"])
+        if not row_contracts or not (set(row_contracts) & contract_set):
+            continue
+        if not str(row["order_no"] or "").strip():
+            continue
+        candidates.append((row, row_contracts))
+        for contract_no in row_contracts:
+            if contract_no not in referenced_contract_nos:
+                referenced_contract_nos.append(contract_no)
+
+    if not candidates:
+        return result
+
+    contract_statuses = load_factory_plan_contract_statuses(conn, referenced_contract_nos)
+
+    target_ids: list[int] = []
+    target_line_nos: dict[str, list[int]] = {}
+    order_contracts: dict[str, set[str]] = {}
+    for row, row_contracts in candidates:
+        # 保守语义：该行引用的每一个合同都必须存在且状态全部是「已取消」。
+        if any(contract_statuses.get(contract_no) != {CANCELLED_CONTRACT_STATUS} for contract_no in row_contracts):
+            continue
+        row_id = int(row["id"])
+        order_no = str(row["order_no"] or "").strip()
+        target_ids.append(row_id)
+        target_line_nos.setdefault(order_no, []).append(
+            int(row["line_no"]) if row["line_no"] is not None else row_id
+        )
+        order_contracts.setdefault(order_no, set()).update(row_contracts)
+
+    if not target_ids:
+        return result
+
+    conn.execute(
+        text(
+            "UPDATE dealer_orders SET status='cancelled', factory_pending=0, allocated_qty=0, "
+            "reviewed_at=COALESCE(reviewed_at, NOW()), reviewed_by=:operator, review_note=:note "
+            "WHERE id IN :target_ids"
+        ).bindparams(bindparam("target_ids", expanding=True)),
+        {"operator": operator, "note": note, "target_ids": target_ids},
+    )
+
+    order_nos = sorted(order_contracts)
+    line_rows = conn.execute(
+        text("SELECT id, order_no, line_no, status FROM dealer_orders WHERE order_no IN :order_nos")
+        .bindparams(bindparam("order_nos", expanding=True)),
+        {"order_nos": order_nos},
+    ).mappings().all()
+    statuses_by_order: dict[str, list[str]] = {}
+    for row in line_rows:
+        statuses_by_order.setdefault(str(row["order_no"] or "").strip(), []).append(
+            str(row["status"] or "").strip()
+        )
+
+    try:
+        from crud.cloud_sync_outbox import supersede_pending_order_sync_events
+    except (ImportError, AttributeError):  # 同步层尚未提供该函数时降级为直接入队
+        supersede_pending_order_sync_events = None
+
+    for order_no in order_nos:
+        statuses = statuses_by_order.get(order_no) or []
+        # 整单全部行都已取消 → 不带 line_nos；仍有未取消行 → 只回传被取消的行号。
+        whole_order = bool(statuses) and all(status == "cancelled" for status in statuses)
+        payload: dict[str, Any] = {
+            "order_no": order_no,
+            "contract_no": "、".join(sorted(order_contracts[order_no])),
+            "operator": operator,
+            "note": note,
+        }
+        if not whole_order:
+            payload["line_nos"] = sorted(target_line_nos.get(order_no, []))
+        # 先作废旧回传事件，再入队本单取消事件，避免终态被晚到的旧事件覆盖。
+        if supersede_pending_order_sync_events is not None:
+            supersede_pending_order_sync_events(conn, order_no, reason=note)
+        _enqueue_cloud_sync(conn, "dealer_order_cancelled", order_no, payload)
+        result["orders"].append(order_no)
+        result["events"].append(
+            {"event_type": "dealer_order_cancelled", "order_no": order_no, "payload": payload}
+        )
+
+    result["lines"] = len(target_ids)
+    return result
 
 
 def _cancel_linked_contract_order_chain(
@@ -956,16 +1147,32 @@ def _sync_allocation_status(conn, order_no: str, items: list[dict]) -> list[dict
                 },
             )
         aggregate_status = _aggregate_status(updated_items)
-        if aggregate_status in {"partial_allocated", "allocated"}:
+        contract_no = str(first.get("contract_no") or "").strip()
+        v7_order_no = ",".join(sorted(all_order_ids))
+        if aggregate_status in {"completed", "complete"}:
+            _enqueue_cloud_sync(
+                conn,
+                "dealer_order_completed",
+                order_no,
+                {
+                    "order_no": order_no,
+                    "contract_no": contract_no,
+                    "operator": "system",
+                    "v7_order_no": v7_order_no,
+                },
+            )
+        elif aggregate_status in {"partial_allocated", "allocated"}:
+            # 按真实聚合状态回传：部分配货不能被云端记成已配货。
             _enqueue_cloud_sync(
                 conn,
                 "dealer_order_allocated",
                 order_no,
                 {
                     "order_no": order_no,
-                    "contract_no": str(first.get("contract_no") or "").strip(),
+                    "contract_no": contract_no,
                     "operator": "system",
-                    "v7_order_no": ",".join(sorted(all_order_ids)),
+                    "v7_order_no": v7_order_no,
+                    "status": aggregate_status,
                 },
             )
 
@@ -1269,18 +1476,71 @@ def approve_dealer_order_extra_review(order_no: str, reviewer: str, note: str = 
             ),
             {"order_no": order_no, "reviewer": reviewer, "note": note},
         )
-        _enqueue_cloud_sync(
-            conn,
-            "dealer_order_reviewed",
-            order_no,
-            {
-                "order_no": order_no,
-                "status": "approved",
-                "factory_pending": 0,
-                "reviewer": reviewer,
-                "note": note,
-            },
+        # 复审通过后按订单当前真实聚合状态回传，不能硬编码 approved：
+        # 已转合同/已配货的订单被写回 approved 会让云端状态倒退。
+        aggregate_status = _aggregate_status(items)
+        # 归一化：complete→completed；仍不是云端可写状态时回退 approved，
+        # 否则 outbox 事件会因云端拒绝永不成功、永久重试。
+        if aggregate_status == "complete":
+            aggregate_status = "completed"
+        if aggregate_status not in CLOUD_WRITABLE_DEALER_ORDER_STATUSES:
+            aggregate_status = "approved"
+        contract_no = "、".join(
+            sorted(
+                {
+                    str(item.get("contract_no") or "").strip()
+                    for item in items
+                    if str(item.get("contract_no") or "").strip()
+                }
+            )
         )
+        v7_order_no = "、".join(
+            sorted(
+                {
+                    str(item.get("v7_order_no") or "").strip()
+                    for item in items
+                    if str(item.get("v7_order_no") or "").strip()
+                }
+            )
+        )
+        if aggregate_status == "completed":
+            _enqueue_cloud_sync(
+                conn,
+                "dealer_order_completed",
+                order_no,
+                {
+                    "order_no": order_no,
+                    "contract_no": contract_no,
+                    "operator": reviewer,
+                    "v7_order_no": v7_order_no,
+                },
+            )
+        elif aggregate_status in {"partial_allocated", "allocated"}:
+            _enqueue_cloud_sync(
+                conn,
+                "dealer_order_allocated",
+                order_no,
+                {
+                    "order_no": order_no,
+                    "contract_no": contract_no,
+                    "operator": reviewer,
+                    "v7_order_no": v7_order_no,
+                    "status": aggregate_status,
+                },
+            )
+        else:
+            _enqueue_cloud_sync(
+                conn,
+                "dealer_order_reviewed",
+                order_no,
+                {
+                    "order_no": order_no,
+                    "status": aggregate_status,
+                    "factory_pending": 0,
+                    "reviewer": reviewer,
+                    "note": note,
+                },
+            )
     return preview_dealer_order(order_no)
 
 

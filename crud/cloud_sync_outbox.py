@@ -18,6 +18,7 @@ SYNC_EVENT_TYPES = {
     "dealer_order_reviewed",
     "dealer_order_contracted",
     "dealer_order_allocated",
+    "dealer_order_cancelled",
     "dealer_order_completed",
     "wechat_batch_summary_sync",
     "repair_snapshot_sync",
@@ -124,6 +125,36 @@ def insert_cloud_sync_event(conn: Any, event_id: str, event_type: str, biz_key: 
             "payload_json": payload_json,
         },
     )
+
+
+def supersede_pending_order_sync_events(
+    conn: Any,
+    order_no: str,
+    *,
+    reason: str = "superseded by newer terminal event",
+) -> int:
+    """作废同一订单尚未发送的 dealer_order_* 事件。
+
+    由调用方事务保证：在入队取消/终态事件之前调用，把该订单所有 pending/failed 的
+    旧回传事件置为 superseded，避免退避重试中的旧事件晚到又把云端状态覆盖回旧值。
+    传入的 conn 必须是调用方已开启的事务连接（本函数不新开事务、不负责建表）。
+    """
+    order_no = str(order_no or "").strip()
+    if not order_no:
+        return 0
+    result = conn.execute(
+        text(
+            """
+            UPDATE cloud_sync_outbox
+            SET status='superseded', last_error=:reason, updated_at=CURRENT_TIMESTAMP
+            WHERE biz_key=:order_no
+              AND event_type LIKE 'dealer_order_%'
+              AND status IN ('pending', 'failed')
+            """
+        ),
+        {"order_no": order_no, "reason": str(reason or "")[:4000]},
+    )
+    return int(result.rowcount or 0)
 
 
 def enqueue_wechat_batch_summary_sync(reason: str = "") -> str:
@@ -267,10 +298,63 @@ def process_due_cloud_sync_events(limit: int = 20) -> dict[str, Any]:
     return {"processed": processed, "synced": synced, "failed": failed}
 
 
+# 云端订单状态语义下的先后顺序：数字越大越接近终态。
+# 与 crud.dealer_orders._aggregate_status 聚合出的本地状态配合，用于丢弃
+# “本地状态已推进、事件仍停留在旧状态”的过期回传（例如取消成功后晚到的 allocated）。
+# rejected 不是云端终态（云端只保护 cancelled/completed），已完成事件允许覆盖已驳回，
+# 因此 completed 排在 rejected 之后。
+_ORDER_STATUS_RANK = {
+    "pending": 0,
+    "approved": 1,
+    "contracted": 2,
+    "partial_allocated": 3,
+    "allocated": 4,
+    "rejected": 5,
+    "completed": 6,
+    "complete": 6,
+    "cancelled": 7,
+}
+
+
+def _order_status_rank(status: Any) -> int:
+    return _ORDER_STATUS_RANK.get(str(status or "").strip(), -1)
+
+
+def _event_intended_status(event_type: str, payload: dict[str, Any]) -> str:
+    """事件想把云端订单改成什么状态；未知事件返回空串（不参与过期判断）。"""
+    if event_type == "dealer_order_cancelled":
+        return "cancelled"
+    if event_type == "dealer_order_contracted":
+        return "contracted"
+    if event_type == "dealer_order_completed":
+        return "completed"
+    if event_type == "dealer_order_allocated":
+        return str(payload.get("status") or "allocated")
+    if event_type == "dealer_order_reviewed":
+        return str(payload.get("status") or "")
+    return ""
+
+
+def _load_local_order_aggregate_status(order_no: str) -> str:
+    """按 dealer_orders 行聚合出本地订单状态（与订单审核列表同一套 _aggregate_status）。"""
+    from crud.dealer_orders import _aggregate_status
+
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            text("SELECT * FROM dealer_orders WHERE order_no=:order_no ORDER BY line_no, id"),
+            {"order_no": order_no},
+        ).mappings().all()
+    items = [dict(row) for row in rows]
+    if not items:
+        return ""
+    return _aggregate_status(items)
+
+
 def _dispatch_event(event: dict[str, Any]) -> None:
     from crud.cloud_dealer_order_sync import (
         fetch_local_wechat_batch_summary,
         push_cloud_allocate,
+        push_cloud_cancel,
         push_cloud_completed_state,
         push_cloud_contract,
         push_cloud_review,
@@ -336,6 +420,31 @@ def _dispatch_event(event: dict[str, Any]) -> None:
             logger.info("Skipping cloud sync event %s because local dealer order %s no longer exists", event_id, order_no)
             return
 
+    # 本地订单已经推进到更靠后的状态时，丢弃退避重试中晚到的旧事件，避免把云端
+    # 从 cancelled/completed 等终态覆盖回 allocated/approved；取消事件本身永不拦截。
+    if (
+        event_type.startswith("dealer_order_")
+        and event_type != "dealer_order_cancelled"
+        and order_no
+    ):
+        intended_status = _event_intended_status(event_type, payload)
+        intended_rank = _order_status_rank(intended_status)
+        local_status = _load_local_order_aggregate_status(order_no)
+        local_rank = _order_status_rank(local_status)
+        # intended_rank < 0：事件目标状态不可识别，交回原推送逻辑处理（由其报错/重试）。
+        if intended_rank >= 0 and local_rank > intended_rank:
+            logger.info(
+                "skipped-stale cloud sync event %s: order=%s local=%s(rank %s) > "
+                "intended=%s(rank %s), local order already advanced",
+                event_id,
+                order_no,
+                local_status,
+                local_rank,
+                intended_status,
+                intended_rank,
+            )
+            return
+
     if event_type == "dealer_order_reviewed":
         push_cloud_review(
             order_no,
@@ -363,6 +472,18 @@ def _dispatch_event(event: dict[str, Any]) -> None:
             contract_no=str(payload.get("contract_no") or ""),
             operator=str(payload.get("operator") or "system"),
             v7_order_no=str(payload.get("v7_order_no") or ""),
+            idempotency_key=event_id,
+            status=str(payload.get("status") or "allocated"),
+        )
+        return
+
+    if event_type == "dealer_order_cancelled":
+        push_cloud_cancel(
+            order_no,
+            contract_no=str(payload.get("contract_no") or ""),
+            operator=str(payload.get("operator") or "system"),
+            note=str(payload.get("note") or payload.get("reason") or ""),
+            line_nos=payload.get("line_nos"),
             idempotency_key=event_id,
         )
         return

@@ -827,6 +827,41 @@ def _cleanup_cancelled_contract_links(conn, contract_id: str, operator: str = ""
     return stats
 
 
+def _cancel_linked_dealer_orders(conn, contract_ids: List[str], operator: str, reason: str) -> dict[str, Any]:
+    """合同取消后在同一事务里联动取消经销商订单行，并写入云端回传 outbox 事件。"""
+    from crud.dealer_orders import cancel_dealer_orders_for_contracts
+
+    return cancel_dealer_orders_for_contracts(
+        conn,
+        list(contract_ids),
+        operator=operator,
+        reason=reason,
+    )
+
+
+def _dealer_order_sync_text(dealer_order_sync: dict[str, Any]) -> str:
+    events = dealer_order_sync.get("events") or []
+    if not events:
+        return ""
+    return f"；联动取消经销商订单 {len(dealer_order_sync.get('orders') or [])} 单 {int(dealer_order_sync.get('lines') or 0)} 行"
+
+
+def _ensure_cloud_sync_outbox_ready() -> None:
+    """合同取消入队前确保 outbox 表存在。
+
+    必须在业务事务之外调用：避免在事务内做 DDL / 嵌套事务。失败只记日志不阻断业务
+    （真正的入队会在业务事务里再报错，由上层返回 500）。
+    """
+    try:
+        from crud.cloud_sync_outbox import ensure_cloud_sync_outbox_table
+
+        ensure_cloud_sync_outbox_table()
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("cloud_sync_outbox 预建失败，合同取消回传事件可能入队失败")
+
+
 def _to_contract_date_text(value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -3188,8 +3223,17 @@ def internal_contract_cancel_sync_api(payload: ContractCancelSyncPayload, reques
         raise HTTPException(status_code=422, detail="contract_no 不能为空")
     operator = str(payload.operator or "system").strip() or "system"
     try:
+        # outbox 表必须在业务事务之外预建，避免事务内 DDL。
+        _ensure_cloud_sync_outbox_ready()
         with get_engine().begin() as conn:
             stats = _cleanup_cancelled_contract_links(conn, contract_no, operator)
+            # 与合同清理同一事务：联动取消经销商订单行并写入云端回传事件。
+            dealer_order_sync = _cancel_linked_dealer_orders(
+                conn,
+                [contract_no],
+                operator,
+                f"合同 {contract_no} 由 {payload.source or 'go'} 触发整单取消",
+            )
         _clear_planning_related_caches()
         recompute_synced = _trigger_sandbox_recompute_sync({"username": operator, "role": "Admin"})
         append_audit_log(
@@ -3200,12 +3244,18 @@ def internal_contract_cancel_sync_api(payload: ContractCancelSyncPayload, reques
                 f"合同 {contract_no} 由 {payload.source or 'go'} 触发整单取消；"
                 f"清理 factory_plan={stats.get('factory_plan', 0)}、units={stats.get('units', 0)}、"
                 f"production_queue={stats.get('production_queue', 0)}、rush_order_queue={stats.get('rush_order_queue', 0)}；"
+                f"联动经销商订单 {len(dealer_order_sync.get('orders') or [])} 单 {int(dealer_order_sync.get('lines') or 0)} 行；"
                 f"沙盘重算：{'成功' if recompute_synced else '失败'}"
             ),
             user_id=operator,
             username=operator,
         )
-        return {"status": "success", "cleanup": stats, "sandbox_recompute": recompute_synced}
+        return {
+            "status": "success",
+            "cleanup": stats,
+            "dealer_orders": dealer_order_sync,
+            "sandbox_recompute": recompute_synced,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -3596,11 +3646,31 @@ def update_contract_status(
             recompute_synced = True
 
         cleanup_stats: dict[str, int] = {}
+        dealer_order_sync: dict[str, Any] = {}
+        already_cancelled = False
+        if new_status == "已取消":
+            # outbox 表必须在业务事务之外预建，避免事务内 DDL。
+            _ensure_cloud_sync_outbox_ready()
         with get_engine().begin() as conn:
             if new_status == "已取消":
                 cleanup_stats = _cleanup_cancelled_contract_links(conn, str(contract_id), current_operator)
                 if cleanup_stats.get("factory_plan", 0) == 0:
-                    raise HTTPException(status_code=404, detail="合同不存在")
+                    # rowcount=0 可能是合同不存在，也可能是合同已经是「已取消」。
+                    # 后者不应报 404，而要幂等联动订单并补同步历史回传。
+                    exists = conn.execute(
+                        text("SELECT 1 FROM factory_plan WHERE `合同号` = :cid LIMIT 1"),
+                        {"cid": str(contract_id)},
+                    ).first()
+                    if not exists:
+                        raise HTTPException(status_code=404, detail="合同不存在")
+                    already_cancelled = True
+                # 同一事务内联动取消关联经销商订单行，并写入 cancel 回传事件。
+                dealer_order_sync = _cancel_linked_dealer_orders(
+                    conn,
+                    [str(contract_id)],
+                    current_operator,
+                    f"合同 {contract_id} 已取消",
+                )
             else:
                 result = conn.execute(
                     text("UPDATE factory_plan SET `状态` = :status WHERE `合同号` = :cid"),
@@ -3616,17 +3686,28 @@ def update_contract_status(
             recompute_synced = _trigger_sandbox_recompute_sync(current_user)
         sync_text = "（已同步沙盘重算）" if recompute_synced else ""
         cancel_text = "（已同步清空沙盘所有状态批次卡片及排产队列，并触发预测沙盒重算）" if new_status == "已取消" else ""
+        dealer_text = _dealer_order_sync_text(dealer_order_sync) if new_status == "已取消" else ""
+        if new_status == "已取消" and already_cancelled:
+            message = "合同已是已取消状态，已补同步订单回传"
+            if dealer_order_sync.get("events"):
+                message += f"（联动 {len(dealer_order_sync.get('orders') or [])} 单 {int(dealer_order_sync.get('lines') or 0)} 行）"
+            else:
+                message += "（关联订单无需变更）"
+            audit_suffix = "（合同原已是已取消状态，本次补同步订单回传）"
+        else:
+            message = f"合同状态已更新为 {new_status}" + ("，对应沙盘卡片及队列已同步清理，预测沙盒已同步重算" if new_status == "已取消" else ("，沙盘已同步重算" if recompute_synced else ""))
+            audit_suffix = ""
         append_audit_log(
             module="合同管理",
             action_type="更新状态",
             biz_type="合同",
-            content=f"合同 {contract_id} 状态更新为：{new_status}" + (cancel_text or sync_text),
+            content=f"合同 {contract_id} 状态更新为：{new_status}" + (cancel_text or sync_text) + dealer_text + audit_suffix,
             user_id=current_user.get("username"),
             username=current_operator,
         )
         return {
-            "message": f"合同状态已更新为 {new_status}" + ("，对应沙盘卡片及队列已同步清理，预测沙盒已同步重算" if new_status == "已取消" else ("，沙盘已同步重算" if recompute_synced else "")),
-            "sync": {"cleanup": cleanup_stats, "sandbox_recompute": recompute_synced},
+            "message": message,
+            "sync": {"cleanup": cleanup_stats, "sandbox_recompute": recompute_synced, "dealer_orders": dealer_order_sync},
         }
     except HTTPException:
         raise

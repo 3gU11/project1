@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -66,6 +67,19 @@ CLOUD_READ_STATUSES = (
     "completed",
     "rejected",
     "cancelled",
+)
+# 云端 v8-status 允许 V8 回写的工厂状态；cancelled 由 push_cloud_cancel 单独回传。
+# 附加备注复审通过时按订单真实状态回写，避免把已转合同/已配货订单退回 approved。
+CLOUD_WRITABLE_ORDER_STATUSES = frozenset(
+    {
+        "pending",
+        "approved",
+        "rejected",
+        "contracted",
+        "partial_allocated",
+        "allocated",
+        "completed",
+    }
 )
 
 
@@ -213,6 +227,9 @@ def _jsonable(value: Any) -> Any:
 
 
 def _status_rank(status: str) -> int:
+    # 下拉合并时的“本地状态不可被低阶云端状态覆盖”优先级。
+    # 与推送侧 crud.cloud_sync_outbox._ORDER_STATUS_RANK 保持一致：云端只把
+    # cancelled/completed 当终态，completed 允许覆盖 rejected（工厂驳回不是终态）。
     return {
         "regional_pending": -1,
         "pending": 0,
@@ -220,10 +237,10 @@ def _status_rank(status: str) -> int:
         "contracted": 2,
         "partial_allocated": 3,
         "allocated": 4,
-        "completed": 5,
-        "complete": 5,
+        "rejected": 5,
         "regional_rejected": 6,
-        "rejected": 6,
+        "completed": 6,
+        "complete": 6,
         "cancelled": 7,
     }.get(status or "", -1)
 
@@ -294,8 +311,15 @@ def fetch_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max
         for order in status_results.get(read_status, []):
             items = _iter_cloud_items(order)
             first_item = items[0] if items else order
+            # 生产云 /api/v8/bridge/orders 的顶层订单号字段是 id（listDealerOrders 用 order_no AS id），
+            # 必须与 _line_payload / find_cloud_dealer_order 一样补 id 兜底；否则所有订单的
+            # 去重键都会变成 ("", 1)，一次拉取会被折叠成 1 条订单，导致状态同步不完整。
+            order_no = _clean(
+                _pick(first_item, "order_no", "orderNo", "id")
+                or _pick(order, "order_no", "orderNo", "id")
+            )
             key = (
-                _clean(_pick(first_item, "order_no", "orderNo") or _pick(order, "order_no", "orderNo")),
+                order_no,
                 _as_int(_pick(first_item, "line_no", "lineNo"), 1),
             )
             if key in seen_keys:
@@ -359,8 +383,11 @@ def push_cloud_review(
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     next_status = _clean(status)
-    if next_status not in {"approved", "rejected"}:
-        raise ValueError("cloud review status must be approved or rejected")
+    if next_status not in CLOUD_WRITABLE_ORDER_STATUSES:
+        raise ValueError(
+            "cloud review status must be one of: "
+            + ", ".join(sorted(CLOUD_WRITABLE_ORDER_STATUSES))
+        )
     payload = {
         "status": next_status,
         "reviewedBy": _clean(reviewer),
@@ -405,19 +432,75 @@ def push_cloud_allocate(
     operator: str = "",
     v7_order_no: str = "",
     idempotency_key: str | None = None,
+    status: str = "allocated",
 ) -> dict[str, Any]:
+    next_status = _clean(status) or "allocated"
+    if next_status not in {"allocated", "partial_allocated"}:
+        raise ValueError("cloud allocation status must be allocated or partial_allocated")
+    default_key = (
+        f"v8-outbox-allocate-{_clean(order_no)}-{_clean(contract_no)}-{_clean(v7_order_no)}"
+    )
+    if next_status != "allocated":
+        # 部分配货与全部配货必须是不同幂等键，否则云端会把后一次请求当成重复请求。
+        default_key = f"{default_key}-{next_status}"
     return _post_cloud_order(
         order_no=order_no,
         path_suffix="v8-status",
         payload={
-            "status": "allocated",
+            "status": next_status,
             "contractNo": _clean(contract_no),
             "v7OrderNo": _clean(v7_order_no),
             "reviewedBy": _clean(operator),
             "reviewNote": "V8 allocation sync",
             "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         },
-        idempotency_key=idempotency_key or f"v8-outbox-allocate-{_clean(order_no)}-{_clean(contract_no)}-{_clean(v7_order_no)}",
+        idempotency_key=idempotency_key or default_key,
+    )
+
+
+def push_cloud_cancel(
+    order_no: str,
+    contract_no: str = "",
+    operator: str = "",
+    note: str = "",
+    line_nos: list[int] | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """回传订单取消状态；line_nos 非空时按行回传 cancelled，云端据此只取消对应明细。
+
+    注意：云端 contract_no 的回写口径是 COALESCE(NULLIF(?, ''), contract_no)，即空值保留原值。
+    只有「整单取消 + 单一合同」时才回传 contractNo；按行取消或多合同并集回传会把云端
+    每一行的原合同号污染成「A、B」，因此这些场景让云端保留各行自己的合同号。
+    """
+    normalized_line_nos: list[int] = []
+    for raw_line_no in line_nos or []:
+        line_no = _as_int(raw_line_no, 0)
+        if line_no > 0 and line_no not in normalized_line_nos:
+            normalized_line_nos.append(line_no)
+    contract_nos = [
+        part.strip()
+        for part in re.split(r"[、，,/／;；\s]+", _clean(contract_no))
+        if part.strip()
+    ]
+    payload: dict[str, Any] = {
+        "status": "cancelled",
+        "reviewedBy": _clean(operator),
+        "reviewNote": _clean(note),
+        "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if not normalized_line_nos and len(contract_nos) == 1:
+        payload["contractNo"] = contract_nos[0]
+    if normalized_line_nos:
+        payload["items"] = [
+            {"lineNo": line_no, "status": "cancelled"} for line_no in normalized_line_nos
+        ]
+    # 默认幂等键只能是 ASCII（HTTP 头要求）；多合同号里的「、」等字符做兜底替换。
+    key_contract = re.sub(r"[^0-9A-Za-z._-]+", "_", _clean(contract_no)).strip("_")
+    return _post_cloud_order(
+        order_no=order_no,
+        path_suffix="v8-status",
+        payload=payload,
+        idempotency_key=idempotency_key or f"v8-outbox-cancel-{_clean(order_no)}-{key_contract}",
     )
 
 
