@@ -180,7 +180,7 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
 # Load local, ignored environment files before starting child services.
-foreach ($envPath in @((Join-Path $root '.env'), (Join-Path $root '.env.local'))) {
+foreach ($envPath in @((Join-Path $root '.env'), (Join-Path $root '.env.local'), (Join-Path $root 'server/.env'))) {
   if (Test-Path -LiteralPath $envPath) {
     Get-Content -LiteralPath $envPath | ForEach-Object {
       $line = $_.Trim()
