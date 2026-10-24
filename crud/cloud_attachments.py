@@ -54,11 +54,26 @@ def _read_dotenv_value(key: str) -> str:
     return ""
 
 
+def _attachment_base_url() -> str:
+    """附件接口所在服务地址。
+
+    售后云端把订单附件接口部署在售后域名（默认 ruijuncare.rjzkapp.com），
+    与订货桥接的 WECHAT_CLOUD_API_BASE 可能不是同一台服务，因此单独提供覆盖项。
+    """
+    return (
+        os.getenv("CLOUD_ATTACHMENT_API_BASE")
+        or _read_dotenv_value("CLOUD_ATTACHMENT_API_BASE")
+        or os.getenv("WECHAT_CLOUD_API_BASE")
+        or _read_dotenv_value("WECHAT_CLOUD_API_BASE")
+        or "https://ruijuncare.rjzkapp.com"
+    ).strip().rstrip("/")
+
+
 def _cloud_config() -> tuple[str, str]:
-    base_url = (os.getenv("WECHAT_CLOUD_API_BASE") or _read_dotenv_value("WECHAT_CLOUD_API_BASE")).strip().rstrip("/")
+    base_url = _attachment_base_url()
     api_key = (os.getenv("V7_API_KEY") or _read_dotenv_value("V7_API_KEY")).strip()
     if not base_url:
-        raise ValueError("WECHAT_CLOUD_API_BASE is not configured")
+        raise ValueError("CLOUD_ATTACHMENT_API_BASE is not configured")
     if not api_key:
         raise ValueError("V7_API_KEY is required to pull order attachments")
     return base_url, api_key

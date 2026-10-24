@@ -10,6 +10,25 @@
     @closed="reset"
   >
     <div v-loading="busy" class="draft-wrap">
+      <div class="cloud-attach">
+        <div class="cloud-attach-head">
+          <span class="cloud-attach-title">云端合同附件</span>
+          <span v-if="cloudAttachments.length" class="cloud-attach-count">{{ cloudAttachments.length }}</span>
+          <span v-if="cloudError" class="cloud-attach-error">{{ cloudError }}</span>
+          <span class="cloud-attach-actions">
+            <el-button size="small" text :loading="cloudLoading" @click="loadCloudAttachments">刷新</el-button>
+            <el-button size="small" :loading="cloudSyncing" @click="syncCloudAttachments">从云端同步</el-button>
+          </span>
+        </div>
+        <div v-if="!cloudLoading && !cloudAttachments.length" class="cloud-attach-empty">该订单暂无云端合同附件</div>
+        <div v-for="item in cloudAttachments" :key="item.id" class="cloud-attach-row">
+          <span class="cloud-attach-name" :title="item.fileName">{{ item.fileName }}</span>
+          <span class="cloud-attach-meta">{{ formatSize(item.size) }}<template v-if="item.syncedAt"> · {{ item.syncedAt }}</template></span>
+          <el-button size="small" text @click="previewCloudAttachment(item)">预览</el-button>
+          <el-button size="small" text @click="downloadCloudAttachment(item)">下载</el-button>
+        </div>
+      </div>
+
       <el-empty
         v-if="!loading && !currentDraft"
         :description="canApproveOrder ? `订单 ${orderNo || ''} 暂无合同附件，可直接审核订单` : `订单 ${orderNo || ''} 暂无合同附件`"
@@ -118,6 +137,12 @@
         <el-button type="primary" :loading="busy" @click="saveFields">保存</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="cloudPreviewVisible" :title="cloudPreviewName" width="85%" top="4vh" append-to-body @closed="clearCloudPreview">
+      <div v-loading="cloudPreviewLoading" class="cloud-preview-wrap">
+        <iframe v-if="cloudPreviewUrl" :src="cloudPreviewUrl" class="contract-page-preview" title="云端合同附件预览" />
+        <iframe v-else-if="cloudPreviewHtml" :srcdoc="cloudPreviewHtml" class="contract-page-preview" title="云端合同附件预览" sandbox="" />
+      </div>
+    </el-dialog>
   </el-dialog>
 </template>
 
@@ -125,7 +150,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { contractPreviewHtml } from '../utils/contractPreview'
-import { apiGet, apiPost, apiPut } from '../utils/request'
+import { apiDownloadBlob, apiGet, apiPost, apiPut } from '../utils/request'
 
 type Draft = {
   id: string
@@ -139,6 +164,17 @@ type Draft = {
   reviewer?: string
   review_note?: string
   reviewed_at?: string
+}
+
+type CloudAttachment = {
+  id: string
+  fileName: string
+  mimeType?: string
+  size?: number
+  sha256?: string
+  syncedAt?: string
+  downloadUrl?: string
+  previewUrl?: string
 }
 
 const props = defineProps<{
@@ -168,6 +204,15 @@ const sourceOrder = ref<Record<string, any>>({})
 const editVisible = ref(false)
 const editFields = ref<Record<string, string>>({})
 const editableFields = ref<{ key: string }[]>([])
+const cloudAttachments = ref<CloudAttachment[]>([])
+const cloudLoading = ref(false)
+const cloudSyncing = ref(false)
+const cloudError = ref('')
+const cloudPreviewVisible = ref(false)
+const cloudPreviewName = ref('')
+const cloudPreviewUrl = ref('')
+const cloudPreviewHtml = ref('')
+const cloudPreviewLoading = ref(false)
 let viewSequence = 0
 
 const labels: Record<string, string> = {
@@ -246,6 +291,100 @@ const notifyError = (error: any, fallback: string) => {
   ElMessage.error(error?.message || fallback)
 }
 
+const formatSize = (size?: number) => {
+  const value = Number(size || 0)
+  if (!value) return '-'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+const cloudAttachmentPath = (attachment: CloudAttachment, suffix: string) =>
+  `/dealer-orders/${encodeURIComponent(orderNo.value)}/attachments/${encodeURIComponent(attachment.id)}/${suffix}`
+
+async function loadCloudAttachments() {
+  if (!orderNo.value) return
+  cloudLoading.value = true
+  cloudError.value = ''
+  try {
+    const result = await apiGet<{ data?: CloudAttachment[] }>(
+      `/dealer-orders/${encodeURIComponent(orderNo.value)}/attachments`,
+    )
+    cloudAttachments.value = Array.isArray(result?.data) ? result.data : []
+  } catch (error: any) {
+    cloudAttachments.value = []
+    cloudError.value = '读取云端合同附件失败'
+    notifyError(error, '读取云端合同附件失败')
+  } finally {
+    cloudLoading.value = false
+  }
+}
+
+async function syncCloudAttachments() {
+  if (!orderNo.value) return
+  cloudSyncing.value = true
+  try {
+    const result = await apiPost<{ failed?: number; synced?: number }>(
+      `/dealer-orders/${encodeURIComponent(orderNo.value)}/attachments/sync`,
+      {},
+      { timeout: 120000 },
+    )
+    const failed = Number(result?.failed || 0)
+    if (failed) ElMessage.warning(`同步完成：${failed} 个附件同步失败`)
+    else ElMessage.success(`已从云端同步合同附件（新增 ${Number(result?.synced || 0)} 个）`)
+    await loadCloudAttachments()
+  } catch (error: any) {
+    notifyError(error, '同步云端附件失败')
+  } finally {
+    cloudSyncing.value = false
+  }
+}
+
+function downloadCloudAttachment(attachment: CloudAttachment) {
+  void apiDownloadBlob(cloudAttachmentPath(attachment, 'download'), attachment.fileName).catch(() => {})
+}
+
+function clearCloudPreviewObjectUrl() {
+  if (cloudPreviewUrl.value) {
+    URL.revokeObjectURL(cloudPreviewUrl.value)
+    cloudPreviewUrl.value = ''
+  }
+}
+
+function clearCloudPreview() {
+  clearCloudPreviewObjectUrl()
+  cloudPreviewHtml.value = ''
+  cloudPreviewName.value = ''
+}
+
+async function previewCloudAttachment(attachment: CloudAttachment) {
+  cloudPreviewName.value = attachment.fileName
+  cloudPreviewVisible.value = true
+  cloudPreviewLoading.value = true
+  clearCloudPreviewObjectUrl()
+  cloudPreviewHtml.value = ''
+  try {
+    const bytes = await apiGet<ArrayBuffer>(cloudAttachmentPath(attachment, 'preview'), {
+      responseType: 'arraybuffer',
+      timeout: 65000,
+    })
+    const mime = String(attachment.mimeType || '')
+    if (mime === 'application/pdf' || mime.startsWith('image/')) {
+      cloudPreviewUrl.value = URL.createObjectURL(new Blob([bytes], { type: mime }))
+    } else if (mime.includes('wordprocessingml')) {
+      cloudPreviewHtml.value = await contractPreviewHtml(bytes)
+    } else {
+      ElMessage.warning('该附件类型暂不支持在线预览，请下载查看')
+      cloudPreviewVisible.value = false
+    }
+  } catch (error: any) {
+    notifyError(error, '附件预览失败')
+    cloudPreviewVisible.value = false
+  } finally {
+    cloudPreviewLoading.value = false
+  }
+}
+
 function reset() {
   viewSequence += 1
   orderNo.value = ''
@@ -257,6 +396,13 @@ function reset() {
   sourceOrder.value = {}
   busy.value = false
   loading.value = false
+  cloudAttachments.value = []
+  cloudError.value = ''
+  cloudLoading.value = false
+  cloudSyncing.value = false
+  clearCloudPreview()
+  cloudPreviewVisible.value = false
+  cloudPreviewLoading.value = false
 }
 
 async function openForOrder(no: string) {
@@ -268,7 +414,7 @@ async function openForOrder(no: string) {
   reset()
   orderNo.value = normalizedOrderNo
   visible.value = true
-  await loadDrafts()
+  await Promise.allSettled([loadDrafts(), loadCloudAttachments()])
 }
 
 async function loadDrafts() {
@@ -523,5 +669,79 @@ defineExpose({ openForOrder })
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.cloud-attach {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.cloud-attach-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-gray-700);
+}
+
+.cloud-attach-title {
+  font-weight: 600;
+  color: var(--color-gray-900);
+}
+
+.cloud-attach-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #e8f0fe;
+  color: #2563eb;
+  font-size: 12px;
+  text-align: center;
+}
+
+.cloud-attach-error {
+  color: #d97706;
+}
+
+.cloud-attach-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud-attach-empty {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--color-gray-500);
+}
+
+.cloud-attach-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.cloud-attach-name {
+  min-width: 0;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-gray-900);
+}
+
+.cloud-attach-meta {
+  color: var(--color-gray-500);
+  font-size: 12px;
+}
+
+.cloud-preview-wrap {
+  min-height: 240px;
 }
 </style>
