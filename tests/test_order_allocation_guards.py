@@ -1,5 +1,9 @@
 import inspect
+import json
 import unittest
+from unittest.mock import patch
+
+import pandas as pd
 
 from api.routes.planning import (
     complete_order_allocation_api,
@@ -12,6 +16,25 @@ from crud.orders import allocate_inventory
 
 
 class OrderAllocationGuardTests(unittest.TestCase):
+    def test_allocation_endpoint_returns_json_safe_nulls_for_missing_inventory_fields(self):
+        from api.routes.planning import get_order_allocations_api
+
+        rows = pd.DataFrame({
+            "流水号": ["96-TEST-001", "96-TEST-002"],
+            "更新时间": [float("nan"), pd.NaT],
+            "Location_Code": [float("nan"), "A-01"],
+            "row_version": [float("nan"), 1.0],
+        })
+
+        with patch("api.routes.planning.batch_planning.review_rows", return_value=None), \
+             patch("api.routes.planning._get_order_contract_machine_rows", return_value=rows):
+            result = get_order_allocations_api("SO-TEST")
+
+        payload = json.loads(json.dumps(result, allow_nan=False))
+        self.assertIsNone(payload["data"][0]["更新时间"])
+        self.assertIsNone(payload["data"][0]["row_version"])
+        self.assertIsNone(payload["data"][0]["Location_Code"])
+
     def test_queued_cards_are_not_allocatable(self):
         for fn in (_get_order_contract_machine_rows, allocate_inventory):
             source = inspect.getsource(fn)

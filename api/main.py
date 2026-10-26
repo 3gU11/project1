@@ -22,8 +22,11 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def on_startup():
-    from contract_bridge.worker import worker_loop
-    app.state.contract_bridge_task = asyncio.create_task(worker_loop())
+    try:
+        from contract_bridge.worker import worker_loop
+        app.state.contract_bridge_task = asyncio.create_task(worker_loop())
+    except Exception as e:
+        logger.warning("contract bridge worker not started: %s", e)
     from database import init_mysql_tables_v2
     try:
         result = init_mysql_tables_v2()
@@ -76,6 +79,10 @@ async def on_startup():
         app.state.watch_finished_goods_task = asyncio.create_task(watch_finished_goods_db())
     except Exception as e:
         logger.warning("finished goods db watch worker not started: %s", e)
+    try:
+        app.state.snapshot_heartbeat_task = asyncio.create_task(cloud_snapshot_heartbeat_loop())
+    except Exception as e:
+        logger.warning("snapshot heartbeat worker not started: %s", e)
 
 
 
@@ -88,6 +95,7 @@ async def on_shutdown():
             await contract_task
         except asyncio.CancelledError:
             pass
+
     task = getattr(app.state, "cloud_sync_worker_task", None)
     if task:
         task.cancel()
@@ -127,6 +135,29 @@ async def on_shutdown():
             await watch_fg_task
         except asyncio.CancelledError:
             pass
+
+    heartbeat_task = getattr(app.state, "snapshot_heartbeat_task", None)
+    if heartbeat_task:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def cloud_snapshot_heartbeat_loop() -> None:
+    """按固定周期推送库存快照：即使库存无变化也刷新云端回执，满足 5 分钟同步监控。"""
+    interval = max(60, int(os.getenv("CLOUD_SNAPSHOT_INTERVAL_SECONDS", "300") or "300"))
+    while True:
+        try:
+            from crud.cloud_dealer_order_sync import sync_wechat_batch_summary_to_cloud
+            result = await asyncio.to_thread(sync_wechat_batch_summary_to_cloud)
+            logger.info("cloud snapshot heartbeat pushed: rows=%s", (result or {}).get("pushed_rows"))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("cloud snapshot heartbeat failed: %s", exc)
+        await asyncio.sleep(interval)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

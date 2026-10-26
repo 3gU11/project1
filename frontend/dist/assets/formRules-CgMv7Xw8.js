@@ -1,0 +1,1 @@
+const t=(e,r="blur")=>({required:!0,message:`请输入${e}`,trigger:r}),s=e=>({required:!0,message:`请选择${e}`,trigger:"change"}),i=e=>String(e??"").trim().length>0,n=e=>{const r=Number(e);return Number.isInteger(r)&&r>0};export{s as a,i as h,n as i,t as r};

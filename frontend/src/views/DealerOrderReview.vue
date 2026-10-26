@@ -12,6 +12,7 @@
     <ContractDraftReview
       ref="contractDraftReview"
       :confirm-order-approve="approveContractReviewOrder"
+      :confirm-order-reject="rejectContractReviewOrder"
       :can-approve-order="!!contractReviewOrder && canApprove(contractReviewOrder)"
       @done="onContractReviewDone"
       @approve-order="onApproveWithoutContract"
@@ -70,8 +71,10 @@
           <el-tag :type="statusMeta(row).type">{{ statusMeta(row).text }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="regional_manager_name" label="经销商" width="90" show-overflow-tooltip />
-      <el-table-column prop="customer_name" label="客户名" min-width="390" show-overflow-tooltip />
+      <el-table-column prop="dealer_name" label="经销商" width="90" show-overflow-tooltip />
+      <el-table-column prop="customer_name" label="客户名" min-width="390" show-overflow-tooltip>
+        <template #default="{ row }">{{ customerDisplay(row) }}</template>
+      </el-table-column>
       <el-table-column prop="model" label="机型明细" min-width="150" show-overflow-tooltip />
       <el-table-column prop="batch_no" label="批次/来源" width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ displayBatch(row.batch_no, row.inventory_type) }}</template>
@@ -97,10 +100,16 @@
         <template #default="{ row }">
           <div class="op-buttons">
             <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="openContractReview(row)">
-              {{ isFactoryPending(row) ? '通过' : '预览并审批' }}
+              {{ reviewButtonLabel(row) }}
             </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
-            <el-button size="small" type="warning" :disabled="!canConvertDealerOrder(row)" @click.stop="openConvertDialog(row._order || row)">
+            <el-button
+              size="small"
+              type="warning"
+              :disabled="!canConvertDealerOrder(row)"
+              :title="canConvertDealerOrder(row) ? '' : '请先审核通过后再转合同'"
+              @click.stop="openConvertDialog(row._order || row)"
+            >
               转合同
             </el-button>
           </div>
@@ -127,6 +136,11 @@
           <span>订单号</span><strong>{{ selectedOrder.order_no }}</strong>
           <span>经销商</span><strong>{{ selectedOrder.dealer_name || '-' }}</strong>
           <span>客户</span><strong>{{ selectedOrder.customer_name || '-' }}</strong>
+          <span>地址</span><strong>{{ selectedOrder.delivery_address || '-' }}</strong>
+          <span>客户名（地址合并）</span><strong>{{ customerDisplay(selectedOrder) }}</strong>
+          <span>办事处</span><strong>{{ selectedOrder.office_name || '-' }}</strong>
+          <span>办事处联系人</span><strong>{{ selectedOrder.office_contact || '-' }}</strong>
+          <span>办事处联系方式</span><strong>{{ selectedOrder.office_phone || '-' }}</strong>
           <span>联系人</span><strong>{{ selectedOrder.contact_name || '-' }}</strong>
           <span>电话</span><strong>{{ selectedOrder.contact_phone || '-' }}</strong>
           <span>当前状态</span><strong>{{ statusMeta(selectedOrder).text }}</strong>
@@ -189,10 +203,15 @@
 
         <div class="drawer-actions">
           <el-button :disabled="!canApprove(selectedOrder)" @click="openContractReview(selectedOrder)">
-            {{ isFactoryPending(selectedOrder) ? '通过' : '预览并审批' }}
+            {{ reviewButtonLabel(selectedOrder) }}
           </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
-          <el-button type="warning" :disabled="!canConvertDealerOrder(selectedOrder)" @click="openConvertDialog(selectedOrder)">转合同</el-button>
+          <el-button
+            type="warning"
+            :disabled="!canConvertDealerOrder(selectedOrder)"
+            :title="canConvertDealerOrder(selectedOrder) ? '' : '请先审核通过后再转合同'"
+            @click="openConvertDialog(selectedOrder)"
+          >转合同</el-button>
         </div>
       </template>
     </el-drawer>
@@ -314,6 +333,7 @@ import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request
 import { isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
+import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
 const contractDraftReview = ref<InstanceType<typeof ContractDraftReview>>()
 
 type DealerOrder = {
@@ -326,6 +346,10 @@ type DealerOrder = {
   dealer_phone?: string
   regional_manager_name?: string
   customer_name?: string
+  delivery_address?: string
+  office_name?: string
+  office_contact?: string
+  office_phone?: string
   contact_name?: string
   contact_phone?: string
   model: string
@@ -514,7 +538,13 @@ const hasFactoryRemark = (row: DealerOrder) => {
 const isFactoryPending = (row: DealerOrder) => Number(row.factory_pending || 0) === 1 && !['complete', 'completed'].includes(row.status)
 const canApprove = (row: DealerOrder) => isFactoryPending(row) || row.status === 'pending'
 const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemark(row) : ['pending', 'approved'].includes(row.status))
-const canConvertDealerOrder = (row: DealerOrder) => ['pending', 'approved'].includes(String(row.status || '').trim()) && !isFactoryPending(row)
+const canConvertDealerOrder = (row: DealerOrder) => String(row.status || '').trim() === 'approved' && !isFactoryPending(row)
+
+// 待审核显示"预览并审批"，其它状态一律只读查看合同附件。
+const reviewButtonLabel = (row: DealerOrder) => {
+  if (isFactoryPending(row)) return '通过'
+  return canApprove(row) ? '预览并审批' : '查看合同'
+}
 
 const modelDictionaryStore = useModelDictionaryStore()
 const modelOptions = computed(() => modelDictionaryStore.rows
@@ -590,9 +620,16 @@ const normalizeDealerOrderItems = (order: DealerOrder) => {
     .filter((item) => item.model)
 }
 
+const customerDisplay = (order: DealerOrder | Record<string, any>) => {
+  const customer = String((order as any).customer_name || '').trim()
+  const address = String((order as any).delivery_address || '').trim()
+  if (!address) return customer || '-'
+  return `${address}（${customer || '-'}）`
+}
+
 const openConvertDialog = async (order: DealerOrder) => {
   if (!canConvertDealerOrder(order)) {
-    ElMessage.warning('只有待审核或已通过的经销商订单可以转合同')
+    ElMessage.warning('只有审核通过的经销商订单可以转合同，请先在「预览并审批」中完成审核')
     return
   }
   const rows = normalizeDealerOrderItems(order)
@@ -896,9 +933,8 @@ const contractReviewOrder = ref<DealerOrder | null>(null)
 
 const openContractReview = async (row: DealerOrder) => {
   const target = (row as DealerOrderTableRow)._order || row
-  if (!canApprove(target)) return
   // 新备注复审不是合同审批，沿用原来的直接通过。
-  if (isFactoryPending(target)) {
+  if (isFactoryPending(target) && canApprove(target)) {
     await approveOrder(target)
     return
   }
@@ -912,6 +948,16 @@ const approveContractReviewOrder = async (): Promise<boolean> => {
   await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/approve`, {
     note: String(target.remark || ''),
   })
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  void loadOrders(true)
+  return true
+}
+
+const rejectContractReviewOrder = async (reason: string): Promise<boolean> => {
+  const target = contractReviewOrder.value
+  if (!target) throw new Error('未选择订单')
+  // 订单与合同附件一起驳回；后端会把该订单未归档的草稿同步置为 rejected。
+  await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/reject`, { reason })
   window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
   void loadOrders(true)
   return true
@@ -974,7 +1020,15 @@ const rejectOrder = async (row: DealerOrder) => {
   }
 }
 
-type MessageResponse = { message?: string; rush_created?: number; rush_auto_inserted?: number; warning?: string; contract_no?: string }
+type MessageResponse = {
+  message?: string
+  rush_created?: number
+  rush_auto_inserted?: number
+  warning?: string
+  contract_no?: string
+  cloud_attachments?: CloudAttachmentSyncSummary
+  order_form_attached_contracts?: string[]
+}
 
 const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
   if (!hasText(convertForm.contractNo) || !hasText(convertForm.customer) || !hasText(convertForm.deliveryDate)) {
@@ -1065,6 +1119,11 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
       ? '已按“使用现货”处理（合同状态：已规划）'
       : (convertForm.isRush ? '已按“进入生产看板”处理（合同状态：待规划）' : '已按“进入沙盘”处理（合同状态：待规划）')
     ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    const cloudAttachmentNotice = buildCloudAttachmentNotice(res.cloud_attachments)
+    if (cloudAttachmentNotice) {
+      if (cloudAttachmentNotice.level === 'warning') ElMessage.warning(cloudAttachmentNotice.text)
+      else ElMessage.success(cloudAttachmentNotice.text)
+    }
     convertDialogVisible.value = false
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadOrders()

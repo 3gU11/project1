@@ -114,7 +114,7 @@ describe('dealer order contract draft entry', () => {
     await flushPromises()
 
     const action = wrapper.findAll('button').find((button) => button.text().includes('预览并审批'))
-    expect(action, 'the order row should provide a contract preview and approval action').toBeDefined()
+    expect(action, 'the order row should provide a contract review action').toBeDefined()
     await action!.trigger('click')
 
     expect(mocks.openForOrder).toHaveBeenCalledWith('DEALER-ORDER-42')
