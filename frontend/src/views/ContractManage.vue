@@ -674,6 +674,7 @@ import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 import { compareModels, isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
 import { useModelDictionaryStore } from '../store/modelDictionary'
+import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
 import PageHeader from '../components/PageHeader.vue'
 
 const router = useRouter()
@@ -684,6 +685,8 @@ type MessageResponse = {
   rush_created?: number
   rush_auto_inserted?: number
   save_mode?: 'sandbox' | 'spot'
+  cloud_attachments?: CloudAttachmentSyncSummary
+  order_form_attached_contracts?: string[]
 }
 type ContractSummary = {
   id: string
@@ -1610,6 +1613,11 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
       ? '已按“使用现货”处理（合同状态=已规划）'
       : (dealerConvertForm.isRush ? '已按“进入生产看板”处理（合同状态=待规划）' : '已按“进入沙盘”处理（合同状态=待规划）')
     ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    const cloudAttachmentNotice = buildCloudAttachmentNotice(res.cloud_attachments)
+    if (cloudAttachmentNotice) {
+      if (cloudAttachmentNotice.level === 'warning') ElMessage.warning(cloudAttachmentNotice.text)
+      else ElMessage.success(cloudAttachmentNotice.text)
+    }
     dealerConvertDialogVisible.value = false
     activeTab.value = saveMode === 'spot' ? '已规划' : '待规划'
     selectedContractId.value = String(res.contract_no || dealerConvertForm.contractNo).trim()

@@ -333,6 +333,7 @@ import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request
 import { isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
+import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
 const contractDraftReview = ref<InstanceType<typeof ContractDraftReview>>()
 
 type DealerOrder = {
@@ -1019,7 +1020,15 @@ const rejectOrder = async (row: DealerOrder) => {
   }
 }
 
-type MessageResponse = { message?: string; rush_created?: number; rush_auto_inserted?: number; warning?: string; contract_no?: string }
+type MessageResponse = {
+  message?: string
+  rush_created?: number
+  rush_auto_inserted?: number
+  warning?: string
+  contract_no?: string
+  cloud_attachments?: CloudAttachmentSyncSummary
+  order_form_attached_contracts?: string[]
+}
 
 const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
   if (!hasText(convertForm.contractNo) || !hasText(convertForm.customer) || !hasText(convertForm.deliveryDate)) {
@@ -1110,6 +1119,11 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
       ? '已按“使用现货”处理（合同状态：已规划）'
       : (convertForm.isRush ? '已按“进入生产看板”处理（合同状态：待规划）' : '已按“进入沙盘”处理（合同状态：待规划）')
     ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    const cloudAttachmentNotice = buildCloudAttachmentNotice(res.cloud_attachments)
+    if (cloudAttachmentNotice) {
+      if (cloudAttachmentNotice.level === 'warning') ElMessage.warning(cloudAttachmentNotice.text)
+      else ElMessage.success(cloudAttachmentNotice.text)
+    }
     convertDialogVisible.value = false
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadOrders()

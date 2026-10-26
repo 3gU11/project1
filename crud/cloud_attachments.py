@@ -176,7 +176,7 @@ def _lookup_order(conn, order_no: str) -> dict:
 def _already_synced(conn, attachment_id: str) -> dict | None:
     row = conn.execute(
         text(
-            "SELECT attachment_id, state, file_path, sha256 FROM cloud_order_attachment_sync "
+            "SELECT attachment_id, contract_id, state, file_path, sha256 FROM cloud_order_attachment_sync "
             "WHERE attachment_id = :attachment_id"
         ),
         {"attachment_id": attachment_id},
@@ -304,16 +304,83 @@ def _make_room_for_duplicate(path: Path, attachment_id: str, sha256: str) -> Pat
     return path.with_name(f"{stem}_{attachment_id[:8]}{suffix}")
 
 
+def _existing_local_file(existing: dict) -> Path | None:
+    """已同步记录指向的本地文件。
+
+    路径为空、越界、不是普通文件或哈希对不上时返回 None，
+    由调用方安全回退到重新下载，不能在这里抛异常。
+    """
+    relative = _clean(existing.get("file_path"))
+    if not relative:
+        return None
+    root = Path(BASE_DIR).resolve()
+    try:
+        local = (root / relative).resolve()
+        local.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    if not local.is_file():
+        return None
+    expected = _clean(existing.get("sha256"))
+    if not expected:
+        return local
+    try:
+        if _sha256_file(local) != expected:
+            return None
+    except OSError:
+        return None
+    return local
+
+
+def _move_synced_attachment_to_contract(conn, order_no: str, attachment: dict,
+                                       existing: dict, local: Path) -> str:
+    """订单已转合同：把早先同步到订单目录的附件补进合同目录并写合同附件记录。"""
+    attachment_id = _clean(attachment.get("id"))
+    contract_id, customer, target, _ = _target_file(conn, order_no, attachment)
+    sha256 = _clean(existing.get("sha256")) or _sha256_file(local)
+    target = _make_room_for_duplicate(target, attachment_id, sha256)
+    relative = str(target.relative_to(Path(BASE_DIR))).replace("\\", "/")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_name(target.name + ".part")
+    temp.write_bytes(local.read_bytes())
+    os.replace(temp, target)
+
+    _insert_contract_record(
+        conn,
+        contract_id=contract_id,
+        customer=customer,
+        file_name=target.name,
+        file_path=relative,
+        sha256=sha256,
+        uploader="云端附件",
+        upload_time=datetime.now(),
+    )
+    _upsert_sync_row(
+        conn, attachment_id, order_no, contract_id, target.name, relative, sha256,
+        state="synced", synced_at=datetime.now(),
+    )
+    return "synced"
+
+
 def _sync_one_attachment(conn, order_no: str, attachment: dict) -> str:
     """Returns synced/skipped/failed state for one attachment."""
     attachment_id = _clean(attachment.get("id"))
     if not attachment_id:
         return "failed"
     existing = _already_synced(conn, attachment_id)
-    if existing and existing.get("state") == "synced" and _clean(existing.get("file_path")):
-        local = Path(BASE_DIR) / str(existing["file_path"])
-        expected = _clean(existing.get("sha256"))
-        if local.exists() and (not expected or _sha256_file(local) == expected):
+    if existing and existing.get("state") == "synced":
+        local = _existing_local_file(existing)
+        if local is not None:
+            # 拉单时可能先同步到 data/<订单号>/，转合同后订单号已变成合同号；
+            # 此时不能只返回 skipped，要把本地已有文件补进合同目录并补写合同附件记录。
+            target_contract_id = _target_file(conn, order_no, attachment)[0]
+            previous_contract_id = _clean(existing.get("contract_id"))
+            if (
+                target_contract_id
+                and target_contract_id != previous_contract_id
+                and target_contract_id != order_no
+            ):
+                return _move_synced_attachment_to_contract(conn, order_no, attachment, existing, local)
             return "skipped"
 
     content, headers = download_cloud_attachment(order_no, attachment_id)
