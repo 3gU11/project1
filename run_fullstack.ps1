@@ -175,6 +175,20 @@ function Start-LoggedProcess(
   Add-StartedProcess -name $name -processId $proc.Id
   return $proc
 }
+function Reset-NodeModules([string]$directory, [string]$label) {
+  $modules = Join-Path $directory 'node_modules'
+  if (-not (Test-Path -LiteralPath $modules)) { return }
+  Log "Removing damaged $label node_modules: $modules"
+  # A half-deleted tree (interrupted install, locked files, long paths) makes
+  # plain Remove-Item fail; rmdir /s /q handles it far more reliably.
+  & cmd /c "rmdir /s /q `"$modules`"" 2>$null | Out-Null
+  if (Test-Path -LiteralPath $modules) {
+    Remove-Item -LiteralPath $modules -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  if (Test-Path -LiteralPath $modules) {
+    Fail "Could not clear $label node_modules: $modules. Close any running Node/Vite process and retry." 1
+  }
+}
 function Ensure-FrontendDependencies([string]$directory, [string]$label) {
   $packageJson = Join-Path $directory 'package.json'
   $lockFile = Join-Path $directory 'package-lock.json'
@@ -188,7 +202,12 @@ function Ensure-FrontendDependencies([string]$directory, [string]$label) {
   Push-Location $directory
   try {
     & $npmCmd ci
-    if ($LASTEXITCODE -ne 0) { Fail "$label dependency installation failed." 1 }
+    if ($LASTEXITCODE -ne 0) {
+      Log "$label npm ci failed (exit $LASTEXITCODE); clearing node_modules and retrying once..."
+      Reset-NodeModules -directory $directory -label $label
+      & $npmCmd ci
+      if ($LASTEXITCODE -ne 0) { Fail "$label dependency installation failed." 1 }
+    }
   } finally {
     Pop-Location
   }
@@ -417,6 +436,49 @@ Log "API docs  : http://127.0.0.1:$ApiPort/docs"
 Log "Frontend  : http://127.0.0.1:$WebPort"
 if (-not $NoMobile) { Log "Mobile    : http://127.0.0.1:$MobilePort" }
 Log "PID file  : $pidFile"
+
+# LAN endpoints (needs firewall rules; run enable_lan_access.ps1 once as admin).
+$lanAddresses = @()
+try {
+  $lanAddresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+    Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+    Select-Object -ExpandProperty IPAddress)
+} catch {
+  $lanAddresses = @()
+}
+if ($lanAddresses.Count -gt 0) {
+  Log ''
+  Log 'LAN access (run enable_lan_access.ps1 once to allow firewall):'
+  foreach ($lanIp in $lanAddresses) {
+    Log "  Frontend  : http://$($lanIp):$WebPort"
+    if (-not $NoMobile) { Log "  Mobile    : http://$($lanIp):$MobilePort" }
+    Log "  API docs  : http://$($lanIp):$ApiPort/docs"
+  }
+
+  # LAN clients are gated by inbound firewall rules, not by the listener.
+  # Report the state here so a missing rule is visible at start time.
+  $lanPorts = @($WebPort, $ApiPort, $GoPort)
+  if (-not $NoMobile) { $lanPorts += $MobilePort }
+  $missingPorts = @()
+  try {
+    $v8Rules = @(Get-NetFirewallRule -Direction Inbound -Enabled True -ErrorAction Stop |
+      Where-Object { $_.DisplayName -like 'V8 Fullstack*' })
+  } catch {
+    $v8Rules = @()
+  }
+  foreach ($port in $lanPorts) {
+    $hit = $v8Rules | Where-Object { $_.DisplayName -like "V8 Fullstack $port (*" } | Select-Object -First 1
+    if (-not $hit) { $missingPorts += $port }
+  }
+  if ($missingPorts.Count -eq 0) {
+    Log '  Firewall  : OK (inbound allow rules present)'
+  } else {
+    Log "  Firewall  : MISSING rules for port(s): $($missingPorts -join ', ')"
+    Log '              Run once in an admin PowerShell: .\enable_lan_access.ps1'
+    Log '              Other devices will NOT connect until those rules exist.'
+  }
+}
+
 Log 'Logs:'
 Log "- $goOut"
 Log "- $goErr"
