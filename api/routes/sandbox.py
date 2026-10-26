@@ -12,6 +12,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 
 import asyncio
+import inspect
 
 import httpx
 import pandas as pd
@@ -128,9 +129,17 @@ async def _get_client() -> httpx.AsyncClient:
     global _client
     async with _client_lock:
         if _client is None or _client.is_closed:
+            # The Go sandbox is always reached over loopback. With trust_env
+            # left at its default, httpx reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY
+            # here and a malformed host proxy value raises httpx.InvalidURL
+            # while constructing the client, turning every
+            # /api/v1/sandbox/* call into a 500. Other internal clients in this
+            # repo (crud/cloud_attachments.py, api/routes/planning.py) already
+            # disable environment proxy discovery the same way.
             _client = httpx.AsyncClient(
                 base_url=GO_SANDBOX_URL,
                 timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
+                trust_env=False,
             )
     return _client
 
@@ -169,8 +178,16 @@ async def _reset_client(failed_client: httpx.AsyncClient) -> httpx.AsyncClient:
         _client = httpx.AsyncClient(
             base_url=GO_SANDBOX_URL,
             timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
+            trust_env=False,
         )
         return _client
+
+
+# websockets 15+ honors the host proxy configuration by default. The Go
+# sandbox websocket is a loopback connection, so a malformed system proxy must
+# not be parsed for it. Older websockets releases don't accept the `proxy`
+# keyword, so only pass it when the installed version supports it.
+_WS_CONNECT_SUPPORTS_PROXY = "proxy" in inspect.signature(websockets.connect).parameters
 
 
 async def proxy_ws(websocket: WebSocket):
@@ -194,8 +211,14 @@ async def proxy_ws(websocket: WebSocket):
     go_headers.append(("X-Username", str(user_ctx.get("username") or "")))
     go_headers.append(("X-Role", str(user_ctx.get("role") or "")))
 
+    ws_connect_options = {"additional_headers": go_headers}
+    if _WS_CONNECT_SUPPORTS_PROXY:
+        # None explicitly disables proxy discovery, matching trust_env=False on
+        # the HTTP client above.
+        ws_connect_options["proxy"] = None
+
     try:
-        async with websockets.connect(go_ws_url, additional_headers=go_headers) as go_ws:
+        async with websockets.connect(go_ws_url, **ws_connect_options) as go_ws:
             await websocket.accept()
 
             async def client_to_go():
