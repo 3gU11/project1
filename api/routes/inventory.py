@@ -1545,10 +1545,21 @@ def confirm_shipping(
             .bindparams(bindparam("sns", expanding=True))
         )
 
-        with get_engine().begin() as schema_conn:
-            schema_conn.execute(text("""
+        # 建表语句要区分方言：AUTO_INCREMENT / ENGINE / 内联 INDEX 只有 MySQL 认，
+        # SQLite（单元测试与轻量部署）必须用 AUTOINCREMENT + 独立 CREATE INDEX。
+        engine = get_engine()
+        is_sqlite = engine.dialect.name == "sqlite"
+        id_column = "INTEGER PRIMARY KEY AUTOINCREMENT" if is_sqlite else "BIGINT NOT NULL AUTO_INCREMENT"
+        pk_line = "" if is_sqlite else ",\n                        PRIMARY KEY (`id`)"
+        index_lines = "" if is_sqlite else (
+            ",\n                        INDEX `idx_machine_transfer_serial` (`serial_no`)"
+            ",\n                        INDEX `idx_machine_transfer_time` (`operate_time`)"
+        )
+        table_options = "" if is_sqlite else " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        with engine.begin() as schema_conn:
+            schema_conn.execute(text(f"""
                     CREATE TABLE IF NOT EXISTS machine_transfer_history (
-                        `id` BIGINT NOT NULL AUTO_INCREMENT,
+                        `id` {id_column},
                         `serial_no` VARCHAR(100) NOT NULL,
                         `from_location` VARCHAR(100) DEFAULT '',
                         `to_location` VARCHAR(100) DEFAULT '',
@@ -1559,12 +1570,18 @@ def confirm_shipping(
                         `contract_no` VARCHAR(100) DEFAULT '',
                         `operator` VARCHAR(100) DEFAULT '',
                         `operate_time` DATETIME NULL,
-                        `remark` TEXT,
-                        PRIMARY KEY (`id`),
-                        INDEX `idx_machine_transfer_serial` (`serial_no`),
-                        INDEX `idx_machine_transfer_time` (`operate_time`)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                        `remark` TEXT{pk_line}{index_lines}
+                    ){table_options}
                 """))
+            if is_sqlite:
+                schema_conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_machine_transfer_serial "
+                    "ON machine_transfer_history (`serial_no`)"
+                ))
+                schema_conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_machine_transfer_time "
+                    "ON machine_transfer_history (`operate_time`)"
+                ))
 
         now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
         with get_engine().begin() as conn:
@@ -1647,8 +1664,15 @@ def confirm_shipping(
                         {"order_id": order_id},
                     ).scalar() or ""
                 except Exception as customer_exc:
-                    # Lightweight SQLite fixtures may omit optional customer metadata.
-                    if "no such column" in str(customer_exc).lower() or "unknown column" in str(customer_exc).lower():
+                    # Lightweight SQLite fixtures may omit optional customer metadata,
+                    # including the whole sales_orders table.
+                    _exc_text = str(customer_exc).lower()
+                    if (
+                        "no such column" in _exc_text
+                        or "unknown column" in _exc_text
+                        or "no such table" in _exc_text
+                        or "doesn't exist" in _exc_text
+                    ):
                         customer_name = ""
                     else:
                         raise
