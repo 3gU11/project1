@@ -1425,7 +1425,7 @@ def execute_allocation_recall(instance_no: str, worker_id: str):
         derived_tasks = create_reinbound_tasks(conn, instance, worker_id)
         final_status = '待派生处理' if derived_tasks else '已完成'
         finished = conn.execute(text("""UPDATE workflow_instances SET status=:status, result='成功', executor_id=:worker,
-            completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='执行中'"""), {'status': final_status, 'worker': worker_id, 'id': instance['id']})
+            failure_reason=NULL, completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='执行中'"""), {'status': final_status, 'worker': worker_id, 'id': instance['id']})
         if finished.rowcount != 1:
             raise ValueError('撤回配货流程状态已变化，整单回滚')
         conn.execute(text("""UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP
@@ -1503,7 +1503,7 @@ def execute_shipment_recall(instance_no: str, worker_id: str):
             conn.execute(text("UPDATE workflow_instance_items SET execution_result='已撤回' WHERE instance_id=:id AND object_id=:sn"), {'id': instance['id'], 'sn': sn})
         conn.execute(text("""UPDATE workflow_execution_attempts SET status='已完成', completed_at=CURRENT_TIMESTAMP(6), validation_result=:validation
             WHERE id=:attempt AND lease_token=:token AND status='执行中'"""), {'attempt': lease['id'], 'token': lease['lease_token'], 'validation': _json({'count': len(serials), 'states': sorted(allowed)})})
-        conn.execute(text("UPDATE workflow_instances SET status='已完成', result='成功', executor_id=:worker, completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='执行中'"), {'worker': worker_id, 'id': instance['id']})
+        conn.execute(text("UPDATE workflow_instances SET status='已完成', result='成功', executor_id=:worker, failure_reason=NULL, completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='执行中'"), {'worker': worker_id, 'id': instance['id']})
         conn.execute(text("UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND lock_status='占用中'"), {'id': instance['id']})
         conn.execute(text("""INSERT INTO workflow_audit_logs (instance_id,action,operator_id,before_state,after_state,detail)
             VALUES (:id,'执行完成',:worker,'执行中','已完成',:detail)"""), {'id': instance['id'], 'worker': worker_id, 'detail': _json({'count': len(serials), 'action': 'shipment-recall'})})
@@ -1609,7 +1609,7 @@ def execute_customer_finished_recall(instance_no: str, worker_id: str):
             conn.execute(text("UPDATE workflow_instance_items SET execution_result='已撤回' WHERE instance_id=:id AND object_id=:sn"), {'id': instance['id'], 'sn': sn})
         conn.execute(text("""UPDATE workflow_execution_attempts SET status='已完成', completed_at=CURRENT_TIMESTAMP(6), validation_result=:validation
             WHERE id=:attempt AND lease_token=:token AND status='执行中'"""), {'attempt': lease['id'], 'token': lease['lease_token'], 'validation': _json({'count': len(serials)})})
-        conn.execute(text("UPDATE workflow_instances SET status='已完成', result='成功', executor_id=:worker, completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='执行中'"), {'worker': worker_id, 'id': instance['id']})
+        conn.execute(text("UPDATE workflow_instances SET status='已完成', result='成功', executor_id=:worker, failure_reason=NULL, completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='执行中'"), {'worker': worker_id, 'id': instance['id']})
         conn.execute(text("UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND lock_status='占用中'"), {'id': instance['id']})
         conn.execute(text("""INSERT INTO workflow_audit_logs (instance_id,action,operator_id,before_state,after_state,detail)
             VALUES (:id,'执行完成',:worker,'执行中','已完成',:detail)"""), {'id': instance['id'], 'worker': worker_id, 'detail': _json({'count': len(serials), 'action': 'customer-finished-recall'})})
@@ -1631,31 +1631,93 @@ def mark_execution_failure(instance_no: str, worker_id: str, error: str):
     with get_engine().begin() as conn:
         instance = conn.execute(text("SELECT id,status FROM workflow_instances WHERE instance_no=:no FOR UPDATE"),
                                  {'no': instance_no}).mappings().first()
-        if not instance or instance['status'] != '执行中':
+        # 审批通过但执行从未启动时也会失败（抢不到租约、执行器解析报错等），
+        # 这类实例原先因为状态不是"执行中"而被静默丢弃，永久停在"已通过"并占着对象锁。
+        if not instance or instance['status'] not in ('执行中', '已通过'):
             return False
+        before_status = str(instance['status'])
         attempt = conn.execute(text("""SELECT id FROM workflow_execution_attempts
             WHERE instance_id=:id AND worker_id=:worker AND status='执行中'
             ORDER BY id DESC LIMIT 1 FOR UPDATE"""),
                                 {'id': instance['id'], 'worker': worker_id}).mappings().first()
-        if not attempt:
-            return False
-        conn.execute(text("""UPDATE workflow_execution_attempts
-            SET status='执行异常', completed_at=CURRENT_TIMESTAMP(6), validation_result=:detail
-            WHERE id=:attempt AND status='执行中'"""),
-                     {'attempt': attempt['id'], 'detail': _json({'error': message})})
-        conn.execute(text("""UPDATE workflow_instances
+        if attempt:
+            conn.execute(text("""UPDATE workflow_execution_attempts
+                SET status='执行异常', completed_at=CURRENT_TIMESTAMP(6), validation_result=:detail
+                WHERE id=:attempt AND status='执行中'"""),
+                         {'attempt': attempt['id'], 'detail': _json({'error': message})})
+        changed = conn.execute(text("""UPDATE workflow_instances
             SET status='执行异常', result='失败', failure_reason=:error
-            WHERE id=:id AND status='执行中'"""),
+            WHERE id=:id AND status IN ('执行中','已通过')"""),
                      {'id': instance['id'], 'error': message})
+        if not changed.rowcount:
+            return False
         # 业务事务已回滚，对象没有被改动，锁必须随之释放，
         # 否则该机台/订单会被永久占用，再也发不起新的逆向流程。
         conn.execute(text("""UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP
             WHERE instance_id=:id AND lock_status='占用中'"""), {'id': instance['id']})
         conn.execute(text("""INSERT INTO workflow_audit_logs
             (instance_id,action,operator_id,before_state,after_state,detail)
-            VALUES (:id,'执行异常',:worker,'执行中','执行异常',:detail)"""),
-                     {'id': instance['id'], 'worker': worker_id, 'detail': _json({'error': message})})
+            VALUES (:id,'执行异常',:worker,:before,'执行异常',:detail)"""),
+                     {'id': instance['id'], 'worker': worker_id, 'before': before_status,
+                      'detail': _json({'error': message})})
         return True
+
+
+def close_stale_reverse_instances(max_age_hours: int = 24, operator_id: str = 'system',
+                                  dry_run: bool = True, reason: str = '') -> dict:
+    """关闭"审批通过但长期未执行"的逆向实例，释放被占用的业务对象。
+
+    这类实例的成因是审批成功、执行没起来（抢不到租约、进程重启、执行器缺项），
+    它们不在终态，冲突校验会一直拒绝同一业务对象发起新的逆向流程，只能人工发现。
+    关闭动作不触碰任何业务数据，只改流程状态、释放锁、结束待办任务并留审计。
+    """
+    ensure_workflow_tables()
+    hours = max(1, int(max_age_hours or 24))
+    close_reason = (reason or f'审批通过后超过 {hours} 小时未执行，系统自动关闭并释放业务对象').strip()
+    with get_engine().begin() as conn:
+        rows = conn.execute(text("""SELECT i.id,i.instance_no,i.workflow_key,i.business_type,i.business_id,
+                i.status,i.created_at
+            FROM workflow_instances i
+            WHERE i.status IN ('已通过','执行异常','重试中','执行中')
+              AND i.created_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL :hours HOUR)
+              AND NOT EXISTS (SELECT 1 FROM workflow_execution_attempts a
+                              WHERE a.instance_id=i.id AND a.status='执行中'
+                                AND a.lease_expires_at > CURRENT_TIMESTAMP(6))
+            ORDER BY i.id"""), {'hours': hours}).mappings().all()
+        closed = []
+        for row in rows:
+            item = {
+                'instance_no': row['instance_no'],
+                'workflow_key': row['workflow_key'],
+                'business': f"{row['business_type']}:{row['business_id']}",
+                'status_before': row['status'],
+                'created_at': str(row['created_at']),
+            }
+            if dry_run:
+                closed.append(item)
+                continue
+            changed = conn.execute(text("""UPDATE workflow_instances
+                SET status='已撤回', result='关闭', completed_at=CURRENT_TIMESTAMP,
+                    failure_reason=COALESCE(NULLIF(failure_reason,''), :reason)
+                WHERE id=:id AND status IN ('已通过','执行异常','重试中','执行中')"""),
+                {'id': row['id'], 'reason': close_reason})
+            if not changed.rowcount:
+                continue
+            conn.execute(text("""UPDATE workflow_tasks SET status='已结束', decision='已关闭',
+                completed_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND status='待处理'"""),
+                {'id': row['id']})
+            conn.execute(text("""UPDATE workflow_execution_attempts
+                SET status='已作废', completed_at=CURRENT_TIMESTAMP(6)
+                WHERE instance_id=:id AND status='执行中'"""), {'id': row['id']})
+            conn.execute(text("""UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP
+                WHERE instance_id=:id AND lock_status='占用中'"""), {'id': row['id']})
+            conn.execute(text("""INSERT INTO workflow_audit_logs
+                (instance_id,action,operator_id,before_state,after_state,detail)
+                VALUES (:id,'超时关闭',:op,:before,'已撤回',:detail)"""),
+                {'id': row['id'], 'op': operator_id, 'before': row['status'],
+                 'detail': _json({'reason': close_reason, 'max_age_hours': hours})})
+            closed.append(item)
+        return {'dry_run': dry_run, 'max_age_hours': hours, 'count': len(closed), 'instances': closed}
 
 
 _SPOT_ONLY_BATCHES = {'现货(spot)', '现货', 'spot', '库存中', 'finished-stock', '库存'}
@@ -1971,6 +2033,7 @@ def _finish_reverse_execution(conn, instance, lease, worker_id, payload, force_r
     conn.execute(text("""UPDATE workflow_execution_attempts SET status='已完成', completed_at=CURRENT_TIMESTAMP(6), validation_result=:validation
         WHERE id=:attempt AND lease_token=:token AND status='执行中'"""), {'attempt': lease['id'], 'token': lease['lease_token'], 'validation': _json(payload)})
     conn.execute(text("""UPDATE workflow_instances SET status=:status, result='成功', executor_id=:worker,
+        failure_reason=NULL,
         completed_at=CASE WHEN :status='已完成' THEN CURRENT_TIMESTAMP ELSE NULL END
         WHERE id=:id AND status='执行中'"""), {'status': final_status, 'worker': worker_id, 'id': instance['id']})
     conn.execute(text("UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND lock_status='占用中'"""), {'id': instance['id']})

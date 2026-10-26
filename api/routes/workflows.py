@@ -16,7 +16,7 @@ from crud.workflows import (ensure_workflow_tables, list_instances, list_models,
                             execute_contract_cancel, transfer_reverse_approval,
                             requeue_outbox_event, reclaim_expired_execution_leases, publish_workflow_model,
                             duplicate_workflow_model, set_workflow_model_enabled, delete_workflow_draft,
-                            workflow_editor_catalog)
+                            workflow_editor_catalog, close_stale_reverse_instances)
 from crud.workflows import REVERSE_WORKFLOW_RULES
 from crud.workflows import workflow_action_for_instance, dispatch_pending_model_notifications
 
@@ -71,6 +71,12 @@ class ReverseCreateRequest(BaseModel):
 
 
 class WorkflowActionRequest(BaseModel):
+    reason: str = ''
+
+
+class CloseStaleRequest(BaseModel):
+    max_age_hours: int = Field(default=24, ge=1, le=24 * 90)
+    dry_run: bool = True
     reason: str = ''
 
 class WorkflowPublishRequest(BaseModel):
@@ -346,6 +352,21 @@ def withdraw_workflow(instance_no: str, payload: WorkflowActionRequest,
                       ctx: dict = Depends(get_current_user_context)):
     try:
         return {'data': transition_reverse_instance(instance_no, 'withdraw', ctx['username'], payload.reason)}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post('/instances/close-stale')
+def close_stale_instances(payload: CloseStaleRequest,
+                          ctx: dict = Depends(require_roles('admin', 'boss'))):
+    """关闭审批通过但长期未执行的逆向实例，释放被占用的业务对象。"""
+    try:
+        return {'data': close_stale_reverse_instances(
+            max_age_hours=payload.max_age_hours,
+            operator_id=ctx['username'],
+            dry_run=payload.dry_run,
+            reason=payload.reason,
+        )}
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
