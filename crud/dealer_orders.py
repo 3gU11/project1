@@ -83,6 +83,10 @@ def ensure_dealer_order_tables() -> None:
                   dealer_name VARCHAR(255) NOT NULL,
                   dealer_phone VARCHAR(64) DEFAULT '',
                   customer_name VARCHAR(255) NOT NULL,
+                  delivery_address VARCHAR(500) DEFAULT '',
+                  office_name VARCHAR(128) DEFAULT '',
+                  office_contact VARCHAR(128) DEFAULT '',
+                  office_phone VARCHAR(64) DEFAULT '',
                   contact_name VARCHAR(128) NOT NULL,
                   contact_phone VARCHAR(64) NOT NULL,
                   model VARCHAR(255) NOT NULL,
@@ -127,6 +131,10 @@ def ensure_dealer_order_tables() -> None:
         additions = [
             ("line_no", "ALTER TABLE dealer_orders ADD COLUMN line_no INT NOT NULL DEFAULT 1 AFTER order_no"),
             ("regional_manager_name", "ALTER TABLE dealer_orders ADD COLUMN regional_manager_name VARCHAR(128) DEFAULT '' AFTER dealer_phone"),
+            ("delivery_address", "ALTER TABLE dealer_orders ADD COLUMN delivery_address VARCHAR(500) DEFAULT '' AFTER customer_name"),
+            ("office_name", "ALTER TABLE dealer_orders ADD COLUMN office_name VARCHAR(128) DEFAULT '' AFTER delivery_address"),
+            ("office_contact", "ALTER TABLE dealer_orders ADD COLUMN office_contact VARCHAR(128) DEFAULT '' AFTER office_name"),
+            ("office_phone", "ALTER TABLE dealer_orders ADD COLUMN office_phone VARCHAR(64) DEFAULT '' AFTER office_contact"),
             ("approved_qty", "ALTER TABLE dealer_orders ADD COLUMN approved_qty INT NOT NULL DEFAULT 0 AFTER quantity"),
             ("allocated_qty", "ALTER TABLE dealer_orders ADD COLUMN allocated_qty INT NOT NULL DEFAULT 0 AFTER approved_qty"),
             ("reviewed_at", "ALTER TABLE dealer_orders ADD COLUMN reviewed_at DATETIME NULL AFTER status"),
@@ -866,6 +874,7 @@ def list_dealer_orders(
             text(
                 f"""
                 SELECT id, order_no, line_no, dealer_id, dealer_name, dealer_phone, customer_name,
+                       delivery_address, office_name, office_contact, office_phone,
                        contact_name, contact_phone, model, batch_no, eta, inventory_type,
                        quantity, approved_qty, allocated_qty, delivery_date, remark,
                        extra_remark, ERMQ, factory_pending,

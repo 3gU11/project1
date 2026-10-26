@@ -881,6 +881,10 @@ def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]
         "dealer_phone": _clean(_pick(item, "dealer_phone", "dealerPhone") or _pick(order, "dealer_phone", "dealerPhone")),
         "regional_manager_name": _clean(_pick(item, "regional_manager_name", "regionalManagerName") or _pick(order, "regional_manager_name", "regionalManagerName")),
         "customer_name": _clean(_pick(item, "customer_name", "customerName") or _pick(order, "customer_name", "customerName")),
+        "delivery_address": _clean(_pick(item, "delivery_address", "deliveryAddress") or _pick(order, "delivery_address", "deliveryAddress")),
+        "office_name": _clean(_pick(item, "office_name", "officeName", "officeBranch", "office_branch") or _pick(order, "office_name", "officeName", "officeBranch", "office_branch")),
+        "office_contact": _clean(_pick(item, "office_contact", "officeContact") or _pick(order, "office_contact", "officeContact")),
+        "office_phone": _clean(_pick(item, "office_phone", "officePhone") or _pick(order, "office_phone", "officePhone")),
         "contact_name": _clean(_pick(item, "contact_name", "contactName") or _pick(order, "contact_name", "contactName")),
         "contact_phone": _clean(_pick(item, "contact_phone", "contactPhone") or _pick(order, "contact_phone", "contactPhone")),
         "model": _clean(_pick(item, "model")),
@@ -925,6 +929,7 @@ def _batch_load_existing(
     _EXISTING_FIELDS = (
         "order_no, line_no, status, approved_qty, allocated_qty, reviewed_at, reviewed_by, "
         "contract_no, v7_order_no, review_note, extra_remark, ERMQ, factory_pending, "
+        "customer_name, delivery_address, office_name, office_contact, office_phone, "
         "source, last_synced_at, sync_status, sync_error, "
         "factory_reviewed_at, factory_reviewed_by, "
         "extra_remark_reviewed_at, extra_remark_reviewed_by"
@@ -1076,6 +1081,9 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                 elif extra_changed:
                     payload["factory_pending"] = 1
                     pending_order_nos.add(order_no)
+                for field in ("customer_name", "delivery_address", "office_name", "office_contact", "office_phone"):
+                    if existing.get(field) and not payload.get(field):
+                        payload[field] = existing.get(field)
                 for field in (
                     "reviewed_at",
                     "reviewed_by",
@@ -1102,7 +1110,9 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                         UPDATE dealer_orders
                         SET dealer_id=:dealer_id, dealer_name=:dealer_name, dealer_phone=:dealer_phone,
                             regional_manager_name=:regional_manager_name,
-                            customer_name=:customer_name, contact_name=:contact_name, contact_phone=:contact_phone,
+                            customer_name=:customer_name, delivery_address=:delivery_address,
+                            office_name=:office_name, office_contact=:office_contact, office_phone=:office_phone,
+                            contact_name=:contact_name, contact_phone=:contact_phone,
                             model=:model, batch_no=:batch_no, eta=:eta, inventory_type=:inventory_type,
                             quantity=:quantity, approved_qty=:approved_qty, allocated_qty=:allocated_qty,
                             delivery_date=:delivery_date, remark=:remark,
@@ -1140,7 +1150,8 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                         """
                         INSERT INTO dealer_orders
                         (order_no, line_no, dealer_id, dealer_name, dealer_phone, regional_manager_name,
-                         customer_name, contact_name, contact_phone, model, batch_no, eta, inventory_type,
+                         customer_name, delivery_address, office_name, office_contact, office_phone,
+                         contact_name, contact_phone, model, batch_no, eta, inventory_type,
                          quantity, approved_qty, allocated_qty, delivery_date, remark,
                          extra_remark, ERMQ, factory_pending,
                          source, last_synced_at, sync_status, sync_error,
@@ -1151,7 +1162,8 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                          reviewed_at, reviewed_by, contract_no, v7_order_no, review_note, created_at, updated_at)
                         VALUES
                         (:order_no, :line_no, :dealer_id, :dealer_name, :dealer_phone, :regional_manager_name,
-                         :customer_name, :contact_name, :contact_phone, :model, :batch_no, :eta, :inventory_type,
+                         :customer_name, :delivery_address, :office_name, :office_contact, :office_phone,
+                         :contact_name, :contact_phone, :model, :batch_no, :eta, :inventory_type,
                          :quantity, :approved_qty, :allocated_qty, :delivery_date, :remark,
                          :extra_remark, :ERMQ, :factory_pending,
                          :source, :last_synced_at, :sync_status, :sync_error,
