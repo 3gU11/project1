@@ -19,7 +19,7 @@ SELECT CONCAT('derived:',id,':',status), CONCAT('待', task_type),
  CASE WHEN task_type='重入库' THEN CONCAT('请将机台 ', object_id, ' 重新入库')
       ELSE CONCAT('请处理', task_type, '：', object_id) END,
  COALESCE(completed_at,created_at), '/inbound'
- FROM workflow_derived_tasks WHERE assignee_id=:username
+ FROM workflow_derived_tasks WHERE assignee_id=:username AND status='待处理'
 UNION ALL
 SELECT CONCAT('notice:',id),title,content,created_at,''
  FROM workflow_notifications WHERE recipient_id=:username
