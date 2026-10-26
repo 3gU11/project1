@@ -75,10 +75,16 @@ const reload = async () => {
   await onLoad()
 }
 
+/** 通知底部导航刷新未读徽标（Layout 监听该事件）。 */
+const notifyInboxChanged = () => {
+  window.dispatchEvent(new Event('workflow-inbox-updated'))
+}
+
 const readAll = async () => {
   try {
     await workflowApi.readAllPersonalMessages()
     showToast('已全部标记为已读')
+    notifyInboxChanged()
     await reload()
   } catch { /* 拦截器已提示 */ }
 }
@@ -89,6 +95,7 @@ const open = async (item: PersonalMessage) => {
       await workflowApi.readPersonalMessage(item.message_key)
       item.unread = false
       unreadCount.value = Math.max(0, unreadCount.value - 1)
+      notifyInboxChanged()
     } catch { /* 保持未读状态 */ }
   }
   // 重入库任务的来源页在 PC 是 /inbound，移动端对应「成品入库 → 重新入库」分区。

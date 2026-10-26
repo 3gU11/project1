@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { startInventorySync, stopInventorySync } from '@/utils/inventorySync'
@@ -41,6 +41,19 @@ const refreshUnread = async () => {
     unreadCount.value = Number(res.unread_count || 0)
   } catch { /* ignore */ }
 }
+
+// 消息页读完一条/全部已读后立即刷新徽标，不必等 60 秒轮询。
+// 移动端浏览器切后台会挂起 setInterval，所以还要在回到前台时补一次。
+const onInboxUpdated = () => { void refreshUnread() }
+const onVisibilityChange = () => {
+  if (document.visibilityState === 'visible') void refreshUnread()
+}
+
+// 进出消息页时都刷新一次：进入时对齐服务端（可能在别的设备读过），
+// 离开时兜底，即使消息页的请求被中断，徽标也能跟上。
+watch(() => route.path, (path, previous) => {
+  if (path === '/messages' || previous === '/messages') void refreshUnread()
+})
 
 type TabItem = { title: string; to: string; icon: string; badge?: string }
 
@@ -88,10 +101,14 @@ onMounted(async () => {
   startInventorySync(userStore.token)
   await refreshUnread()
   unreadTimer = setInterval(refreshUnread, 60000)
+  window.addEventListener('workflow-inbox-updated', onInboxUpdated)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 onBeforeUnmount(() => {
   stopInventorySync()
   if (unreadTimer) { clearInterval(unreadTimer); unreadTimer = undefined }
+  window.removeEventListener('workflow-inbox-updated', onInboxUpdated)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 
