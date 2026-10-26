@@ -51,6 +51,61 @@ class LocalContractDraftTests(unittest.TestCase):
         # 模板里空着的明细行不写死含税，保持空白由审批人处理
         self.assertEqual('', fields['item2_tax'])
 
+    def test_buyer_falls_back_to_local_order_regional_manager_when_snapshot_misses_it(self):
+        """云端快照缺大区经理时，用本地已同步订单行的 regional_manager_name 兜底。"""
+        with self.engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS dealer_orders("
+                "order_no TEXT, line_no INTEGER, regional_manager_name TEXT)"
+            ))
+            conn.execute(
+                text("INSERT INTO dealer_orders VALUES(:order_no, 1, :manager)"),
+                {"order_no": "ORD-RM5", "manager": "朱孝一"},
+            )
+
+        row = drafts.create_from_order({
+            'orderNo': 'ORD-RM5', 'dealerName': '经销商公司甲',
+            'customerName': '客户甲', 'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        self.assertEqual('朱孝一', row['fields']['dealer_name'])
+
+    def test_order_form_buyer_is_the_regional_manager_not_the_dealer_company(self):
+        """自动生成的订货单附件上「需方」取大区经理名字；没有大区经理时才退回经销商名。"""
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-RM1', 'dealerName': '经销商公司甲', 'regionalManagerName': '朱孝一',
+            'customerName': '客户甲', 'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        self.assertEqual('朱孝一', fields['dealer_name'])
+
+        fallback = drafts.map_order_to_contract({
+            'orderNo': 'ORD-RM2', 'dealerName': '经销商公司甲',
+            'customerName': '客户甲', 'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        self.assertEqual('经销商公司甲', fallback['dealer_name'])
+
+    def test_existing_pending_draft_uses_regional_manager_as_buyer(self):
+        """改动前生成的待审草稿，读取时把「需方」从经销商名刷新成大区经理名。"""
+        row = drafts.create_from_order({
+            'orderNo': 'ORD-RM3', 'dealerName': '经销商公司甲', 'regionalManagerName': '朱孝一',
+            'customerName': '客户甲', 'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        stored = dict(row['fields'], dealer_name='经销商公司甲')
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
+                         {'f': json.dumps(stored, ensure_ascii=False), 'id': row['id']})
+
+        healed = drafts.get(row['id'])
+        self.assertEqual('朱孝一', healed['fields']['dealer_name'])
+
+    def test_manual_buyer_edit_is_not_overwritten_by_regional_manager_rule(self):
+        row = drafts.create_from_order({
+            'orderNo': 'ORD-RM4', 'dealerName': '经销商公司甲', 'regionalManagerName': '朱孝一',
+            'customerName': '客户甲', 'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        drafts.update(row['id'], dict(row['fields'], dealer_name='审批人手工填的需方'))
+        healed = drafts.get(row['id'])
+        self.assertEqual('审批人手工填的需方', healed['fields']['dealer_name'])
+
     def test_tax_defaults_to_tax_included_unless_cloud_says_otherwise(self):
         """税票默认含税：云端没采集也要出「含税」，明确传了才覆盖。"""
         fields = drafts.map_order_to_contract({

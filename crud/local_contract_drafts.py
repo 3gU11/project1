@@ -247,6 +247,10 @@ def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
     for name in HEAD_FIELDS:
         fields[name] = _lookup(order, FIELD_ALIASES[name])
     fields["supplier_name"] = fields["supplier_name"] or DEFAULT_SUPPLIER
+    # 自动生成的订货单附件（合同附件）中「需方」必须是大区经理，而不是经销商公司名。
+    regional_manager = _lookup(order, ("regionalManagerName", "regional_manager_name", "regionalManager", "regional_manager"))
+    if regional_manager:
+        fields["dealer_name"] = regional_manager
     fields["signed_date"] = _format_signed_date(fields["signed_date"])
     item_rows = min(max(len(items), BASE_ITEM_ROWS), MAX_ITEM_ROWS)
     for index in range(1, item_rows + 1):
@@ -290,6 +294,32 @@ def ensure_table() -> None:
         if 'reviewed_at' not in columns:
             conn.execute(text("ALTER TABLE v8_contract_drafts ADD COLUMN reviewed_at DATETIME NULL"))
 
+def _enrich_regional_manager(order_no: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """云端快照没有大区经理时，用本地订单行补上，保证订货单附件「需方」不为空。"""
+    enriched = dict(snapshot) if isinstance(snapshot, dict) else {}
+    if _lookup(enriched, ("regionalManagerName", "regional_manager_name")):
+        return enriched
+    order_no = str(order_no or "").strip()
+    if not order_no:
+        return enriched
+    try:
+        with get_engine().connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT regional_manager_name FROM dealer_orders "
+                    "WHERE order_no=:order_no AND COALESCE(TRIM(regional_manager_name),'')<>'' "
+                    "ORDER BY line_no LIMIT 1"
+                ),
+                {"order_no": order_no},
+            ).first()
+    except Exception:
+        return enriched
+    manager = str(row[0] or "").strip() if row else ""
+    if manager:
+        enriched["regionalManagerName"] = manager
+    return enriched
+
+
 def create_from_order(order: dict[str, Any]) -> dict[str, Any] | None:
     ensure_table()
     order_no = _value(order, "orderNo", "order_no", "id")
@@ -297,7 +327,7 @@ def create_from_order(order: dict[str, Any]) -> dict[str, Any] | None:
         return None
     snapshot = json.dumps(order, ensure_ascii=False, sort_keys=True, default=str)
     source_hash = hashlib.sha256(snapshot.encode()).hexdigest()
-    fields = map_order_to_contract(order)
+    fields = map_order_to_contract(_enrich_regional_manager(order_no, order))
     now = datetime.now()
     draft_id = __import__('uuid').uuid4()
     with get_engine().begin() as conn:
@@ -355,6 +385,11 @@ def _normalize_stored_fields(fields: dict[str, Any],
             fields[f"item{index}_tax"] = DEFAULT_TAX
     if isinstance(snapshot, dict) and snapshot:
         regional_manager = _lookup(snapshot, ("regionalManagerName", "regional_manager_name"))
+        # 旧草稿的「需方」存的是经销商名，升级成当前规则的大区经理；审批人手工改过的保留。
+        stored_dealer = _lookup(snapshot, ("dealerName", "dealer_name"))
+        current_dealer = str(fields.get("dealer_name") or "").strip()
+        if regional_manager and (not current_dealer or current_dealer == stored_dealer):
+            fields["dealer_name"] = regional_manager
         if (regional_manager and not _lookup(snapshot, FIELD_ALIASES["office_contact"])
                 and str(fields.get("office_contact") or "").strip() == regional_manager):
             fields["office_contact"] = ""
@@ -382,6 +417,7 @@ def get(draft_id: str) -> dict[str, Any] | None:
     for key in ("fields_json", "source_snapshot"):
         result[key[:-5] if key == "fields_json" else "source_order_snapshot"] = json.loads(result.pop(key) or "{}")
     snapshot = result.get("source_order_snapshot") or {}
+    snapshot = _enrich_regional_manager(result.get("source_order_no") or "", snapshot)
     stored_fields = result["fields"]
     if result.get("state") == 'approved':
         # 已归档合同是历史结果：字段按归档时的口径展示，不按新规则重排，避免字段与附件内容对不上
