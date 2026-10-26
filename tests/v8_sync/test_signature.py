@@ -1,7 +1,7 @@
 import hashlib
 import unittest
 
-from repair_sync.signer import canonical_string, sign_request
+from v8_sync.signer import canonical_string, sign_request
 
 
 class SignatureTests(unittest.TestCase):

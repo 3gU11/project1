@@ -127,6 +127,24 @@ def insert_cloud_sync_event(conn: Any, event_id: str, event_type: str, biz_key: 
     )
 
 
+def supersede_pending_cloud_sync_events(event_type: str, biz_key: str) -> int:
+    ensure_cloud_sync_outbox_table()
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            text(
+                """
+                UPDATE cloud_sync_outbox
+                SET status='superseded', last_error='replaced by a newer snapshot',
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE event_type=:event_type AND biz_key=:biz_key
+                  AND status IN ('pending', 'failed')
+                """
+            ),
+            {"event_type": event_type, "biz_key": biz_key},
+        )
+    return int(result.rowcount or 0)
+
+
 def supersede_pending_order_sync_events(
     conn: Any,
     order_no: str,
@@ -367,9 +385,9 @@ def _dispatch_event(event: dict[str, Any]) -> None:
     event_type = str(event.get("event_type") or "")
 
     if event_type == "repair_snapshot_sync":
-        from repair_sync.client import NonRetryableSyncError, upload_snapshot
-        from repair_sync.config import get_config
-        from repair_sync.snapshot_store import (
+        from v8_sync.client import NonRetryableSyncError, upload_snapshot
+        from v8_sync.config import get_config
+        from v8_sync.snapshot_store import (
             get_snapshot,
             mark_snapshot_error,
             mark_snapshot_rejected,
@@ -402,7 +420,7 @@ def _dispatch_event(event: dict[str, Any]) -> None:
         return
 
     if event_type == "repair_delta_event_sync":
-        from repair_sync.client import NonRetryableSyncError
+        from v8_sync.client import NonRetryableSyncError
 
         raise NonRetryableSyncError("repair delta event upload is reserved for the realtime sync phase")
     order_no = str(payload.get("order_no") or event.get("biz_key") or "").strip()

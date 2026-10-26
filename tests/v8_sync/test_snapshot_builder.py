@@ -1,13 +1,18 @@
 import unittest
 from datetime import date
 
-from repair_sync.snapshot_builder import SnapshotValidationError, build_snapshot_from_rows
+from v8_sync.snapshot_builder import SnapshotValidationError, build_snapshot_from_rows
 
 
 class SnapshotBuilderTests(unittest.TestCase):
     def setUp(self):
         self.rows = {
-            "machines": [{"machine_no": "M-1", "model_name": "MODEL-1", "customer": "secret"}],
+            "machines": [{
+                "machine_no": "M-1",
+                "model_name": "MODEL-1",
+                "customer": "杭州恒峰包装有限公司",
+                "delivery_date": date(2026, 7, 13),
+            }],
             "materials": [{"material_code": "MAT-1", "material_name": "Part", "material_type": "component"}],
             "materialInstances": [{"component_serial_no": "SN-1", "material_code": "MAT-1"}],
             "machineMaterialBindings": [{
@@ -19,13 +24,24 @@ class SnapshotBuilderTests(unittest.TestCase):
             "modelPhotoConfig": [{"model_name": "MODEL-1", "position_code": "P-1", "required": 1}],
         }
 
-    def test_build_is_deterministic_and_excludes_sensitive_fields(self):
+    def test_build_is_deterministic_and_keeps_aftercare_identity_fields(self):
         first = build_snapshot_from_rows(date(2026, 7, 16), self.rows, snapshot_id="snapshot-1")
         second = build_snapshot_from_rows(date(2026, 7, 16), self.rows, snapshot_id="snapshot-1")
         self.assertEqual(first["recordsSha256"], second["recordsSha256"])
-        self.assertEqual(first["tables"]["machines"][0]["customer"], "")
-        self.assertNotIn("secret", str(first))
+        self.assertEqual(first["tables"]["machines"][0]["customer"], "杭州恒峰包装有限公司")
+        self.assertEqual(first["tables"]["machines"][0]["shipping_date"], "2026-07-13")
         self.assertEqual(first["counts"]["bindings"], 1)
+
+    def test_missing_shipping_date_is_not_inferred_from_outbound_timestamp(self):
+        rows = dict(self.rows)
+        rows["machines"] = [{
+            "machine_no": "M-1",
+            "model_name": "MODEL-1",
+            "customer": "杭州恒峰包装有限公司",
+            "outbound_at": "2026-07-14T09:30:00",
+        }]
+        snapshot = build_snapshot_from_rows(date(2026, 7, 16), rows)
+        self.assertIsNone(snapshot["tables"]["machines"][0]["shipping_date"])
 
     def test_active_unapproved_binding_rejects_whole_snapshot(self):
         self.rows["machineMaterialBindings"][0]["check_status"] = "pending"

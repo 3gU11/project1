@@ -50,7 +50,12 @@ def _payload_json(payload: dict[str, Any]) -> str:
     return json.dumps(_public_payload(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def save_snapshot(payload: dict[str, Any], *, status: str = "created") -> dict[str, Any]:
+def save_snapshot(
+    payload: dict[str, Any],
+    *,
+    status: str = "created",
+    replace_existing: bool = False,
+) -> dict[str, Any]:
     ensure_snapshot_table()
     tables = payload.get("tables") or {}
     counts = payload.get("counts") or {}
@@ -61,15 +66,57 @@ def save_snapshot(payload: dict[str, Any], *, status: str = "created") -> dict[s
     with get_engine().begin() as conn:
         existing = conn.execute(
             text(
-                "SELECT snapshot_id, payload_sha256, status FROM repair_sync_snapshots "
+                "SELECT snapshot_id, payload_sha256, status, payload_json FROM repair_sync_snapshots "
                 "WHERE business_date=:business_date AND dataset_type='repair_snapshot'"
             ),
             {"business_date": business_date},
         ).mappings().first()
         if existing:
-            if existing["payload_sha256"] != digest:
+            existing_payload = json.loads(existing["payload_json"])
+            if (
+                existing["payload_sha256"] == digest
+                or existing_payload.get("recordsSha256") == payload.get("recordsSha256")
+            ):
+                return {
+                    "snapshot_id": existing["snapshot_id"],
+                    "business_date": business_date,
+                    "status": existing["status"],
+                    "payload_sha256": existing["payload_sha256"],
+                    "unchanged": True,
+                }
+            if not replace_existing:
                 raise ValueError(f"snapshot already exists for {business_date} with different content")
-            return dict(existing)
+            conn.execute(
+                text(
+                    """
+                    UPDATE repair_sync_snapshots
+                    SET snapshot_id=:snapshot_id, schema_version=:schema_version,
+                        payload_json=:payload_json, payload_sha256=:payload_sha256,
+                        record_count=:record_count, machine_count=:machine_count,
+                        source_watermark_json=:watermark_json, status=:status,
+                        last_error=NULL, uploaded_at=NULL, created_at=CURRENT_TIMESTAMP
+                    WHERE business_date=:business_date AND dataset_type='repair_snapshot'
+                    """
+                ),
+                {
+                    "snapshot_id": snapshot_id,
+                    "schema_version": str(payload.get("schemaVersion") or ""),
+                    "payload_json": payload_json,
+                    "payload_sha256": digest,
+                    "record_count": sum(len(value) for value in tables.values() if isinstance(value, list)),
+                    "machine_count": int(counts.get("machines") or 0),
+                    "watermark_json": json.dumps(payload.get("sourceWatermark") or {}, ensure_ascii=False),
+                    "status": status,
+                    "business_date": business_date,
+                },
+            )
+            return {
+                "snapshot_id": snapshot_id,
+                "business_date": business_date,
+                "status": status,
+                "payload_sha256": digest,
+                "replaced": True,
+            }
         conn.execute(
             text(
                 """
@@ -98,6 +145,7 @@ def save_snapshot(payload: dict[str, Any], *, status: str = "created") -> dict[s
         "business_date": business_date,
         "status": status,
         "payload_sha256": digest,
+        "created": True,
     }
 
 

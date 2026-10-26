@@ -10,9 +10,10 @@ $pendingBat = Join-Path $project 'tools\repair_sync_send_pending.bat'
 
 $dailyAction = New-ScheduledTaskAction -Execute $dailyBat -WorkingDirectory $project
 $pendingAction = New-ScheduledTaskAction -Execute $pendingBat -WorkingDirectory $project
-$dailyTrigger = New-ScheduledTaskTrigger -Daily -At ([datetime]::ParseExact($DailyTime, 'HH:mm', $null))
+$dailyTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 3) -RepetitionDuration (New-TimeSpan -Days 3650)
 $pendingTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
-    -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+    -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
 
 Register-ScheduledTask -TaskName "$TaskPrefix-Daily" -Action $dailyAction -Trigger $dailyTrigger `
     -Description 'V8 repair snapshot generation and upload outbox enqueue' -Force | Out-Null

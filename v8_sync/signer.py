@@ -55,7 +55,7 @@ def sign_request(
     nonce: str | None = None,
 ) -> SignedRequest:
     if not secret:
-        raise ValueError("REPAIR_SYNC_HMAC_SECRET is not configured")
+        raise ValueError("V8_SYNC_HMAC_SECRET is not configured")
     timestamp_text = str(int(time.time() if timestamp is None else timestamp))
     nonce_text = nonce or secrets.token_hex(16)
     digest = content_sha256(body)

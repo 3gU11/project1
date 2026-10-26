@@ -13,7 +13,7 @@ from sqlalchemy import text
 from config import MYSQL_DB
 from database import get_engine
 
-from .config import RepairSyncConfig, get_config
+from .config import V8SyncConfig, get_config
 
 SCHEMA_VERSION = "repair-v8-snapshot-1"
 QUERY_VERSION = "repair-base-v1"
@@ -67,9 +67,18 @@ def _map_machines(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
             {
                 "machine_no": machine_no,
                 "model": _clean(_row_value(row, "model", "model_name", "机型")),
-                "customer": "",
+                "customer": _clean(_row_value(row, "customer", "customer_name", "客户", "客户名称")),
                 "agent": "",
-                "factory_date": _optional(_row_value(row, "factory_date")),
+                "shipping_date": _optional(
+                    _row_value(
+                        row,
+                        "delivery_date",
+                        "shipping_date",
+                        "shipping_confirm_operation_date",
+                        "发货日期",
+                        "发货符合操作日期",
+                    )
+                ),
                 "warranty_start": _optional(_row_value(row, "warranty_start", "delivery_date")),
                 "status": _clean(_row_value(row, "status", "machine_status", "状态")),
             }
@@ -375,7 +384,7 @@ def _fetch_if_exists(conn: Any, table_name: str) -> tuple[list[dict[str, Any]], 
     return rows, watermark
 
 
-def read_source_rows(config: RepairSyncConfig | None = None) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+def read_source_rows(config: V8SyncConfig | None = None) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
     config = config or get_config()
     rows: dict[str, list[dict[str, Any]]] = {}
     watermark: dict[str, Any] = {}
@@ -409,7 +418,25 @@ def read_source_rows(config: RepairSyncConfig | None = None) -> tuple[dict[str, 
                 rows[output_name] = table_rows
                 if stamp is not None:
                     watermark[table_name] = stamp.isoformat() if hasattr(stamp, "isoformat") else str(stamp)
-            machine_rows, stamp = _fetch_if_exists(conn, "finished_goods_data")
+            if _table_exists(conn, "finished_goods_data") and _table_exists(conn, "shipping_history"):
+                machine_rows = [
+                    dict(row)
+                    for row in conn.execute(
+                        text("""
+                            SELECT fg.*, DATE(sh.shipping_at) AS delivery_date
+                            FROM finished_goods_data fg
+                            LEFT JOIN (
+                                SELECT TRIM(`流水号`) AS serial_no, MAX(`更新时间`) AS shipping_at
+                                FROM shipping_history
+                                WHERE TRIM(COALESCE(`状态`, '')) LIKE '已出库%'
+                                GROUP BY TRIM(`流水号`)
+                            ) sh ON sh.serial_no = TRIM(fg.`流水号`)
+                        """)
+                    ).mappings().all()
+                ]
+                stamp = conn.execute(text("SELECT MAX(`更新时间`) FROM finished_goods_data")).scalar()
+            else:
+                machine_rows, stamp = _fetch_if_exists(conn, "finished_goods_data")
             binding_rows = rows.get("machineMaterialBindings") or []
             # The Go photo service stores the current machine profile on every
             # binding row. Use it for overlapping machines, while retaining
@@ -444,7 +471,7 @@ def build_snapshot(
     business_date: date,
     *,
     snapshot_id: str | None = None,
-    config: RepairSyncConfig | None = None,
+    config: V8SyncConfig | None = None,
 ) -> dict[str, Any]:
     rows, watermark = read_source_rows(config)
     active_config = config or get_config()
