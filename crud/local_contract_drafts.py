@@ -16,6 +16,9 @@ DEFAULT_TAX = "含税"      # 税票默认含税：云端没单独采集时也�
 ITEM_FIELDS = ("product", "spec", "qty", "tax")
 BASE_ITEM_ROWS = 4      # 模板自带 4 行明细，少了留空、多了渲染时自动加行
 MAX_ITEM_ROWS = 30      # 防止异常数据把表格撑爆
+# 合同附件落盘文件名非法字符（Windows/Linux 共用），以及客户名前缀长度上限
+UNSAFE_FILE_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+MAX_FILE_NAME_PREFIX = 80
 
 # 订货单栏位 → 云端订单里可能出现的键名，按纸质表单从上到下、分区块排列。
 # 小程序/云端表单是中文的，接口也可能直接传驼峰或下划线字段，所以三种写法一并认；
@@ -545,11 +548,29 @@ def list_latest_states(order_nos: list[str]) -> dict[str, dict[str, Any]]:
     return latest
 
 
-def latest_document(order_no: str) -> tuple[bytes, str] | None:
+def order_form_file_name(order_no: str, customer_name: str = "") -> str:
+    """订货单作为合同附件时的文件名：前缀优先用云端回传的客户名称。
+
+    客户名称为空时退回订单号，保证历史订单和空客户名也能正常归档；
+    客户名称里可能带路径分隔符等文件名非法字符，统一剔除后再落盘。
+    """
+    prefix = str(customer_name or "").strip()
+    if not prefix:
+        prefix = str(order_no or "").strip()
+    prefix = UNSAFE_FILE_NAME_CHARS.sub("", prefix).strip(" .")
+    if not prefix:
+        prefix = str(order_no or "").strip()
+    if not prefix:
+        return "订货单.docx"
+    return f"{prefix[:MAX_FILE_NAME_PREFIX].rstrip(' .')}-订货单.docx"
+
+
+def latest_document(order_no: str, customer_name: str = "") -> tuple[bytes, str] | None:
     """返回经销商订单最新一版可归档的订货单（docx 字节, 建议文件名）。
 
     转合同时用它把"系统生成的订货单"一起挂到合同附件里，避免合同只剩人工上传的文件。
     优先复用已生成并可能已审批的预览；没有预览时按当前字段重新渲染（旧草稿字段已在 get() 里升级）。
+    建议文件名前缀用云端回传的客户名称（customer_name），没有时退回订单号。
     找不到任何草稿时返回 None，由调用方决定是否跳过。
     """
     cleaned_order_no = str(order_no or '').strip()
@@ -578,4 +599,4 @@ def latest_document(order_no: str) -> tuple[bytes, str] | None:
         if not draft:
             return None
         content, _ = render_order_form(draft['fields'])
-    return content, f"{cleaned_order_no}-订货单.docx"
+    return content, order_form_file_name(cleaned_order_no, customer_name)

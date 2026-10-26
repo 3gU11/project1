@@ -450,7 +450,7 @@ def _attach_order_form_to_contracts(
     from crud.local_contract_drafts import latest_document
 
     try:
-        document = latest_document(order_no)
+        document = latest_document(order_no, customer)
     except Exception:
         logging.getLogger(__name__).exception("dealer order %s order form document unavailable", order_no)
         return []

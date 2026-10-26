@@ -621,18 +621,36 @@ class LocalContractDraftTests(unittest.TestCase):
         }
         created = drafts.create_from_order(base)
 
-        content, file_name = drafts.latest_document('ORD-DOC1')
+        # 附件名前缀用云端回传的客户名称，不再用订单号
+        content, file_name = drafts.latest_document('ORD-DOC1', '客户甲')
         self.assertTrue(content.startswith(b'PK'))
-        self.assertEqual('ORD-DOC1-订货单.docx', file_name)
+        self.assertEqual('客户甲-订货单.docx', file_name)
+
+        # 没有客户名称时退回订单号，保证历史订单仍可归档
+        _, fallback_name = drafts.latest_document('ORD-DOC1')
+        self.assertEqual('ORD-DOC1-订货单.docx', fallback_name)
+        _, blank_name = drafts.latest_document('ORD-DOC1', '   ')
+        self.assertEqual('ORD-DOC1-订货单.docx', blank_name)
+
+        # 客户名称里的文件夹/通配符等非法字符要剔除，不能带进落盘路径
+        _, cleaned_name = drafts.latest_document('ORD-DOC1', ' 甲/乙*丙:丁 ')
+        self.assertEqual('甲乙丙丁-订货单.docx', cleaned_name)
 
         # 生成过预览后优先复用预览内容，不再重复渲染
         prepared = drafts.prepare(created['id'])
-        preview_content, _ = drafts.latest_document('ORD-DOC1')
+        preview_content, _ = drafts.latest_document('ORD-DOC1', '客户甲')
         self.assertTrue(preview_content.startswith(b'PK'))
         self.assertEqual(64, len(prepared['preview_hash']))
 
         self.assertIsNone(drafts.latest_document('ORD-NONE'))
         self.assertIsNone(drafts.latest_document(''))
+
+    def test_order_form_file_name_uses_customer_name_prefix(self):
+        """订货单附件文件名：客户名称优先，非法字符剔除，空值退回订单号。"""
+        self.assertEqual('广东-订货单.docx', drafts.order_form_file_name('DO-9', '广东'))
+        self.assertEqual('ORD-DOC2-订货单.docx', drafts.order_form_file_name('ORD-DOC2', ''))
+        self.assertEqual('AB-订货单.docx', drafts.order_form_file_name('ORD-DOC2', 'A?B'))
+        self.assertEqual('订货单.docx', drafts.order_form_file_name('', ''))
 
 
 if __name__ == '__main__':
