@@ -1,6 +1,7 @@
 from pathlib import Path
 import asyncio
 import logging
+import os
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,6 +52,10 @@ async def on_startup():
         app.state.watch_finished_goods_task = asyncio.create_task(watch_finished_goods_db())
     except Exception as e:
         logger.warning("finished goods db watch worker not started: %s", e)
+    try:
+        app.state.snapshot_heartbeat_task = asyncio.create_task(cloud_snapshot_heartbeat_loop())
+    except Exception as e:
+        logger.warning("snapshot heartbeat worker not started: %s", e)
 
 
 
@@ -95,6 +100,29 @@ async def on_shutdown():
             await watch_fg_task
         except asyncio.CancelledError:
             pass
+
+    heartbeat_task = getattr(app.state, "snapshot_heartbeat_task", None)
+    if heartbeat_task:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def cloud_snapshot_heartbeat_loop() -> None:
+    """按固定周期推送库存快照：即使库存无变化也刷新云端回执，满足 5 分钟同步监控。"""
+    interval = max(60, int(os.getenv("CLOUD_SNAPSHOT_INTERVAL_SECONDS", "300") or "300"))
+    while True:
+        try:
+            from crud.cloud_dealer_order_sync import sync_wechat_batch_summary_to_cloud
+            result = await asyncio.to_thread(sync_wechat_batch_summary_to_cloud)
+            logger.info("cloud snapshot heartbeat pushed: rows=%s", (result or {}).get("pushed_rows"))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("cloud snapshot heartbeat failed: %s", exc)
+        await asyncio.sleep(interval)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

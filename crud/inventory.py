@@ -408,30 +408,39 @@ def save_data_v2(df):
 
 
 def archive_shipped_data(df_shipped):
-    try:
-        current_month = datetime.now().strftime("%Y_%m")
-        df_shipped = df_shipped.copy()
-        df_shipped['archive_month'] = current_month
-        for dt_col in ["预计入库时间", "更新时间"]:
-            if dt_col in df_shipped.columns:
-                df_shipped[dt_col] = pd.to_datetime(df_shipped[dt_col], errors="coerce")
-        engine = get_engine()
-        with engine.begin() as conn:
-            if not _has_column(conn, "shipping_history", "合同备注"):
-                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
-            if not _has_column(conn, "shipping_history", "合同号"):
-                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
-            target_cols = [
-                row[0] for row in conn.execute(text(
-                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-                    "WHERE TABLE_SCHEMA = DATABASE() "
-                    "AND TABLE_NAME = 'shipping_history'"
-                )).fetchall()
-            ]
-        df_shipped = df_shipped[[col for col in target_cols if col in df_shipped.columns]]
-        df_shipped.fillna("").to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
-    except (OperationalError, Exception) as e:
-        print(f"archive_shipped_data error: {e}")
+    """归档发货复核记录到 shipping_history。
+
+    注意：DATETIME 列必须保持 NaT/None（to_sql 会写 NULL），不能填空字符串，
+    否则 MySQL 严格模式会整批拒绝。归档失败时向上抛出，由调用方决定是否阻断业务。
+    """
+    current_month = datetime.now().strftime("%Y_%m")
+    df_shipped = df_shipped.copy()
+    df_shipped['archive_month'] = current_month
+    date_cols = ["预计入库时间", "更新时间"]
+    for dt_col in date_cols:
+        if dt_col in df_shipped.columns:
+            df_shipped[dt_col] = pd.to_datetime(df_shipped[dt_col], errors="coerce")
+    engine = get_engine()
+    with engine.begin() as conn:
+        if not _has_column(conn, "shipping_history", "合同备注"):
+            conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
+        if not _has_column(conn, "shipping_history", "合同号"):
+            conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
+        target_cols = [
+            row[0] for row in conn.execute(text(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'shipping_history'"
+            )).fetchall()
+        ]
+    df_shipped = df_shipped[[col for col in target_cols if col in df_shipped.columns]]
+    # 只对非日期列填空字符串；日期列留 NaT，交给 to_sql 写成 NULL
+    present_date_cols = [c for c in date_cols if c in df_shipped.columns]
+    text_cols = [c for c in df_shipped.columns if c not in present_date_cols]
+    if text_cols:
+        df_shipped[text_cols] = df_shipped[text_cols].fillna("")
+    df_shipped.to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
+    logger.info("archive_shipped_data 归档 %s 行", len(df_shipped))
 
 
 def get_import_staging():
