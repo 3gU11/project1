@@ -168,6 +168,11 @@ def _sum_quantity(left: str, right: str) -> str:
     return _clean_text(format(total.normalize(), "f"))
 
 
+def _product_label(index: int, product: str) -> str:
+    """产品名称按纸质合同写成「1: 线切割机床」，行号固定带在名称前。"""
+    return f"{index}: {str(product or '').strip() or DEFAULT_PRODUCT}"
+
+
 def _price_note(item: dict[str, Any], spec: str) -> str:
     """明细「单价」列：该行有机型时默认「含税」，云端明确传了说明才覆盖。
 
@@ -219,11 +224,15 @@ _ITEM_KEY = re.compile(r'item\d+_[A-Za-z]+')
 
 
 def _stored_item_rows(fields: dict[str, Any]) -> list[tuple[str, ...]]:
-    """按明细行号取出非空行（product/spec/qty/price 四元组）。"""
+    """按明细行号取出有内容的行（product/spec/qty/price 四元组）。
+
+    产品名称和单价现在对所有行都有默认值（「1: 线切割机床」「含税」），不能拿它们判断
+    明细行是否有内容，否则空行也会被当成有效行。真正表示一台设备的是规格型号或数量。
+    """
     rows: list[tuple[str, ...]] = []
     for index in range(1, MAX_ITEM_ROWS + 1):
         values = tuple(str(fields.get(f"item{index}_{suffix}") or "").strip() for suffix in ITEM_FIELDS)
-        if any(values):
+        if values[ITEM_FIELDS.index("spec")] or values[ITEM_FIELDS.index("qty")]:
             rows.append(values)
     return rows
 
@@ -289,10 +298,13 @@ def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
     item_rows = min(max(len(items), BASE_ITEM_ROWS), MAX_ITEM_ROWS)
     for index in range(1, item_rows + 1):
         fields.update({f"item{index}_{suffix}": "" for suffix in ITEM_FIELDS})
+        # 纸质合同的产品名称是预印好的「1: 线切割机床」…「4: 线切割机床」，
+        # 生成时所有明细行都按行号默认填满，空行也保留，和纸质版一致。
+        fields[f"item{index}_product"] = _product_label(index, DEFAULT_PRODUCT)
     for index, item in enumerate(items[:MAX_ITEM_ROWS], 1):
         fields.update({
-            # 产品名称优先用订单传的；没传但这一行有机型时补默认名，没机型就留空
-            f"item{index}_product": item["product"] or (DEFAULT_PRODUCT if item["spec"] else ""),
+            # 订单传了产品名称就按「行号: 名称」带上，否则用默认「线切割机床」
+            f"item{index}_product": _product_label(index, item["product"] or DEFAULT_PRODUCT),
             f"item{index}_spec": item["spec"],
             f"item{index}_qty": item["qty"],
             # 单价列：有机型就默认「含税」，云端传了别的说明才覆盖
@@ -418,9 +430,10 @@ def _backfill_current_fields(fields: dict[str, Any], derived: dict[str, str]) ->
         spec = str(fields.get(f"item{index}_spec") or "").strip()
         product_key = f"item{index}_product"
         price_key = f"item{index}_price"
-        # 旧草稿的默认产品名刷新成「线切割机床」
-        if spec and str(fields.get(product_key) or "").strip() in LEGACY_PRODUCT_NAMES:
-            fields[product_key] = derived.get(product_key) or DEFAULT_PRODUCT
+        product = str(fields.get(product_key) or "").strip()
+        # 旧草稿的默认产品名（无行号）或空行，刷新成「行号: 线切割机床」
+        if derived.get(product_key) and product in LEGACY_PRODUCT_NAMES | {DEFAULT_PRODUCT, ""}:
+            fields[product_key] = derived[product_key]
         # 新加的单价列：有机型、单价还空着时补默认「含税」
         if spec and not str(fields.get(price_key) or "").strip():
             fields[price_key] = derived.get(price_key) or DEFAULT_PRICE_NOTE

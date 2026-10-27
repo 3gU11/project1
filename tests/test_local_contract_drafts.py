@@ -35,7 +35,7 @@ class LocalContractDraftTests(unittest.TestCase):
         fields = row['fields']
         self.assertEqual('客户甲', fields['buyer_name'])
         self.assertEqual('13800000000', fields['contact_phone'])
-        self.assertEqual('设备A', fields['item1_product'])
+        self.assertEqual('1: 设备A', fields['item1_product'])
         self.assertEqual('A-1', fields['item1_spec'])
         self.assertEqual('2', fields['item1_qty'])
         # 订单没有采集的商业条款留空，等审批人补，不能编造
@@ -44,8 +44,8 @@ class LocalContractDraftTests(unittest.TestCase):
         for removed in ('supplier_name', 'office_name', 'office_branch', 'office_contact',
                         'office_phone', 'item1_tax'):
             self.assertNotIn(removed, fields)
-        # 产品名称也只跟订单走，订单没给就留空
-        self.assertEqual('', fields['item2_product'])
+        # 产品名称按纸质合同默认填满：空行也写成「2: 线切割机床」
+        self.assertEqual('2: 线切割机床', fields['item2_product'])
         self.assertEqual('', fields['item2_spec'])
 
     def test_buyer_falls_back_to_local_order_regional_manager_when_snapshot_misses_it(self):
@@ -160,8 +160,9 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('含税', fields['item2_price'])
         self.assertEqual('底价', fields['item3_price'])
         self.assertEqual('', fields['item4_price'])
-        # 产品名称默认值与纸质合同一致
-        self.assertEqual('线切割机床', fields['item1_product'])
+        # 产品名称默认值与纸质合同一致：行号 + 名称
+        self.assertEqual('1: 线切割机床', fields['item1_product'])
+        self.assertEqual('4: 随机配件', fields['item4_product'])
         self.assertEqual(drafts.DEFAULT_PRODUCT, '线切割机床')
 
     def test_obsolete_fields_are_dropped_and_preview_is_invalidated(self):
@@ -206,9 +207,9 @@ class LocalContractDraftTests(unittest.TestCase):
                          {'f': json.dumps(old_fields, ensure_ascii=False), 'hash': 'c' * 64, 'id': row['id']})
 
         healed = drafts.get(row['id'])
-        # 有机型的行补上默认「含税」，旧默认产品名刷新成「线切割机床」
+        # 有机型的行补上默认「含税」，旧默认产品名刷新成带行号的「1: 线切割机床」
         self.assertEqual('含税', healed['fields']['item1_price'])
-        self.assertEqual('线切割机床', healed['fields']['item1_product'])
+        self.assertEqual('1: 线切割机床', healed['fields']['item1_product'])
         self.assertEqual('', healed['fields']['item2_price'])
         # 字段变化后旧预览作废，需要重新生成
         self.assertEqual('submitted', healed['state'])
@@ -409,8 +410,8 @@ class LocalContractDraftTests(unittest.TestCase):
                 {'productName': '设备B', 'quantity': 2},
             ],
         })
-        self.assertEqual('设备A', fields['item1_product'])
-        self.assertEqual('设备B', fields['item2_product'])
+        self.assertEqual('1: 设备A', fields['item1_product'])
+        self.assertEqual('2: 设备B', fields['item2_product'])
         self.assertEqual('1', fields['item1_qty'])
         self.assertEqual('2', fields['item2_qty'])
 
@@ -562,13 +563,17 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual(updated['fields']['buyer_name'], healed['fields']['buyer_name'])
         self.assertEqual(updated['fields']['item1_qty'], healed['fields']['item1_qty'])
 
-    def test_product_name_defaults_only_when_model_present(self):
+    def test_product_name_is_prefilled_with_row_number_for_every_row(self):
+        """纸质合同的产品名称是预印的「1: 线切割机床」…「4: 线切割机床」，生成时全部默认填满。"""
         fields = drafts.map_order_to_contract({
             'orderNo': 'ORD-9', 'customerName': '客户甲',
             'items': [{'productCode': 'FR-500XS', 'quantity': 1}, {'quantity': 2}],
         })
-        self.assertEqual(drafts.DEFAULT_PRODUCT, fields['item1_product'])
-        self.assertEqual('', fields['item2_product'])
+        self.assertEqual('1: 线切割机床', fields['item1_product'])
+        # 没有机型、没有产品名称的空行同样默认填满
+        self.assertEqual('2: 线切割机床', fields['item2_product'])
+        self.assertEqual('4: 线切割机床', fields['item4_product'])
+        self.assertEqual(drafts.DEFAULT_PRODUCT, '线切割机床')
 
     def test_chinese_and_alternative_field_names_are_recognized(self):
         fields = drafts.map_order_to_contract({
