@@ -84,4 +84,3 @@ def test_unknown_model_rows_are_skipped_and_logged():
     assert "机型不在启用中的机型字典里" in source
     assert "请让工厂修正机型/字典" in source
     assert "DELETE w FROM wechat_batch_summary w" in source
-
