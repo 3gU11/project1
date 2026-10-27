@@ -98,6 +98,15 @@ def _set_cell_text(cell, text: str) -> None:
     _set_paragraph_text(paragraph, text)
 
 
+def _remove_trailing_empty_paragraphs(doc) -> None:
+    """去掉文末的空段落，避免打印时多出一张空白页（合同底稿末尾带了两个空段）。"""
+    while doc.paragraphs:
+        last = doc.paragraphs[-1]
+        if last.text.strip() or last._p.findall(".//" + qn("w:drawing")):
+            break
+        last._element.getparent().remove(last._element)
+
+
 def build(target: Path = DEFAULT_OUTPUT, placeholders: bool = True) -> Path:
     """placeholders=True 生成渲染用模板；False 生成打印用空白合同。"""
     doc = Document(str(BASE_TEMPLATE))
@@ -144,6 +153,8 @@ def build(target: Path = DEFAULT_OUTPUT, placeholders: bool = True) -> Path:
             if text.startswith(prefix):
                 _set_paragraph_text(paragraph, replacement)
                 break
+
+    _remove_trailing_empty_paragraphs(doc)
 
     target.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(target))
