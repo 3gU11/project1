@@ -131,7 +131,7 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('余姚模具城', fields['buyer_address'])
 
     def test_office_and_tax_fields_are_not_mapped_any_more(self):
-        """办事处信息、税票不再进合同：云端就算传了也不落到字段、不算缺失项。"""
+        """办事处信息不再进合同；税票改由单价列表达。"""
         fields = drafts.map_order_to_contract({
             'orderNo': 'ORD-O1', 'customerName': '客户甲',
             'officeName': '浙江办', 'officeBranch': '余姚办',
@@ -142,6 +142,27 @@ class LocalContractDraftTests(unittest.TestCase):
             self.assertNotIn(key, fields)
         self.assertFalse({'office_name', 'office_branch', 'office_contact', 'office_phone'}
                          & set(drafts.missing_required(fields)))
+        # 云端明确传「不含税」时，单价列跟着显示不含税
+        self.assertEqual('不含税', fields['item1_price'])
+
+    def test_unit_price_defaults_to_tax_included_when_row_has_model(self):
+        """单价列：只要该行有规格型号就默认「含税」，没机型的行留空。"""
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-PRICE', 'customerName': '客户甲',
+            'items': [
+                {'productCode': 'FR-400G', 'quantity': 1},
+                {'productCode': 'FR-500XS', 'quantity': 2, 'taxIncluded': True},
+                {'productCode': 'FR-7055XS', 'quantity': 1, 'priceNote': '底价'},
+                {'productName': '随机配件', 'quantity': 1},
+            ],
+        })
+        self.assertEqual('含税', fields['item1_price'])
+        self.assertEqual('含税', fields['item2_price'])
+        self.assertEqual('底价', fields['item3_price'])
+        self.assertEqual('', fields['item4_price'])
+        # 产品名称默认值与纸质合同一致
+        self.assertEqual('线切割机床', fields['item1_product'])
+        self.assertEqual(drafts.DEFAULT_PRODUCT, '线切割机床')
 
     def test_obsolete_fields_are_dropped_and_preview_is_invalidated(self):
         """旧草稿里的办事处/税票/供方等废弃键读取时丢弃，旧预览随之作废。"""
@@ -161,8 +182,11 @@ class LocalContractDraftTests(unittest.TestCase):
 
         healed = drafts.get(row['id'])
         for key in ('office_name', 'office_branch', 'office_contact', 'office_phone',
-                    'supplier_name', 'item1_tax', 'item1_price', 'item1_brand', 'contract_no'):
+                    'supplier_name', 'item1_tax', 'item1_brand', 'contract_no'):
             self.assertNotIn(key, healed['fields'])
+        # 旧版金额列不会污染新的单价说明，单价按机型默认「含税」
+        self.assertEqual('含税', healed['fields']['item1_price'])
+        self.assertNotEqual('50000', healed['fields']['item1_price'])
         # 字段口径变了，旧预览不能继续拿去审批
         self.assertEqual('submitted', healed['state'])
         self.assertIsNone(healed['preview_hash'])
@@ -278,9 +302,10 @@ class LocalContractDraftTests(unittest.TestCase):
         text = document_text(blob)
         self.assertNotIn('{{', text)
         self.assertIn('FR-400XS(PRO)（加高）', text)
-        self.assertEqual(4, text.count('瑞钧中走丝线切割'))
-        # 单价说明是模板固定文字，只印一次
+        self.assertEqual(4, text.count(drafts.DEFAULT_PRODUCT))
+        # 表头的「（底价）」固定印一次；单价列每行有机型就默认「含税」
         self.assertEqual(1, text.count('（底价）'))
+        self.assertEqual(4, text.count('含税'))
 
     def test_stale_preview_is_regenerated_after_mapping_upgrade(self):
         """映射规则升级后旧预览要作废，重新生成时按合并/加高规则渲染。"""
@@ -461,7 +486,7 @@ class LocalContractDraftTests(unittest.TestCase):
             'buyer_address': '', 'contact_name': '高望', 'contact_phone': '16651615305',
             'special_requirements': '', 'remark': '', 'accessories': '',
             'item1_product': 'FR-400XS(PRO)', 'item1_brand': '', 'item1_spec': 'FR-400XS(PRO)',
-            'item1_qty': '5.000', 'item1_price': '',
+            'item1_qty': '5.000', 'item1_price': '50000',
         }
         for index in range(2, 5):
             for suffix in ('product', 'brand', 'spec', 'qty', 'price'):
@@ -476,10 +501,13 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('陈利春', fields['dealer_name'])
         self.assertEqual('青岛铭青', fields['buyer_name'])
         self.assertEqual('FR-400XS(PRO)', fields['item1_spec'])
+        # 旧版的金额列 item1_price=50000 不能当成新合同的单价说明；单价按行默认「含税」
+        self.assertEqual('含税', fields['item1_price'])
         # 旧键与废弃键清掉，编辑弹窗不再出现无效项
-        for removed in ('supplier_name', 'contract_no', 'item1_price', 'item1_brand',
+        for removed in ('supplier_name', 'contract_no', 'item1_brand',
                         'office_branch', 'item1_tax'):
             self.assertNotIn(removed, fields)
+        self.assertNotEqual('50000', fields['item1_price'])
         # 旧值里的 5.000 也顺手规整成 5
         self.assertEqual('5', fields['item1_qty'])
         # 缺失清单按新字段集算，需方不再算缺失
