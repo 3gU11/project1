@@ -257,13 +257,14 @@
 import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useInventoryStore } from '../store/inventory'
+import { useModelDictionaryStore } from '../store/modelDictionary'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
-import { getModelOrderList } from '../utils/modelOrder'
+import { compareModels, normalizeModelName } from '../utils/modelOrder'
+import { hasHighHint } from '../utils/heightened'
 import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount, type ModelInventorySummary } from '../utils/inventoryStats'
 import { getBindingTitle, getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from '../utils/inventoryState'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 import { apiGet, getApiErrorMessage } from '../utils/request'
-import { compareModels } from '../utils/modelOrder'
 
 type QueueModelSummary = { model: string; pending: number; ordered: number; batch_ids: string[] }
 type PlannedDemandRow = { model: string; required_qty: number; contract_count: number }
@@ -272,9 +273,66 @@ const queueModels = ref<QueueModelSummary[]>([])
 const plannedDemandRows = ref<PlannedDemandRow[]>([])
 const queueLoading = ref(false)
 const queueError = ref('')
-const filteredQueueModels = computed(() => queueModels.value
+const modelDictionaryStore = useModelDictionaryStore()
+
+// 机型严格对齐机型字典：字典里只有基础机型，「加高」只是规格属性（表现在「加高」列），
+// 历史数据/外部系统拼在机型后面的「(加高)」在这里统一剥掉并合并到基础机型行。
+const dictionaryModelList = computed(() => {
+  const seen = new Set<string>()
+  const models: string[] = []
+  for (const row of [...modelDictionaryStore.rows].sort((a, b) => a.sort_order - b.sort_order)) {
+    if (!row.enabled) continue
+    const model = normalizeModelName(row.model_name)
+    if (!model || seen.has(model)) continue
+    seen.add(model)
+    models.push(model)
+  }
+  return models
+})
+const dictionaryModelSet = computed(() => new Set(dictionaryModelList.value))
+const isDictionaryModel = (model: string) => !dictionaryModelSet.value.size || dictionaryModelSet.value.has(model)
+
+const normalizedQueueModels = computed<QueueModelSummary[]>(() => {
+  const merged = new Map<string, QueueModelSummary>()
+  for (const row of queueModels.value) {
+    const model = normalizeModelName(row.model)
+    if (!model || !isDictionaryModel(model)) continue
+    const hit = merged.get(model) || { model, pending: 0, ordered: 0, batch_ids: [] as string[] }
+    hit.pending += Number(row.pending || 0)
+    hit.ordered += Number(row.ordered || 0)
+    hit.batch_ids = Array.from(new Set([...hit.batch_ids, ...(row.batch_ids || [])]))
+    merged.set(model, hit)
+  }
+  return [...merged.values()]
+})
+
+const normalizedPlannedDemand = computed<PlannedDemandRow[]>(() => {
+  const merged = new Map<string, PlannedDemandRow>()
+  for (const demand of plannedDemandRows.value) {
+    const model = normalizeModelName(demand.model)
+    if (!model || !isDictionaryModel(model)) continue
+    const hit = merged.get(model) || { model, required_qty: 0, contract_count: 0 }
+    hit.required_qty += Number(demand.required_qty || 0)
+    hit.contract_count += Number(demand.contract_count || 0)
+    merged.set(model, hit)
+  }
+  return [...merged.values()]
+})
+
+// 「仅查看加高型号」按库存里的加高机台筛选；待产/需求行本身不分加高规格，用有加高库存的机型判断。
+const highInventoryModels = computed(() => {
+  const models = new Set<string>()
+  for (const row of inventoryList.value) {
+    if (!hasHighHint(row['机型'], row['合同备注'])) continue
+    const model = normalizeModelName(row['机型'])
+    if (model) models.add(model)
+  }
+  return models
+})
+
+const filteredQueueModels = computed(() => normalizedQueueModels.value
   .filter(row => !selectedModels.value.length || selectedModels.value.includes(row.model))
-  .filter(row => !highOnly.value || row.model.includes('加高'))
+  .filter(row => !highOnly.value || highInventoryModels.value.has(row.model))
   .sort((a, b) => compareModels(a.model, b.model)))
 const queueUnavailable = computed(() => queueLoading.value || Boolean(queueError.value))
 const queueUnitTotal = computed(() => filteredQueueModels.value.reduce((sum, row) => sum + row.pending, 0))
@@ -335,14 +393,8 @@ const handleSearch = () => {
   currentPage.value = 1
 }
 
-const modelOptions = computed(() => {
-  return [...new Set([
-    ...getModelOrderList(),
-    ...inventoryList.value.map(row => String(row['机型'] || '').trim()),
-    ...queueModels.value.map(row => row.model),
-    ...plannedDemandRows.value.map(row => row.model),
-  ].filter(Boolean))].sort(compareModels)
-})
+// 筛选下拉只提供机型字典里的基础机型，避免历史/外部数据把「(加高)」机型混进来。
+const modelOptions = computed(() => dictionaryModelList.value)
 
 const indexedRows = computed(() => buildInventoryIndex(inventoryList.value))
 
@@ -390,9 +442,11 @@ const modelSummarySource = computed(() => {
   for (const item of productionBoundRows.value) {
     if (seen.has(item['流水号'])) continue
     seen.add(item['流水号'])
-    let row = summary.find(r => r.机型 === item['机型'])
+    const model = normalizeModelName(item['机型'])
+    if (!model || !isDictionaryModel(model)) continue
+    let row = summary.find(r => r.机型 === model)
     if (!row) {
-      row = { 机型: item['机型'], 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0, pending: 0, ordered: 0, plannedDemand: 0 }
+      row = { 机型: model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0, pending: 0, ordered: 0, plannedDemand: 0 }
       summary.push(row)
     }
     row.已绑定++
@@ -401,7 +455,11 @@ const modelSummarySource = computed(() => {
 })
 
 const modelSummary = computed(() => {
-  const rows = new Map<string, InventoryModelRow>(modelSummarySource.value.map(row => [row.机型, { ...row, pending: 0, ordered: 0 }]))
+  const rows = new Map<string, InventoryModelRow>(
+    modelSummarySource.value
+      .filter(row => isDictionaryModel(row.机型))
+      .map(row => [row.机型, { ...row, pending: 0, ordered: 0 }]),
+  )
   for (const queueModel of filteredQueueModels.value) {
     const row = rows.get(queueModel.model) || {
       机型: queueModel.model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0, plannedDemand: 0,
@@ -411,9 +469,9 @@ const modelSummary = computed(() => {
     row.ordered = queueModel.ordered
     rows.set(queueModel.model, row)
   }
-  for (const demand of plannedDemandRows.value) {
+  for (const demand of normalizedPlannedDemand.value) {
     if (selectedModels.value.length && !selectedModels.value.includes(demand.model)) continue
-    if (highOnly.value && !demand.model.includes('加高')) continue
+    if (highOnly.value && !highInventoryModels.value.has(demand.model)) continue
     const row = rows.get(demand.model) || {
       机型: demand.model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0,
       pending: 0, ordered: 0, plannedDemand: 0,
@@ -527,6 +585,12 @@ watch(top10DistNormalized, () => {
 })
 
 onMounted(async () => {
+  // 先加载机型字典：这张表/环形图只允许出现字典里的基础机型。
+  try {
+    await modelDictionaryStore.ensureLoaded()
+  } catch {
+    // 字典加载失败不阻塞库存数据展示，后续刷新会重试。
+  }
   await fetchData()
   runDonutBuildAnimation()
 })

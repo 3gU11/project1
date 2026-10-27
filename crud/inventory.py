@@ -12,6 +12,7 @@ from database import get_engine, ensure_finished_goods_unique_serial
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 from crud.inbound_history import notify_inbound_completion, record_inbound_history
 from utils.cache import fetch_data_with_cache
+from utils.heightened import is_high_text_hint, split_heightened_model_name
 from utils.local_cache import ttl_cache
 
 
@@ -293,6 +294,29 @@ def clear_inventory_data_caches():
     get_data_v2.cache_clear()
 
 
+def _align_inventory_models(df):
+    """机型字段严格对齐机型字典：剥掉历史数据拼在机型后面的「(加高)」，
+
+    加高信息保留在合同备注里（已有加高描述时不重复追加），避免同一机型拆成两行。
+    """
+    if df.empty or "机型" not in df.columns:
+        return df
+    df = df.copy()
+    pairs = df["机型"].map(split_heightened_model_name)
+    df["机型"] = pairs.map(lambda pair: pair[0])
+    if "合同备注" in df.columns:
+        heightened = pairs.map(lambda pair: pair[1])
+        if bool(heightened.any()):
+            def _append_high(note):
+                text = str(note or "").strip()
+                if is_high_text_hint(text):
+                    return text
+                return " ".join(part for part in [text, "加高"] if part).strip()
+
+            df.loc[heightened, "合同备注"] = df.loc[heightened, "合同备注"].map(_append_high)
+    return df
+
+
 def save_data(df):
     clear_inventory_data_caches()
     try:
@@ -307,6 +331,7 @@ def save_data(df):
         fill_cols = [c for c in INVENTORY_COLS if c not in ["预计入库时间", "更新时间", "占用订单号"]]
         for col in fill_cols:
             df[col] = df[col].fillna("")
+        df = _align_inventory_models(df)
         with get_engine().begin() as conn:
             _ensure_finished_goods_contract_note_column(conn)
             result = conn.execute(text("SHOW COLUMNS FROM finished_goods_data LIKE 'Location_Code'"))
@@ -347,6 +372,8 @@ def save_data_v2(df):
         fill_cols = [c for c in INVENTORY_COLS if c not in ["预计入库时间", "更新时间", "占用订单号"]]
         for col in fill_cols:
             df[col] = df[col].fillna("").astype(str).str.strip()
+
+        df = _align_inventory_models(df)
 
         with get_engine().begin() as conn:
             _ensure_finished_goods_contract_note_column(conn)

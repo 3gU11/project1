@@ -10,6 +10,10 @@
   3. 不在说明分段里的纯文本备注（历史数据，如「加高500MM」）。
 
 说明分段指备注里的「[总]整单备注」「[备注]原备注」「[附加]附加备注」「[改数]改数量」。
+
+另外约定：机型字段必须严格对齐机型字典——字典里只有基础机型，「加高」是机台的规格属性，
+统一用备注/加高标记表达。展示、统计、写库前一律用 split_heightened_model_name 把历史数据
+里拼在机型后面的「(加高)」剥掉，避免同一机型拆成两行。
 """
 from __future__ import annotations
 
@@ -20,6 +24,23 @@ import re
 _NOTE_SEGMENT_RE = re.compile(r"\[(?:总|备注|附加|改数)\][^\[]*")
 # 转合同时在 [总] 备注后单独追加的「加高」标记（前后有空格），与备注正文区分开。
 _HIGH_MARKER_TOKEN_RE = re.compile(r"(?<!\S)加高(?!\S)")
+# 机型名后缀「(加高)」「（加高）」：历史数据/外部系统会把规格拼进机型，必须剥掉。
+_HEIGHTENED_NAME_SUFFIX_RE = re.compile(r"\s*[（(]\s*加高\s*[）)]\s*")
+
+
+def split_heightened_model_name(model: object) -> tuple[str, bool]:
+    """把「FR-400G(加高)」拆成机型字典里的「FR-400G」和加高标记。
+
+    返回 (机型字典机型, 是否加高)；没有加高后缀时原样返回（只去首尾空白）。
+    """
+    raw = str(model or "").strip()
+    base = _HEIGHTENED_NAME_SUFFIX_RE.sub("", raw).strip()
+    return base, bool(base and base != raw)
+
+
+def normalize_dictionary_model_name(model: object) -> str:
+    """机型统一成机型字典里的基础机型（去掉拼在后面的「(加高)」）。"""
+    return split_heightened_model_name(model)[0]
 
 
 def is_high_text_hint(*values: object) -> bool:

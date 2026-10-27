@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from database import get_engine
 from utils.cache import fetch_data_with_cache
+from utils.heightened import is_high_text_hint, split_heightened_model_name
 from utils.local_cache import ttl_cache
 from utils.parsers import parse_alloc_dict, to_json_text
 
@@ -106,12 +107,36 @@ def get_factory_plan_v2():
         return pd.DataFrame(columns=cols)
 
 
+def align_factory_plan_models(df):
+    """机型字段严格对齐机型字典：历史/外部数据把「(加高)」拼在机型后面时，
+
+    - 机型剥成字典里的基础机型（避免同一机型在排产/统计里拆成两行）；
+    - 加高信息补进备注（备注里已有加高描述时不重复追加）。
+    """
+    if df.empty or "机型" not in df.columns:
+        return df
+    df = df.copy()
+    pairs = df["机型"].map(split_heightened_model_name)
+    df["机型"] = pairs.map(lambda pair: pair[0])
+    if "备注" in df.columns:
+        heightened = pairs.map(lambda pair: pair[1])
+        if bool(heightened.any()):
+            def _append_high(note):
+                text = str(note or "").strip()
+                if is_high_text_hint(text):
+                    return text
+                return " ".join(part for part in [text, "加高"] if part).strip()
+
+            df.loc[heightened, "备注"] = df.loc[heightened, "备注"].map(_append_high)
+    return df
+
+
 def save_factory_plan(df, notification_rows=None, notification_operator=""):
     get_factory_plan.cache_clear()
     get_factory_plan_v2.cache_clear()  # 同时清除 v2 版本缓存
     cols = ["合同号", "机型", "排产数量", "要求交期", "状态", "备注", "客户名", "代理商", "指定批次/来源", "订单号"]
     try:
-        df = df.copy()
+        df = align_factory_plan_models(df.copy())
         for col in cols:
             if col not in df.columns:
                 df[col] = ""

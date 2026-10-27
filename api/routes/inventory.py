@@ -34,7 +34,7 @@ from crud.inventory import (
 from utils.cache_adapter import cache
 from utils.model_compatibility import normalize_model_family, production_group_for_family
 from crud.logs import append_log
-from crud.model_dictionary import find_disabled_models, get_model_dictionary, is_model_enabled
+from crud.model_dictionary import find_disabled_models, get_enabled_model_names, get_model_dictionary, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound, save_orders
 from crud.production_cards import restore_shipped_production_cards, retire_shipped_production_cards
 from crud.order_reservations import release_completed_order_reservations
@@ -510,14 +510,19 @@ def get_production_queue_summary():
     """
     with get_engine().connect() as conn:
         rows = conn.execute(text(sql)).mappings().all()
+    # 机型严格对齐机型字典：待产机台也按字典基础机型汇总，加高信息不参与这里的分行。
+    enabled_models = set(get_enabled_model_names())
     batches = set()
     models = {}
     for row in rows:
         batches.add(row['batch_id'])
         if row['unit_id'] is None:
             continue
-        item = models.setdefault(row['model'], {
-            'model': row['model'], 'pending': 0, 'ordered': 0, 'batch_ids': set(),
+        model = _normalize_model_for_edit_rule(row['model'])
+        if not model or (enabled_models and model not in enabled_models):
+            continue
+        item = models.setdefault(model, {
+            'model': model, 'pending': 0, 'ordered': 0, 'batch_ids': set(),
         })
         item['pending'] += 1
         item['ordered'] += int(row['ordered'])

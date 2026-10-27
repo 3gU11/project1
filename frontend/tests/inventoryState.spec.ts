@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/utils/modelOrder', () => ({
-  compareModels: (a: string, b: string) => a.localeCompare(b),
+  compareModels: (a: string, b: string) => String(a).localeCompare(String(b)),
   isModelInDictionary: () => true,
+  normalizeModelName: (model: unknown) => String(model || '').replace(/[（(]\s*加高\s*[）)]/g, '').trim(),
 }))
 
 import { getInventoryLifecycleStatus, isContractLinked, isMachineBound, isOrderReserved, isPendingInbound } from '../src/utils/inventoryState'

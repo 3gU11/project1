@@ -134,7 +134,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as sandboxApi from '../../services/sandboxApi'
 import { useInventoryStore } from '../../store/inventory'
 import { buildModelInventoryRatios, getActiveInventoryRows } from '../../utils/inventoryStats'
-import { compareModels } from '../../utils/modelOrder'
+import { compareModels, normalizeModelName } from '../../utils/modelOrder'
 import { hasHighHint } from '../../utils/heightened'
 import { apiGet } from '../../utils/request'
 
@@ -659,9 +659,10 @@ async function loadInventoryRatios() {
     const ratioRows = buildModelInventoryRatios(activeRows)
     const highCounts = new Map<string, number>()
     for (const item of activeRows) {
-      const model = String(item['机型'] || '').trim()
+      // 机型严格对齐机型字典：加高只是规格属性，不能拼在机型名里参与分行
+      const model = normalizeModelName(item['机型'])
       const status = String(item['状态'] || '')
-      if (model && (status.startsWith('库存中') || status === '待入库') && hasHighHint(model, item['合同备注'])) {
+      if (model && (status.startsWith('库存中') || status === '待入库') && hasHighHint(item['机型'], item['合同备注'])) {
         const key = model.toUpperCase()
         highCounts.set(key, (highCounts.get(key) || 0) + 1)
       }

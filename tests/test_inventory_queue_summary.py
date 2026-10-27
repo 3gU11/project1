@@ -27,13 +27,15 @@ class QueueSummaryTests(unittest.TestCase):
             ]
             for row in cases:
                 conn.exec_driver_sql('INSERT INTO units VALUES (?,?,?,?,?,?,?)', row)
-        with patch('api.routes.inventory.get_engine', return_value=engine):
+        with patch('api.routes.inventory.get_engine', return_value=engine), \
+             patch('api.routes.inventory.get_enabled_model_names', return_value=['A', 'B']):
             result = get_production_queue_summary()
         self.assertEqual(result['batch_count'], 3)
         rows = {row['model']: row for row in result['data']}
-        self.assertEqual(rows['A'], dict(model='A', pending=3, ordered=1, batch_ids=['b1', 'b2']))
+        # 机型严格对齐机型字典：历史数据里的「A(加高)」合并到机型 A，不再单独占一行
+        self.assertEqual(rows['A'], dict(model='A', pending=4, ordered=2, batch_ids=['b1', 'b2']))
         self.assertEqual(rows['B']['ordered'], 1)
-        self.assertEqual(rows['A(加高)']['pending'], 1)
+        self.assertNotIn('A(加高)', rows)
         self.assertEqual(sum(row['pending'] for row in rows.values()), 5)
         engine.dispose()
 
@@ -41,5 +43,6 @@ class QueueSummaryTests(unittest.TestCase):
         from unittest.mock import MagicMock
         engine = MagicMock()
         engine.connect.return_value.__enter__.return_value.execute.return_value.mappings.return_value.all.return_value = []
-        with patch('api.routes.inventory.get_engine', return_value=engine):
+        with patch('api.routes.inventory.get_engine', return_value=engine), \
+             patch('api.routes.inventory.get_enabled_model_names', return_value=['A']):
             self.assertEqual(get_production_queue_summary(), {'batch_count': 0, 'data': []})

@@ -23,15 +23,15 @@ from crud.audit_logs import append_audit_log
 from crud.contracts import get_contract_files
 from crud.inventory import get_data, save_data
 from crud.logs import append_log
-from crud.model_dictionary import is_model_enabled
-from crud.planning import get_factory_plan, get_factory_plan_v2, save_factory_plan
+from crud.model_dictionary import get_enabled_model_names, is_model_enabled
+from crud.planning import align_factory_plan_models, get_factory_plan, get_factory_plan_v2, save_factory_plan
 from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token, require_permissions
 from crud import batch_planning
 from crud.contract_notifications import contract_rows, record_converted, record_planned
 from utils.parsers import parse_alloc_dict
 from utils.contract_ids import contract_no_exists, next_contract_no
-from utils.heightened import is_high_text_hint
+from utils.heightened import is_high_text_hint, normalize_dictionary_model_name, split_heightened_model_name
 from database import get_engine
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
@@ -2489,16 +2489,31 @@ def get_planned_model_summary():
             if not inv_df.empty and {"机型", "占用订单号"}.issubset(inv_df.columns):
                 occupied = inv_df.copy()
                 occupied["占用订单号"] = occupied["占用订单号"].astype(str).str.strip()
-                occupied["机型"] = occupied["机型"].astype(str).str.strip()
+                occupied["机型"] = occupied["机型"].map(normalize_dictionary_model_name)
                 occupied = occupied[occupied["占用订单号"] != ""]
                 for _, inv_row in occupied.iterrows():
                     key = (str(inv_row["占用订单号"]), str(inv_row["机型"]))
                     allocated[key] = allocated.get(key, 0) + 1
 
+        # 机型严格对齐机型字典：历史合同中拼了「(加高)」的机型统一按字典基础机型汇总，
+        # 否则同一机型会拆成两行，且已配货机台无法从需求里扣减。
+        enabled_models = set(get_enabled_model_names())
+        normalized_plan_rows: list[dict[str, str | int]] = []
+        for item in plan_rows:
+            model = normalize_dictionary_model_name(item.get("model"))
+            if not model or (enabled_models and model not in enabled_models):
+                continue
+            normalized_plan_rows.append({
+                "contract_no": str(item.get("contract_no") or "").strip(),
+                "model": model,
+                "qty": int(item.get("qty") or 0),
+                "order_no": str(item.get("order_no") or "").strip(),
+            })
+
         # Aggregate contract rows first so allocation for an order linked to
         # multiple contracts is deducted exactly once.
         demand_by_order_model: dict[tuple[str, str], int] = {}
-        for item in plan_rows:
+        for item in normalized_plan_rows:
             key = (str(item.get("order_no") or "").strip(), str(item.get("model") or "").strip())
             demand_by_order_model[key] = demand_by_order_model.get(key, 0) + int(item.get("qty") or 0)
 
@@ -2509,7 +2524,7 @@ def get_planned_model_summary():
             remaining_by_order_model[(order_no, model)] = remaining
             totals[model] = totals.get(model, 0) + remaining
         contract_sets: dict[str, set[str]] = {}
-        for item in plan_rows:
+        for item in normalized_plan_rows:
             model = str(item.get("model") or "").strip()
             order_no = str(item.get("order_no") or "").strip()
             if remaining_by_order_model.get((order_no, model), 0) > 0:
@@ -3776,8 +3791,29 @@ def _process_contracts_batch(
     if not add_list:
         raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
 
-    df_plan = get_factory_plan()
+    df_plan = align_factory_plan_models(get_factory_plan())
     now_status = "已规划" if save_mode == "spot" else "待规划"
+
+    # 机型字段严格对齐机型字典：外部/历史数据把「(加高)」拼在机型后面时，
+    # 剥掉后缀并把加高标记补进备注，避免同一机型在排产、统计、订单里拆成两行。
+    for item in add_list:
+        model, heightened = split_heightened_model_name(item.get("机型"))
+        if not model:
+            continue
+        item["机型"] = model
+        if heightened:
+            remark = str(item.get("备注") or "").strip()
+            if not is_high_text_hint(remark):
+                item["备注"] = " ".join(part for part in [remark, "加高"] if part).strip()
+    for row in rush_source_rows:
+        model, heightened = split_heightened_model_name(row.get("model_type"))
+        if not model:
+            continue
+        row["model_type"] = model
+        if heightened:
+            remark = str(row.get("remark") or "").strip()
+            if not is_high_text_hint(remark):
+                row["remark"] = " ".join(part for part in [remark, "加高"] if part).strip()
 
     # Filter out duplicates within this batch call
     clean_add_list: List[Dict[str, Any]] = []
