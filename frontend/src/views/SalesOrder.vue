@@ -401,6 +401,7 @@ import PageSkeleton from '../components/PageSkeleton.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useFormSubmit } from '../composables/useFormSubmit'
 import { getModelOrderList, isModelInDictionary } from '../utils/modelOrder'
+import { hasHighHint } from '../utils/heightened'
 type RowData = Record<string, any>
 
 const route = useRoute()
@@ -512,7 +513,7 @@ const stripTotalNote = (value: unknown) => {
 
 const splitHighFromRowNote = (value: unknown) => {
   const raw = String(value || '').trim()
-  const high = raw.includes('加高')
+  const high = hasHighHint(raw)
   const rowNote = raw
     .replace(/(^|\s+)加高(?=\s+|$)/g, ' ')
     .replace(/\s+/g, ' ')

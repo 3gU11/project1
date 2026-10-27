@@ -31,6 +31,7 @@ from crud import batch_planning
 from crud.contract_notifications import contract_rows, record_converted, record_planned
 from utils.parsers import parse_alloc_dict
 from utils.contract_ids import contract_no_exists, next_contract_no
+from utils.heightened import is_high_text_hint
 from database import get_engine
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
@@ -169,8 +170,10 @@ def _normalize_alloc_model(value: object) -> str:
     return text_value.replace("(加高)", "").replace("（加高）", "").strip()
 
 
+# 备注里的方括号分段：[总]整单备注、[备注]原备注、[附加]附加备注、[改数]需要修改数量。
+# 加高判定统一走 utils/heightened.py，说明分段里的「400G加高100mm」这类文字不算加高。
 def _is_high_model_hint(*values: object) -> bool:
-    return any("加高" in str(value or "") for value in values)
+    return is_high_text_hint(*values)
 
 
 _ORDER_LINE_NOTE_LABEL_PATTERN = r"(?:\[[^\]]+\]\s*)?[A-Za-z0-9][A-Za-z0-9_\-./+]*(?:\([^)]*\))*"

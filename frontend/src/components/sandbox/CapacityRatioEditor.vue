@@ -135,6 +135,7 @@ import * as sandboxApi from '../../services/sandboxApi'
 import { useInventoryStore } from '../../store/inventory'
 import { buildModelInventoryRatios, getActiveInventoryRows } from '../../utils/inventoryStats'
 import { compareModels } from '../../utils/modelOrder'
+import { hasHighHint } from '../../utils/heightened'
 import { apiGet } from '../../utils/request'
 
 const props = defineProps<{ editable?: boolean }>()
@@ -660,8 +661,7 @@ async function loadInventoryRatios() {
     for (const item of activeRows) {
       const model = String(item['机型'] || '').trim()
       const status = String(item['状态'] || '')
-      const highHint = `${model}|${String(item['合同备注'] || '')}`
-      if (model && (status.startsWith('库存中') || status === '待入库') && highHint.includes('加高')) {
+      if (model && (status.startsWith('库存中') || status === '待入库') && hasHighHint(model, item['合同备注'])) {
         const key = model.toUpperCase()
         highCounts.set(key, (highCounts.get(key) || 0) + 1)
       }

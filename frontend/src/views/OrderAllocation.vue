@@ -179,6 +179,7 @@ import { useRoute } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from '../store/cache'
 import { compareModels, normalizeModelName, sortRowsByModel } from '../utils/modelOrder'
+import { hasHighHint } from '../utils/heightened'
 import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type ListResponse<T = any> = { data: T[] }
@@ -258,7 +259,7 @@ const selectedAllocatedSerials = ref<string[]>([])
 const candidateStatusFilter = ref('')
 const candidateKeyword = ref('')
 
-const isHighHint = (...values: unknown[]) => values.some((value) => String(value || '').includes('加高'))
+const isHighHint = (...values: unknown[]) => hasHighHint(...values)
 
 const variantKey = (model: string, high: boolean) => `${model}||${high ? 'high' : 'normal'}`
 

@@ -13,6 +13,7 @@ from crud.inbound_history import notify_inbound_completion, record_inbound_histo
 from crud.logs import append_log
 from database import get_engine
 from utils.cache import fetch_data_with_cache
+from utils.heightened import is_high_text_hint
 from utils.local_cache import ttl_cache
 from utils.parsers import parse_plan_map
 
@@ -217,7 +218,7 @@ def _normalize_allocation_model(value) -> str:
 
 
 def _is_high_model_hint(*values) -> bool:
-    return any("加高" in str(value or "") for value in values)
+    return is_high_text_hint(*values)
 
 
 def create_sales_order(customer, agent, model_data, note, pack_option="", delivery_time="", source_batch=""):

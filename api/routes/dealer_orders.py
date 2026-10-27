@@ -93,6 +93,18 @@ def _operator(ctx: dict) -> str:
     return str(ctx.get("name") or ctx.get("username") or "system").strip()
 
 
+# 云端没有行备注时会把「订单备注」复制到每一行明细；加高只能看明细自己的
+# inventory_type/机型，用备注判断会把整单所有机型误标成加高。
+HEIGHTENED_INVENTORY_TYPES = frozenset({"heightened", "heighten", "high", "tall"})
+
+
+def _line_is_heightened(item: dict[str, Any]) -> bool:
+    """判断经销商订单明细行是否加高（与合同草稿 _item_is_heightened 口径一致）。"""
+    if str(item.get("inventory_type") or "").strip().lower() in HEIGHTENED_INVENTORY_TYPES:
+        return True
+    return "加高" in str(item.get("model") or "")
+
+
 @router.get("/")
 def list_orders(
     status: str = "",
@@ -522,7 +534,7 @@ def convert_to_contract(
                 contract_items.append({
                     "model": str(item.get("model") or "").strip(),
                     "qty": int(item.get("quantity") or 1),
-                    "high": "加高" in str(item.get("remark") or ""),
+                    "high": _line_is_heightened(item),
                     "rowNote": "",
                 })
 

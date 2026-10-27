@@ -673,6 +673,8 @@ import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 import { compareModels, isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
+import { normalizeDealerOrderItems } from '../utils/dealerOrderItems'
+import { hasHighHint } from '../utils/heightened'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
 import PageHeader from '../components/PageHeader.vue'
@@ -952,24 +954,6 @@ const isRushHint = (order: DealerOrder) => {
   if (!delivery) return false
   const days = (new Date(delivery).getTime() - Date.now()) / 86400000
   return days <= 3
-}
-
-const normalizeDealerOrderItems = (order: DealerOrder) => {
-  const source: DealerOrderLine[] = order.items?.length
-    ? order.items
-    : [{ model: order.model, quantity: order.quantity, remark: order.remark, extra_remark: order.extra_remark, factory_remark: order.factory_remark, ERMQ: order.ERMQ }]
-  return source
-    .map((item) => {
-      const model = String(item.model || '').trim()
-      const qty = Math.max(1, Number(item.quantity || 1))
-      const remark = String(item.remark || '').trim()
-      const extraRemark = String(item.factory_remark || item.extra_remark || '').trim()
-      const ermq = Number(item.ERMQ || 0)
-      const high = model.includes('加高') || remark.includes('加高') || extraRemark.includes('加高')
-      const rowNote = [remark ? `[备注]${remark}` : '', extraRemark ? `[附加]${extraRemark}` : '', ermq > 0 ? `[改数]${ermq}` : ''].filter(Boolean).join(' ')
-      return { model, qty, high, rowNote, remark, extraRemark, ermq }
-    })
-    .filter((item) => item.model)
 }
 
 const openDealerOrderConvertDialog = async (order: DealerOrder) => {
@@ -1523,7 +1507,7 @@ const getInStockCountByModel = async () => {
     const status = String(row['状态'] || '').trim()
     const occupied = String(row['占用订单号'] || '').trim()
     if (!model || !status.startsWith('库存中') || occupied) continue
-    const high = [row['机型'], row['批次号'], row['合同备注']].some((value) => String(value || '').includes('加高'))
+    const high = hasHighHint(row['机型'], row['批次号'], row['合同备注'])
     const key = `${model}||${high ? 'high' : 'normal'}`
     map.set(key, (map.get(key) || 0) + 1)
   }
