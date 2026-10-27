@@ -518,7 +518,7 @@ def _dispatch_event(event: dict[str, Any]) -> None:
 
     if event_type == "wechat_batch_summary_sync":
         refresh_local_wechat_batch_summary()
-        rows = fetch_local_wechat_batch_summary()
+        rows, _excluded_special = fetch_local_wechat_batch_summary()
         push_wechat_batch_summary_to_cloud(rows, idempotency_key=event_id)
         return
 

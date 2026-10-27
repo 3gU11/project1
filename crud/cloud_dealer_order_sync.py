@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, inspect, text
 
 from crud.dealer_orders import ensure_dealer_order_tables
 from crud.cloud_bridge_auth import signed_headers, snapshot_content_id
@@ -21,6 +21,160 @@ from database import get_engine
 BRIDGE_STOCK_STATUS_PREDICATE = "TRIM(COALESCE(`状态`, '')) LIKE '库存中%'"
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 可选购加高只允许默认高度：FR-400G 为 100mm，其余机型为 200mm。
+# 非默认高度（如 8060XS「加高400mm」「加高100mm」）属于特殊加高，只能走合同预订，
+# 不能作为可选购库存同步到云端/小程序，否则会被当成默认 200mm 加高售卖。
+# ---------------------------------------------------------------------------
+HEIGHTENED_DEFAULT_MM = 200
+HEIGHTENED_DEFAULT_MM_BY_MODEL = {"FR-400G": 100}
+
+_HEIGHTENED_SUFFIX_RE = re.compile(r"[（(]\s*加高[^）)]*[）)]", re.IGNORECASE)
+_HEIGHTENED_HEIGHT_RE = re.compile(r"加高\s*(?:到|至|为)?\s*(\d{2,4})", re.IGNORECASE)
+_HEIGHTENED_HEIGHT_BEFORE_RE = re.compile(r"(\d{2,4})\s*(?:mm|毫米)\s*加高", re.IGNORECASE)
+
+
+def _heightened_default_mm(model: Any) -> int:
+    name = _HEIGHTENED_SUFFIX_RE.sub("", str(model or "")).strip().upper()
+    return HEIGHTENED_DEFAULT_MM_BY_MODEL.get(name, HEIGHTENED_DEFAULT_MM)
+
+
+def parse_heightened_height_mm(*remarks: Any) -> int | None:
+    """从合同/订单备注里解析加高高度（mm）；没写具体高度返回 None（按默认高度处理）。"""
+    for remark in remarks:
+        value = str(remark or "")
+        if "加高" not in value:
+            continue
+        match = _HEIGHTENED_HEIGHT_RE.search(value) or _HEIGHTENED_HEIGHT_BEFORE_RE.search(value)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def is_special_heightened(model: Any, *remarks: Any) -> bool:
+    """备注写明了非默认加高高度时返回 True；未写高度或等于默认高度返回 False。"""
+    height = parse_heightened_height_mm(*remarks)
+    if height is None:
+        return False
+    return height != _heightened_default_mm(model)
+
+
+def _normalize_snapshot_eta(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value).replace("T", " ")[:19]
+
+
+def _heightened_remark_expr(conn) -> str:
+    """拼装备注的 SQL 表达式；旧库没有「订单备注」列时只读「合同备注」。"""
+    try:
+        columns = {str(column["name"]) for column in inspect(conn).get_columns("finished_goods_data")}
+    except Exception:
+        columns = set()
+    if "订单备注" in columns:
+        return "CONCAT_WS(' ', COALESCE(`合同备注`, ''), COALESCE(`订单备注`, ''))"
+    return "COALESCE(`合同备注`, '')"
+
+
+def _special_heightened_units(conn) -> tuple[dict[tuple, int], dict[tuple, int]]:
+    """统计特殊加高台数：待入库按 (批次号, 预计入库时间, 机型)，库存中按 (机型, 原批次号)。"""
+    remark_expr = _heightened_remark_expr(conn)
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT TRIM(`批次号`) AS batch_no,
+                   `预计入库时间` AS eta,
+                   TRIM(`机型`) AS model,
+                   `状态` AS status,
+                   {remark_expr} AS remarks
+            FROM finished_goods_data
+            WHERE (`状态` = '待入库' OR TRIM(COALESCE(`状态`, '')) LIKE '库存中%')
+            """
+        )
+    ).mappings().all()
+    pending: dict[tuple, int] = {}
+    stock: dict[tuple, int] = {}
+    for row in rows:
+        status = str(row.get("status") or "").strip()
+        batch_no = str(row.get("batch_no") or "").strip()
+        model = str(row.get("model") or "").strip()
+        remarks = str(row.get("remarks") or "")
+        if not model:
+            continue
+        if status == "待入库":
+            if not batch_no:
+                continue
+            key = (batch_no, _normalize_snapshot_eta(row.get("eta")), model)
+            target = pending
+        elif status.startswith("库存中"):
+            key = ("库存中", model, batch_no or "库存中")
+            target = stock
+        else:
+            continue
+        is_heightened = "加高" in remarks or "加高" in batch_no or "附加" in batch_no
+        if not is_heightened or not is_special_heightened(model, remarks):
+            continue
+        target[key] = target.get(key, 0) + 1
+    return pending, stock
+
+
+def strip_special_heightened_rows(
+    conn, rows: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int]:
+    """从待推送快照中剔除特殊加高（非默认高度）机台，返回 (保留行, 剔除台数)。
+
+    云端 wechat_batch_summary 是整表替换的只读视图，小程序/门户直接读取；
+    特殊加高不是可选购库存，只能在推送前扣减，避免混入「加高」可选机型。
+    """
+    if not rows:
+        return rows, 0
+    try:
+        pending, stock = _special_heightened_units(conn)
+    except Exception as exc:  # 过滤不可用时宁可保留原快照，也不阻断库存同步
+        logger.warning("wechat_batch_summary: 特殊加高过滤不可用，按原快照推送：%s", exc)
+        return rows, 0
+    if not pending and not stock:
+        return rows, 0
+
+    kept: list[dict[str, Any]] = []
+    excluded = 0
+    for row in rows:
+        if int(row.get("heightened") or 0) == 0:
+            kept.append(row)
+            continue
+        model = str(row.get("model") or "").strip()
+        if row.get("batch_no") == "库存中":
+            special = stock.get(
+                ("库存中", model, str(row.get("original_batch_no") or "库存中").strip()), 0
+            )
+        else:
+            key = (
+                str(row.get("original_batch_no") or "").strip(),
+                _normalize_snapshot_eta(row.get("original_expected_inbound_time")),
+                model,
+            )
+            special = pending.get(key, 0)
+        if special <= 0:
+            kept.append(row)
+            continue
+        original = int(row.get("quantity") or 0)
+        quantity = original - special
+        excluded += min(special, original)
+        if quantity <= 0:
+            continue
+        adjusted = dict(row)
+        adjusted["quantity"] = quantity
+        kept.append(adjusted)
+
+    if excluded:
+        logger.info(
+            "wechat_batch_summary: 云端快照剔除 %s 台非默认加高（特殊加高只能合同预订）",
+            excluded,
+        )
+    return kept, excluded
 
 # ---------------------------------------------------------------------------
 # Shared httpx client (connection pool reuse)
@@ -783,7 +937,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
     }
 
 
-def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
+def fetch_local_wechat_batch_summary() -> tuple[list[dict[str, Any]], int]:
     with get_engine().begin() as conn:
         _ensure_wechat_batch_summary_schema(conn)
         rows = conn.execute(
@@ -804,7 +958,8 @@ def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
                 """
             )
         ).mappings().all()
-    return [{key: _jsonable(value) for key, value in row.items()} for row in rows]
+        rows, excluded = strip_special_heightened_rows(conn, [dict(row) for row in rows])
+    return [{key: _jsonable(value) for key, value in row.items()} for row in rows], excluded
 
 
 def fetch_local_ordering_models() -> list[dict[str, Any]]:
@@ -867,12 +1022,13 @@ def push_wechat_batch_summary_to_cloud(rows: list[dict[str, Any]], idempotency_k
 
 def sync_wechat_batch_summary_to_cloud() -> dict[str, Any]:
     local = refresh_local_wechat_batch_summary()
-    rows = fetch_local_wechat_batch_summary()
+    rows, excluded_special = fetch_local_wechat_batch_summary()
     cloud = push_wechat_batch_summary_to_cloud(rows)
     return {
         "message": "wechat batch summary synced",
         "local_rows": local["rows"],
         "pushed_rows": len(rows),
+        "excluded_special_heightened": excluded_special,
         "model_rows": len(fetch_local_ordering_models()),
         "cloud": cloud,
     }
