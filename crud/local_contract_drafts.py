@@ -8,28 +8,24 @@ from sqlalchemy import bindparam, text
 from database import get_engine
 from contract_bridge.renderer import render_order_form
 
-# 「瑞钧科技办事处订货单」必填项：这四项都能从订单直接推导，缺了说明订单数据本身有问题
-REQUIRED = ("supplier_name", "dealer_name", "signed_date", "buyer_name")
-DEFAULT_SUPPLIER = "苏州瑞钧智能科技有限公司"
+# 「瑞钧机械办事处订货合同」必填项：这三项都能从订单直接推导，缺了说明订单数据本身有问题
+REQUIRED = ("dealer_name", "signed_date", "buyer_name")
 DEFAULT_PRODUCT = "瑞钧中走丝线切割"
-DEFAULT_TAX = "含税"      # 税票默认含税：云端没单独采集时也按含税出单
-ITEM_FIELDS = ("product", "spec", "qty", "tax")
+ITEM_FIELDS = ("product", "spec", "qty")
 BASE_ITEM_ROWS = 4      # 模板自带 4 行明细，少了留空、多了渲染时自动加行
 MAX_ITEM_ROWS = 30      # 防止异常数据把表格撑爆
 # 合同附件落盘文件名非法字符（Windows/Linux 共用），以及客户名前缀长度上限
 UNSAFE_FILE_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 MAX_FILE_NAME_PREFIX = 80
 
-# 订货单栏位 → 云端订单里可能出现的键名，按纸质表单从上到下、分区块排列。
+# 订货合同栏位 → 云端订单里可能出现的键名，按纸质表单从上到下、分区块排列。
 # 小程序/云端表单是中文的，接口也可能直接传驼峰或下划线字段，所以三种写法一并认；
 # 新增云端字段时只在这个表里补别名即可，映射、渲染、旧草稿升级都不用改。
+# 供方、牌号、单价说明、服务责任、其它约定、供方签署栏是纸质合同的固定内容，
+# 直接写在模板里（见 contract_bridge/templates/build_dealer_order_form.py），不在这里映射。
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     # —— 订单头 ——
-    "supplier_name": ("supplierName", "supplier_name", "供方", "供方名称", "供应商"),
     "dealer_name": ("dealerName", "dealer_name", "agentName", "agent_name", "经销商", "需方", "代理商"),
-    "office_name": ("officeName", "office_name", "belongOffice", "belong_office",
-                    "regionalOffice", "regional_office", "salesOffice", "sales_office",
-                    "所属办事处", "region"),
     "signed_date": ("signedDate", "signed_date", "submitTime", "submit_time",
                     "createdAt", "created_at", "签订时间", "下单时间", "提交时间"),
     # —— 备注与交货条款 ——
@@ -43,6 +39,7 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
                          "settlement_method", "paymentTerms", "payment_terms", "paymentMethod",
                          "payMethod", "结算方式", "结算方式及期限", "付款方式"),
     # —— 购货方信息（对应云端订单的「客户信息/地址」区块）——
+    # 合同上「购货单位名称」就是客户名
     "buyer_name": ("customerName", "customer_name", "buyerName", "buyer_name",
                    "购货单位", "客户名称", "客户"),
     # 云端把「客户信息/地址」拆成「客户 + 地址」两栏后，地址取 customerAddress
@@ -51,11 +48,6 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
                       "收货地址", "交货地址"),
     "contact_name": ("contactName", "contact_name", "联系人"),
     "contact_phone": ("contactPhone", "contact_phone", "phone", "联系电话", "联系方式"),
-    # —— 办事处信息（非必填：云端没采集就留空，审批人可在编辑字段里补）——
-    "office_branch": ("officeBranch", "office_branch", "serviceOffice", "service_office",
-                      "deliveryOffice", "delivery_office", "officeName", "office_name", "办事处"),
-    "office_contact": ("officeContact", "office_contact", "办事处联系人"),
-    "office_phone": ("officePhone", "office_phone", "办事处电话", "办事处联系方式"),
     # —— 其他特殊要求 ——
     "special_requirements": ("specialRequirements", "special_requirements",
                              "extraRemark", "extra_remark", "其他特殊要求", "特殊要求"),
@@ -65,16 +57,24 @@ ITEM_ALIASES: dict[str, tuple[str, ...]] = {
     "product": ("productName", "product_name", "产品名称", "产品"),
     "spec": ("productCode", "product_code", "spec", "model", "规格型号", "机型"),
     "qty": ("quantity", "qty", "数量"),
-    "tax": ("taxIncluded", "tax_included", "tax", "invoiceType", "taxType", "税票", "含税"),
 }
 
-# 字段在订货单里的出现顺序（与模板从上到下一致，前端「编辑字段」按这个顺序展示）。
+# 字段在订货合同里的出现顺序（与模板从上到下一致，前端「编辑字段」按这个顺序展示）。
 # 明细行 item*_* 插在订单头之后，由 ITEM_FIELDS 展开。
-HEAD_FIELDS = ("supplier_name", "dealer_name", "office_name", "signed_date")
+HEAD_FIELDS = ("dealer_name", "signed_date")
 TERMS_FIELDS = ("remark", "delivery_date", "settlement_terms")
 BUYER_FIELDS = ("buyer_name", "buyer_address", "contact_name", "contact_phone")
-OFFICE_FIELDS = ("office_branch", "office_contact", "office_phone")
 EXTRA_FIELDS = ("special_requirements",)
+
+# 已废弃栏位：合同不再印办事处信息、税票和供方（供方是固定值），历史草稿里的这些键
+# 在读档规整时丢弃，避免编辑弹窗出现无效字段。
+OBSOLETE_KEYS = frozenset({
+    "supplier_name", "contract_no", "signing_place", "total_upper", "accessories",
+})
+OBSOLETE_PATTERNS = (
+    re.compile(r'^office_(name|branch|contact|phone)$'),
+    re.compile(r'^item\d+_(tax|brand|price)$'),
+)
 
 # 只出现在「订货合同」旧字段集里的键，用来识别换模板之前生成的草稿
 LEGACY_FIELD_KEYS = frozenset({
@@ -160,7 +160,7 @@ def _sum_quantity(left: str, right: str) -> str:
 def _merge_item_rows(items: list[dict[str, Any]]) -> list[dict[str, str]]:
     """把同型号明细合并成一行、数量相加，并标出加高机型。
 
-    云端订单明细是按批次行下发的：同一型号可能拆成多行、每行 1 台，但订货单是合同附件，
+    云端订单明细是按批次行下发的：同一型号可能拆成多行、每行 1 台，但合同附件是正式合同，
     同一型号应当合成一行按数量叠加；加高机与普通机必须分开，所以合并键是「规格型号 + 是否加高」。
     没有规格型号的行不参与合并，原样保留，避免把不同设备误并成一行。
     """
@@ -173,14 +173,12 @@ def _merge_item_rows(items: list[dict[str, Any]]) -> list[dict[str, str]]:
             "product": _lookup(item, ITEM_ALIASES["product"]),
             "spec": spec,
             "qty": _lookup(item, ITEM_ALIASES["qty"]),
-            "tax": _lookup(item, ITEM_ALIASES["tax"]),
         }
         key = (spec, heightened)
         if spec and key in positions:
             existing = merged[positions[key]]
             existing["qty"] = _sum_quantity(existing["qty"], row["qty"])
             existing["product"] = existing["product"] or row["product"]
-            existing["tax"] = existing["tax"] or row["tax"]
             continue
         if spec:
             positions[key] = len(merged)
@@ -192,7 +190,7 @@ _ITEM_KEY = re.compile(r'item\d+_[A-Za-z]+')
 
 
 def _stored_item_rows(fields: dict[str, Any]) -> list[tuple[str, ...]]:
-    """按明细行号取出非空行（product/spec/qty/tax 四元组）。"""
+    """按明细行号取出非空行（product/spec/qty 三元组）。"""
     rows: list[tuple[str, ...]] = []
     for index in range(1, MAX_ITEM_ROWS + 1):
         values = tuple(str(fields.get(f"item{index}_{suffix}") or "").strip() for suffix in ITEM_FIELDS)
@@ -204,7 +202,7 @@ def _stored_item_rows(fields: dict[str, Any]) -> list[tuple[str, ...]]:
 def _spec_quantity_totals(rows: list[tuple[str, ...]]) -> dict[str, Decimal]:
     """按「基础型号」汇总数量，用来判断旧草稿的明细数量有没有被人工改过。"""
     totals: dict[str, Decimal] = {}
-    for product, spec, qty, _tax in rows:
+    for product, spec, qty in rows:
         key = _HEIGHTENED_MARK.sub("", spec).strip() or product
         try:
             amount = Decimal(qty)
@@ -214,8 +212,13 @@ def _spec_quantity_totals(rows: list[tuple[str, ...]]) -> dict[str, Decimal]:
     return totals
 
 
+def _is_obsolete(key: str) -> bool:
+    """旧模板遗留、当前订货合同不再打印的栏位。"""
+    return key in OBSOLETE_KEYS or any(pattern.match(key) for pattern in OBSOLETE_PATTERNS)
+
+
 def _canonical_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    """按订货单栏位顺序重排字段；旧字段集里多出来的键原样跟在后面。"""
+    """按订货合同栏位顺序重排字段；旧字段集里多出来的键原样跟在后面，废弃键丢弃。"""
     ordered: dict[str, Any] = {}
     for name in HEAD_FIELDS:
         ordered[name] = fields.get(name, "")
@@ -225,32 +228,31 @@ def _canonical_fields(fields: dict[str, Any]) -> dict[str, Any]:
             break
         for key in keys:
             ordered[key] = fields.get(key, "")
-    for name in TERMS_FIELDS + BUYER_FIELDS + OFFICE_FIELDS + EXTRA_FIELDS:
+    for name in TERMS_FIELDS + BUYER_FIELDS + EXTRA_FIELDS:
         ordered[name] = fields.get(name, "")
     for key, value in fields.items():
-        if key not in ordered:
+        if key not in ordered and not _is_obsolete(key):
             ordered[key] = value
     return ordered
 
 
 def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
-    """把云端经销商订单映射成「订货单」字段。
+    """把云端经销商订单映射成「瑞钧机械办事处订货合同」字段。
 
-    表单是纯表格：值单元格一个字段，标签是固定文字，所以这里只产出值，不拼标签。
-    值一律按订货单栏位顺序输出（订单头 → 明细行 → 备注条款 → 购货方信息 → 办事处信息 →
+    合同是纯表格：值单元格一个字段，标签是固定文字，所以这里只产出值，不拼标签。
+    值一律按订货合同栏位顺序输出（订单头 → 明细行 → 备注条款 → 购货方信息 →
     其他特殊要求），前端「编辑字段」按这个顺序展示。
     明细按「规格型号 + 是否加高」合并同型号的批次行，数量相加；加高机型在规格型号后标「（加高）」。
-    两个默认值：供方固定为苏州瑞钧；税票按业务惯例默认「含税」。
-    办事处信息是非必填项，云端没采集时留空，不阻断审批；其余字段缺值也留空，
-    由审批人补齐，不编造商业条款。
+    购货单位名称取客户名（customerName）；需方取大区经理，缺省时退回经销商名。
+    供方、牌号、单价说明、服务责任、其它约定、供方签署栏是纸质合同的固定值，写在模板里，
+    这里不产出；其余字段缺值留空，由审批人补齐，不编造商业条款。
     """
     raw_items = order.get("items") if isinstance(order.get("items"), list) else [order]
     items = _merge_item_rows([item for item in raw_items if isinstance(item, dict)] or [order])
     fields: dict[str, str] = {}
     for name in HEAD_FIELDS:
         fields[name] = _lookup(order, FIELD_ALIASES[name])
-    fields["supplier_name"] = fields["supplier_name"] or DEFAULT_SUPPLIER
-    # 自动生成的订货单附件（合同附件）中「需方」必须是大区经理，而不是经销商公司名。
+    # 自动生成的合同附件中「需方」必须是大区经理，而不是经销商公司名。
     regional_manager = _lookup(order, ("regionalManagerName", "regional_manager_name", "regionalManager", "regional_manager"))
     if regional_manager:
         fields["dealer_name"] = regional_manager
@@ -264,10 +266,8 @@ def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
             f"item{index}_product": item["product"] or (DEFAULT_PRODUCT if item["spec"] else ""),
             f"item{index}_spec": item["spec"],
             f"item{index}_qty": item["qty"],
-            # 税票默认含税；云端传了「不含税」等值才覆盖
-            f"item{index}_tax": item["tax"] or DEFAULT_TAX,
         })
-    for name in TERMS_FIELDS + BUYER_FIELDS + OFFICE_FIELDS + EXTRA_FIELDS:
+    for name in TERMS_FIELDS + BUYER_FIELDS + EXTRA_FIELDS:
         fields[name] = _lookup(order, FIELD_ALIASES[name])
     return fields
 
@@ -298,7 +298,7 @@ def ensure_table() -> None:
             conn.execute(text("ALTER TABLE v8_contract_drafts ADD COLUMN reviewed_at DATETIME NULL"))
 
 def _enrich_regional_manager(order_no: str, snapshot: dict[str, Any]) -> dict[str, Any]:
-    """云端快照没有大区经理时，用本地订单行补上，保证订货单附件「需方」不为空。"""
+    """云端快照没有大区经理时，用本地订单行补上，保证合同附件「需方」不为空。"""
     enriched = dict(snapshot) if isinstance(snapshot, dict) else {}
     if _lookup(enriched, ("regionalManagerName", "regional_manager_name")):
         return enriched
@@ -347,12 +347,12 @@ def create_from_order(order: dict[str, Any]) -> dict[str, Any] | None:
     return {**created, "_created": True} if created else None
 
 def _upgrade_legacy_fields(fields: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
-    """把换模板之前生成的草稿字段升级成订货单字段集。
+    """把换模板之前生成的草稿字段升级成当前订货合同字段集。
 
-    旧草稿存的是「订货合同」的键（contract_no / signing_place / item1_price…），
-    新模板要的 dealer_name / office_* / item*_tax 根本不存在，直接渲染整张表单会空白。
-    这里按当时的订单快照重算一遍：以新字段集为底，旧值里非空的覆盖上去，
-    既补全缺失项，也不会冲掉审批人改过的内容。
+    旧草稿存的是旧版订货单的键（contract_no / signing_place / item1_price…），
+    现在订货合同模板要的 dealer_name / buyer_name / item*_spec 等字段可能缺失，
+    直接渲染整张合同会空白。这里按当时的订单快照重算一遍：以新字段集为底，
+    旧值里非空的覆盖上去，既补全缺失项，也不会冲掉审批人改过的内容。
     """
     if not isinstance(snapshot, dict) or not snapshot:
         return fields
@@ -369,23 +369,20 @@ def _normalize_stored_fields(fields: dict[str, Any],
                              snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """把存量草稿的字段规整成当前映射的取值约定。
 
-    - 税票默认含税、签订时间转中文日期：这两项只存在于映射逻辑里，云端订单快照不会因此
-      变化、也就不会生成新版本草稿；不补的话，改动之前生成、还在待审的草稿会一直空着。
+    - 签订时间转中文日期；这一项只存在于映射逻辑里，云端订单快照不会因此变化、
+      也就不会生成新版本草稿；不补的话，改动之前生成、还在待审的草稿会一直空着。
     - 明细合并：旧草稿按云端批次行逐行存（同型号拆成多行、每行 1 台），数量口径没被人工
       改过时按当前「型号 + 加高」合并规则重排，加高机型顺带补上「（加高）」标记；
       一旦人工改过数量/型号（按型号汇总的数量对不上快照）就保持原样，不覆盖审批人的修改。
-    - 办事处联系人：旧草稿里可能是早年用所属大区经理兜底填进去的，云端补出真值前先清掉，
-      避免把大区经理当成办事处对接人印到合同上。
-    - 最后按订货单栏位顺序重排，前端「编辑字段」直接按这个顺序展示。
+    - 废弃栏位：办事处信息、税票、供方与旧版订货单的键在合同上已经不再打印，读取时丢弃，
+      避免编辑弹窗出现无效字段。
+    - 最后按订货合同栏位顺序重排，前端「编辑字段」直接按这个顺序展示。
     """
+    for key in [name for name in fields if _is_obsolete(name)]:
+        fields.pop(key)
     signed_date = str(fields.get("signed_date") or "").strip()
     if signed_date:
         fields["signed_date"] = _format_signed_date(signed_date)
-    for index in range(1, MAX_ITEM_ROWS + 1):
-        has_content = (str(fields.get(f"item{index}_product") or "").strip()
-                       or str(fields.get(f"item{index}_spec") or "").strip())
-        if has_content and not str(fields.get(f"item{index}_tax") or "").strip():
-            fields[f"item{index}_tax"] = DEFAULT_TAX
     if isinstance(snapshot, dict) and snapshot:
         regional_manager = _lookup(snapshot, ("regionalManagerName", "regional_manager_name"))
         # 旧草稿的「需方」存的是经销商名，升级成当前规则的大区经理；审批人手工改过的保留。
@@ -393,9 +390,6 @@ def _normalize_stored_fields(fields: dict[str, Any],
         current_dealer = str(fields.get("dealer_name") or "").strip()
         if regional_manager and (not current_dealer or current_dealer == stored_dealer):
             fields["dealer_name"] = regional_manager
-        if (regional_manager and not _lookup(snapshot, FIELD_ALIASES["office_contact"])
-                and str(fields.get("office_contact") or "").strip() == regional_manager):
-            fields["office_contact"] = ""
         stored_rows = _stored_item_rows(fields)
         derived = map_order_to_contract(snapshot)
         derived_rows = _stored_item_rows(derived)

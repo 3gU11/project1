@@ -6,7 +6,7 @@ import hashlib
 import re
 
 TEMPLATE = Path(__file__).parent / 'templates' / 'dealer-contract-v1.docx'
-ORDER_FORM_TEMPLATE = Path(__file__).parent / 'templates' / 'dealer-order-form-v1.docx'
+ORDER_FORM_TEMPLATE = Path(__file__).parent / 'templates' / 'dealer-order-form-v2.docx'
 NS = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
 W = '{' + NS['w'] + '}'
 
@@ -22,7 +22,7 @@ def _text_of(node) -> str:
 def _expand_item_rows(root, fields: dict[str, str]) -> None:
     """明细行不够时复制模板里的最后一行，让预览和合同附件自动加行。
 
-    订货单模板固定 4 行明细；订单机型超过 4 种时，多出来的行按模板行整行复制
+    订货合同模板固定 4 行明细；订单机型超过 4 种时，多出来的行按模板行整行复制
     （边框、行高、列宽都跟着走），再把占位符里的行号换掉。
     """
     template_row, template_index = None, 0
@@ -61,7 +61,7 @@ def _repack(package: ZipFile, root, output: BytesIO) -> bytes:
 
 
 def render_order_form(fields: dict[str, str], template: Path = ORDER_FORM_TEMPLATE) -> tuple[bytes, str]:
-    """Fill the 订货单 form by replacing {{field}} placeholders.
+    """Fill the 订货合同 form by replacing {{field}} placeholders.
 
     The form is a pure table: every value lives in its own cell and the labels are
     fixed text, so we replace placeholders in place instead of rebuilding whole
