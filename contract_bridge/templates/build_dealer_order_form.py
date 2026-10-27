@@ -4,12 +4,12 @@
 版式不再单独排版，而是直接沿用正式合同模板 dealer-contract-v1.docx（同为 A4 纵向、
 同一套表线与栏位），保证系统自动生成的合同附件与纸质合同一致：
 
-- 红框固定值写死在模板里：供方名称、单价列「（底价）」（表头）与「含税」（第 1 行）、
-  服务责任、其它约定事项、供方签署栏（单位名称、开户银行、帐号、电话、传真）；
-  牌号固定「瑞钧」、计量单位固定「台」。
+- 红框固定值写死在模板里：供方名称、单价表头「（底价）」、服务责任、其它约定事项、
+  供方签署栏（单位名称、开户银行、帐号、电话、传真）；牌号固定「瑞钧」、计量单位固定「台」。
 - 可变栏位换成 {{字段}} 占位符，由 contract_bridge.renderer.render_order_form 替换：
-  需方、签订时间、明细（产品名称/规格型号/数量）、交货时间、结算方式、
+  需方、签订时间、明细（产品名称/规格型号/数量/单价）、交货时间、结算方式、
   购货单位名称（客户名）、地址、联系人、联系方式、其他特殊要求、备注。
+  明细单价列默认「含税」，由映射按行填（没有机型的行留空）。
 - 合同编号、签订地点、合计人民币金额（大写）、需方签署栏、随机配件留空，打印后手填。
 
 明细固定 4 行；订单型号超过 4 种时由 renderer._expand_item_rows 复制最后一行自动加行。
@@ -30,8 +30,6 @@ DEFAULT_OUTPUT = Path(__file__).with_name("dealer-order-form-v2.docx")
 FIXED_SUPPLIER = "昆山瑞钧机械科技有限公司"
 FIXED_BRAND = "瑞钧"
 FIXED_UNIT = "台"
-# 单价列：表头自带「单价 /（底价）」，第 1 行固定「含税」，其余明细行留空
-FIXED_PRICE_LABELS = {1: "含税"}
 FIXED_SUPPLIER_SIGNATURE = {
     "单位名称": f"单位名称：{FIXED_SUPPLIER}",
     "开户银行": "开户银行：中国工商银行昆山北门分理处",
@@ -116,7 +114,7 @@ def build(target: Path = DEFAULT_OUTPUT, placeholders: bool = True) -> Path:
             _set_paragraph_text(paragraph, text)
             break
 
-    # 2) 明细表：产品名称/规格型号/数量放占位符，牌号、单位、单价按纸质合同固定
+    # 2) 明细表：产品名称/规格型号/数量/单价放占位符，牌号、计量单位按纸质合同固定
     item_table = doc.tables[0]
     for index in range(1, 5):
         row_cells = item_table.rows[index].cells
@@ -125,7 +123,7 @@ def build(target: Path = DEFAULT_OUTPUT, placeholders: bool = True) -> Path:
         _set_cell_text(row_cells[2], _placeholder(f"item{index}_spec", placeholders))
         _set_cell_text(row_cells[3], FIXED_UNIT)
         _set_cell_text(row_cells[4], _placeholder(f"item{index}_qty", placeholders))
-        _set_cell_text(row_cells[5], FIXED_PRICE_LABELS.get(index, ""))
+        _set_cell_text(row_cells[5], _placeholder(f"item{index}_price", placeholders))
 
     # 3) 购货方详细资料表
     buyer_table = doc.tables[1]
