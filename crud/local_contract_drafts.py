@@ -11,6 +11,8 @@ from contract_bridge.renderer import render_order_form
 # 「瑞钧机械办事处订货合同」必填项：这三项都能从订单直接推导，缺了说明订单数据本身有问题
 REQUIRED = ("dealer_name", "signed_date", "buyer_name")
 DEFAULT_PRODUCT = "线切割机床"
+# 旧版默认产品名：旧草稿里存的是这个值时，读取时刷新成当前默认名
+LEGACY_PRODUCT_NAMES = frozenset({"瑞钧中走丝线切割"})
 # 单价的默认说明：只要该行有机型就默认「含税」，云端明确传了别的说明才覆盖
 DEFAULT_PRICE_NOTE = "含税"
 ITEM_FIELDS = ("product", "spec", "qty", "price")
@@ -395,6 +397,35 @@ def _upgrade_legacy_fields(fields: dict[str, Any], snapshot: dict[str, Any]) -> 
     return upgraded
 
 
+def _backfill_current_fields(fields: dict[str, Any], derived: dict[str, str]) -> None:
+    """旧草稿缺当前字段集里的新栏位时，按订单快照补齐。
+
+    典型场景：单价列（item*_price）是后加的，之前生成的草稿没有这个键，
+    新版模板会把它渲染成空白，看起来像「含税」丢了；旧默认产品名也要刷新成当前默认值。
+    只补缺失的键和空的单价，不覆盖审批人已经填过的其他内容；已归档草稿不走这里。
+    """
+    for name in HEAD_FIELDS + TERMS_FIELDS + BUYER_FIELDS + EXTRA_FIELDS:
+        if name not in fields and str(derived.get(name) or "").strip():
+            fields[name] = derived[name]
+    for index in range(1, MAX_ITEM_ROWS + 1):
+        keys = [f"item{index}_{suffix}" for suffix in ITEM_FIELDS]
+        if not any(key in fields for key in keys) and not any(
+                str(derived.get(key) or "").strip() for key in keys):
+            break
+        for key in keys:
+            if key not in fields and str(derived.get(key) or "").strip():
+                fields[key] = derived[key]
+        spec = str(fields.get(f"item{index}_spec") or "").strip()
+        product_key = f"item{index}_product"
+        price_key = f"item{index}_price"
+        # 旧草稿的默认产品名刷新成「线切割机床」
+        if spec and str(fields.get(product_key) or "").strip() in LEGACY_PRODUCT_NAMES:
+            fields[product_key] = derived.get(product_key) or DEFAULT_PRODUCT
+        # 新加的单价列：有机型、单价还空着时补默认「含税」
+        if spec and not str(fields.get(price_key) or "").strip():
+            fields[price_key] = derived.get(price_key) or DEFAULT_PRICE_NOTE
+
+
 def _normalize_stored_fields(fields: dict[str, Any],
                              snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
     """把存量草稿的字段规整成当前映射的取值约定。
@@ -406,6 +437,7 @@ def _normalize_stored_fields(fields: dict[str, Any],
       一旦人工改过数量/型号（按型号汇总的数量对不上快照）就保持原样，不覆盖审批人的修改。
     - 废弃栏位：办事处信息、税票、供方与旧版订货单的键在合同上已经不再打印，读取时丢弃，
       避免编辑弹窗出现无效字段。
+    - 新栏位补齐：后加的单价列、新的默认产品名按订单快照补进旧草稿，避免新模板渲染成空白。
     - 最后按订货合同栏位顺序重排，前端「编辑字段」直接按这个顺序展示。
     """
     for key in [name for name in fields if _is_obsolete(name)]:
@@ -431,6 +463,7 @@ def _normalize_stored_fields(fields: dict[str, Any],
             for key, value in derived.items():
                 if _ITEM_KEY.fullmatch(key):
                     fields[key] = value
+        _backfill_current_fields(fields, derived)
     return _canonical_fields(fields)
 
 

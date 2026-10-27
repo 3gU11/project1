@@ -191,6 +191,29 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('submitted', healed['state'])
         self.assertIsNone(healed['preview_hash'])
 
+    def test_old_draft_without_price_field_gets_tax_note_backfilled(self):
+        """单价列是后加的：改造前生成的草稿没有 item*_price，读取时要补「含税」并刷新默认产品名。"""
+        row = drafts.create_from_order({
+            'orderNo': 'ORD-OLDPRICE', 'customerName': '客户甲', 'dealerName': '经销商甲',
+            'signedDate': '2026-10-26',
+            'items': [{'model': 'FR-400XS(PRO)', 'quantity': 1}],
+        })
+        old_fields = {k: v for k, v in row['fields'].items() if not k.endswith('_price')}
+        old_fields['item1_product'] = '瑞钧中走丝线切割'
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f, state='preview_ready', "
+                              "preview_hash=:hash WHERE id=:id"),
+                         {'f': json.dumps(old_fields, ensure_ascii=False), 'hash': 'c' * 64, 'id': row['id']})
+
+        healed = drafts.get(row['id'])
+        # 有机型的行补上默认「含税」，旧默认产品名刷新成「线切割机床」
+        self.assertEqual('含税', healed['fields']['item1_price'])
+        self.assertEqual('线切割机床', healed['fields']['item1_product'])
+        self.assertEqual('', healed['fields']['item2_price'])
+        # 字段变化后旧预览作废，需要重新生成
+        self.assertEqual('submitted', healed['state'])
+        self.assertIsNone(healed['preview_hash'])
+
     def test_signed_date_is_formatted_like_paper_form(self):
         """签订时间按纸质单写成中文日期；已是中文日期或自由文本则原样保留。"""
         iso = drafts.map_order_to_contract({
