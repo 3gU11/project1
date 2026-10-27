@@ -38,18 +38,15 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('设备A', fields['item1_product'])
         self.assertEqual('A-1', fields['item1_spec'])
         self.assertEqual('2', fields['item1_qty'])
-        # 供方是固定值，不依赖订单
-        self.assertEqual(drafts.DEFAULT_SUPPLIER, fields['supplier_name'])
         # 订单没有采集的商业条款留空，等审批人补，不能编造
         self.assertEqual('', fields['settlement_terms'])
-        # 税票按业务惯例默认含税
-        self.assertEqual(drafts.DEFAULT_TAX, fields['item1_tax'])
-        self.assertEqual('', fields['office_branch'])
+        # 供方、税票、办事处信息已改由模板固定或不再打印，字段集里不存在
+        for removed in ('supplier_name', 'office_name', 'office_branch', 'office_contact',
+                        'office_phone', 'item1_tax'):
+            self.assertNotIn(removed, fields)
         # 产品名称也只跟订单走，订单没给就留空
         self.assertEqual('', fields['item2_product'])
         self.assertEqual('', fields['item2_spec'])
-        # 模板里空着的明细行不写死含税，保持空白由审批人处理
-        self.assertEqual('', fields['item2_tax'])
 
     def test_buyer_falls_back_to_local_order_regional_manager_when_snapshot_misses_it(self):
         """云端快照缺大区经理时，用本地已同步订单行的 regional_manager_name 兜底。"""
@@ -106,17 +103,6 @@ class LocalContractDraftTests(unittest.TestCase):
         healed = drafts.get(row['id'])
         self.assertEqual('审批人手工填的需方', healed['fields']['dealer_name'])
 
-    def test_tax_defaults_to_tax_included_unless_cloud_says_otherwise(self):
-        """税票默认含税：云端没采集也要出「含税」，明确传了才覆盖。"""
-        fields = drafts.map_order_to_contract({
-            'orderNo': 'ORD-TAX', 'customerName': '客户甲',
-            'items': [{'productCode': 'A-1', 'quantity': 1},
-                      {'productCode': 'A-2', 'quantity': 1, 'taxIncluded': '不含税'}],
-        })
-        self.assertEqual(drafts.DEFAULT_TAX, fields['item1_tax'])
-        self.assertEqual('不含税', fields['item2_tax'])
-        self.assertEqual('', fields['item3_tax'])
-
     def test_delivery_and_settlement_follow_cloud_form_labels(self):
         """云端表单的「期望交期」「结算方式及期限」要能带出到对应栏位。"""
         fields = drafts.map_order_to_contract({
@@ -144,53 +130,42 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('宁波舒勒精密机械有限公司', fields['buyer_name'])
         self.assertEqual('余姚模具城', fields['buyer_address'])
 
-    def test_office_info_is_optional_and_sourced_from_cloud(self):
-        """办事处信息非必填：云端没给就留空且不算缺失；给了就带到办事处信息区块。"""
-        blank = drafts.map_order_to_contract({'orderNo': 'ORD-O1', 'customerName': '客户甲'})
-        for key in ('office_name', 'office_branch', 'office_contact', 'office_phone'):
-            self.assertEqual('', blank[key])
-        self.assertFalse({'office_name', 'office_branch', 'office_contact', 'office_phone'}
-                         & set(drafts.missing_required(blank)))
-        filled = drafts.map_order_to_contract({
-            'orderNo': 'ORD-O2', 'customerName': '客户甲',
+    def test_office_and_tax_fields_are_not_mapped_any_more(self):
+        """办事处信息、税票不再进合同：云端就算传了也不落到字段、不算缺失项。"""
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-O1', 'customerName': '客户甲',
             'officeName': '浙江办', 'officeBranch': '余姚办',
             'officeContact': '俞文涛', 'officePhone': '13003767856',
+            'items': [{'productCode': 'A-1', 'quantity': 1, 'taxIncluded': '不含税'}],
         })
-        self.assertEqual('浙江办', filled['office_name'])
-        self.assertEqual('余姚办', filled['office_branch'])
-        self.assertEqual('俞文涛', filled['office_contact'])
-        self.assertEqual('13003767856', filled['office_phone'])
+        for key in ('office_name', 'office_branch', 'office_contact', 'office_phone', 'item1_tax'):
+            self.assertNotIn(key, fields)
+        self.assertFalse({'office_name', 'office_branch', 'office_contact', 'office_phone'}
+                         & set(drafts.missing_required(fields)))
 
-    def test_office_contact_is_not_backfilled_from_regional_manager(self):
-        """办事处联系人只认云端 officeContact；大区经理不再兜底成办事处联系人。"""
-        fields = drafts.map_order_to_contract({
-            'orderNo': 'ORD-O3', 'customerName': '客户甲',
-            'regionalManagerName': '朱宸',
-        })
-        self.assertEqual('', fields['office_contact'])
-        self.assertEqual('', fields['office_branch'])
-        self.assertEqual('', fields['office_phone'])
-        # 云端真给了办事处联系人时照常带出
-        with_contact = drafts.map_order_to_contract({
-            'orderNo': 'ORD-O4', 'customerName': '客户甲',
-            'regionalManagerName': '朱宸', 'officeContact': '俞文涛',
-        })
-        self.assertEqual('俞文涛', with_contact['office_contact'])
-
-    def test_stored_office_contact_filled_by_old_fallback_is_cleared(self):
-        """旧草稿里用大区经理兜底填的办事处联系人，读取时清掉，等云端补真值。"""
+    def test_obsolete_fields_are_dropped_and_preview_is_invalidated(self):
+        """旧草稿里的办事处/税票/供方等废弃键读取时丢弃，旧预览随之作废。"""
         row = drafts.create_from_order({
             'orderNo': 'ORD-O5', 'customerName': '客户甲', 'dealerName': '经销商甲',
             'signedDate': '2026-10-24', 'regionalManagerName': '朱宸',
             'items': [{'model': 'FH-300C', 'quantity': 1}],
         })
-        legacy = dict(row['fields'], office_contact='朱宸')
+        legacy = dict(row['fields'], office_name='浙江办', office_branch='余姚办',
+                      office_contact='朱宸', office_phone='13003767856',
+                      supplier_name='苏州瑞钧智能科技有限公司', item1_tax='含税',
+                      item1_price='50000', item1_brand='瑞钧', contract_no='HT-1')
         with self.engine.begin() as conn:
-            conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
-                         {'f': json.dumps(legacy, ensure_ascii=False), 'id': row['id']})
+            conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f, state='preview_ready', "
+                              "preview_hash=:hash WHERE id=:id"),
+                         {'f': json.dumps(legacy, ensure_ascii=False), 'hash': 'b' * 64, 'id': row['id']})
 
         healed = drafts.get(row['id'])
-        self.assertEqual('', healed['fields']['office_contact'])
+        for key in ('office_name', 'office_branch', 'office_contact', 'office_phone',
+                    'supplier_name', 'item1_tax', 'item1_price', 'item1_brand', 'contract_no'):
+            self.assertNotIn(key, healed['fields'])
+        # 字段口径变了，旧预览不能继续拿去审批
+        self.assertEqual('submitted', healed['state'])
+        self.assertIsNone(healed['preview_hash'])
 
     def test_signed_date_is_formatted_like_paper_form(self):
         """签订时间按纸质单写成中文日期；已是中文日期或自由文本则原样保留。"""
@@ -230,16 +205,27 @@ class LocalContractDraftTests(unittest.TestCase):
         blob, _ = render_order_form(drafts.map_order_to_contract(order))
         text = document_text(blob)
         self.assertNotIn('{{', text)
+        # 纸质合同固定内容（红框值）直接印在成品上
         for expected in (
-            '苏州瑞钧智能科技有限公司', '陈利春', '浙江办', '2026 年 10 月 23 日',
-            'FR-500XS(PRO)', 'FR-7055XS(PRO)', '含税', '标配',
-            '2026 年 11 月（具体等客户通知）', '预付定金肆万元，安装调试合格付清',
-            '宁波舒勒精密机械有限公司', '余姚模具城', '吴元国', '13905844257',
-            '余姚办', '俞文涛', '13003767856', '收货信息直接写办事处信息',
+            '瑞钧机械办事处订货合同', '昆山瑞钧机械科技有限公司',
+            '（底价）', '含税', '需方负责安装调试、培训及售后服务',
+            '机械精度、电气部分保修一年',
+            '中国工商银行昆山北门分理处', '1102 2320 0900 0027 757',
+            '0512-57175508', '0512-57175608',
         ):
             self.assertIn(expected, text)
-        # 两行明细各写一次含税，空明细行不写
-        self.assertEqual(2, text.count('含税'))
+        # 可变栏位按订单快照填充
+        for expected in (
+            '陈利春', '2026 年 10 月 23 日',
+            'FR-500XS(PRO)', 'FR-7055XS(PRO)', '标配',
+            '2026 年 11 月（具体等客户通知）', '预付定金肆万元，安装调试合格付清',
+            '宁波舒勒精密机械有限公司', '余姚模具城', '吴元国', '13905844257',
+            '收货信息直接写办事处信息',
+        ):
+            self.assertIn(expected, text)
+        # 办事处信息不再印到合同上
+        for removed in ('浙江办', '余姚办', '俞文涛', '13003767856', '苏州瑞钧智能科技有限公司'):
+            self.assertNotIn(removed, text)
 
     def test_same_model_batch_lines_are_merged_with_summed_quantity(self):
         """云端按批次行下发同型号时，订货单合并成一行、数量相加。"""
@@ -293,7 +279,8 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertNotIn('{{', text)
         self.assertIn('FR-400XS(PRO)（加高）', text)
         self.assertEqual(4, text.count('瑞钧中走丝线切割'))
-        self.assertEqual(4, text.count('含税'))
+        # 单价说明是模板固定文字，只印一次
+        self.assertEqual(1, text.count('（底价）'))
 
     def test_stale_preview_is_regenerated_after_mapping_upgrade(self):
         """映射规则升级后旧预览要作废，重新生成时按合并/加高规则渲染。"""
@@ -305,7 +292,7 @@ class LocalContractDraftTests(unittest.TestCase):
         ]
         row = drafts.create_from_order({'orderNo': 'ORD-M4', 'dealerName': '经销商甲',
                                         'customerName': '客户甲', 'items': items})
-        # 模拟改动前生成的草稿：按批次行逐行存 4 行、税票为空
+        # 模拟改动前生成的草稿：按批次行逐行存 4 行
         legacy = dict(row['fields'])
         old_rows = [('FH-300C', '1'), ('FH-300C', '1'), ('FR-400XS(PRO)', '1'), ('FR-400XS(PRO)', '1')]
         for index in range(1, 5):
@@ -345,8 +332,8 @@ class LocalContractDraftTests(unittest.TestCase):
                                         'customerName': '客户甲', 'items': items})
         edited = dict(row['fields'])
         edited.update({
-            'item1_product': '瑞钧中走丝线切割', 'item1_spec': 'FH-300C', 'item1_qty': '5', 'item1_tax': '',
-            'item2_product': '瑞钧中走丝线切割', 'item2_spec': 'FH-300C', 'item2_qty': '1', 'item2_tax': '',
+            'item1_product': '瑞钧中走丝线切割', 'item1_spec': 'FH-300C', 'item1_qty': '5',
+            'item2_product': '瑞钧中走丝线切割', 'item2_spec': 'FH-300C', 'item2_qty': '1',
         })
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
@@ -388,7 +375,7 @@ class LocalContractDraftTests(unittest.TestCase):
         })
         approved = drafts.prepare(row['id'])
         drafts.review(approved['id'], approved['preview_hash'], 'approved', 'boss', '核对无误')
-        # 模拟老口径字段：税票为空、明细逐行存（未合并）
+        # 模拟老口径字段（含已废弃键）：已归档草稿不做规整，展示口径与归档时一致
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
                          {'f': json.dumps(dict(row['fields'], item1_tax=''), ensure_ascii=False),
@@ -397,7 +384,6 @@ class LocalContractDraftTests(unittest.TestCase):
         kept = drafts.get(row['id'])
         self.assertEqual('approved', kept['state'])
         self.assertTrue(kept['preview_hash'])
-        # 已归档草稿不再按新规则补默认值，展示口径与归档时一致
         self.assertEqual('', kept['fields']['item1_tax'])
 
     def test_duplicate_source_form_is_idempotent_and_changed_form_creates_new_draft(self):
@@ -424,7 +410,7 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertNotEqual(updated['preview_hash'], preview['preview_hash'])
 
     def test_render_fills_every_placeholder(self):
-        """订货单模板里的 {{占位符}} 必须全部替换掉，不能漏到成品里。"""
+        """订货合同模板里的 {{占位符}} 必须全部替换掉，不能漏到成品里。"""
         from contract_bridge.renderer import render_order_form
 
         order = {
@@ -441,7 +427,7 @@ class LocalContractDraftTests(unittest.TestCase):
         text = document_text(blob)
         self.assertNotIn('{{', text)
         self.assertEqual(64, len(template_hash))
-        for expected in ('苏州瑞钧智能科技有限公司', '陈利春', '宁波舒勒精密机械有限公司',
+        for expected in ('昆山瑞钧机械科技有限公司', '陈利春', '宁波舒勒精密机械有限公司',
                          'FR-500XS(PRO)', '余姚模具城', '标配'):
             self.assertIn(expected, text)
 
@@ -487,34 +473,32 @@ class LocalContractDraftTests(unittest.TestCase):
         healed = drafts.get(row['id'])
         fields = healed['fields']
         # 旧字段集没有的键被补上
-        self.assertEqual(drafts.DEFAULT_SUPPLIER, fields['supplier_name'])
         self.assertEqual('陈利春', fields['dealer_name'])
-        self.assertIn('office_branch', fields)
-        self.assertIn('item1_tax', fields)
-        # 旧键清掉，编辑弹窗不再出现无效项
-        self.assertNotIn('contract_no', fields)
-        self.assertNotIn('item1_price', fields)
+        self.assertEqual('青岛铭青', fields['buyer_name'])
+        self.assertEqual('FR-400XS(PRO)', fields['item1_spec'])
+        # 旧键与废弃键清掉，编辑弹窗不再出现无效项
+        for removed in ('supplier_name', 'contract_no', 'item1_price', 'item1_brand',
+                        'office_branch', 'item1_tax'):
+            self.assertNotIn(removed, fields)
         # 旧值里的 5.000 也顺手规整成 5
         self.assertEqual('5', fields['item1_qty'])
         # 缺失清单按新字段集算，需方不再算缺失
         self.assertNotIn('dealer_name', healed['missing_fields'])
         self.assertIn('signed_date', healed['missing_fields'])
 
-    def test_existing_drafts_get_tax_default_backfilled(self):
-        """改动前生成的草稿：税票补默认含税、签订时间转中文日期，空明细行保持空白。"""
+    def test_existing_drafts_get_signed_date_normalized(self):
+        """改动前生成的草稿：签订时间转中文日期，旧预览作废等待重新生成。"""
         row = drafts.create_from_order({
             'orderNo': 'ORD-BF', 'dealerName': '经销商甲', 'customerName': '客户甲',
             'createdAt': '2026-10-24 14:22:34',
             'items': [{'productCode': 'A-1', 'quantity': 1}],
         })
-        stored = dict(row['fields'], item1_tax='', signed_date='2026-10-24 14:22:34')
+        stored = dict(row['fields'], signed_date='2026-10-24 14:22:34')
         with self.engine.begin() as conn:
             conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
                          {'f': json.dumps(stored, ensure_ascii=False), 'id': row['id']})
 
         healed = drafts.get(row['id'])
-        self.assertEqual(drafts.DEFAULT_TAX, healed['fields']['item1_tax'])
-        self.assertEqual('', healed['fields']['item3_tax'])
         self.assertEqual('2026 年 10 月 24 日', healed['fields']['signed_date'])
         self.assertEqual('submitted', healed['state'])
 
@@ -524,7 +508,8 @@ class LocalContractDraftTests(unittest.TestCase):
         updated = drafts.update(row['id'], dict(row['fields'], dealer_name='人工改过'))
         healed = drafts.get(row['id'])
         self.assertEqual('人工改过', healed['fields']['dealer_name'])
-        self.assertEqual(updated['fields']['supplier_name'], healed['fields']['supplier_name'])
+        self.assertEqual(updated['fields']['buyer_name'], healed['fields']['buyer_name'])
+        self.assertEqual(updated['fields']['item1_qty'], healed['fields']['item1_qty'])
 
     def test_product_name_defaults_only_when_model_present(self):
         fields = drafts.map_order_to_contract({
@@ -537,17 +522,17 @@ class LocalContractDraftTests(unittest.TestCase):
     def test_chinese_and_alternative_field_names_are_recognized(self):
         fields = drafts.map_order_to_contract({
             'orderNo': 'ORD-10', '经销商': '陈利春', '购货单位': '青岛铭青',
-            '结算方式': '月结 30 天', '交货时间': '2026 年 11 月', '所属办事处': '浙江办',
-            'items': [{'规格型号': 'FR-400XS(PRO)', '数量': 5, '税票': '含税'}],
+            '结算方式': '月结 30 天', '交货时间': '2026 年 11 月',
+            'items': [{'规格型号': 'FR-400XS(PRO)', '数量': 5}],
         })
         self.assertEqual('陈利春', fields['dealer_name'])
         self.assertEqual('青岛铭青', fields['buyer_name'])
         self.assertEqual('月结 30 天', fields['settlement_terms'])
         self.assertEqual('2026 年 11 月', fields['delivery_date'])
-        self.assertEqual('浙江办', fields['office_name'])
         self.assertEqual('FR-400XS(PRO)', fields['item1_spec'])
         self.assertEqual('5', fields['item1_qty'])
-        self.assertEqual('含税', fields['item1_tax'])
+        # 办事处信息已经不在合同字段集里，中文别名也不会再带出
+        self.assertNotIn('office_name', fields)
 
     def test_extra_item_rows_are_added_when_order_has_more_models(self):
         from contract_bridge.renderer import render_order_form
