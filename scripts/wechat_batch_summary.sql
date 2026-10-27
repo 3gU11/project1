@@ -64,7 +64,7 @@ BEGIN
 
   SET v_batch_no = NULLIF(TRIM(COALESCE(p_batch_no, '')), '');
   SET v_model = NULLIF(TRIM(COALESCE(p_model, '')), '');
-  SET v_model_base = NULLIF(TRIM(REPLACE(REPLACE(COALESCE(v_model, ''), '(加高)', ''), '加高', '')), '');
+  SET v_model_base = v_model;
 
   DELETE FROM `wechat_batch_summary`
   WHERE (
@@ -131,18 +131,22 @@ BEGIN
         SELECT
           TRIM(`批次号`) AS `source_batch_no`,
           `预计入库时间` AS `source_expected_inbound_time`,
-          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+          TRIM(`机型`) AS `base_model`,
           (
-            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
             OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
           ) AS `is_high`
         FROM `finished_goods_data`
+        INNER JOIN (
+          SELECT DISTINCT TRIM(`model_name`) AS `model_name`
+          FROM `model_dictionary`
+          WHERE `enabled` = 1
+        ) md ON md.`model_name` = TRIM(`机型`)
         WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') = v_batch_no
           AND `预计入库时间` <=> p_expected
-          AND TRIM(REPLACE(REPLACE(TRIM(COALESCE(`机型`, '')), '(加高)', ''), '加高', '')) = v_model_base
+          AND TRIM(COALESCE(`机型`, '')) = v_model_base
           AND TRIM(COALESCE(`状态`, '')) = '待入库'
       ) raw
       WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
@@ -200,16 +204,20 @@ BEGIN
       FROM (
         SELECT
           TRIM(COALESCE(`批次号`, '')) AS `source_batch_no`,
-          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+          TRIM(`机型`) AS `base_model`,
           (
-            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
             OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
           ) AS `is_high`
         FROM `finished_goods_data`
-        WHERE TRIM(REPLACE(REPLACE(TRIM(COALESCE(`机型`, '')), '(加高)', ''), '加高', '')) = v_model_base
+        INNER JOIN (
+          SELECT DISTINCT TRIM(`model_name`) AS `model_name`
+          FROM `model_dictionary`
+          WHERE `enabled` = 1
+        ) md ON md.`model_name` = TRIM(`机型`)
+        WHERE TRIM(COALESCE(`机型`, '')) = v_model_base
           AND TRIM(COALESCE(`状态`, '')) LIKE '库存中%'
       ) raw
       WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
@@ -272,15 +280,19 @@ BEGIN
       SELECT
         TRIM(`批次号`) AS `source_batch_no`,
         `预计入库时间` AS `source_expected_inbound_time`,
-        TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+        TRIM(`机型`) AS `base_model`,
         (
-          TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-          OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+          TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
           OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
         ) AS `is_high`
       FROM `finished_goods_data`
+        INNER JOIN (
+          SELECT DISTINCT TRIM(`model_name`) AS `model_name`
+          FROM `model_dictionary`
+          WHERE `enabled` = 1
+        ) md ON md.`model_name` = TRIM(`机型`)
       WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
         AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
         AND TRIM(COALESCE(`状态`, '')) = '待入库'
@@ -299,15 +311,19 @@ BEGIN
     FROM (
       SELECT
         TRIM(COALESCE(`批次号`, '')) AS `source_batch_no`,
-        TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS `base_model`,
+        TRIM(`机型`) AS `base_model`,
         (
-          TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-          OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+          TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
           OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
         ) AS `is_high`
       FROM `finished_goods_data`
+        INNER JOIN (
+          SELECT DISTINCT TRIM(`model_name`) AS `model_name`
+          FROM `model_dictionary`
+          WHERE `enabled` = 1
+        ) md ON md.`model_name` = TRIM(`机型`)
       WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
         AND TRIM(COALESCE(`状态`, '')) LIKE '库存中%'
     ) raw

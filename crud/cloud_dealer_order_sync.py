@@ -590,18 +590,18 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
     """Rebuild the local mini-program inventory read model from finished_goods_data."""
     with get_engine().begin() as conn:
         _ensure_wechat_batch_summary_schema(conn)
+        # 加高只认备注：合同备注/订单备注含“加高”；机型必须严格命中启用的机型字典。
+        has_order_remark = conn.execute(
+            text("SHOW COLUMNS FROM finished_goods_data LIKE '订单备注'")
+        ).fetchone() is not None
+        order_remark_high_clause = (
+            "OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'"
+            if has_order_remark
+            else ""
+        )
         try:
             conn.execute(text("CALL `refresh_wechat_batch_summary_all`()"))
         except Exception:
-            has_order_remark = conn.execute(
-                text("SHOW COLUMNS FROM finished_goods_data LIKE '订单备注'")
-            ).fetchone() is not None
-            order_remark_high_clause = (
-                "OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'"
-                if has_order_remark
-                else ""
-            )
-
             conn.execute(text("TRUNCATE TABLE wechat_batch_summary"))
             conn.execute(
                 text(
@@ -640,15 +640,19 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                         SELECT
                           TRIM(`批次号`) AS source_batch_no,
                           `预计入库时间` AS source_expected_inbound_time,
-                          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
+                          TRIM(`机型`) AS base_model,
                           (
-                            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
                             OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
                             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
                             {order_remark_high_clause}
                           ) AS is_high
                         FROM finished_goods_data
+                          INNER JOIN (
+                            SELECT DISTINCT TRIM(model_name) AS model_name
+                            FROM model_dictionary
+                            WHERE enabled = 1
+                          ) md ON md.model_name = TRIM(`机型`)
                         WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
                           AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
                           AND TRIM(COALESCE(`状态`, '')) = '待入库'
@@ -667,15 +671,19 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       FROM (
                         SELECT
                           TRIM(COALESCE(`批次号`, '')) AS source_batch_no,
-                          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
+                          TRIM(`机型`) AS base_model,
                           (
-                            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
                             OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
                             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
                             {order_remark_high_clause}
                           ) AS is_high
                         FROM finished_goods_data
+                          INNER JOIN (
+                            SELECT DISTINCT TRIM(model_name) AS model_name
+                            FROM model_dictionary
+                            WHERE enabled = 1
+                          ) md ON md.model_name = TRIM(`机型`)
                         WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
                           AND {BRIDGE_STOCK_STATUS_PREDICATE}
                       ) raw
@@ -708,8 +716,71 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                     """
                 )
             )
+        # 机型严格按字典：不在启用字典里的行已在刷新时跳过，这里补一条告警，避免静默丢数据。
+        try:
+            skipped = conn.execute(
+                text(
+                    f"""
+                    SELECT TRIM(f.`机型`) AS model, COUNT(*) AS cnt,
+                           MAX((
+                             TRIM(COALESCE(f.`合同备注`, '')) LIKE '%加高%'
+                             {order_remark_high_clause}
+                           )) AS remark_high
+                    FROM finished_goods_data f
+                    LEFT JOIN (
+                      SELECT DISTINCT TRIM(model_name) AS model_name
+                      FROM model_dictionary
+                      WHERE enabled = 1
+                    ) md ON md.model_name = TRIM(f.`机型`)
+                    WHERE (
+                        (NULLIF(TRIM(COALESCE(f.`批次号`, '')), '') IS NOT NULL
+                          AND TRIM(COALESCE(f.`状态`, '')) = '待入库')
+                        OR TRIM(COALESCE(f.`状态`, '')) LIKE '库存中%'
+                      )
+                      AND NULLIF(TRIM(COALESCE(f.`机型`, '')), '') IS NOT NULL
+                      AND md.model_name IS NULL
+                    GROUP BY TRIM(f.`机型`)
+                    ORDER BY cnt DESC
+                    LIMIT 10
+                    """
+                )
+            ).mappings().all()
+        except Exception as exc:  # 告警查询失败不影响库存刷新本身
+            logger.warning("wechat_batch_summary: 机型字典校验查询失败：%s", exc)
+            skipped = []
+        skipped_rows = sum(int(row["cnt"]) for row in skipped)
+        if skipped_rows:
+            samples = [
+                f"{row['model']}×{row['cnt']}" + ("（备注加高）" if int(row.get("remark_high") or 0) else "")
+                for row in skipped
+            ]
+            logger.warning(
+                "wechat_batch_summary: 跳过 %s 行机型不在启用中的机型字典里（例：%s）；"
+                "加高只按备注识别，这些行不会同步到小程序，请让工厂修正机型/字典",
+                skipped_rows,
+                "，".join(samples),
+            )
+        # 兼容旧版存储过程：即使部署的刷新过程还没更新，也把非字典机型从快照里清掉，保证机型严格按字典。
+        conn.execute(
+            text(
+                """
+                DELETE w FROM wechat_batch_summary w
+                LEFT JOIN (
+                  SELECT DISTINCT TRIM(model_name) AS model_name
+                  FROM model_dictionary
+                  WHERE enabled = 1
+                ) md ON md.model_name = TRIM(w.model)
+                WHERE md.model_name IS NULL
+                """
+            )
+        )
         total = conn.execute(text("SELECT COUNT(*) FROM wechat_batch_summary")).scalar() or 0
-    return {"refreshed": True, "rows": int(total)}
+    return {
+        "refreshed": True,
+        "rows": int(total),
+        "skipped_unknown_models": int(skipped_rows),
+        "skipped_unknown_samples": [row["model"] for row in skipped],
+    }
 
 
 def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
