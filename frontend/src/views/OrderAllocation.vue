@@ -71,6 +71,9 @@
               <el-table-column label="单行备注" min-width="180" show-overflow-tooltip>
                 <template #default="scope">{{ scope.row.remark || '-' }}</template>
               </el-table-column>
+              <el-table-column label="指定批次" min-width="120" show-overflow-tooltip>
+                <template #default="scope">{{ scope.row.batches || '-' }}</template>
+              </el-table-column>
               <el-table-column label="状态" width="120">
                 <template #default="scope">
                   <el-tag :type="scope.row.pending <= 0 ? 'success' : 'warning'">
@@ -132,6 +135,13 @@
               <el-table-column prop="货源" label="货源" width="100" />
               <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
+              <el-table-column label="批次匹配" width="100">
+                <template #default="scope">
+                  <el-tag v-if="scope.row['_batch_match'] === '匹配'" type="success" size="small">匹配</el-tag>
+                  <el-tag v-else-if="scope.row['_batch_match'] === '其他批次'" type="warning" size="small">其他批次</el-tag>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
               <el-table-column label="合同备注" min-width="160" show-overflow-tooltip>
                 <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
               </el-table-column>
@@ -204,7 +214,7 @@ const orderKeyword = ref('')
 const orderModelFilter = ref('')
 const orders = ref<Row[]>([])
 const allocations = ref<Row[]>([])
-const orderDetailRows = ref<Array<{ model: string; high: boolean; qty: number; remark: string }>>([])
+const orderDetailRows = ref<Array<{ model: string; high: boolean; qty: number; remark: string; batches: string }>>([])
 const orderDetailsSource = ref<'factory_plan' | 'sales_orders' | ''>('')
 const cacheStore = useCacheStore()
 const route = useRoute()
@@ -422,8 +432,25 @@ const demandRemarkMap = computed(() => {
   return map
 })
 
+const demandBatchesMap = computed(() => {
+  const map = new Map<string, string[]>()
+  if (orderDetailsSource.value !== 'factory_plan') return map
+  for (const row of orderDetailRows.value) {
+    const batches = String(row.batches || '').trim()
+    if (!batches) continue
+    const key = variantKey(row.model, row.high)
+    const list = map.get(key) || []
+    for (const batch of batches.split('、')) {
+      const value = batch.trim()
+      if (value && !list.includes(value)) list.push(value)
+    }
+    map.set(key, list)
+  }
+  return map
+})
+
 const demandRows = computed(() => {
-  const rows: Array<{ model: string; high: boolean; displayModel: string; need: number; allocated: number; pending: number; remark: string }> = []
+  const rows: Array<{ model: string; high: boolean; displayModel: string; need: number; allocated: number; pending: number; remark: string; batches: string }> = []
   for (const [key, item] of demandMap.value.entries()) {
     const allocated = allocationModelCountMap.value.get(key) || 0
     rows.push({
@@ -434,6 +461,7 @@ const demandRows = computed(() => {
       allocated,
       pending: Math.max(0, item.qty - allocated),
       remark: (demandRemarkMap.value.get(key) || []).join('；'),
+      batches: (demandBatchesMap.value.get(key) || []).join('、'),
     })
   }
   return rows.sort((a, b) => compareModels(a.model, b.model))
@@ -533,12 +561,25 @@ const loadOrderDetails = async () => {
       .map((item: any) => {
         const model = normalizeModelName(item?.['机型'])
         const rawRemark = String(item?.['备注'] || '')
+        const alloc = item?.['指定批次/来源']
+        const batches =
+          alloc && typeof alloc === 'object'
+            ? Object.keys(alloc)
+                .map((batch) => String(batch || '').trim())
+                .filter(
+                  (batch) =>
+                    batch &&
+                    !['FINISHED-STOCK', '库存中', '现货', '现货库存'].includes(batch),
+                )
+                .join('、')
+            : ''
         return {
           model,
           high: isHighHint(item?.['机型'], rawRemark),
           qty: Math.max(0, Number(item?.['数量'] || 0) || 0),
           // 后端返回单行备注；旧接口没有该字段时用原始备注按同口径压成一行。
           remark: String(item?.['单行备注'] ?? '') || singleLineOrderRemark(rawRemark),
+          batches,
         }
       })
       .filter((item: { model: string; qty: number }) => item.model && item.qty > 0)
@@ -679,10 +720,20 @@ const allocateSelected = async () => {
 
   saving.value = true
   try {
-    await apiPost(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`, {
-      selected_serial_nos: selectedCandidateSerials.value,
-    })
-    ElMessage.success('配货复核已确认')
+    const res = await apiPost<{ batch_mismatch?: Array<{ 流水号: string; 机型: string; 批次号: string }> }>(
+      `/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`,
+      { selected_serial_nos: selectedCandidateSerials.value },
+    )
+    const mismatches = res.batch_mismatch || []
+    if (mismatches.length > 0) {
+      const text = mismatches
+        .slice(0, 5)
+        .map((item) => `${item['流水号']}（${item['批次号'] || '无批次'}）`)
+        .join('、')
+      ElMessage.warning(`已配货，但 ${mismatches.length} 台不是订单指定批次：${text}`)
+    } else {
+      ElMessage.success('配货复核已确认')
+    }
     selectedCandidateSerials.value = []
     await refreshCurrentOrder()
   } catch (err: any) {
@@ -720,8 +771,18 @@ const completeAllocation = async () => {
   if (!selectedOrderId.value) return
   saving.value = true
   try {
-    const res = await apiPost<{ message?: string; status?: string }>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`, {})
-    ElMessage.success(res.message || '配货完成')
+    const res = await apiPost<{ message?: string; status?: string; batch_mismatch?: Array<{ 流水号: string; 机型: string; 批次号: string }> }>(
+      `/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`,
+      {},
+    )
+    const mismatches = res.batch_mismatch || []
+    if (mismatches.length > 0) {
+      ElMessage.warning(
+        `${res.message || '配货完成'}；其中 ${mismatches.length} 台不是订单指定批次，请核对`,
+      )
+    } else {
+      ElMessage.success(res.message || '配货完成')
+    }
     await refreshCurrentOrder(res.status || 'ready')
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '配货完成失败')

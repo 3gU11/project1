@@ -238,6 +238,82 @@ def _inventory_row_high(row: Any) -> bool:
     return _is_high_model_hint(getter("机型", ""), getter("批次号", ""), getter("合同备注", ""))
 
 
+# 「指定批次/来源」里的现货别名不算具体批次。
+STOCK_SOURCE_ALIASES = frozenset({"FINISHED-STOCK", "库存中", "现货", "现货库存"})
+
+
+def _required_batches_by_variant(detail_rows: list[dict]) -> dict[tuple[str, bool], set[str]]:
+    """订单明细行里的指定批次：{(机型, 是否加高): {批次号}}；现货别名不计入。"""
+    result: dict[tuple[str, bool], set[str]] = {}
+    for row in detail_rows or []:
+        model = _normalize_alloc_model(row.get("机型"))
+        if not model:
+            continue
+        high = _is_high_model_hint(row.get("机型"), row.get("备注"))
+        alloc = row.get("指定批次/来源")
+        if isinstance(alloc, str):
+            alloc = parse_alloc_dict(alloc)
+        if not isinstance(alloc, dict):
+            continue
+        for batch in alloc:
+            batch_no = str(batch or "").strip()
+            if not batch_no or batch_no in STOCK_SOURCE_ALIASES:
+                continue
+            result.setdefault((model, high), set()).add(batch_no)
+    return result
+
+
+def _batch_match_label(row: Any, required: dict[tuple[str, bool], set[str]]) -> str:
+    """候选机台与订单行指定批次的匹配标记：匹配 / 其他批次 / ''（该变体未要求批次）。"""
+    if not required:
+        return ""
+    getter = row.get if hasattr(row, "get") else lambda key, default=None: default
+    model = _normalize_alloc_model(getter("机型", ""))
+    expected = required.get((model, _inventory_row_high(row)))
+    if not expected:
+        return ""
+    batch_no = str(getter("批次号", "") or "").strip()
+    return "匹配" if batch_no in expected else "其他批次"
+
+
+def _order_batch_mismatches(order_id: str, machine_rows: Any) -> list[dict]:
+    """机台与订单指定批次不一致的清单（软约束只提示，不阻止配货）。"""
+    if machine_rows is None or getattr(machine_rows, "empty", True):
+        return []
+    plan_df = get_factory_plan()
+    contract_rows = (
+        plan_df[plan_df["订单号"].astype(str).str.strip() == str(order_id).strip()].copy()
+        if not plan_df.empty
+        else pd.DataFrame()
+    )
+    if contract_rows.empty:
+        return []
+    orders_df = get_orders()
+    hit = (
+        orders_df[orders_df["订单号"].astype(str).str.strip() == str(order_id).strip()]
+        if not orders_df.empty
+        else pd.DataFrame()
+    )
+    order_row = hit.iloc[0].to_dict() if not hit.empty else {}
+    required = _required_batches_by_variant(
+        _split_factory_plan_detail_rows(contract_rows.to_dict(orient="records"), order_row)
+    )
+    if not required:
+        return []
+    mismatches: list[dict] = []
+    for _, row in machine_rows.iterrows():
+        if _batch_match_label(row, required) != "其他批次":
+            continue
+        mismatches.append(
+            {
+                "流水号": str(row.get("流水号") or "").strip(),
+                "机型": str(row.get("机型") or "").strip(),
+                "批次号": str(row.get("批次号") or "").strip(),
+            }
+        )
+    return mismatches
+
+
 def _positive_int(value: object) -> int:
     try:
         qty = int(float(value or 0))
@@ -2321,6 +2397,22 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
     occupied_rows = inv_df[inv_df["占用订单号"].astype(str).str.strip() == order_id].copy()
     rows = pd.concat([linked_rows, occupied_rows], ignore_index=True).drop_duplicates(subset=["流水号"], keep="first")
 
+    # 指定批次软约束：候选机台标出「匹配 / 其他批次」，并把匹配的排前面；不阻止人工改选。
+    required_batches = _required_batches_by_variant(contract_detail_rows)
+    if not rows.empty:
+        if required_batches:
+            rows["_batch_match"] = rows.apply(
+                lambda row: _batch_match_label(row, required_batches), axis=1
+            )
+            rows["_batch_rank"] = (
+                rows["_batch_match"].map({"匹配": 0, "其他批次": 1}).fillna(2).astype(int)
+            )
+            rows = rows.sort_values(by=["_batch_rank", "流水号"], kind="stable").drop(
+                columns=["_batch_rank"]
+            )
+        else:
+            rows["_batch_match"] = ""
+
     required_lookup: dict[tuple[str, str, bool], tuple[str, bool]] = {}
     expected_counts: dict[tuple[str, str, bool], int] = {}
     expected_notes: dict[tuple[str, str, bool], str] = {}
@@ -2814,6 +2906,7 @@ def _split_factory_plan_detail_rows(linked_rows: list[dict[str, Any]], order_row
         tokens = demand_tokens_by_model.get(model) or []
         is_high = _is_high_model_hint(row.get("机型", ""), remark)
         single_remark = single_line_order_remark(remark)
+        source_alloc = parse_alloc_dict(row.get("指定批次/来源"))
         if is_high and qty > 1 and len(tokens) > 1 and sum(_positive_int(t.get("qty")) for t in tokens) == qty:
             positive_tokens = [t for t in tokens if _positive_int(t.get("qty")) > 0]
             high_idx = min(range(len(positive_tokens)), key=lambda idx: _positive_int(positive_tokens[idx].get("qty")))
@@ -2824,6 +2917,7 @@ def _split_factory_plan_detail_rows(linked_rows: list[dict[str, Any]], order_row
                     "数量": _positive_int(token.get("qty")),
                     "备注": remark if idx == high_idx else "",
                     "单行备注": single_remark if idx == high_idx else "",
+                    "指定批次/来源": source_alloc,
                     "source": "factory_plan",
                 })
             continue
@@ -2833,6 +2927,7 @@ def _split_factory_plan_detail_rows(linked_rows: list[dict[str, Any]], order_row
             "数量": qty,
             "备注": remark,
             "单行备注": single_remark,
+            "指定批次/来源": source_alloc,
             "source": "factory_plan",
         })
     return details
@@ -3483,10 +3578,25 @@ def allocate_order_inventory_api(
         if invalid:
             raise HTTPException(status_code=422, detail=f"所选机台不属于该订单绑定合同，或已不可配货: {', '.join(invalid[:10])}")
 
+        selected_rows = candidate_rows[
+            candidate_rows["流水号"].astype(str).str.strip().isin(selected)
+        ].copy()
+        # 指定批次是软约束：不阻止改选其他批次，但返回不一致清单供前端提示。
+        batch_mismatch = []
+        if "_batch_match" in candidate_rows.columns:
+            batch_mismatch = [
+                {
+                    "流水号": str(row.get("流水号") or "").strip(),
+                    "机型": str(row.get("机型") or "").strip(),
+                    "批次号": str(row.get("批次号") or "").strip(),
+                }
+                for _, row in selected_rows.iterrows()
+                if str(row.get("_batch_match") or "") == "其他批次"
+            ]
+
         required_variants = _order_required_variant_counts(str(order_id), first)
         if required_variants:
             current_rows = _get_explicit_order_allocations(str(order_id))
-            selected_rows = candidate_rows[candidate_rows["流水号"].astype(str).str.strip().isin(selected)].copy()
             variant_counts: dict[tuple[str, bool], int] = {}
             combined = pd.concat([current_rows, selected_rows], ignore_index=True).drop_duplicates(subset=["流水号"], keep="first")
             for _, row in combined.iterrows():
@@ -3505,16 +3615,24 @@ def allocate_order_inventory_api(
         allocation_result = allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
         stock_count = int(allocation_result.get("stock", 0))
         production_count = int(allocation_result.get("production", 0))
+        mismatch_text = "、".join(
+            f"{item['流水号']}({item['批次号']})" for item in batch_mismatch[:5]
+        )
         append_audit_log(
             module="订单配货",
             action_type="配货",
             biz_type="订单",
             content=(f"为订单 {order_id} 配货 {len(selected)} 台机台（库存现货 {stock_count}，"
-                     f"在产预占 {production_count}）；流水号：{', '.join(selected[:10])}"),
+                     f"在产预占 {production_count}）；流水号：{', '.join(selected[:10])}"
+                     + (f"；批次软约束提示：{mismatch_text} 非指定批次" if batch_mismatch else "")),
             user_id=_user_id_from_context(current_user),
             username=current_operator,
         )
-        return {"message": f"配货成功，已确认 {len(selected)} 台机台", **allocation_result}
+        return {
+            "message": f"配货成功，已确认 {len(selected)} 台机台",
+            "batch_mismatch": batch_mismatch,
+            **allocation_result,
+        }
     except HTTPException:
         raise
     except RuntimeError as e:
@@ -3573,6 +3691,7 @@ def complete_order_allocation_api(
         serials = allocated_df["流水号"].astype(str).str.strip().drop_duplicates().tolist()
         production_count = int((allocated_df["货源"].astype(str) == "在产机器").sum())
         stock_count = int((allocated_df["货源"].astype(str) == "库存现货").sum())
+        batch_mismatch = _order_batch_mismatches(order_id, allocated_df)
         orders_df.at[order_idx, "status"] = "ready"
         save_orders(orders_df)
         append_audit_log(
@@ -3580,12 +3699,14 @@ def complete_order_allocation_api(
             action_type="配货完成",
             biz_type="订单",
             content=(f"订单 {order_id} 配货完成（库存现货 {stock_count}，在产预占 {production_count}）；"
-                     f"流水号：{', '.join(serials[:10])}"),
+                     f"流水号：{', '.join(serials[:10])}"
+                     + (f"；批次软约束提示：{len(batch_mismatch)} 台非指定批次" if batch_mismatch else "")),
             user_id=_user_id_from_context(current_user),
             username=current_operator,
         )
         return {"message": "配货完成，订单进入待发货", "completed": True, "logged": len(serials), "status": "ready",
-                "stock": stock_count, "production": production_count}
+                "stock": stock_count, "production": production_count,
+                "batch_mismatch": batch_mismatch}
     except HTTPException:
         raise
     except Exception as e:

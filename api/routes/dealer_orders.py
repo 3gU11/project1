@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -20,7 +19,6 @@ from crud.dealer_orders import (
     _is_finished_stock_order,
     approve_dealer_order,
     approve_dealer_order_extra_review,
-    assign_dealer_order_line_contracts,
     get_dealer_orders_pending_counts,
     list_dealer_orders,
     mark_dealer_order_allocated,
@@ -509,12 +507,8 @@ def _attach_order_form_to_contracts(
 
 STOCK_LINE_PATH = "spot"
 BATCH_LINE_PATH = "batch"
-CONVERT_PATH_LABELS = {
-    STOCK_LINE_PATH: "库存中 → 现货直配（合同已规划）",
-}
-
-# 合同号尾部 4 位序号：同日多合同顺延时只改序号。
-_CONTRACT_SEQ_RE = re.compile(r"^(.*?)(\d{4})$")
+# 一张经销商订单只生成一张合同，行级保留批次/来源；合同全部置「已规划」。
+CONVERT_PATH_LABEL = "按明细来源自动选路（合同已规划）"
 
 
 def _clear_convert_caches() -> None:
@@ -562,35 +556,7 @@ def _line_path(batch_no: object, inventory_type: object) -> str:
     )
 
 
-def _group_key(path: str, batch_no: str) -> str:
-    if path == STOCK_LINE_PATH:
-        return STOCK_LINE_PATH
-    return f"batch:{batch_no}"
-
-
-def _batch_path_label(batch_no: str) -> str:
-    return f"批次 {batch_no} → 指定批次（合同已规划）"
-
-
-def _path_label(group: dict) -> str:
-    if group["path"] == STOCK_LINE_PATH:
-        return CONVERT_PATH_LABELS[STOCK_LINE_PATH]
-    return _batch_path_label(str(group.get("batch_no") or ""))
-
-
-def _empty_convert_group(path: str, batch_no: str, first_index: int) -> dict:
-    return {
-        "path": path,
-        "batch_no": batch_no,
-        "first_index": first_index,
-        "add_list": [],
-        "index": {},
-        "qty": 0,
-        "models": [],
-    }
-
-
-def _build_convert_groups(
+def _build_convert_contract(
     contract_items: list[dict],
     order_items: list[dict],
     *,
@@ -598,31 +564,26 @@ def _build_convert_groups(
     delivery_date: str,
     customer: str,
     agent: str,
-) -> list[dict]:
-    """按明细行的批次/来源分组。
+) -> dict:
+    """把一张经销商订单的明细合成**一张**已规划合同。
 
-    - 库存中行合并成一张合同；
-    - 每个具体批次号各自一张合同（同批次同行合并，加高与普通规格不合并）；
-    - 返回顺序按各组首行在订单里的先后。
+    - 同机型同加高规格合并为一行并累加数量；
+    - 行级「指定批次/来源」保留具体批次（现货行留空），配货时按批次软约束匹配；
+    - 不再按批次号拆合同：拆合同会增加导入/发货/对账步骤，而当前不做自动预占。
     """
-    groups: dict[str, dict] = {}
-    for index, item in enumerate(contract_items):
+    rows: list[dict] = []
+    index: dict[tuple[str, bool], int] = {}
+    models: list[str] = []
+    batch_nos: list[str] = []
+    qty_total = 0
+    for position, item in enumerate(contract_items):
         model = str(item.get("model") or "").strip()
         qty = int(item.get("qty") or 0)
         if not model or qty <= 0:
             continue
-        source_item = _source_item_for(order_items, index, model)
+        source_item = _source_item_for(order_items, position, model)
         batch_no, inventory_type = _line_batch_source(item, source_item)
         path = _line_path(batch_no, inventory_type)
-        key = _group_key(path, batch_no)
-        group = groups.get(key)
-        if group is None:
-            group = _empty_convert_group(
-                path,
-                batch_no if path == BATCH_LINE_PATH else "",
-                index,
-            )
-            groups[key] = group
         high = bool(item.get("high")) if "high" in item else _line_is_heightened(source_item)
         row_note = str(item.get("rowNote") or "").strip()
         remark = " ".join(
@@ -634,12 +595,12 @@ def _build_convert_groups(
             ]
             if part
         )
-        # 现货行不写批次；批次行保留指定批次，供合同管理展示和订单配货时人工判别。
+        # 现货行不写批次；批次行保留指定批次，供合同管理展示和订单配货按批次优先匹配。
         source_alloc = {} if path == STOCK_LINE_PATH else ({batch_no: qty} if batch_no else {})
         merge_key = (model, high)
-        existing_index = group["index"].get(merge_key)
+        existing_index = index.get(merge_key)
         if existing_index is not None:
-            existing = group["add_list"][existing_index]
+            existing = rows[existing_index]
             existing["排产数量"] = int(existing.get("排产数量") or 0) + qty
             if remark and remark not in str(existing.get("备注") or ""):
                 existing["备注"] = " ".join(
@@ -652,8 +613,8 @@ def _build_convert_groups(
                 existing_alloc[source_batch] = int(existing_alloc.get(source_batch) or 0) + int(source_qty)
             existing["指定批次/来源"] = existing_alloc
         else:
-            group["index"][merge_key] = len(group["add_list"])
-            group["add_list"].append(
+            index[merge_key] = len(rows)
+            rows.append(
                 {
                     "合同号": "",
                     "机型": model,
@@ -667,39 +628,17 @@ def _build_convert_groups(
                     "订单号": "",
                 }
             )
-        group["qty"] += qty
-        if model not in group["models"]:
-            group["models"].append(model)
-    return sorted(groups.values(), key=lambda group: group["first_index"])
-
-
-def _bump_contract_no(value: str) -> str:
-    """把合同号尾部 4 位序号 +1；不是该格式时返回空串，交给 next_contract_no 兜底。"""
-    match = _CONTRACT_SEQ_RE.match(str(value or "").strip())
-    if not match:
-        return ""
-    next_seq = int(match.group(2)) + 1
-    if next_seq > 9999:
-        return ""
-    return f"{match.group(1)}{next_seq:04d}"
-
-
-def _unique_contract_no(conn, preferred: str, used: set[str]) -> str:
-    """同一连接内生成不重复的合同号：主号用前端生成值，拆路时按序号顺延。"""
-    candidate = str(preferred or "").strip()
-    if not candidate:
-        candidate = next_contract_no(conn)
-    for _ in range(500):
-        if candidate and candidate not in used and not contract_no_exists(conn, candidate):
-            return candidate
-        bumped = _bump_contract_no(candidate)
-        if bumped:
-            candidate = bumped
-            continue
-        candidate = next_contract_no(conn)
-        if candidate in used:
-            candidate = _bump_contract_no(candidate)
-    raise HTTPException(status_code=422, detail="无法生成唯一合同号，请手动填写合同号后重试")
+        qty_total += qty
+        if model not in models:
+            models.append(model)
+        if path == BATCH_LINE_PATH and batch_no and batch_no not in batch_nos:
+            batch_nos.append(batch_no)
+    return {
+        "add_list": rows,
+        "qty": qty_total,
+        "models": models,
+        "batch_nos": batch_nos,
+    }
 
 
 def _rollback_created_contracts(contract_ids: list[str]) -> None:
@@ -741,14 +680,12 @@ def convert_to_contract(
     background_tasks: BackgroundTasks,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
-    """经销商订单转合同：按明细行的「批次/来源」自动选路。
+    """经销商订单转合同：一张订单生成一张「已规划」合同，行级保留批次/来源。
 
-    - 库存中行（FINISHED-STOCK/库存中/空批次/finished）：合同「已规划」；
-    - 具体批次行（如 09-16）：合同同样「已规划」并保留指定批次/来源，不再进入沙盘预测；
-      每个批次号单独一张合同；
-    - 之后统一由业务人员在「销售订单 → 导入已规划合同」建单，再到「订单配货」手动
-      判别分配机台（指定批次只作参考，不做自动预占）；
-    - 每行备注保留单行备注口径，人工配货后写到机台合同备注，供后续判别与追溯。
+    - 库存中行 / 具体批次行都进入同一张合同，合同置「已规划」，不进入沙盘预测；
+    - 行级「指定批次/来源」保留批次，供订单配货时按批次优先匹配（软约束，可改选）；
+    - 之后由业务人员在「销售订单 → 导入已规划合同」建单，再到「订单配货」人工分配机台；
+    - 每行备注保留单行备注口径，人工配货后写到机台合同备注。
     """
     operator = _operator(ctx)
     try:
@@ -784,8 +721,8 @@ def convert_to_contract(
         delivery_date = str(payload.delivery_date or "").strip() or str(items[0].get("delivery_date") or "").strip()
         total_note = str(payload.contract_note or "").strip()
 
-        # 3. 按批次/来源自动分组：库存中合并一张，每个具体批次号各一张
-        groups = _build_convert_groups(
+        # 3. 整单合成一张合同：行级保留批次/来源，同机型同加高规格合并
+        contract = _build_convert_contract(
             contract_items,
             items,
             total_note=total_note,
@@ -793,11 +730,10 @@ def convert_to_contract(
             customer=customer,
             agent=agent,
         )
-        if not groups:
+        if not contract["add_list"]:
             raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
-        ordered_groups = sorted(groups, key=lambda group: group["first_index"])
 
-        # 4. 分配合同号：主号给首行所在分组，其余分组按序号顺延
+        # 4. 合同号：沿用前端预取号；没有则服务端生成
         with get_engine().connect() as conn:
             requested = str(payload.contract_no or "").strip()
             if requested and contract_no_exists(conn, requested):
@@ -805,99 +741,77 @@ def convert_to_contract(
                     status_code=422,
                     detail=f"合同号已存在，请刷新后重新生成: {requested}",
                 )
-            used_contract_nos: set[str] = set()
-            for position, group in enumerate(ordered_groups):
-                contract_id = _unique_contract_no(
-                    conn,
-                    requested if position == 0 else "",
-                    used_contract_nos,
-                )
-                used_contract_nos.add(contract_id)
-                group["contract_no"] = contract_id
-                for row in group["add_list"]:
-                    row["合同号"] = contract_id
-        contract_ids = [group["contract_no"] for group in ordered_groups]
-        contract_no_str = "、".join(contract_ids)
+            contract_no = requested or next_contract_no(conn)
+        for row in contract["add_list"]:
+            row["合同号"] = contract_no
 
-        # 5. 建合同：所有分组都置「已规划」（显式批次不再进入沙盘预测）；失败回滚已建部分
+        # 5. 建合同并置「已规划」（不进入沙盘预测）；失败回滚
         current_user = ctx if isinstance(ctx, dict) else {"username": operator, "role": ""}
-        created_contract_ids: list[str] = []
         try:
-            for group in ordered_groups:
-                _process_contracts_batch(
-                    add_list=group["add_list"],
-                    rush_source_rows=[],
-                    save_mode="spot",
-                    is_rush=False,
-                    user_ctx=current_user,
-                    operator=operator,
-                    background_tasks=background_tasks,
-                )
-                created_contract_ids.append(group["contract_no"])
+            _process_contracts_batch(
+                add_list=contract["add_list"],
+                rush_source_rows=[],
+                save_mode="spot",
+                is_rush=False,
+                user_ctx=current_user,
+                operator=operator,
+                background_tasks=background_tasks,
+            )
         except Exception:
-            _rollback_created_contracts(created_contract_ids)
+            _rollback_created_contracts([contract_no])
             raise
 
-        # 6. 回写经销商订单：多张合同时逐行写各自合同；机台分配仍由业务人员在订单配货手动完成
+        # 6. 回写经销商订单；机台分配仍由业务人员在订单配货手动完成
         try:
-            mark_dealer_order_contracted(order_no, contract_no=contract_no_str, operator=operator)
-            if len(contract_ids) > 1:
-                try:
-                    assign_dealer_order_line_contracts(
-                        order_no,
-                        {
-                            _group_key(group["path"], group["batch_no"]): group["contract_no"]
-                            for group in ordered_groups
-                        },
-                    )
-                except Exception:
-                    logging.getLogger(__name__).exception(
-                        "dealer order %s line contract assignment failed", order_no
-                    )
+            mark_dealer_order_contracted(order_no, contract_no=contract_no, operator=operator)
         except Exception:
-            _rollback_created_contracts(created_contract_ids)
+            _rollback_created_contracts([contract_no])
             raise
 
-        path_text = "，".join(
-            f"{_path_label(group)}：{group['contract_no']}"
-            for group in ordered_groups
+        batch_text = (
+            f"；指定批次：{'、'.join(contract['batch_nos'])}（配货时优先匹配，可改选）"
+            if contract["batch_nos"]
+            else ""
         )
         append_audit_log(
             module="经销商订单",
             action_type="转为合同",
             biz_type="订单",
             content=(
-                f"经销商订单按批次/来源自动选路转合同：{order_no} → {contract_no_str}；"
-                f"{path_text}；全部置「已规划」，待人工导入订单并配货"
+                f"经销商订单按批次/来源自动选路转合同：{order_no} → {contract_no}；"
+                f"整单一张已规划合同，待人工导入订单并配货{batch_text}"
             ),
             user_id=ctx.get("username"),
             username=operator,
         )
 
-        order_form_contracts = _attach_order_form_to_contracts(order_no, contract_ids, customer, operator)
+        order_form_contracts = _attach_order_form_to_contracts(order_no, [contract_no], customer, operator)
         cloud_attachments = _sync_cloud_attachments_for_order(order_no)
 
         contracts_payload = [
             {
-                "contract_no": group["contract_no"],
-                "path": group["path"],
-                "batch_no": group["batch_no"],
-                "path_label": _path_label(group),
-                "row_count": len(group["add_list"]),
-                "qty": group["qty"],
-                "models": group["models"],
+                "contract_no": contract_no,
+                "path": "auto",
+                "batch_nos": contract["batch_nos"],
+                "path_label": CONVERT_PATH_LABEL,
+                "row_count": len(contract["add_list"]),
+                "qty": contract["qty"],
+                "models": contract["models"],
             }
-            for group in ordered_groups
         ]
-        batch_nos = [group["batch_no"] for group in ordered_groups if group["batch_no"]]
-        message = f"已成功转为合同 {contract_no_str}；合同均已置「已规划」，请在销售订单导入后人工配货"
-        if batch_nos:
-            message = f"{message}（指定批次：{'、'.join(batch_nos)}，配货时按批次手动选择机台）"
+        message = (
+            f"已成功转为合同 {contract_no}；合同已置「已规划」，请在销售订单导入后人工配货"
+        )
+        if contract["batch_nos"]:
+            message = (
+                f"{message}（指定批次：{'、'.join(contract['batch_nos'])}，"
+                "配货时优先匹配该批次机台，可改选）"
+            )
 
         return {
             "message": message,
-            "contract_no": contract_no_str,
-            "contract_ids": contract_ids,
+            "contract_no": contract_no,
+            "contract_ids": [contract_no],
             "contracts": contracts_payload,
             "save_mode": "auto",
             "order_form_attached_contracts": order_form_contracts,

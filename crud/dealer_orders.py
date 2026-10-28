@@ -1650,49 +1650,6 @@ def mark_dealer_order_contracted(order_no: str, contract_no: str, operator: str 
         )
 
 
-def assign_dealer_order_line_contracts(order_no: str, contract_by_key: dict[str, str]) -> int:
-    """按明细行自身的批次/来源写回合同号。
-
-    转合同可能把「库存中」行和每个「具体批次」行拆成多张合同。整单统一写合并合同号时，
-    ``_sync_allocation_status`` 会按机型把另一张合同的配货算到本行，导致批次行在还没
-    配货时就被标成已配货；这里逐行只写它实际所属的合同，保证已配/部分配货口径准确。
-
-    ``contract_by_key`` 的键：库存中行为 ``spot``，具体批次行为 ``batch:{批次号}``；
-    行找不到对应合同时保持原值，不做猜测。
-    """
-    order_no = str(order_no or "").strip()
-    contract_by_key = dict(contract_by_key or {})
-    if not order_no or len(contract_by_key) <= 1:
-        return 0
-    spot_contract = str(contract_by_key.get("spot") or "").strip()
-    ensure_dealer_order_tables()
-    updated = 0
-    with get_engine().begin() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT id, batch_no, inventory_type, contract_no FROM dealer_orders "
-                "WHERE order_no=:order_no"
-            ),
-            {"order_no": order_no},
-        ).mappings().all()
-        for row in rows:
-            batch_no = str(row.get("batch_no") or "").strip()
-            if _is_finished_stock_order(batch_no, row.get("inventory_type")):
-                contract_id = spot_contract
-            else:
-                contract_id = str(contract_by_key.get(f"batch:{batch_no}") or "").strip()
-            if not contract_id:
-                continue
-            if str(row.get("contract_no") or "").strip() == contract_id:
-                continue
-            conn.execute(
-                text("UPDATE dealer_orders SET contract_no=:contract_no WHERE id=:id"),
-                {"contract_no": contract_id, "id": row["id"]},
-            )
-            updated += 1
-    return updated
-
-
 def get_dealer_orders_pending_counts() -> dict:
     ensure_dealer_order_tables()
     with get_engine().begin() as conn:

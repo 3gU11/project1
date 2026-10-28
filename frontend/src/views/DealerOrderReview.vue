@@ -306,7 +306,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint">库存中行：合同置「已规划」，业务人员到「销售订单 → 导入已规划合同」建单后在「订单配货」手动选库存机台。具体批次行：合同同样置「已规划」并保留指定批次（如 09-16），配货时按批次手动选该批次的在产机台，不再进入沙盘预测。</div>
+        <div class="save-mode-hint">整单生成一张合同：库存中行与批次行都置「已规划」并写入同一张合同，行级保留批次/来源。业务人员到「销售订单 → 导入已规划合同」建单后，在「订单配货」人工分配机台；指定批次只做优先匹配提示，可改选其他批次。</div>
       </div>
 
       <template #footer>
@@ -954,7 +954,7 @@ type MessageResponse = {
   contract_no?: string
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
-  contracts?: Array<{ contract_no: string; path: 'spot' | 'batch'; batch_no: string; path_label: string; row_count: number; qty: number; models: string[] }>
+  contracts?: Array<{ contract_no: string; path: 'auto'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
 }
 
 const submitConvert = async () => {
