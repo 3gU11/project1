@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from api.routes.auth import require_permissions
 from crud.audit_logs import append_audit_log
@@ -14,8 +17,10 @@ from crud.cloud_attachments import (
     sync_cloud_order_attachments,
 )
 from crud.dealer_orders import (
+    _is_finished_stock_order,
     approve_dealer_order,
     approve_dealer_order_extra_review,
+    assign_dealer_order_line_contracts,
     get_dealer_orders_pending_counts,
     list_dealer_orders,
     mark_dealer_order_allocated,
@@ -23,8 +28,16 @@ from crud.dealer_orders import (
     preview_dealer_order,
     reject_dealer_order,
     reject_dealer_order_extra_review,
+    sync_dealer_order_statuses_by_sales_orders,
     validate_dealer_order_convertible,
 )
+from crud.spot_allocation import (
+    SpotAllocationError,
+    allocate_spot_contract,
+    rollback_spot_allocation,
+)
+from database import get_engine
+from utils.contract_ids import contract_no_exists, next_contract_no
 from crud.cloud_dealer_order_sync import (
     sync_cloud_dealer_orders,
     sync_completed_dealer_orders_to_cloud,
@@ -57,9 +70,11 @@ class ConvertToContractPayload(BaseModel):
     customer_name: str = Field(default="", max_length=255)
     agent_name: str = Field(default="", max_length=255)
     delivery_date: str = Field(default="", max_length=64)
+    # 已废弃：路径改为按明细行的 batch_no/inventory_type 自动判定，保留字段仅为兼容旧客户端。
     save_mode: str = Field(default="sandbox", max_length=32)  # sandbox | spot
     is_rush: bool = False
-    items: List[Dict[str, Any]] = Field(default_factory=list)  # [{model, qty, high, rowNote}]
+    # [{model, qty, high, rowNote, batch_no, inventory_type}]
+    items: List[Dict[str, Any]] = Field(default_factory=list)
     contract_note: str = Field(default="", max_length=2000)
 
 
@@ -497,108 +512,148 @@ def _attach_order_form_to_contracts(
     return saved
 
 
-@router.post("/{order_no}/convert-to-contract")
-def convert_to_contract(
-    order_no: str,
-    payload: ConvertToContractPayload,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
-):
-    operator = _operator(ctx)
+STOCK_LINE_PATH = "spot"
+BATCH_LINE_PATH = "batch"
+CONVERT_PATH_LABELS = {
+    STOCK_LINE_PATH: "库存中 → 现货直配（合同已规划）",
+    BATCH_LINE_PATH: "批次 → 沙盘待规划",
+}
+
+# 合同号尾部 4 位序号：同日多合同顺延时只改序号。
+_CONTRACT_SEQ_RE = re.compile(r"^(.*?)(\d{4})$")
+
+
+def _clear_convert_caches() -> None:
+    """转合同会改写合同、订单、库存三张视图，统一清缓存避免读到旧数据。"""
     try:
-        # 1. Validate and lock the dealer order
-        items = validate_dealer_order_convertible(order_no)
+        from crud.inventory import clear_inventory_data_caches
+        from crud.orders import get_orders, get_orders_v2
+        from crud.planning import get_factory_plan, get_factory_plan_v2
 
-        # 2. Determine contract_no
-        contract_no = str(payload.contract_no or "").strip()
-        from database import get_engine
-        from utils.contract_ids import contract_no_exists, next_contract_no
-        with get_engine().connect() as conn:
-            if not contract_no:
-                contract_no = next_contract_no(conn)
-            elif contract_no_exists(conn, contract_no):
-                raise HTTPException(status_code=422, detail=f"合同号已存在，请刷新后重新生成: {contract_no}")
+        for fn in (get_factory_plan, get_factory_plan_v2, get_orders, get_orders_v2):
+            if hasattr(fn, "cache_clear"):
+                fn.cache_clear()
+        clear_inventory_data_caches()
+    except Exception:
+        logging.getLogger(__name__).exception("dealer order convert cache clear failed")
 
-        customer = str(payload.customer_name or "").strip() or str(items[0].get("customer_name") or "").strip()
-        agent = str(payload.agent_name or "").strip() or str(items[0].get("contact_name") or "").strip()
-        delivery_date = str(payload.delivery_date or "").strip() or str(items[0].get("delivery_date") or "").strip()
-        save_mode = str(payload.save_mode or "sandbox").strip().lower()
-        if save_mode not in {"sandbox", "spot"}:
-            raise HTTPException(status_code=422, detail="save_mode 仅支持 sandbox 或 spot")
 
-        # 3. Build contract rows from payload items or order line items
-        contract_items = payload.items if payload.items else []
-        if not contract_items:
-            for item in items:
-                contract_items.append({
-                    "model": str(item.get("model") or "").strip(),
-                    "qty": int(item.get("quantity") or 1),
-                    "high": _line_is_heightened(item),
-                    "rowNote": "",
-                })
+def _source_item_for(items: list[dict], index: int, model: str) -> dict:
+    """按行号优先、机型兜底，找到转合同明细对应的经销商订单行。"""
+    if index < len(items):
+        candidate = items[index]
+        if str(candidate.get("model") or "").strip() == model:
+            return candidate
+    for candidate in items:
+        if str(candidate.get("model") or "").strip() == model:
+            return candidate
+    return {}
 
-        # 4. Build add_list and rush_source_rows
-        from api.routes.planning import _process_contracts_batch, _assert_models_in_dictionary
-        from api.routes.auth import get_current_user_context
 
-        model_names = [str(ci.get("model") or "").strip() for ci in contract_items if str(ci.get("model") or "").strip()]
-        _assert_models_in_dictionary(model_names)
+def _line_batch_source(contract_item: dict, source_item: dict) -> tuple[str, str]:
+    """取一行明细的批次/来源；前端回传了行字段就以前端为准，旧客户端回退订单行。"""
+    raw_batch = contract_item.get("batch_no")
+    raw_type = contract_item.get("inventory_type")
+    batch_no = raw_batch if raw_batch is not None else source_item.get("batch_no")
+    inventory_type = raw_type if raw_type is not None else source_item.get("inventory_type")
+    return str(batch_no or "").strip(), str(inventory_type or "").strip()
 
-        add_list: List[Dict[str, Any]] = []
-        rush_source_rows: List[Dict[str, Any]] = []
-        add_index_by_model: Dict[str, int] = {}
 
-        def source_item_for(index: int, model: str) -> Dict[str, Any]:
-            if index < len(items):
-                candidate = items[index]
-                if str(candidate.get("model") or "").strip() == model:
-                    return candidate
-            for candidate in items:
-                if str(candidate.get("model") or "").strip() == model:
-                    return candidate
-            return {}
+def _line_path(batch_no: object, inventory_type: object) -> str:
+    """库存中（含空批次）走现货直配，具体批次走沙盘待规划。"""
+    return (
+        STOCK_LINE_PATH
+        if _is_finished_stock_order(batch_no, inventory_type)
+        else BATCH_LINE_PATH
+    )
 
-        for idx, ci in enumerate(contract_items):
-            model = str(ci.get("model") or "").strip()
-            qty = int(ci.get("qty") or 0)
-            if not model or qty <= 0:
-                continue
-            high = bool(ci.get("high"))
-            row_note = str(ci.get("rowNote") or "").strip()
-            remark_parts = [p for p in [f"[总]{payload.contract_note.strip()}" if payload.contract_note and payload.contract_note.strip() else "", "加高" if high else "", row_note] if p]
-            remark = " ".join(remark_parts)
-            source_item = source_item_for(idx, model)
-            batch_no = str(source_item.get("batch_no") or "").strip()
-            source_alloc = {batch_no: qty} if batch_no else {}
 
-            existing_idx = add_index_by_model.get(model)
-            if existing_idx is not None:
-                existing = add_list[existing_idx]
-                existing["排产数量"] = int(existing.get("排产数量") or 0) + qty
-                if remark and remark not in str(existing.get("备注") or ""):
-                    existing["备注"] = " ".join([p for p in [str(existing.get("备注") or "").strip(), remark] if p])
-                existing_alloc = existing.get("指定批次/来源") if isinstance(existing.get("指定批次/来源"), dict) else {}
-                for batch, batch_qty in source_alloc.items():
-                    existing_alloc[batch] = int(existing_alloc.get(batch) or 0) + int(batch_qty)
-                existing["指定批次/来源"] = existing_alloc
+def _empty_convert_group(path: str, is_rush: bool) -> dict:
+    return {
+        "path": path,
+        "add_list": [],
+        "rush_rows": [],
+        "index": {},
+        "qty": 0,
+        "models": [],
+        "first_index": None,
+        "is_rush": bool(is_rush),
+    }
 
-                rush_source_rows[existing_idx]["qty"] = int(rush_source_rows[existing_idx].get("qty") or 0) + qty
-                if remark and remark not in str(rush_source_rows[existing_idx].get("remark") or ""):
-                    rush_source_rows[existing_idx]["remark"] = " ".join(
-                        [p for p in [str(rush_source_rows[existing_idx].get("remark") or "").strip(), remark] if p]
-                    )
-                # 合并 source_alloc（多个批次信息都保留）
-                existing_rush_alloc = rush_source_rows[existing_idx].get("source_alloc") or {}
-                if isinstance(existing_rush_alloc, dict):
-                    for batch, batch_qty in source_alloc.items():
-                        existing_rush_alloc[batch] = int(existing_rush_alloc.get(batch) or 0) + int(batch_qty)
-                    rush_source_rows[existing_idx]["source_alloc"] = existing_rush_alloc
-                continue
 
-            add_index_by_model[model] = len(add_list)
-            add_list.append({
-                "合同号": contract_no,
+def _build_convert_groups(
+    contract_items: list[dict],
+    order_items: list[dict],
+    *,
+    total_note: str,
+    delivery_date: str,
+    customer: str,
+    agent: str,
+    is_rush: bool,
+) -> dict[str, dict]:
+    """按明细行的批次/来源把转合同明细分成现货组和批次组，同组同机型同规格合并。"""
+    groups = {
+        STOCK_LINE_PATH: _empty_convert_group(STOCK_LINE_PATH, False),
+        BATCH_LINE_PATH: _empty_convert_group(BATCH_LINE_PATH, is_rush),
+    }
+    for index, item in enumerate(contract_items):
+        model = str(item.get("model") or "").strip()
+        qty = int(item.get("qty") or 0)
+        if not model or qty <= 0:
+            continue
+        source_item = _source_item_for(order_items, index, model)
+        batch_no, inventory_type = _line_batch_source(item, source_item)
+        path = _line_path(batch_no, inventory_type)
+        group = groups[path]
+        if group["first_index"] is None:
+            group["first_index"] = index
+        high = bool(item.get("high")) if "high" in item else _line_is_heightened(source_item)
+        row_note = str(item.get("rowNote") or "").strip()
+        remark = " ".join(
+            part
+            for part in [
+                f"[总]{total_note}" if total_note else "",
+                "加高" if high else "",
+                row_note,
+            ]
+            if part
+        )
+        # 现货行配货时已经用掉来源，不再往合同里写批次；批次行保留指定批次供沙盘/规划优先。
+        source_alloc = {} if path == STOCK_LINE_PATH else ({batch_no: qty} if batch_no else {})
+        merge_key = (model, high)
+        existing_index = group["index"].get(merge_key)
+        if existing_index is not None:
+            existing = group["add_list"][existing_index]
+            existing["排产数量"] = int(existing.get("排产数量") or 0) + qty
+            if remark and remark not in str(existing.get("备注") or ""):
+                existing["备注"] = " ".join(
+                    [part for part in [str(existing.get("备注") or "").strip(), remark] if part]
+                )
+            existing_alloc = existing.get("指定批次/来源")
+            if not isinstance(existing_alloc, dict):
+                existing_alloc = {}
+            for batch, batch_qty in source_alloc.items():
+                existing_alloc[batch] = int(existing_alloc.get(batch) or 0) + int(batch_qty)
+            existing["指定批次/来源"] = existing_alloc
+
+            rush_row = group["rush_rows"][existing_index]
+            rush_row["qty"] = int(rush_row.get("qty") or 0) + qty
+            if remark and remark not in str(rush_row.get("remark") or ""):
+                rush_row["remark"] = " ".join(
+                    [part for part in [str(rush_row.get("remark") or "").strip(), remark] if part]
+                )
+            rush_alloc = rush_row.get("source_alloc")
+            if not isinstance(rush_alloc, dict):
+                rush_alloc = {}
+            for batch, batch_qty in source_alloc.items():
+                rush_alloc[batch] = int(rush_alloc.get(batch) or 0) + int(batch_qty)
+            rush_row["source_alloc"] = rush_alloc
+            continue
+
+        group["index"][merge_key] = len(group["add_list"])
+        group["add_list"].append(
+            {
+                "合同号": "",
                 "机型": model,
                 "排产数量": qty,
                 "要求交期": delivery_date,
@@ -608,9 +663,11 @@ def convert_to_contract(
                 "代理商": agent,
                 "指定批次/来源": source_alloc,
                 "订单号": "",
-            })
-            rush_source_rows.append({
-                "contract_no": contract_no,
+            }
+        )
+        group["rush_rows"].append(
+            {
+                "contract_no": "",
                 "customer": customer,
                 "dealer_name": agent,
                 "model_type": model,
@@ -618,30 +675,251 @@ def convert_to_contract(
                 "qty": qty,
                 "remark": remark,
                 "source_alloc": source_alloc,  # 指定批次/来源，用于急单自动插入时优先定位批次
-            })
-
-        # 5. Create contracts via shared logic
-        current_user = ctx if isinstance(ctx, dict) else {"username": operator, "role": ""}
-        result = _process_contracts_batch(
-            add_list=add_list,
-            rush_source_rows=rush_source_rows,
-            save_mode=save_mode,
-            is_rush=bool(payload.is_rush),
-            user_ctx=current_user,
-            operator=operator,
-            background_tasks=background_tasks,
+            }
         )
+        group["qty"] += qty
+        if model not in group["models"]:
+            group["models"].append(model)
+    return {path: group for path, group in groups.items() if group["add_list"]}
 
-        # 6. Update dealer order
-        contract_ids = result.get("contract_ids", [contract_no])
-        contract_no_str = "、".join(contract_ids) if contract_ids else contract_no
-        mark_dealer_order_contracted(order_no, contract_no=contract_no_str, operator=operator)
 
+def _bump_contract_no(value: str) -> str:
+    """把合同号尾部 4 位序号 +1；不是该格式时返回空串，交给 next_contract_no 兜底。"""
+    match = _CONTRACT_SEQ_RE.match(str(value or "").strip())
+    if not match:
+        return ""
+    next_seq = int(match.group(2)) + 1
+    if next_seq > 9999:
+        return ""
+    return f"{match.group(1)}{next_seq:04d}"
+
+
+def _unique_contract_no(conn, preferred: str, used: set[str]) -> str:
+    """同一连接内生成不重复的合同号：主号用前端生成值，拆路时按序号顺延。"""
+    candidate = str(preferred or "").strip()
+    if not candidate:
+        candidate = next_contract_no(conn)
+    for _ in range(500):
+        if candidate and candidate not in used and not contract_no_exists(conn, candidate):
+            return candidate
+        bumped = _bump_contract_no(candidate)
+        if bumped:
+            candidate = bumped
+            continue
+        candidate = next_contract_no(conn)
+        if candidate in used:
+            candidate = _bump_contract_no(candidate)
+    raise HTTPException(status_code=422, detail="无法生成唯一合同号，请手动填写合同号后重试")
+
+
+def _rollback_created_contracts(contract_ids: list[str]) -> None:
+    """转合同失败补偿：删掉本次新建的合同、合同通知和尚未处理的急单卡。"""
+    ids = [str(cid or "").strip() for cid in contract_ids if str(cid or "").strip()]
+    if not ids:
+        return
+    try:
+        with get_engine().begin() as conn:
+            for cid in ids:
+                conn.execute(text("DELETE FROM factory_plan WHERE `合同号` = :cid"), {"cid": cid})
+                conn.execute(
+                    text("DELETE FROM contract_notifications WHERE contract_id = :cid"),
+                    {"cid": cid},
+                )
+                try:
+                    conn.execute(
+                        text(
+                            "DELETE FROM rush_order_queue "
+                            "WHERE `contract_no` = :cid AND `status` = 'pending'"
+                        ),
+                        {"cid": cid},
+                    )
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "rollback rush queue failed contract=%s", cid
+                    )
+    except Exception:
+        logging.getLogger(__name__).exception("rollback created contracts failed ids=%s", ids)
+    finally:
+        _clear_convert_caches()
+
+
+@router.post("/{order_no}/convert-to-contract")
+def convert_to_contract(
+    order_no: str,
+    payload: ConvertToContractPayload,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    """经销商订单转合同：按明细行的「批次/来源」自动选路并执行对应路径。
+
+    - 库存中行（FINISHED-STOCK/库存中/空批次/finished）：合同「已规划」，同一请求内
+      自动建销售订单并按机型+加高分配库存机台；缺口留待人工补配。
+    - 具体批次行（如 09-10）：合同「待规划」，保留指定批次，进入沙盘/批次规划。
+    - 同路径明细合并为一张合同；混合订单拆成现货、批次两张合同。
+    """
+    operator = _operator(ctx)
+    try:
+        # 1. 锁定并校验经销商订单
+        items = validate_dealer_order_convertible(order_no)
+
+        # 2. 明细：前端回传优先，否则按订单行兜底
+        contract_items: List[Dict[str, Any]] = list(payload.items or [])
+        if not contract_items:
+            for item in items:
+                contract_items.append(
+                    {
+                        "model": str(item.get("model") or "").strip(),
+                        "qty": int(item.get("quantity") or 1),
+                        "high": _line_is_heightened(item),
+                        "rowNote": "",
+                        "batch_no": str(item.get("batch_no") or "").strip(),
+                        "inventory_type": str(item.get("inventory_type") or "").strip(),
+                    }
+                )
+
+        from api.routes.planning import _assert_models_in_dictionary, _process_contracts_batch
+
+        model_names = [
+            str(ci.get("model") or "").strip()
+            for ci in contract_items
+            if str(ci.get("model") or "").strip()
+        ]
+        _assert_models_in_dictionary(model_names)
+
+        customer = str(payload.customer_name or "").strip() or str(items[0].get("customer_name") or "").strip()
+        agent = str(payload.agent_name or "").strip() or str(items[0].get("contact_name") or "").strip()
+        delivery_date = str(payload.delivery_date or "").strip() or str(items[0].get("delivery_date") or "").strip()
+        total_note = str(payload.contract_note or "").strip()
+
+        # 3. 按批次/来源自动分组：库存中→现货，具体批次→沙盘；同路径合并
+        groups = _build_convert_groups(
+            contract_items,
+            items,
+            total_note=total_note,
+            delivery_date=delivery_date,
+            customer=customer,
+            agent=agent,
+            is_rush=bool(payload.is_rush),
+        )
+        if not groups:
+            raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
+
+        # 4. 分配合同号：主号给首行所在路径，另一条路径按序号顺延
+        ordered_paths = sorted(groups, key=lambda path: groups[path]["first_index"] or 0)
+        with get_engine().connect() as conn:
+            requested = str(payload.contract_no or "").strip()
+            if requested and contract_no_exists(conn, requested):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"合同号已存在，请刷新后重新生成: {requested}",
+                )
+            used_contract_nos: set[str] = set()
+            for position, path in enumerate(ordered_paths):
+                group = groups[path]
+                contract_id = _unique_contract_no(
+                    conn,
+                    requested if position == 0 else "",
+                    used_contract_nos,
+                )
+                used_contract_nos.add(contract_id)
+                group["contract_no"] = contract_id
+                for row in group["add_list"]:
+                    row["合同号"] = contract_id
+                for row in group["rush_rows"]:
+                    row["contract_no"] = contract_id
+        contract_ids = [groups[path]["contract_no"] for path in ordered_paths]
+        contract_no_str = "、".join(contract_ids)
+
+        # 5. 建合同：现货组先建并立即自动配货，再建沙盘组；任一步失败回滚已建部分
+        current_user = ctx if isinstance(ctx, dict) else {"username": operator, "role": ""}
+        created_contract_ids: list[str] = []
+        spot_result: dict | None = None
+        batch_result: dict = {}
+        try:
+            spot_group = groups.get(STOCK_LINE_PATH)
+            if spot_group:
+                _process_contracts_batch(
+                    add_list=spot_group["add_list"],
+                    rush_source_rows=[],
+                    save_mode="spot",
+                    is_rush=False,
+                    user_ctx=current_user,
+                    operator=operator,
+                    background_tasks=background_tasks,
+                )
+                created_contract_ids.append(spot_group["contract_no"])
+                spot_result = allocate_spot_contract(
+                    spot_group["contract_no"],
+                    customer=customer,
+                    agent=agent,
+                    operator=operator,
+                )
+            batch_group = groups.get(BATCH_LINE_PATH)
+            if batch_group:
+                batch_result = _process_contracts_batch(
+                    add_list=batch_group["add_list"],
+                    rush_source_rows=batch_group["rush_rows"],
+                    save_mode="sandbox",
+                    is_rush=bool(payload.is_rush),
+                    user_ctx=current_user,
+                    operator=operator,
+                    background_tasks=background_tasks,
+                )
+                created_contract_ids.append(batch_group["contract_no"])
+        except Exception:
+            if spot_result:
+                rollback_spot_allocation(spot_result)
+            _rollback_created_contracts(created_contract_ids)
+            raise
+
+        # 6. 回写经销商订单；混合订单逐行写各自合同，再把现货行同步为已配货/部分配货
+        try:
+            mark_dealer_order_contracted(order_no, contract_no=contract_no_str, operator=operator)
+            if len(contract_ids) > 1:
+                try:
+                    assign_dealer_order_line_contracts(
+                        order_no,
+                        {
+                            path: groups[path]["contract_no"]
+                            for path in ordered_paths
+                        },
+                    )
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "dealer order %s line contract assignment failed", order_no
+                    )
+            if spot_result:
+                try:
+                    sync_dealer_order_statuses_by_sales_orders([spot_result["order_id"]])
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "dealer order %s spot allocation status sync failed", order_no
+                    )
+        except Exception:
+            if spot_result:
+                rollback_spot_allocation(spot_result)
+            _rollback_created_contracts(created_contract_ids)
+            raise
+
+        path_text = "，".join(
+            f"{CONVERT_PATH_LABELS[groups[path]['path']]}：{groups[path]['contract_no']}"
+            for path in ordered_paths
+        )
+        alloc_text = (
+            f"；自动配货 {spot_result['allocated_qty']}/{spot_result['required_qty']} 台"
+            f"（订单 {spot_result['order_id']}）"
+            if spot_result
+            else ""
+        )
         append_audit_log(
             module="经销商订单",
             action_type="转为合同",
             biz_type="订单",
-            content=f"经销商订单转为合同：{order_no} → {contract_no_str}；模式：{save_mode}；急单：{payload.is_rush}",
+            content=(
+                f"经销商订单按批次/来源自动选路转合同：{order_no} → {contract_no_str}；"
+                f"{path_text}；急单：{payload.is_rush}{alloc_text}"
+            ),
             user_id=ctx.get("username"),
             username=operator,
         )
@@ -649,16 +927,56 @@ def convert_to_contract(
         order_form_contracts = _attach_order_form_to_contracts(order_no, contract_ids, customer, operator)
         cloud_attachments = _sync_cloud_attachments_for_order(order_no)
 
+        contracts_payload = [
+            {
+                "contract_no": groups[path]["contract_no"],
+                "path": groups[path]["path"],
+                "path_label": CONVERT_PATH_LABELS[groups[path]["path"]],
+                "row_count": len(groups[path]["add_list"]),
+                "qty": groups[path]["qty"],
+                "models": groups[path]["models"],
+            }
+            for path in ordered_paths
+        ]
+        auto_allocation = None
+        if spot_result:
+            auto_allocation = {
+                "contract_no": spot_result["contract_no"],
+                "order_id": spot_result["order_id"],
+                "required_qty": spot_result["required_qty"],
+                "allocated_qty": spot_result["allocated_qty"],
+                "status": spot_result["order_status"],
+                "shortages": spot_result["shortages"],
+                "serials": spot_result["serials"],
+                "message": spot_result["message"],
+            }
+        auto_shortage_qty = sum(
+            int(item.get("shortage") or 0)
+            for item in ((spot_result or {}).get("shortages") or [])
+        )
+        message = f"已成功转为合同 {contract_no_str}"
+        if spot_result:
+            message = f"{message}；{spot_result['message']}"
+
         return {
-            "message": f"已成功转为合同 {contract_no_str}",
+            "message": message,
             "contract_no": contract_no_str,
-            "save_mode": save_mode,
+            "contract_ids": contract_ids,
+            "contracts": contracts_payload,
+            "auto_allocation": auto_allocation,
+            "auto_allocated_qty": int((spot_result or {}).get("allocated_qty") or 0),
+            "auto_required_qty": int((spot_result or {}).get("required_qty") or 0),
+            "auto_shortage_qty": auto_shortage_qty,
+            "save_mode": "auto",
             "order_form_attached_contracts": order_form_contracts,
             "cloud_attachments": cloud_attachments,
-            **{k: v for k, v in result.items() if k not in ("message", "save_mode", "contract_ids")},
+            "rush_created": int(batch_result.get("rush_created") or 0),
+            "rush_auto_inserted": int(batch_result.get("rush_auto_inserted") or 0),
         }
     except HTTPException:
         raise
+    except SpotAllocationError as exc:
+        raise HTTPException(status_code=422, detail=f"库存自动配货失败: {exc}")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:

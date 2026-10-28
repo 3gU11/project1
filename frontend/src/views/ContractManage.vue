@@ -609,6 +609,11 @@
             <el-checkbox v-model="scope.row.high" />
           </template>
         </el-table-column>
+        <el-table-column label="路径" width="170">
+          <template #default="scope">
+            <el-tag :type="dealerConvertPathTagType(scope.row)" size="small">{{ convertLinePathLabel(scope.row) }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="原备注" min-width="120">
           <template #default="scope">
             <el-input v-model="scope.row.remark" placeholder="原备注" />
@@ -631,19 +636,13 @@
       <el-input v-model="dealerConvertForm.contractNote" placeholder="可选" />
 
       <div class="save-mode-section">
-        <div class="ops-label">保存方式</div>
-        <div class="save-mode-sub">
-          {{ isDealerRushActive ? '进入生产看板（参与急单排产）' : '进入沙盘（参与老板计划排产）' }}或使用现货（直接置为已规划）。
-        </div>
-        <div v-if="!dealerConvertCanUseSpot" class="save-mode-blocked">当前“使用现货”不可用：{{ dealerConvertSpotBlockReason }}</div>
+        <div class="ops-label">路径（按明细批次/来源自动判定）</div>
+        <div class="save-mode-hint path-mode-hint">库存中行：合同直接置为已规划，并自动建销售订单、按机型+加高分配库存机台，缺口留待人工补配。具体批次行：进入沙盘待规划，保留指定批次。急单开关只影响批次行。</div>
       </div>
 
       <template #footer>
         <el-button @click="dealerConvertDialogVisible = false">取消</el-button>
-        <el-button type="warning" :disabled="!dealerConvertCanUseSpot" :loading="dealerConvertSaving" @click="submitDealerConvert('spot')">使用现货</el-button>
-        <el-button type="primary" :loading="dealerConvertSaving" @click="submitDealerConvert('sandbox')">
-          {{ isDealerRushActive ? '进入生产看板' : '进入沙盘' }}
-        </el-button>
+        <el-button type="primary" :loading="dealerConvertSaving" @click="submitDealerConvert()">确认转合同</el-button>
       </template>
     </el-dialog>
   </div>
@@ -673,7 +672,7 @@ import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 import { compareModels, isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
-import { normalizeDealerOrderItems } from '../utils/dealerOrderItems'
+import { normalizeDealerOrderItems, convertLinePathLabel, type ConvertItemRow } from '../utils/dealerOrderItems'
 import { hasHighHint } from '../utils/heightened'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
@@ -682,13 +681,27 @@ import PageHeader from '../components/PageHeader.vue'
 const router = useRouter()
 
 type StatusTab = '待规划' | '已规划' | '已完成'
+type AutoAllocation = {
+  contract_no: string
+  order_id: string
+  required_qty: number
+  allocated_qty: number
+  status: 'ready' | 'active'
+  shortages: Array<{ model: string; high: boolean; need: number; allocated: number; shortage: number }>
+  serials: string[]
+  message: string
+}
 type MessageResponse = {
   message?: string
   rush_created?: number
   rush_auto_inserted?: number
-  save_mode?: 'sandbox' | 'spot'
+  save_mode?: string  // 经销商转合同自动选路返回 auto；手动批量录合同仍为 sandbox/spot
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
+  contracts?: Array<{ contract_no: string; path: 'spot' | 'batch'; path_label: string; row_count: number; qty: number; models: string[] }>
+  auto_allocation?: AutoAllocation | null
+  auto_allocated_qty?: number
+  auto_shortage_qty?: number
 }
 type ContractSummary = {
   id: string
@@ -821,8 +834,6 @@ const dealerOrders = ref<DealerOrder[]>([])
 const dealerOrderSource = ref('')
 const dealerConvertDialogVisible = ref(false)
 const dealerConvertSaving = ref(false)
-const dealerConvertCanUseSpot = ref(true)
-const dealerConvertSpotBlockReason = ref('')
 const openMonths = ref<string[]>([])
 const detailPanelRef = ref<HTMLElement | null>(null)
 const contractEditDialogVisible = ref(false)
@@ -857,19 +868,17 @@ const modelOptions = computed(() => modelDictionaryStore.rows
   .slice()
   .sort((a, b) => a.sort_order - b.sort_order)
   .map((row) => row.model_name))
-type DealerConvertItem = { model: string; qty: number; high: boolean; rowNote: string; remark: string; extraRemark: string; ermq: number }
 const dealerConvertForm = reactive({
   contractNo: '',
   deliveryDate: '',
   customer: '',
   agent: '',
   isRush: false,
-  items: [] as DealerConvertItem[],
+  items: [] as ConvertItemRow[],
   contractNote: '',
   sourceOrderNo: '',
 })
 const isRushOrderActive = computed(() => batchForm.value.isRush)
-const isDealerRushActive = computed(() => dealerConvertForm.isRush)
 const saveModeDialogVisible = ref(false)
 const canUseSpotMode = ref(true)
 const spotModeBlockReason = ref('')
@@ -974,8 +983,6 @@ const openDealerOrderConvertDialog = async (order: DealerOrder) => {
   dealerConvertForm.items = rows
   dealerConvertForm.contractNote = String(order.review_note || '').trim()
   dealerConvertForm.sourceOrderNo = String(order.order_no || '').trim()
-  dealerConvertCanUseSpot.value = true
-  dealerConvertSpotBlockReason.value = ''
   try {
     dealerConvertForm.contractNo = await fetchNextContractId()
   } catch (err) {
@@ -1537,7 +1544,30 @@ const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: nu
   }
 }
 
-const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
+/** 路径标签配色：库存行 success，批次行 info。 */
+const dealerConvertPathTagType = (item?: { batch_no?: string; inventory_type?: string } | null) =>
+  convertLinePathLabel(item).startsWith('库存') ? 'success' : 'info'
+
+/** 自动配货成功文案（库存中行转合同后后端自动建销售订单并分配机台）。 */
+const autoAllocationText = (res: MessageResponse) => {
+  const allocation = res.auto_allocation
+  if (!allocation) return ''
+  const allocatedQty = Number(res.auto_allocated_qty ?? allocation.allocated_qty ?? 0)
+  const requiredQty = Number(allocation.required_qty ?? 0)
+  return `，库存自动配货 ${allocatedQty}/${requiredQty} 台`
+}
+
+/** 自动配货缺口提示。 */
+const notifyAutoShortages = (res: MessageResponse) => {
+  const shortages = res.auto_allocation?.shortages
+  if (!shortages?.length) return
+  const shortageText = shortages
+    .map((item) => `${item.model}${item.high ? '（加高）' : ''}需 ${item.need}，已配 ${item.allocated}`)
+    .join('；')
+  ElMessage.warning(`库存自动配货缺口：${shortageText}`)
+}
+
+const submitDealerConvert = async () => {
   if (!hasText(dealerConvertForm.contractNo) || !hasText(dealerConvertForm.customer) || !hasText(dealerConvertForm.deliveryDate)) {
     ElMessage.warning('请先完整填写合同号/客户名/要求交期')
     return
@@ -1557,20 +1587,6 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
     ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
     return
   }
-  if (saveMode === 'spot') {
-    try {
-      const spotAvailability = await evaluateSpotModeAvailability(validItems)
-      if (!spotAvailability.canUseSpot) {
-        dealerConvertCanUseSpot.value = false
-        dealerConvertSpotBlockReason.value = spotAvailability.reason
-        ElMessage.warning(`“使用现货”不可用：${spotAvailability.reason}`)
-        return
-      }
-    } catch (err: any) {
-      ElMessage.error(getApiErrorMessage(err) || '校验现货可用机台失败')
-      return
-    }
-  }
 
   await submitWithLock(dealerConvertSaving, async () => {
     const payload = {
@@ -1578,7 +1594,6 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
       customer_name: dealerConvertForm.customer.trim(),
       agent_name: dealerConvertForm.agent.trim(),
       delivery_date: dealerConvertForm.deliveryDate.trim(),
-      save_mode: saveMode,
       is_rush: dealerConvertForm.isRush,
       items: validItems,
       contract_note: dealerConvertForm.contractNote.trim(),
@@ -1587,34 +1602,25 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
       `/dealer-orders/${encodeURIComponent(dealerConvertForm.sourceOrderNo)}/convert-to-contract`,
       payload,
     )
-    const autoInserted = Number(res.rush_auto_inserted || 0)
-    const pendingRushCards = Math.max(0, Number(res.rush_created || 0) - autoInserted)
-    const rushText = [
-      autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
-      pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
-    ].filter(Boolean).join('，')
-    const modeText = saveMode === 'spot'
-      ? '已按“使用现货”处理（合同状态=已规划）'
-      : (dealerConvertForm.isRush ? '已按“进入生产看板”处理（合同状态=待规划）' : '已按“进入沙盘”处理（合同状态=待规划）')
-    ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    const contracts = res.contracts || []
+    ElMessage.success(`${res.warning || res.message || '转合同成功'}${autoAllocationText(res)}`)
+    notifyAutoShortages(res)
     const cloudAttachmentNotice = buildCloudAttachmentNotice(res.cloud_attachments)
     if (cloudAttachmentNotice) {
       if (cloudAttachmentNotice.level === 'warning') ElMessage.warning(cloudAttachmentNotice.text)
       else ElMessage.success(cloudAttachmentNotice.text)
     }
     dealerConvertDialogVisible.value = false
-    activeTab.value = saveMode === 'spot' ? '已规划' : '待规划'
-    selectedContractId.value = String(res.contract_no || dealerConvertForm.contractNo).trim()
+    activeTab.value = contracts.some((contract) => contract.path === 'spot') ? '已规划' : '待规划'
+    selectedContractId.value = String(
+      contracts[0]?.contract_no || String(res.contract_no || dealerConvertForm.contractNo).split('、')[0],
+    ).trim()
     await fetchContracts(true)
     await loadDealerOrders()
-    if (saveMode === 'sandbox') {
-      if (dealerConvertForm.isRush) {
-        router.push('/production-kanban')
-      } else {
-        router.push('/prediction-sandbox')
-      }
-    } else if (saveMode === 'spot') {
-      router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    if (res.auto_allocation?.order_id) {
+      router.push({ path: '/sales-orders', query: { tab: 'manage' } })
+    } else if (contracts.some((contract) => contract.path === 'batch')) {
+      router.push(dealerConvertForm.isRush ? '/production-kanban' : '/prediction-sandbox')
     }
   }, { errorMessage: '经销商订单转合同失败' })
 }
@@ -2378,6 +2384,11 @@ onMounted(() => {
   color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
+.save-mode-hint.path-mode-hint {
+  color: var(--color-gray-500);
+  margin-top: 4px;
+  line-height: 1.6;
+}
 .convert-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2385,11 +2396,6 @@ onMounted(() => {
 }
 .save-mode-section {
   margin-top: 16px;
-}
-.save-mode-blocked {
-  color: var(--color-danger);
-  font-size: var(--font-size-sm);
-  margin-top: 6px;
 }
 .dealer-import-toolbar {
   display: flex;

@@ -12,6 +12,7 @@
 export type DealerOrderLineLike = {
   model?: string
   quantity?: number | string
+  batch_no?: string
   inventory_type?: string
   remark?: string
   extra_remark?: string
@@ -31,10 +32,37 @@ export type ConvertItemRow = {
   remark: string
   extraRemark: string
   ermq: number
+  batch_no: string
+  inventory_type: string
 }
 
 /** 云端标记加高的 inventory_type 取值（见 crud/local_contract_drafts.py 的 _HEIGHTENED_TYPES）。 */
 const HEIGHTENED_INVENTORY_TYPES = new Set(['heightened', 'heighten', 'high', 'tall'])
+
+/** 库存中（现货）来源的 inventory_type 取值，必须与后端判定一致。 */
+const STOCK_INVENTORY_TYPES = new Set(['finished', 'stock', '现货'])
+
+/** 库存中（现货）来源的 batch_no 取值，必须与后端判定一致。 */
+const STOCK_BATCH_NOS = new Set(['FINISHED-STOCK', '库存中', '现货', '现货库存'])
+
+/**
+ * 库存中（现货）来源：批次为空、FINISHED-STOCK/库存中/现货/现货库存，
+ * 或 inventory_type 为 finished/stock/现货。
+ */
+export const isStockSourceLine = (item?: { batch_no?: string; inventory_type?: string } | null) => {
+  if (!item) return false
+  const inventoryType = String(item.inventory_type ?? '').trim().toLowerCase()
+  if (STOCK_INVENTORY_TYPES.has(inventoryType)) return true
+  const batchNo = String(item.batch_no ?? '').trim()
+  if (!batchNo) return true
+  return STOCK_BATCH_NOS.has(batchNo) || STOCK_BATCH_NOS.has(batchNo.toUpperCase())
+}
+
+/** 转合同明细的自动路径文案。 */
+export const convertLinePathLabel = (item?: { batch_no?: string; inventory_type?: string } | null) => {
+  if (isStockSourceLine(item)) return '库存中 → 现货直配'
+  return `批次 ${String(item?.batch_no ?? '').trim()} → 沙盘待规划`
+}
 
 /** 判断一条经销商订单明细是否加高；只看明细自己的字段，不看订单备注。 */
 export const isHeightenedDealerOrderLine = (item?: DealerOrderLineLike | null) => {
@@ -58,12 +86,14 @@ export const normalizeDealerOrderItems = (order: DealerOrderLike): ConvertItemRo
       const extraRemark = String(item.factory_remark || item.extra_remark || '').trim()
       const ermq = Number(item.ERMQ || 0)
       const high = isHeightenedDealerOrderLine(item)
+      const batchNo = String(item.batch_no ?? '').trim()
+      const inventoryType = String(item.inventory_type ?? '').trim()
       const rowNote = [
         remark ? `[备注]${remark}` : '',
         extraRemark ? `[附加]${extraRemark}` : '',
         ermq > 0 ? `[改数]${ermq}` : '',
       ].filter(Boolean).join(' ')
-      return { model, qty, high, rowNote, remark, extraRemark, ermq }
+      return { model, qty, high, rowNote, remark, extraRemark, ermq, batch_no: batchNo, inventory_type: inventoryType }
     })
     .filter((item) => item.model)
 }

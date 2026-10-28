@@ -90,7 +90,8 @@ sequenceDiagram
     P->>O: 登记云端状态同步事件
     opt 审核通过并转合同
         U->>P: 预览并确认转合同
-        P->>D: 建立 factory_plan 及订单关联
+        P->>D: 按明细批次/来源分组建立合同
+        Note over P: 库存中行合同置已规划并自动建单配货；具体批次行置待规划进入沙盘
         P->>O: 登记转合同同步事件
     end
     opt 本地直接录入
@@ -102,7 +103,7 @@ sequenceDiagram
 
 合同承载生产需求；销售订单承载配货和交付；经销商订单承载外部订单及审核状态。三者有关联，但不是同一张表或同一个状态机。
 
-依据：`api/routes/dealer_orders.py`、`api/routes/planning.py`、`crud/dealer_orders.py`。
+依据：`api/routes/dealer_orders.py`、`api/routes/planning.py`、`crud/dealer_orders.py`、`crud/spot_allocation.py`。转合同自动选路与库存自动配货细节见《经销商订单转合同自动选路与现货自动配货》。
 
 ## 4. 预测排产与生产执行
 

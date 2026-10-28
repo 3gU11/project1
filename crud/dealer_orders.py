@@ -804,6 +804,15 @@ def _group_orders(rows: list[dict]) -> list[dict]:
         base["quantity"] = sum(int(item.get("quantity") or 0) for item in items)
         base["approved_qty"] = sum(int(item.get("approved_qty") or 0) for item in items)
         base["allocated_qty"] = sum(int(item.get("allocated_qty") or 0) for item in items)
+        contract_nos: list[str] = []
+        for item in items:
+            for contract_id in CONTRACT_NO_SEPARATOR.split(str(item.get("contract_no") or "")):
+                contract_id = contract_id.strip()
+                if contract_id and contract_id not in contract_nos:
+                    contract_nos.append(contract_id)
+        if contract_nos:
+            # 混合批次/来源的订单会拆成多张合同，订单级展示要把它们都列出来。
+            base["contract_no"] = "、".join(contract_nos)
         base["summary_qty"] = sum(int(item.get("summary_qty") or 0) for item in items)
         base["occupied_qty"] = sum(int(item.get("occupied_qty") or 0) for item in items)
         base["available_qty"] = min((int(item.get("available_qty") or 0) for item in items), default=0)
@@ -1156,7 +1165,16 @@ def _sync_allocation_status(conn, order_no: str, items: list[dict]) -> list[dict
                 },
             )
         aggregate_status = _aggregate_status(updated_items)
-        contract_no = str(first.get("contract_no") or "").strip()
+        contract_no = "、".join(
+            sorted(
+                {
+                    cid.strip()
+                    for item in updated_items
+                    for cid in CONTRACT_NO_SEPARATOR.split(str(item.get("contract_no") or ""))
+                    if cid.strip()
+                }
+            )
+        )
         v7_order_no = ",".join(sorted(all_order_ids))
         if aggregate_status in {"completed", "complete"}:
             _enqueue_cloud_sync(
@@ -1630,6 +1648,44 @@ def mark_dealer_order_contracted(order_no: str, contract_no: str, operator: str 
                 "v7_order_no": "",
             },
         )
+
+
+def assign_dealer_order_line_contracts(order_no: str, path_contracts: dict[str, str]) -> int:
+    """按明细行自身的批次/来源写回合同号。
+
+    转合同可能把「库存中」行和「具体批次」行拆成两张合同。整单统一写合并合同号时，
+    ``_sync_allocation_status`` 会按机型把另一张合同的配货算到本行，导致批次行在还没
+    配货时就被标成已配货；这里逐行只写它实际所属的合同，保证已配/部分配货口径准确。
+    """
+    order_no = str(order_no or "").strip()
+    spot_contract = str((path_contracts or {}).get("spot") or "").strip()
+    batch_contract = str((path_contracts or {}).get("batch") or "").strip()
+    if not order_no or not spot_contract or not batch_contract:
+        return 0
+    ensure_dealer_order_tables()
+    updated = 0
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT id, batch_no, inventory_type, contract_no FROM dealer_orders "
+                "WHERE order_no=:order_no"
+            ),
+            {"order_no": order_no},
+        ).mappings().all()
+        for row in rows:
+            contract_id = (
+                spot_contract
+                if _is_finished_stock_order(row.get("batch_no"), row.get("inventory_type"))
+                else batch_contract
+            )
+            if str(row.get("contract_no") or "").strip() == contract_id:
+                continue
+            conn.execute(
+                text("UPDATE dealer_orders SET contract_no=:contract_no WHERE id=:id"),
+                {"contract_no": contract_id, "id": row["id"]},
+            )
+            updated += 1
+    return updated
 
 
 def get_dealer_orders_pending_counts() -> dict:
