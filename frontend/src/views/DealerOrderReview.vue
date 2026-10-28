@@ -240,10 +240,6 @@
           <div class="ops-label">代理商</div>
           <el-input v-model="convertForm.agent" />
         </div>
-        <div>
-          <div class="ops-label">急单</div>
-          <el-switch v-model="convertForm.isRush" active-text="是" inactive-text="否" />
-        </div>
       </div>
 
       <el-divider />
@@ -310,7 +306,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint">库存中行：合同直接置为已规划，之后由业务人员到「销售订单 → 导入已规划合同」建单，并在「订单配货」手动判别分配机台。具体批次行：进入沙盘待规划，保留指定批次。急单开关只影响批次行。</div>
+        <div class="save-mode-hint">库存中行：合同置「已规划」，业务人员到「销售订单 → 导入已规划合同」建单后在「订单配货」手动选库存机台。具体批次行：合同同样置「已规划」并保留指定批次（如 09-16），配货时按批次手动选该批次的在产机台，不再进入沙盘预测。</div>
       </div>
 
       <template #footer>
@@ -560,7 +556,6 @@ const convertForm = reactive({
   deliveryDate: '',
   customer: '',
   agent: '',
-  isRush: false,
   items: [] as ConvertItemRow[],
   contractNote: '',
   sourceOrderNo: '',
@@ -591,15 +586,6 @@ const fetchNextContractId = async () => {
   return String(res.contract_no || '').trim()
 }
 
-const isRushHint = (order: DealerOrder) => {
-  const remark = String(order.remark || '').toLowerCase()
-  if (remark.includes('急') || remark.includes('加急')) return true
-  const delivery = String(order.delivery_date || '').trim()
-  if (!delivery) return false
-  const days = (new Date(delivery).getTime() - Date.now()) / 86400000
-  return days <= 3
-}
-
 const customerDisplay = (order: DealerOrder | Record<string, any>) => {
   const customer = String((order as any).customer_name || '').trim()
   const address = String((order as any).delivery_address || '').trim()
@@ -621,7 +607,6 @@ const openConvertDialog = async (order: DealerOrder) => {
   convertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   convertForm.customer = String(order.customer_name || '').trim()
   convertForm.agent = String(order.contact_name || '').trim()
-  convertForm.isRush = isRushHint(order)
   convertForm.items = rows
   convertForm.contractNote = String(order.review_note || order.regional_review_note || '').trim()
   convertForm.sourceOrderNo = String(order.order_no || '').trim()
@@ -965,13 +950,11 @@ const rejectOrder = async (row: DealerOrder) => {
 
 type MessageResponse = {
   message?: string
-  rush_created?: number
-  rush_auto_inserted?: number
   warning?: string
   contract_no?: string
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
-  contracts?: Array<{ contract_no: string; path: 'spot' | 'batch'; path_label: string; row_count: number; qty: number; models: string[] }>
+  contracts?: Array<{ contract_no: string; path: 'spot' | 'batch'; batch_no: string; path_label: string; row_count: number; qty: number; models: string[] }>
 }
 
 const submitConvert = async () => {
@@ -1006,7 +989,6 @@ const submitConvert = async () => {
       customer_name: convertForm.customer.trim(),
       agent_name: convertForm.agent.trim(),
       delivery_date: convertForm.deliveryDate.trim(),
-      is_rush: convertForm.isRush,
       items: validItems,
       contract_note: convertForm.contractNote.trim(),
     }
@@ -1047,11 +1029,9 @@ const submitConvert = async () => {
     convertDialogVisible.value = false
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadOrders()
-    if (res.contracts?.some((contract) => contract.path === 'spot')) {
-      // 库存中合同只到「已规划」，由业务人员导入后到订单配货手动分配机台。
+    if (res.contracts?.length) {
+      // 合同一律置「已规划」，由业务人员导入后到订单配货手动分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
-    } else if (res.contracts?.some((contract) => contract.path === 'batch')) {
-      router.push(convertForm.isRush ? '/production-kanban' : '/prediction-sandbox')
     }
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '经销商订单转合同失败')

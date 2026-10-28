@@ -21,7 +21,7 @@ Content-Type: application/json
 | `/api/v1/auth` | `POST /login` | 登录 |
 | `/api/v1/inventory` | `GET /`、`POST /`、`POST /shipping/confirm` | 库存、入库、发货 |
 | `/api/v1/planning` | `GET /orders`、`POST /orders/{id}/allocate`、`GET /export-production-history` | 合同、排产、配货、报表 |
-| `/api/v1/dealer-orders` | `GET /`、`POST /{order_no}/approve`、`POST /{order_no}/convert-to-contract` | 经销商订单闭环；转合同按明细批次/来源自动选路，库存中行人工配货、机台带单行备注（见《经销商订单转合同自动选路与机台单行备注》） |
+| `/api/v1/dealer-orders` | `GET /`、`POST /{order_no}/approve`、`POST /{order_no}/convert-to-contract` | 经销商订单闭环；转合同按明细批次/来源自动选路（具体批次按批次号拆合同并置已规划），人工配货、机台带单行备注（见《经销商订单转合同自动选路与机台单行备注》） |
 | `/api/v1/reports` | `GET /inbound`、`/orders`、`/shipments`、`/completions` | 报表查询 |
 | `/api/v1/traceability` | `GET /search`、`GET /{target_id}/timeline` | 追溯和时间线 |
 | `/api/v1/model-dictionary` | `GET /`、`POST /save` | 机型字典 |

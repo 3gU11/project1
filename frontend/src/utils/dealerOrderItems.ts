@@ -60,8 +60,8 @@ export const isStockSourceLine = (item?: { batch_no?: string; inventory_type?: s
 
 /** 转合同明细的自动路径文案。 */
 export const convertLinePathLabel = (item?: { batch_no?: string; inventory_type?: string } | null) => {
-  if (isStockSourceLine(item)) return '库存中 → 现货直配'
-  return `批次 ${String(item?.batch_no ?? '').trim()} → 沙盘待规划`
+  if (isStockSourceLine(item)) return '库存中 → 现货直配（已规划）'
+  return `批次 ${String(item?.batch_no ?? '').trim()} → 指定批次（已规划）`
 }
 
 /** 判断一条经销商订单明细是否加高；只看明细自己的字段，不看订单备注。 */

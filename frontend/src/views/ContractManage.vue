@@ -580,10 +580,6 @@
           <div class="ops-label">代理商</div>
           <el-input v-model="dealerConvertForm.agent" />
         </div>
-        <div>
-          <div class="ops-label">急单</div>
-          <el-switch v-model="dealerConvertForm.isRush" active-text="是" inactive-text="否" />
-        </div>
       </div>
 
       <el-divider />
@@ -637,7 +633,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint path-mode-hint">库存中行：合同直接置为已规划，之后由业务人员到「销售订单 → 导入已规划合同」建单，并在「订单配货」手动判别分配机台。具体批次行：进入沙盘待规划，保留指定批次。急单开关只影响批次行。</div>
+        <div class="save-mode-hint path-mode-hint">库存中行：合同置「已规划」，业务人员到「销售订单 → 导入已规划合同」建单后在「订单配货」手动选库存机台。具体批次行：合同同样置「已规划」并保留指定批次（如 09-16），配货时按批次手动选该批次的在产机台，不再进入沙盘预测。</div>
       </div>
 
       <template #footer>
@@ -688,7 +684,7 @@ type MessageResponse = {
   save_mode?: string  // 经销商转合同自动选路返回 auto；手动批量录合同仍为 sandbox/spot
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
-  contracts?: Array<{ contract_no: string; path: 'spot' | 'batch'; path_label: string; row_count: number; qty: number; models: string[] }>
+  contracts?: Array<{ contract_no: string; path: 'spot' | 'batch'; batch_no: string; path_label: string; row_count: number; qty: number; models: string[] }>
 }
 type ContractSummary = {
   id: string
@@ -860,7 +856,6 @@ const dealerConvertForm = reactive({
   deliveryDate: '',
   customer: '',
   agent: '',
-  isRush: false,
   items: [] as ConvertItemRow[],
   contractNote: '',
   sourceOrderNo: '',
@@ -943,15 +938,6 @@ const canConvertDealerOrder = (order: DealerOrder) => {
   return ['pending', 'approved'].includes(String(order.status || '').trim()) && Number(order.factory_pending || 0) !== 1
 }
 
-const isRushHint = (order: DealerOrder) => {
-  const remark = String(order.remark || '').toLowerCase()
-  if (remark.includes('急') || remark.includes('加急')) return true
-  const delivery = String(order.delivery_date || '').trim()
-  if (!delivery) return false
-  const days = (new Date(delivery).getTime() - Date.now()) / 86400000
-  return days <= 3
-}
-
 const openDealerOrderConvertDialog = async (order: DealerOrder) => {
   if (!canConvertDealerOrder(order)) {
     ElMessage.warning('只有待审核或已通过审核的经销商订单可以转合同')
@@ -966,7 +952,6 @@ const openDealerOrderConvertDialog = async (order: DealerOrder) => {
   dealerConvertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   dealerConvertForm.customer = String(order.customer_name || '').trim()
   dealerConvertForm.agent = String(order.contact_name || '').trim()
-  dealerConvertForm.isRush = isRushHint(order)
   dealerConvertForm.items = rows
   dealerConvertForm.contractNote = String(order.review_note || '').trim()
   dealerConvertForm.sourceOrderNo = String(order.order_no || '').trim()
@@ -1562,7 +1547,6 @@ const submitDealerConvert = async () => {
       customer_name: dealerConvertForm.customer.trim(),
       agent_name: dealerConvertForm.agent.trim(),
       delivery_date: dealerConvertForm.deliveryDate.trim(),
-      is_rush: dealerConvertForm.isRush,
       items: validItems,
       contract_note: dealerConvertForm.contractNote.trim(),
     }
@@ -1578,17 +1562,15 @@ const submitDealerConvert = async () => {
       else ElMessage.success(cloudAttachmentNotice.text)
     }
     dealerConvertDialogVisible.value = false
-    activeTab.value = contracts.some((contract) => contract.path === 'spot') ? '已规划' : '待规划'
+    activeTab.value = '已规划'
     selectedContractId.value = String(
       contracts[0]?.contract_no || String(res.contract_no || dealerConvertForm.contractNo).split('、')[0],
     ).trim()
     await fetchContracts(true)
     await loadDealerOrders()
-    if (contracts.some((contract) => contract.path === 'spot')) {
-      // 库存中合同只到「已规划」，由业务人员导入后到订单配货手动分配机台。
+    if (contracts.length) {
+      // 合同一律置「已规划」，由业务人员导入后到订单配货手动分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
-    } else if (contracts.some((contract) => contract.path === 'batch')) {
-      router.push(dealerConvertForm.isRush ? '/production-kanban' : '/prediction-sandbox')
     }
   }, { errorMessage: '经销商订单转合同失败' })
 }

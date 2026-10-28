@@ -1,9 +1,9 @@
 """经销商订单转合同：按批次/来源自动选路 + 机台单行备注。
 
 覆盖：
-1. 路径分组（纯函数）：库存中/空批次 → 现货组，具体批次 → 批次组，同路径合并。
+1. 路径分组（纯函数）：库存中合并一张，每个具体批次号各一张合同，同批次合并。
 2. 单行备注：原备注 → 附加备注 → 加高/改数，机台只落一行。
-3. 转合同端点编排：混合订单拆两张合同、逐行回写合同号、失败回滚；不再自动建单/配货。
+3. 转合同端点编排：合同一律置「已规划」、多批次拆合同、逐行回写合同号、失败回滚。
 4. 订单级合同号与逐行合同号回写。
 """
 
@@ -37,6 +37,17 @@ def _contract_item(model: str, qty: int, *, high: bool = False, batch_no: str = 
     }
 
 
+def _build_groups(contract_items: list[dict], order_items: list[dict] | None = None) -> list[dict]:
+    return routes._build_convert_groups(
+        contract_items,
+        order_items or [],
+        total_note="",
+        delivery_date="2026-11-01",
+        customer="客户A",
+        agent="代理A",
+    )
+
+
 def test_line_path_uses_batch_and_inventory_type():
     assert routes._line_path("FINISHED-STOCK", "finished") == "spot"
     assert routes._line_path("库存中", "finished") == "spot"
@@ -47,65 +58,61 @@ def test_line_path_uses_batch_and_inventory_type():
     assert routes._line_path("08-04", "heightened") == "batch"
 
 
-def test_mixed_order_splits_into_spot_and_batch_groups():
-    order_items = [
-        {"model": "FR-400G", "quantity": 1, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
-        {"model": "FR-400G", "quantity": 2, "batch_no": "09-10", "inventory_type": "wip"},
-        {"model": "FH-300C", "quantity": 1, "batch_no": "", "inventory_type": "unmarked"},
-    ]
+def test_mixed_order_splits_spot_and_batch_contracts():
     contract_items = [
         _contract_item("FR-400G", 1, batch_no="FINISHED-STOCK", inventory_type="finished"),
         _contract_item("FR-400G", 2, batch_no="09-10", inventory_type="wip"),
         _contract_item("FH-300C", 1, batch_no="", inventory_type="unmarked"),
     ]
 
-    groups = routes._build_convert_groups(
-        contract_items,
-        order_items,
-        total_note="",
-        delivery_date="2026-11-01",
-        customer="客户A",
-        agent="代理A",
-        is_rush=False,
-    )
+    groups = _build_groups(contract_items)
 
-    assert set(groups) == {"spot", "batch"}
-    assert groups["spot"]["first_index"] == 0
-    assert groups["batch"]["first_index"] == 1
-    assert [row["机型"] for row in groups["spot"]["add_list"]] == ["FR-400G", "FH-300C"]
-    assert [row["排产数量"] for row in groups["spot"]["add_list"]] == [1, 1]
-    assert groups["spot"]["qty"] == 2
+    assert [group["path"] for group in groups] == ["spot", "batch"]
+    assert [group["batch_no"] for group in groups] == ["", "09-10"]
+    assert [group["first_index"] for group in groups] == [0, 1]
+    assert [row["机型"] for row in groups[0]["add_list"]] == ["FR-400G", "FH-300C"]
+    assert [row["排产数量"] for row in groups[0]["add_list"]] == [1, 1]
+    assert groups[0]["qty"] == 2
     # 现货行不携带批次来源，批次行保留指定批次
-    assert groups["spot"]["add_list"][0]["指定批次/来源"] == {}
-    assert groups["batch"]["add_list"][0]["指定批次/来源"] == {"09-10": 2}
-    assert groups["batch"]["add_list"][0]["排产数量"] == 2
+    assert groups[0]["add_list"][0]["指定批次/来源"] == {}
+    assert groups[1]["add_list"][0]["指定批次/来源"] == {"09-10": 2}
+    assert groups[1]["add_list"][0]["排产数量"] == 2
 
 
-def test_same_path_rows_merge_but_heightened_stays_separate():
+def test_each_batch_no_gets_its_own_contract():
     contract_items = [
         _contract_item("FR-400G", 1, batch_no="09-10", inventory_type="wip"),
-        _contract_item("FR-400G", 2, batch_no="09-10", inventory_type="wip"),
-        _contract_item("FR-400G", 1, high=True, batch_no="09-10", inventory_type="wip"),
+        _contract_item("FH-300C", 2, batch_no="10-02", inventory_type="wip"),
+        _contract_item("FR-400G", 1, batch_no="09-10", inventory_type="wip"),
     ]
 
-    groups = routes._build_convert_groups(
-        contract_items,
-        [],
-        total_note="整单备注",
-        delivery_date="2026-11-01",
-        customer="客户A",
-        agent="代理A",
-        is_rush=True,
-    )
+    groups = _build_groups(contract_items)
 
-    assert set(groups) == {"batch"}
-    rows = groups["batch"]["add_list"]
+    assert [group["batch_no"] for group in groups] == ["09-10", "10-02"]
+    assert [group["qty"] for group in groups] == [2, 2]
+    # 同一批次的同机型同规格合并
+    assert len(groups[0]["add_list"]) == 1
+    assert groups[0]["add_list"][0]["排产数量"] == 2
+    assert groups[0]["add_list"][0]["指定批次/来源"] == {"09-10": 2}
+    assert groups[1]["add_list"][0]["指定批次/来源"] == {"10-02": 2}
+
+
+def test_same_batch_rows_merge_but_heightened_stays_separate():
+    contract_items = [
+        _contract_item("FR-400G", 1, batch_no="09-16", inventory_type="wip"),
+        _contract_item("FR-400G", 2, batch_no="09-16", inventory_type="wip"),
+        _contract_item("FR-400G", 1, high=True, batch_no="09-16", inventory_type="heightened"),
+    ]
+
+    groups = _build_groups(contract_items)
+
+    assert len(groups) == 1
+    rows = groups[0]["add_list"]
     assert len(rows) == 2
     assert rows[0]["机型"] == "FR-400G"
     assert rows[0]["排产数量"] == 3
     assert rows[1]["排产数量"] == 1
     assert "加高" in rows[1]["备注"]
-    assert groups["batch"]["rush_rows"][1]["qty"] == 1
 
 
 def test_contract_no_bump_only_handles_trailing_sequence():
@@ -189,7 +196,7 @@ def test_build_model_note_map_writes_single_line_remark(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 三、转合同端点编排（mock 合同落库，验证分组/编号/回写/回滚；不再自动配货）
+# 三、转合同端点编排（mock 合同落库，验证分组/编号/回写/回滚）
 # ---------------------------------------------------------------------------
 
 
@@ -211,17 +218,12 @@ class _FakeBackgroundTasks:
         return None
 
 
-def _mixed_order_items() -> list[dict]:
-    return [
-        {"model": "FR-400G", "quantity": 1, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
-        {"model": "FH-300C", "quantity": 2, "batch_no": "10-02", "inventory_type": "wip"},
-    ]
-
-
 def _patch_convert_endpoint(monkeypatch, *, calls: dict):
     monkeypatch.setattr(routes, "get_engine", lambda: _FakeEngine())
     monkeypatch.setattr(routes, "contract_no_exists", lambda conn, cid: False)
-    contract_numbers = iter(["HT202610280001", "HT202610280002", "HT202610280003"])
+    contract_numbers = iter(
+        ["HT202610280001", "HT202610280002", "HT202610280003", "HT202610280004"]
+    )
     monkeypatch.setattr(routes, "next_contract_no", lambda conn: next(contract_numbers))
     monkeypatch.setattr(planning, "_assert_models_in_dictionary", lambda names: None)
     monkeypatch.setattr(routes, "append_audit_log", lambda **kwargs: calls["audit"].append(kwargs))
@@ -251,58 +253,106 @@ def _patch_convert_endpoint(monkeypatch, *, calls: dict):
     monkeypatch.setattr(planning, "_process_contracts_batch", fake_process_contracts_batch)
 
 
-def _mixed_payload() -> routes.ConvertToContractPayload:
+def _payload(items: list[dict]) -> routes.ConvertToContractPayload:
     return routes.ConvertToContractPayload(
         contract_no="HT202610280001",
         customer_name="客户A",
         agent_name="代理A",
         delivery_date="2026-11-01",
-        items=[
-            {"model": "FR-400G", "qty": 1, "high": False, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
-            {"model": "FH-300C", "qty": 2, "high": False, "batch_no": "10-02", "inventory_type": "wip"},
-        ],
+        items=items,
     )
 
 
-def test_convert_endpoint_splits_mixed_order_without_auto_allocation(monkeypatch):
+def _mixed_order_items() -> list[dict]:
+    return [
+        {"model": "FR-400G", "quantity": 1, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
+        {"model": "FH-300C", "quantity": 2, "batch_no": "10-02", "inventory_type": "wip"},
+    ]
+
+
+def _mixed_payload_items() -> list[dict]:
+    return [
+        {"model": "FR-400G", "qty": 1, "high": False, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
+        {"model": "FH-300C", "qty": 2, "high": False, "batch_no": "10-02", "inventory_type": "wip"},
+    ]
+
+
+def test_convert_endpoint_creates_planned_contracts_per_group(monkeypatch):
     calls = {"contracts": [], "marked": [], "audit": [], "assigned": [], "rollback_contracts": []}
     _patch_convert_endpoint(monkeypatch, calls=calls)
     monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: _mixed_order_items())
 
     result = routes.convert_to_contract(
         "DO-TEST-1",
-        _mixed_payload(),
+        _payload(_mixed_payload_items()),
         request=None,
         background_tasks=_FakeBackgroundTasks(),
         ctx={"name": "tester", "username": "tester"},
     )
 
-    # 同路径合并：现货一张、批次一张，主号给首行所在的现货组
-    assert [call["save_mode"] for call in calls["contracts"]] == ["spot", "sandbox"]
-    spot_rows = calls["contracts"][0]["add_list"]
-    batch_rows = calls["contracts"][1]["add_list"]
-    assert [row["机型"] for row in spot_rows] == ["FR-400G"]
-    assert [row["机型"] for row in batch_rows] == ["FH-300C"]
-    assert spot_rows[0]["合同号"] == "HT202610280001"
-    assert batch_rows[0]["合同号"] == "HT202610280002"
-    assert batch_rows[0]["指定批次/来源"] == {"10-02": 2}
-    assert calls["contracts"][1]["rush_source_rows"][0]["source_alloc"] == {"10-02": 2}
+    # 库存中一张 + 每个批次号一张，全部按「已规划」创建（save_mode=spot）
+    assert [call["save_mode"] for call in calls["contracts"]] == ["spot", "spot"]
+    assert [call["is_rush"] for call in calls["contracts"]] == [False, False]
+    groups = [group["add_list"] for group in calls["contracts"]]
+    assert groups[0][0]["合同号"] == "HT202610280001"
+    assert groups[1][0]["合同号"] == "HT202610280002"
+    assert groups[0][0]["指定批次/来源"] == {}
+    assert groups[1][0]["指定批次/来源"] == {"10-02": 2}
 
-    # 只回写经销商订单与逐行合同号，不再自动建销售订单/配货
+    # 回写经销商订单并逐行写各自合同
     assert calls["marked"][0][0] == ("DO-TEST-1",)
     assert calls["marked"][0][1]["contract_no"] == "HT202610280001、HT202610280002"
     assert calls["assigned"] == [
-        ("DO-TEST-1", {"spot": "HT202610280001", "batch": "HT202610280002"})
+        ("DO-TEST-1", {"spot": "HT202610280001", "batch:10-02": "HT202610280002"})
     ]
 
     assert result["contract_no"] == "HT202610280001、HT202610280002"
     assert [item["path"] for item in result["contracts"]] == ["spot", "batch"]
+    assert [item["batch_no"] for item in result["contracts"]] == ["", "10-02"]
     assert "auto_allocation" not in result
-    assert "人工配货" in result["message"]
+    assert "已规划" in result["message"] and "人工配货" in result["message"]
+    assert "指定批次：10-02" in result["message"]
     assert calls["rollback_contracts"] == []
 
 
-def test_convert_endpoint_batch_only_keeps_sandbox_path(monkeypatch):
+def test_convert_endpoint_splits_contract_per_batch_no(monkeypatch):
+    calls = {"contracts": [], "marked": [], "audit": [], "assigned": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    monkeypatch.setattr(
+        routes,
+        "validate_dealer_order_convertible",
+        lambda order_no: [
+            {"model": "FR-400G", "quantity": 1, "batch_no": "09-16", "inventory_type": "heightened"},
+            {"model": "FH-300C", "quantity": 1, "batch_no": "10-02", "inventory_type": "wip"},
+        ],
+    )
+
+    result = routes.convert_to_contract(
+        "DO-TEST-2",
+        _payload(
+            [
+                {"model": "FR-400G", "qty": 1, "high": True, "batch_no": "09-16", "inventory_type": "heightened"},
+                {"model": "FH-300C", "qty": 1, "high": False, "batch_no": "10-02", "inventory_type": "wip"},
+            ]
+        ),
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"name": "tester", "username": "tester"},
+    )
+
+    assert [call["save_mode"] for call in calls["contracts"]] == ["spot", "spot"]
+    assert result["contract_no"] == "HT202610280001、HT202610280002"
+    assert [item["batch_no"] for item in result["contracts"]] == ["09-16", "10-02"]
+    assert calls["assigned"] == [
+        (
+            "DO-TEST-2",
+            {"batch:09-16": "HT202610280001", "batch:10-02": "HT202610280002"},
+        )
+    ]
+    assert calls["rollback_contracts"] == []
+
+
+def test_convert_endpoint_batch_only_creates_one_planned_contract(monkeypatch):
     calls = {"contracts": [], "marked": [], "audit": [], "assigned": [], "rollback_contracts": []}
     _patch_convert_endpoint(monkeypatch, calls=calls)
     monkeypatch.setattr(
@@ -311,47 +361,40 @@ def test_convert_endpoint_batch_only_keeps_sandbox_path(monkeypatch):
         lambda order_no: [{"model": "FH-300C", "quantity": 2, "batch_no": "10-02", "inventory_type": "wip"}],
     )
 
-    payload = routes.ConvertToContractPayload(
-        contract_no="HT202610280001",
-        customer_name="客户A",
-        agent_name="代理A",
-        delivery_date="2026-11-01",
-        is_rush=True,
-        items=[{"model": "FH-300C", "qty": 2, "high": False, "batch_no": "10-02", "inventory_type": "wip"}],
-    )
-
     result = routes.convert_to_contract(
-        "DO-TEST-2",
-        payload,
+        "DO-TEST-3",
+        _payload(
+            [{"model": "FH-300C", "qty": 2, "high": False, "batch_no": "10-02", "inventory_type": "wip"}]
+        ),
         request=None,
         background_tasks=_FakeBackgroundTasks(),
         ctx={"name": "tester", "username": "tester"},
     )
 
-    assert [call["save_mode"] for call in calls["contracts"]] == ["sandbox"]
-    assert calls["contracts"][0]["is_rush"] is True
+    assert [call["save_mode"] for call in calls["contracts"]] == ["spot"]
+    # 只有一张合同时不逐行改合同号
     assert calls["assigned"] == []
     assert result["contracts"] == [
         {
             "contract_no": "HT202610280001",
             "path": "batch",
-            "path_label": "批次 → 沙盘待规划",
+            "batch_no": "10-02",
+            "path_label": "批次 10-02 → 指定批次（合同已规划）",
             "row_count": 1,
             "qty": 2,
             "models": ["FH-300C"],
         }
     ]
-    assert "auto_allocation" not in result
 
 
-def test_convert_endpoint_rolls_back_contracts_when_second_contract_fails(monkeypatch):
+def test_convert_endpoint_rolls_back_contracts_when_later_contract_fails(monkeypatch):
     calls = {"contracts": [], "marked": [], "audit": [], "assigned": [], "rollback_contracts": []}
     _patch_convert_endpoint(monkeypatch, calls=calls)
     monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: _mixed_order_items())
 
     def failing_process(**kwargs):
         calls["contracts"].append(kwargs)
-        if kwargs["save_mode"] == "sandbox":
+        if len(calls["contracts"]) >= 2:
             raise RuntimeError("合同落库失败")
         return {"contract_ids": [kwargs["add_list"][0]["合同号"]], "rush_created": 0, "rush_auto_inserted": 0}
 
@@ -359,8 +402,8 @@ def test_convert_endpoint_rolls_back_contracts_when_second_contract_fails(monkey
 
     with pytest.raises(routes.HTTPException) as exc_info:
         routes.convert_to_contract(
-            "DO-TEST-3",
-            _mixed_payload(),
+            "DO-TEST-4",
+            _payload(_mixed_payload_items()),
             request=None,
             background_tasks=_FakeBackgroundTasks(),
             ctx={"name": "tester", "username": "tester"},
@@ -402,7 +445,7 @@ def test_group_orders_keeps_all_split_contract_numbers():
     assert order["quantity"] == 3
 
 
-def test_assign_line_contracts_follows_batch_source(monkeypatch):
+def _dealer_engine(*lines: tuple[str, str, str]) -> object:
     engine = create_engine("sqlite://")
     with engine.begin() as conn:
         conn.execute(
@@ -412,19 +455,33 @@ def test_assign_line_contracts_follows_batch_source(monkeypatch):
                 "batch_no TEXT, inventory_type TEXT, contract_no TEXT)"
             )
         )
-        conn.execute(
-            text(
-                "INSERT INTO dealer_orders (order_no, line_no, batch_no, inventory_type, contract_no) VALUES "
-                "('DO-2', 1, 'FINISHED-STOCK', 'finished', 'HT-A、HT-B'),"
-                "('DO-2', 2, '09-10', 'wip', 'HT-A、HT-B')"
+        for line_no, (batch_no, inventory_type, contract_no) in enumerate(lines, start=1):
+            conn.execute(
+                text(
+                    "INSERT INTO dealer_orders (order_no, line_no, batch_no, inventory_type, contract_no) "
+                    "VALUES (:order_no, :line_no, :batch_no, :inventory_type, :contract_no)"
+                ),
+                {
+                    "order_no": "DO-2",
+                    "line_no": line_no,
+                    "batch_no": batch_no,
+                    "inventory_type": inventory_type,
+                    "contract_no": contract_no,
+                },
             )
-        )
+    return engine
 
+
+def test_assign_line_contracts_follows_batch_source(monkeypatch):
+    engine = _dealer_engine(
+        ("FINISHED-STOCK", "finished", "HT-A、HT-B"),
+        ("09-10", "wip", "HT-A、HT-B"),
+    )
     monkeypatch.setattr(crud_dealer, "get_engine", lambda: engine)
     monkeypatch.setattr(crud_dealer, "ensure_dealer_order_tables", lambda: None)
 
     updated = crud_dealer.assign_dealer_order_line_contracts(
-        "DO-2", {"spot": "HT-A", "batch": "HT-B"}
+        "DO-2", {"spot": "HT-A", "batch:09-10": "HT-B"}
     )
 
     assert updated == 2
@@ -433,6 +490,28 @@ def test_assign_line_contracts_follows_batch_source(monkeypatch):
             text("SELECT line_no, contract_no FROM dealer_orders ORDER BY line_no")
         ).fetchall()
     assert [tuple(row) for row in rows] == [(1, "HT-A"), (2, "HT-B")]
+
+
+def test_assign_line_contracts_supports_multiple_batches(monkeypatch):
+    engine = _dealer_engine(
+        ("09-16", "heightened", "HT-A、HT-B、HT-C"),
+        ("10-02", "wip", "HT-A、HT-B、HT-C"),
+        ("FINISHED-STOCK", "finished", "HT-A、HT-B、HT-C"),
+    )
+    monkeypatch.setattr(crud_dealer, "get_engine", lambda: engine)
+    monkeypatch.setattr(crud_dealer, "ensure_dealer_order_tables", lambda: None)
+
+    updated = crud_dealer.assign_dealer_order_line_contracts(
+        "DO-2",
+        {"spot": "HT-A", "batch:09-16": "HT-B", "batch:10-02": "HT-C"},
+    )
+
+    assert updated == 3
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT line_no, contract_no FROM dealer_orders ORDER BY line_no")
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [(1, "HT-B"), (2, "HT-C"), (3, "HT-A")]
 
 
 def test_assign_line_contracts_skips_single_contract_order(monkeypatch):
