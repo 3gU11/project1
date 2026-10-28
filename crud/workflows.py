@@ -2057,9 +2057,15 @@ def _finish_reverse_execution(conn, instance, lease, worker_id, payload, force_r
     conn.execute(text("UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND lock_status='占用中'"""), {'id': instance['id']})
     conn.execute(text("""INSERT INTO workflow_audit_logs (instance_id,action,operator_id,before_state,after_state,detail)
         VALUES (:id,'执行完成',:worker,'执行中',:after_state,:detail)"""), {'id': instance['id'], 'worker': worker_id, 'after_state': final_status, 'detail': _json({**payload, 'derived_tasks': derived_tasks})})
+    # 正向流程（入库、下单、配货等）复用同一个收尾函数，事件类型要按方向区分，
+    # 否则正向完成也会被记成「逆向执行完成」。
+    workflow_key = str(instance.get('workflow_key') or '') if hasattr(instance, 'get') else ''
+    event_type = '正向执行完成' if workflow_key in FORWARD_ENTRY_ACTIONS else '逆向执行完成'
     conn.execute(text("""INSERT INTO workflow_outbox_events (instance_id,event_type,idempotency_key,payload)
-        VALUES (:id,'逆向执行完成',:key,:payload) ON DUPLICATE KEY UPDATE idempotency_key=idempotency_key"""),
-                 {'id': instance['id'], 'key': f"{instance['instance_no']}:completed", 'payload': _json({**payload, 'derived_tasks': derived_tasks})})
+        VALUES (:id,:event_type,:key,:payload) ON DUPLICATE KEY UPDATE idempotency_key=idempotency_key"""),
+                 {'id': instance['id'], 'event_type': event_type,
+                  'key': f"{instance['instance_no']}:completed",
+                  'payload': _json({**payload, 'derived_tasks': derived_tasks})})
 
 
 def forward_workflow_enabled(workflow_key: str) -> bool:
