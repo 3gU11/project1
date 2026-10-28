@@ -1214,7 +1214,8 @@ def _capture_reverse_snapshot(conn, object_type: str, object_id: str):
     return None, None
 
 
-def transition_reverse_instance(instance_no: str, action: str, operator_id: str, reason: str = ''):
+def transition_reverse_instance(instance_no: str, action: str, operator_id: str, reason: str = '',
+                                operator_role: str = ''):
     ensure_workflow_tables()
     allowed = {'approve': ('审批中', '已通过', '通过'), 'reject': ('审批中', '已拒绝', '拒绝'),
                'withdraw': ('审批中', '已撤回', '撤回')}
@@ -1229,6 +1230,12 @@ def transition_reverse_instance(instance_no: str, action: str, operator_id: str,
             raise ValueError(f'流程当前状态为{row["status"]}，不能执行该操作')
         if action == 'approve' and str(row.get('initiator_id') or '') == str(operator_id):
             raise ValueError('发起人不能审批自己的流程')
+        if action == 'withdraw':
+            # 撤回等同于终止审批，必须限定发起人本人或管理角色，
+            # 否则任何登录用户都能凭实例号撤销别人的流程。
+            privileged = str(operator_role or '').strip().lower() in {'admin', 'boss'}
+            if str(row.get('initiator_id') or '') != str(operator_id) and not privileged:
+                raise ValueError('只有流程发起人或管理员可以撤回')
         task = conn.execute(text("""SELECT * FROM workflow_tasks WHERE instance_id=:id
             AND status='待处理' AND assignee_id=:operator
             ORDER BY id LIMIT 1 FOR UPDATE"""), {'id': row['id'], 'operator': operator_id}).mappings().first()
@@ -1242,6 +1249,12 @@ def transition_reverse_instance(instance_no: str, action: str, operator_id: str,
             conn.execute(text("""UPDATE workflow_tasks SET status='已结束',decision=:decision,
                 completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='待处理'"""),
                 {'decision': result, 'id': task['id']})
+        elif action == 'withdraw':
+            # 撤回人不是审批人时，审批任务不会命中上面的分支；
+            # 必须把该实例的待办全部结束，否则审批人的待办数永远清不掉。
+            conn.execute(text("""UPDATE workflow_tasks SET status='已结束',decision=:decision,
+                completed_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND status='待处理'"""),
+                {'decision': result, 'id': row['id']})
         conn.execute(text("""INSERT INTO workflow_approval_records
             (instance_id,task_id,action,result,operator_id,reason,task_status_snapshot)
             VALUES (:instance,:task,:action,:result,:operator,:reason,:snapshot)"""), {
@@ -1292,6 +1305,11 @@ def transfer_reverse_approval(instance_no: str, operator_id: str, new_assignee_i
             raise ValueError('当前用户不是待处理审批人')
         if new_assignee_id == str(row.get('initiator_id') or ''):
             raise ValueError('不能转交给流程发起人')
+        target = conn.execute(text("""SELECT username FROM users
+            WHERE TRIM(username)=:name AND LOWER(TRIM(COALESCE(status,'')))='active'"""),
+            {'name': new_assignee_id}).first()
+        if not target:
+            raise ValueError('转交对象不存在或已停用')
         conn.execute(text("UPDATE workflow_tasks SET assignee_id=:new WHERE id=:id AND status='待处理'"),
                      {'new': new_assignee_id, 'id': task['id']})
         conn.execute(text("""INSERT INTO workflow_approval_records

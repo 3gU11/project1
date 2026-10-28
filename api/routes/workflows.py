@@ -79,6 +79,33 @@ class CloseStaleRequest(BaseModel):
     dry_run: bool = True
     reason: str = ''
 
+
+# 发起逆向流程需要与业务入口一致的权限，不能只靠"已登录"。
+# admin/boss 始终放行，避免管理侧流程被卡住。
+REVERSE_WORKFLOW_PERMISSIONS = {
+    'order-delete': 'SALES_CREATE',
+    'contract-cancel': 'CONTRACT',
+    'allocation-recall': 'SALES_ALLOC',
+    'shipment-recall': 'SHIP_CONFIRM',
+    'model-dict-delete': 'MODEL_DICTIONARY',
+    'customer-finished-recall': 'QUERY',
+    'customer-order-shipped': 'QUERY',
+    'customer-machine-plan': 'QUERY',
+}
+
+
+def _assert_reverse_permission(workflow_key: str, ctx: dict) -> None:
+    role = str(ctx.get('role') or '').strip()
+    if role.lower() in {'admin', 'boss'}:
+        return
+    required = REVERSE_WORKFLOW_PERMISSIONS.get(str(workflow_key or '').strip())
+    if not required:
+        return
+    from crud.roles import get_role_permissions
+    granted = {str(code).strip().upper() for code in get_role_permissions(role)}
+    if required.upper() not in granted:
+        raise HTTPException(status_code=403, detail=f'当前角色无权发起该流程，需要权限：{required}')
+
 class WorkflowPublishRequest(BaseModel):
     snapshot: dict
 
@@ -229,6 +256,8 @@ def complete_derived_task_route(task_no: str, payload: DerivedTaskCompleteReques
 @router.post('/reverse/instances')
 def submit_reverse_instance(payload: ReverseCreateRequest,
                             ctx: dict = Depends(get_current_user_context)):
+    # 权限校验放在 try 之前：HTTPException 不能被下面的 except Exception 吞成 500。
+    _assert_reverse_permission(payload.workflow_key, ctx)
     auto_execution_started = False
     try:
         from crud.workflows import FORWARD_ENTRY_ACTIONS
@@ -351,7 +380,8 @@ def transfer_workflow(instance_no: str, payload: WorkflowActionRequest,
 def withdraw_workflow(instance_no: str, payload: WorkflowActionRequest,
                       ctx: dict = Depends(get_current_user_context)):
     try:
-        return {'data': transition_reverse_instance(instance_no, 'withdraw', ctx['username'], payload.reason)}
+        return {'data': transition_reverse_instance(instance_no, 'withdraw', ctx['username'],
+                                                    payload.reason, operator_role=ctx.get('role', ''))}
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
