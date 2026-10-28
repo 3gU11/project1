@@ -1978,11 +1978,21 @@ def get_shipping_return_candidates(
 
 
 @router.post("/shipping/return")
+def _reject_direct_shipping_return():
+    """已发货机台的退回统一走「发货撤回」审批流程（shipment-recall）。"""
+    raise HTTPException(
+        status_code=409,
+        detail="已发货机台退回需发起「发货撤回」审批，请在发货复核 → 退换货处理页提交",
+    )
+
+
+@router.post("/shipping/return")
 def return_shipped_machines(
     payload: ShippingReturnPayload,
     request: Request,
     current_operator: str = Depends(get_current_operator_name),
     current_user: dict = Depends(get_current_user_context),
+    _blocked: None = Depends(_reject_direct_shipping_return),
 ):
     try:
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]

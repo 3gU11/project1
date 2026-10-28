@@ -1510,6 +1510,9 @@ def execute_shipment_recall(instance_no: str, worker_id: str):
         invalid = [sn for sn in serials if not _shipment_recall_eligible(by_sn[sn])]
         if invalid:
             raise ValueError(f'机台当前不是可撤回发货状态: {", ".join(invalid[:10])}')
+        # 撤回前先记下占用订单，撤回后要按剩余占用重算订单状态，
+        # 否则机台已经回到待入库，订单还停在已发货/已完成。
+        order_ids = sorted({str(r.get('占用订单号') or '').strip() for r in rows if str(r.get('占用订单号') or '').strip()})
         for sn in serials:
             _assert_lease_alive(conn, lease)
             changed = conn.execute(text("""UPDATE finished_goods_data
@@ -1519,21 +1522,41 @@ def execute_shipment_recall(instance_no: str, worker_id: str):
                 raise ValueError(f'机台 {sn} 状态并发变化，整单回滚')
             conn.execute(text("UPDATE shipping_history SET `状态`='已撤回', `更新时间`=CURRENT_TIMESTAMP WHERE TRIM(`流水号`)=:sn AND `状态` NOT IN ('已撤回')"), {'sn': sn})
             conn.execute(text("UPDATE workflow_instance_items SET execution_result='已撤回' WHERE instance_id=:id AND object_id=:sn"), {'id': instance['id'], 'sn': sn})
+        # 与撤回配货保持一致：合同没有实际占用就回到待规划，订单按剩余机台重算状态。
+        # 但已完结的订单（done/deleted 等）不动合同，避免把历史单的合同打回待规划。
+        terminal_order_status = {'deleted', 'done', 'shipped', 'cancelled', 'canceled', 'completed'}
+        rolled_back_contracts = {}
+        order_status_after = {}
+        for recalled_order_id in order_ids:
+            current_order_status = conn.execute(text("SELECT status FROM sales_orders WHERE `订单号`=:o"),
+                                                 {'o': recalled_order_id}).scalar()
+            if str(current_order_status or '').strip().lower() not in terminal_order_status:
+                rolled = _rollback_unallocated_contracts(conn, recalled_order_id)
+                if rolled:
+                    rolled_back_contracts[recalled_order_id] = rolled
+            new_status = _recompute_order_status_after_recall(conn, recalled_order_id)
+            if new_status:
+                order_status_after[recalled_order_id] = new_status
         conn.execute(text("""UPDATE workflow_execution_attempts SET status='已完成', completed_at=CURRENT_TIMESTAMP(6), validation_result=:validation
             WHERE id=:attempt AND lease_token=:token AND status='执行中'"""), {'attempt': lease['id'], 'token': lease['lease_token'], 'validation': _json({'count': len(serials), 'states': sorted(allowed)})})
         conn.execute(text("UPDATE workflow_instances SET status='已完成', result='成功', executor_id=:worker, failure_reason=NULL, completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='执行中'"), {'worker': worker_id, 'id': instance['id']})
         conn.execute(text("UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND lock_status='占用中'"), {'id': instance['id']})
         conn.execute(text("""INSERT INTO workflow_audit_logs (instance_id,action,operator_id,before_state,after_state,detail)
-            VALUES (:id,'执行完成',:worker,'执行中','已完成',:detail)"""), {'id': instance['id'], 'worker': worker_id, 'detail': _json({'count': len(serials), 'action': 'shipment-recall'})})
+            VALUES (:id,'执行完成',:worker,'执行中','已完成',:detail)"""), {'id': instance['id'], 'worker': worker_id, 'detail': _json({'count': len(serials), 'action': 'shipment-recall', 'rolled_back_contracts': rolled_back_contracts, 'order_status_after': order_status_after})})
         conn.execute(text("""INSERT INTO workflow_outbox_events
             (instance_id,event_type,idempotency_key,payload)
             VALUES (:id,'逆向执行完成',:key,:payload)
             ON DUPLICATE KEY UPDATE idempotency_key=idempotency_key"""),
-            {'id': instance['id'], 'key': f"{instance_no}:completed", 'payload': _json({'workflow_key': instance['workflow_key'], 'count': len(serials)})})
+            {'id': instance['id'], 'key': f"{instance_no}:completed", 'payload': _json({'workflow_key': instance['workflow_key'], 'count': len(serials), 'order_status_after': order_status_after})})
         derived_tasks = create_reinbound_tasks(conn, instance, worker_id)
         if derived_tasks:
             conn.execute(text("UPDATE workflow_instances SET status='待派生处理' WHERE id=:id AND status='已完成'"), {'id': instance['id']})
-        return {'instance_no': instance_no, 'status': '待派生处理' if derived_tasks else '已完成', 'count': len(serials), 'serials': serials, 'derived_tasks': derived_tasks}
+        result_payload = {'instance_no': instance_no, 'status': '待派生处理' if derived_tasks else '已完成',
+                          'count': len(serials), 'serials': serials, 'derived_tasks': derived_tasks,
+                          'rolled_back_contracts': rolled_back_contracts, 'order_status_after': order_status_after}
+    # 提交之后再清缓存，避免读线程用旧数据把缓存又填满。
+    _clear_order_planning_caches()
+    return result_payload
 
 
 def create_and_execute_shipment_recall(instance_no: str, worker_id: str):
