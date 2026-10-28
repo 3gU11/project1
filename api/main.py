@@ -2,6 +2,7 @@ from pathlib import Path
 import asyncio
 import logging
 import os
+import re
 import time
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -13,6 +14,52 @@ from api.routes import inventory, users, auth, planning, logs, traceability, mod
 logger = logging.getLogger(__name__)
 from api.routes import contract_drafts
 
+
+# WebSocket 的 token 走查询参数，uvicorn 会把整条 URL 打进访问日志。
+# 这里统一脱敏，避免凭据落到日志文件里。
+_TOKEN_PATTERN = re.compile(r'(token=)[^&\s"\']+', re.IGNORECASE)
+
+
+class _RedactTokenFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str) and 'token=' in record.msg:
+                record.msg = _TOKEN_PATTERN.sub(r'\1***', record.msg)
+            if record.args:
+                if isinstance(record.args, tuple):
+                    record.args = tuple(
+                        _TOKEN_PATTERN.sub(r'\1***', item) if isinstance(item, str) else item
+                        for item in record.args
+                    )
+                elif isinstance(record.args, dict):
+                    record.args = {
+                        key: _TOKEN_PATTERN.sub(r'\1***', value) if isinstance(value, str) else value
+                        for key, value in record.args.items()
+                    }
+        except Exception:
+            pass
+        return True
+
+
+def _install_log_redaction() -> None:
+    """给 uvicorn 与根日志的 handler 都挂上脱敏过滤器（幂等）。"""
+    targets = [
+        logging.getLogger('uvicorn'),
+        logging.getLogger('uvicorn.error'),
+        logging.getLogger('uvicorn.access'),
+        logging.getLogger('fastapi'),
+    ]
+    for target in targets:
+        if not any(isinstance(item, _RedactTokenFilter) for item in target.filters):
+            target.addFilter(_RedactTokenFilter())
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if not any(isinstance(item, _RedactTokenFilter) for item in handler.filters):
+            handler.addFilter(_RedactTokenFilter())
+
+
+_install_log_redaction()
+
 app = FastAPI(
     title="V8betaVer1.0 API",
     description="FastAPI layer for the Finished Goods Management System",
@@ -22,6 +69,7 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def on_startup():
+    _install_log_redaction()
     try:
         from contract_bridge.worker import worker_loop
         app.state.contract_bridge_task = asyncio.create_task(worker_loop())
