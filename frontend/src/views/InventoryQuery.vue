@@ -235,7 +235,9 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="合同备注" label="合同备注" min-width="180" show-overflow-tooltip />
+            <el-table-column label="合同备注" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ singleLineOrderRemark(row['合同备注']) || '-' }}</template>
+            </el-table-column>
           </el-table>
           <div class="pagination-container">
             <el-pagination
@@ -261,6 +263,7 @@ import { useModelDictionaryStore } from '../store/modelDictionary'
 import { buildInventoryIndex, filterInventoryRows } from '../utils/inventoryFilter'
 import { compareModels, normalizeModelName } from '../utils/modelOrder'
 import { hasHighHint } from '../utils/heightened'
+import { singleLineOrderRemark } from '../utils/orderNotes'
 import { buildModelInventorySummary, sortModelInventorySummary, sortModelInventorySummaryByCount, type ModelInventorySummary } from '../utils/inventoryStats'
 import { getBindingTitle, getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from '../utils/inventoryState'
 import VirtualScrollList from '../components/VirtualScrollList.vue'

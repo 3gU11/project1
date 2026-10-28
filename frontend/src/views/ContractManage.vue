@@ -637,7 +637,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint path-mode-hint">库存中行：合同直接置为已规划，并自动建销售订单、按机型+加高分配库存机台，缺口留待人工补配。具体批次行：进入沙盘待规划，保留指定批次。急单开关只影响批次行。</div>
+        <div class="save-mode-hint path-mode-hint">库存中行：合同直接置为已规划，之后由业务人员到「销售订单 → 导入已规划合同」建单，并在「订单配货」手动判别分配机台。具体批次行：进入沙盘待规划，保留指定批次。急单开关只影响批次行。</div>
       </div>
 
       <template #footer>
@@ -681,16 +681,6 @@ import PageHeader from '../components/PageHeader.vue'
 const router = useRouter()
 
 type StatusTab = '待规划' | '已规划' | '已完成'
-type AutoAllocation = {
-  contract_no: string
-  order_id: string
-  required_qty: number
-  allocated_qty: number
-  status: 'ready' | 'active'
-  shortages: Array<{ model: string; high: boolean; need: number; allocated: number; shortage: number }>
-  serials: string[]
-  message: string
-}
 type MessageResponse = {
   message?: string
   rush_created?: number
@@ -699,9 +689,6 @@ type MessageResponse = {
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
   contracts?: Array<{ contract_no: string; path: 'spot' | 'batch'; path_label: string; row_count: number; qty: number; models: string[] }>
-  auto_allocation?: AutoAllocation | null
-  auto_allocated_qty?: number
-  auto_shortage_qty?: number
 }
 type ContractSummary = {
   id: string
@@ -1548,25 +1535,6 @@ const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: nu
 const dealerConvertPathTagType = (item?: { batch_no?: string; inventory_type?: string } | null) =>
   convertLinePathLabel(item).startsWith('库存') ? 'success' : 'info'
 
-/** 自动配货成功文案（库存中行转合同后后端自动建销售订单并分配机台）。 */
-const autoAllocationText = (res: MessageResponse) => {
-  const allocation = res.auto_allocation
-  if (!allocation) return ''
-  const allocatedQty = Number(res.auto_allocated_qty ?? allocation.allocated_qty ?? 0)
-  const requiredQty = Number(allocation.required_qty ?? 0)
-  return `，库存自动配货 ${allocatedQty}/${requiredQty} 台`
-}
-
-/** 自动配货缺口提示。 */
-const notifyAutoShortages = (res: MessageResponse) => {
-  const shortages = res.auto_allocation?.shortages
-  if (!shortages?.length) return
-  const shortageText = shortages
-    .map((item) => `${item.model}${item.high ? '（加高）' : ''}需 ${item.need}，已配 ${item.allocated}`)
-    .join('；')
-  ElMessage.warning(`库存自动配货缺口：${shortageText}`)
-}
-
 const submitDealerConvert = async () => {
   if (!hasText(dealerConvertForm.contractNo) || !hasText(dealerConvertForm.customer) || !hasText(dealerConvertForm.deliveryDate)) {
     ElMessage.warning('请先完整填写合同号/客户名/要求交期')
@@ -1603,8 +1571,7 @@ const submitDealerConvert = async () => {
       payload,
     )
     const contracts = res.contracts || []
-    ElMessage.success(`${res.warning || res.message || '转合同成功'}${autoAllocationText(res)}`)
-    notifyAutoShortages(res)
+    ElMessage.success(res.warning || res.message || '转合同成功')
     const cloudAttachmentNotice = buildCloudAttachmentNotice(res.cloud_attachments)
     if (cloudAttachmentNotice) {
       if (cloudAttachmentNotice.level === 'warning') ElMessage.warning(cloudAttachmentNotice.text)
@@ -1617,8 +1584,9 @@ const submitDealerConvert = async () => {
     ).trim()
     await fetchContracts(true)
     await loadDealerOrders()
-    if (res.auto_allocation?.order_id) {
-      router.push({ path: '/sales-orders', query: { tab: 'manage' } })
+    if (contracts.some((contract) => contract.path === 'spot')) {
+      // 库存中合同只到「已规划」，由业务人员导入后到订单配货手动分配机台。
+      router.push({ path: '/sales-orders', query: { tab: 'import' } })
     } else if (contracts.some((contract) => contract.path === 'batch')) {
       router.push(dealerConvertForm.isRush ? '/production-kanban' : '/prediction-sandbox')
     }

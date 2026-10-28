@@ -68,6 +68,9 @@
               <el-table-column prop="need" label="需求" width="90" />
               <el-table-column prop="allocated" label="已确认" width="90" />
               <el-table-column prop="pending" label="待确认" width="90" />
+              <el-table-column label="单行备注" min-width="180" show-overflow-tooltip>
+                <template #default="scope">{{ scope.row.remark || '-' }}</template>
+              </el-table-column>
               <el-table-column label="状态" width="120">
                 <template #default="scope">
                   <el-tag :type="scope.row.pending <= 0 ? 'success' : 'warning'">
@@ -97,7 +100,9 @@
                 <el-table-column prop="批次号" label="批次号" min-width="120" />
                 <el-table-column prop="货源" label="货源" min-width="120" />
                 <el-table-column label="状态" min-width="160"><template #default="scope">{{ reservationInfo?.machine_states?.[scope.row['流水号']] || '正在核查' }}</template></el-table-column>
-                <el-table-column prop="合同备注" label="合同备注" min-width="150" />
+                <el-table-column label="合同备注" min-width="150" show-overflow-tooltip>
+                  <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+                </el-table-column>
               </el-table>
             </template>
             <template v-else>
@@ -127,7 +132,9 @@
               <el-table-column prop="货源" label="货源" width="100" />
               <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
-              <el-table-column prop="合同备注" label="合同备注" min-width="160" />
+              <el-table-column label="合同备注" min-width="160" show-overflow-tooltip>
+                <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+              </el-table-column>
             </el-table>
             <div class="ops">
               <el-button type="primary" :loading="saving" @click="allocateSelected">复核确认配货</el-button>
@@ -150,7 +157,9 @@
               <el-table-column prop="货源" label="货源" width="100" />
               <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
-              <el-table-column prop="合同备注" label="合同备注" min-width="160" />
+              <el-table-column label="合同备注" min-width="160" show-overflow-tooltip>
+                <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+              </el-table-column>
             </el-table>
             <div class="ops">
               <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
@@ -180,6 +189,7 @@ import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request
 import { useCacheStore } from '../store/cache'
 import { compareModels, normalizeModelName, sortRowsByModel } from '../utils/modelOrder'
 import { hasHighHint } from '../utils/heightened'
+import { singleLineOrderRemark } from '../utils/orderNotes'
 import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type ListResponse<T = any> = { data: T[] }
@@ -194,7 +204,7 @@ const orderKeyword = ref('')
 const orderModelFilter = ref('')
 const orders = ref<Row[]>([])
 const allocations = ref<Row[]>([])
-const orderDetailRows = ref<Array<{ model: string; high: boolean; qty: number }>>([])
+const orderDetailRows = ref<Array<{ model: string; high: boolean; qty: number; remark: string }>>([])
 const orderDetailsSource = ref<'factory_plan' | 'sales_orders' | ''>('')
 const cacheStore = useCacheStore()
 const route = useRoute()
@@ -398,8 +408,22 @@ const allocationModelCountMap = computed(() => {
   return map
 })
 
+const demandRemarkMap = computed(() => {
+  const map = new Map<string, string[]>()
+  if (orderDetailsSource.value !== 'factory_plan') return map
+  for (const row of orderDetailRows.value) {
+    const remark = String(row.remark || '').trim()
+    if (!remark) continue
+    const key = variantKey(row.model, row.high)
+    const list = map.get(key) || []
+    if (!list.includes(remark)) list.push(remark)
+    map.set(key, list)
+  }
+  return map
+})
+
 const demandRows = computed(() => {
-  const rows: Array<{ model: string; high: boolean; displayModel: string; need: number; allocated: number; pending: number }> = []
+  const rows: Array<{ model: string; high: boolean; displayModel: string; need: number; allocated: number; pending: number; remark: string }> = []
   for (const [key, item] of demandMap.value.entries()) {
     const allocated = allocationModelCountMap.value.get(key) || 0
     rows.push({
@@ -409,6 +433,7 @@ const demandRows = computed(() => {
       need: item.qty,
       allocated,
       pending: Math.max(0, item.qty - allocated),
+      remark: (demandRemarkMap.value.get(key) || []).join('；'),
     })
   }
   return rows.sort((a, b) => compareModels(a.model, b.model))
@@ -507,11 +532,13 @@ const loadOrderDetails = async () => {
     orderDetailRows.value = details
       .map((item: any) => {
         const model = normalizeModelName(item?.['机型'])
-        const remark = String(item?.['备注'] || '')
+        const rawRemark = String(item?.['备注'] || '')
         return {
           model,
-          high: isHighHint(item?.['机型'], remark),
+          high: isHighHint(item?.['机型'], rawRemark),
           qty: Math.max(0, Number(item?.['数量'] || 0) || 0),
+          // 后端返回单行备注；旧接口没有该字段时用原始备注按同口径压成一行。
+          remark: String(item?.['单行备注'] ?? '') || singleLineOrderRemark(rawRemark),
         }
       })
       .filter((item: { model: string; qty: number }) => item.model && item.qty > 0)

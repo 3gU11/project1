@@ -32,6 +32,7 @@ from crud.contract_notifications import contract_rows, record_converted, record_
 from utils.parsers import parse_alloc_dict
 from utils.contract_ids import contract_no_exists, next_contract_no
 from utils.heightened import is_high_text_hint, normalize_dictionary_model_name, split_heightened_model_name
+from utils.order_notes import machine_remark_text, single_line_order_remark
 from database import get_engine
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
@@ -2812,6 +2813,7 @@ def _split_factory_plan_detail_rows(linked_rows: list[dict[str, Any]], order_row
         remark = str(row.get("备注") or "").strip()
         tokens = demand_tokens_by_model.get(model) or []
         is_high = _is_high_model_hint(row.get("机型", ""), remark)
+        single_remark = single_line_order_remark(remark)
         if is_high and qty > 1 and len(tokens) > 1 and sum(_positive_int(t.get("qty")) for t in tokens) == qty:
             positive_tokens = [t for t in tokens if _positive_int(t.get("qty")) > 0]
             high_idx = min(range(len(positive_tokens)), key=lambda idx: _positive_int(positive_tokens[idx].get("qty")))
@@ -2821,6 +2823,7 @@ def _split_factory_plan_detail_rows(linked_rows: list[dict[str, Any]], order_row
                     "机型": model,
                     "数量": _positive_int(token.get("qty")),
                     "备注": remark if idx == high_idx else "",
+                    "单行备注": single_remark if idx == high_idx else "",
                     "source": "factory_plan",
                 })
             continue
@@ -2829,6 +2832,7 @@ def _split_factory_plan_detail_rows(linked_rows: list[dict[str, Any]], order_row
             "机型": model,
             "数量": qty,
             "备注": remark,
+            "单行备注": single_remark,
             "source": "factory_plan",
         })
     return details
@@ -2997,7 +3001,8 @@ def _sync_order_detail_rows_to_units_and_inventory(
         cid = str(row.get("合同号") or "").strip()
         model = str(row.get("机型") or "").strip()
         qty = _to_positive_int(row.get("排产数量"))
-        remark = str(row.get("备注") or "").strip()
+        # 机台只落一行备注（保留原备注/附加分段，避免正文「加高」误判）。
+        remark = machine_remark_text(row.get("备注"))
         if not cid or not model or qty <= 0:
             continue
         grouped.setdefault((cid, model), [])

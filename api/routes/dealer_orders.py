@@ -28,13 +28,7 @@ from crud.dealer_orders import (
     preview_dealer_order,
     reject_dealer_order,
     reject_dealer_order_extra_review,
-    sync_dealer_order_statuses_by_sales_orders,
     validate_dealer_order_convertible,
-)
-from crud.spot_allocation import (
-    SpotAllocationError,
-    allocate_spot_contract,
-    rollback_spot_allocation,
 )
 from database import get_engine
 from utils.contract_ids import contract_no_exists, next_contract_no
@@ -751,12 +745,13 @@ def convert_to_contract(
     background_tasks: BackgroundTasks,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
-    """经销商订单转合同：按明细行的「批次/来源」自动选路并执行对应路径。
+    """经销商订单转合同：按明细行的「批次/来源」自动选路。
 
-    - 库存中行（FINISHED-STOCK/库存中/空批次/finished）：合同「已规划」，同一请求内
-      自动建销售订单并按机型+加高分配库存机台；缺口留待人工补配。
+    - 库存中行（FINISHED-STOCK/库存中/空批次/finished）：合同「已规划」，之后由人工
+      在「销售订单 → 导入已规划合同」建单，并在「订单配货」手动判别分配机台。
     - 具体批次行（如 09-10）：合同「待规划」，保留指定批次，进入沙盘/批次规划。
     - 同路径明细合并为一张合同；混合订单拆成现货、批次两张合同。
+    - 每行备注保留单行备注口径，人工配货后写到机台合同备注，供后续判别与追溯。
     """
     operator = _operator(ctx)
     try:
@@ -831,10 +826,9 @@ def convert_to_contract(
         contract_ids = [groups[path]["contract_no"] for path in ordered_paths]
         contract_no_str = "、".join(contract_ids)
 
-        # 5. 建合同：现货组先建并立即自动配货，再建沙盘组；任一步失败回滚已建部分
+        # 5. 建合同：现货组（已规划）和批次组（待规划）各一张；任一步失败回滚已建部分
         current_user = ctx if isinstance(ctx, dict) else {"username": operator, "role": ""}
         created_contract_ids: list[str] = []
-        spot_result: dict | None = None
         batch_result: dict = {}
         try:
             spot_group = groups.get(STOCK_LINE_PATH)
@@ -849,12 +843,6 @@ def convert_to_contract(
                     background_tasks=background_tasks,
                 )
                 created_contract_ids.append(spot_group["contract_no"])
-                spot_result = allocate_spot_contract(
-                    spot_group["contract_no"],
-                    customer=customer,
-                    agent=agent,
-                    operator=operator,
-                )
             batch_group = groups.get(BATCH_LINE_PATH)
             if batch_group:
                 batch_result = _process_contracts_batch(
@@ -868,12 +856,10 @@ def convert_to_contract(
                 )
                 created_contract_ids.append(batch_group["contract_no"])
         except Exception:
-            if spot_result:
-                rollback_spot_allocation(spot_result)
             _rollback_created_contracts(created_contract_ids)
             raise
 
-        # 6. 回写经销商订单；混合订单逐行写各自合同，再把现货行同步为已配货/部分配货
+        # 6. 回写经销商订单：混合订单逐行写各自合同；机台分配仍由业务人员在订单配货手动完成
         try:
             mark_dealer_order_contracted(order_no, contract_no=contract_no_str, operator=operator)
             if len(contract_ids) > 1:
@@ -889,16 +875,7 @@ def convert_to_contract(
                     logging.getLogger(__name__).exception(
                         "dealer order %s line contract assignment failed", order_no
                     )
-            if spot_result:
-                try:
-                    sync_dealer_order_statuses_by_sales_orders([spot_result["order_id"]])
-                except Exception:
-                    logging.getLogger(__name__).exception(
-                        "dealer order %s spot allocation status sync failed", order_no
-                    )
         except Exception:
-            if spot_result:
-                rollback_spot_allocation(spot_result)
             _rollback_created_contracts(created_contract_ids)
             raise
 
@@ -906,19 +883,16 @@ def convert_to_contract(
             f"{CONVERT_PATH_LABELS[groups[path]['path']]}：{groups[path]['contract_no']}"
             for path in ordered_paths
         )
-        alloc_text = (
-            f"；自动配货 {spot_result['allocated_qty']}/{spot_result['required_qty']} 台"
-            f"（订单 {spot_result['order_id']}）"
-            if spot_result
-            else ""
-        )
+        manual_hint = ""
+        if STOCK_LINE_PATH in groups:
+            manual_hint = "；库存中合同已置已规划，需人工到「销售订单→导入已规划合同」建单并配货"
         append_audit_log(
             module="经销商订单",
             action_type="转为合同",
             biz_type="订单",
             content=(
                 f"经销商订单按批次/来源自动选路转合同：{order_no} → {contract_no_str}；"
-                f"{path_text}；急单：{payload.is_rush}{alloc_text}"
+                f"{path_text}；急单：{payload.is_rush}{manual_hint}"
             ),
             user_id=ctx.get("username"),
             username=operator,
@@ -938,35 +912,17 @@ def convert_to_contract(
             }
             for path in ordered_paths
         ]
-        auto_allocation = None
-        if spot_result:
-            auto_allocation = {
-                "contract_no": spot_result["contract_no"],
-                "order_id": spot_result["order_id"],
-                "required_qty": spot_result["required_qty"],
-                "allocated_qty": spot_result["allocated_qty"],
-                "status": spot_result["order_status"],
-                "shortages": spot_result["shortages"],
-                "serials": spot_result["serials"],
-                "message": spot_result["message"],
-            }
-        auto_shortage_qty = sum(
-            int(item.get("shortage") or 0)
-            for item in ((spot_result or {}).get("shortages") or [])
-        )
         message = f"已成功转为合同 {contract_no_str}"
-        if spot_result:
-            message = f"{message}；{spot_result['message']}"
+        if STOCK_LINE_PATH in groups:
+            message = f"{message}；库存中合同已置「已规划」，请在销售订单导入后人工配货"
+        if BATCH_LINE_PATH in groups:
+            message = f"{message}；批次合同已置「待规划」并进入沙盘"
 
         return {
             "message": message,
             "contract_no": contract_no_str,
             "contract_ids": contract_ids,
             "contracts": contracts_payload,
-            "auto_allocation": auto_allocation,
-            "auto_allocated_qty": int((spot_result or {}).get("allocated_qty") or 0),
-            "auto_required_qty": int((spot_result or {}).get("required_qty") or 0),
-            "auto_shortage_qty": auto_shortage_qty,
             "save_mode": "auto",
             "order_form_attached_contracts": order_form_contracts,
             "cloud_attachments": cloud_attachments,
@@ -975,8 +931,6 @@ def convert_to_contract(
         }
     except HTTPException:
         raise
-    except SpotAllocationError as exc:
-        raise HTTPException(status_code=422, detail=f"库存自动配货失败: {exc}")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:

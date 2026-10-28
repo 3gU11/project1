@@ -169,7 +169,9 @@
               <el-table-column prop="机型" label="机型" width="140" />
               <el-table-column prop="预计入库时间" label="预计入库时间" width="130" />
               <el-table-column prop="更新时间" label="更新时间" width="160" />
-              <el-table-column prop="合同备注" label="合同备注" min-width="180" />
+              <el-table-column label="合同备注" min-width="180" show-overflow-tooltip>
+                <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+              </el-table-column>
             </el-table>
           </el-tab-pane>
           <el-tab-pane label="存入机台（入库）" name="inbound">
@@ -224,6 +226,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import PageSkeleton from '../components/PageSkeleton.vue'
 import { useCacheStore } from '../store/cache'
+import { singleLineOrderRemark } from '../utils/orderNotes'
 import {
   exitFullscreenCompat,
   formatTimeHMS,

@@ -15,6 +15,7 @@ from database import get_engine
 from utils.cache import fetch_data_with_cache
 from utils.heightened import is_high_text_hint
 from utils.local_cache import ttl_cache
+from utils.order_notes import machine_remark_text
 from utils.parsers import parse_plan_map
 
 
@@ -280,13 +281,15 @@ def _build_model_note_map(order_id):
     note_map = []
     for row in plan_rows:
         model = str(row.get('机型', '')).strip()
-        note = _normalize_order_note(row.get('备注', ''))
+        raw_note = _normalize_order_note(row.get('备注', ''))
+        # 加高要按原始分段备注判断（说明段里的「加高」不算），机台只落单行备注。
+        high = _is_high_model_hint(model, raw_note)
+        note = machine_remark_text(raw_note)
         qty = _to_int_qty(row.get('数量', row.get('排产数量', 0)))
         if qty <= 0:
             qty = 1
         if model:
             clean_model = _normalize_allocation_model(model)
-            high = _is_high_model_hint(model, note)
             for _ in range(qty):
                 note_map.append({
                     "model": clean_model,
