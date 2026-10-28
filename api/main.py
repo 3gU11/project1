@@ -147,6 +147,10 @@ async def on_shutdown():
 
 async def cloud_snapshot_heartbeat_loop() -> None:
     """按固定周期推送库存快照：即使库存无变化也刷新云端回执，满足 5 分钟同步监控。"""
+    # 与 cloud_sync_worker 保持同一开关：隔离演示（本地测试）时不发任何外发请求。
+    if os.getenv("V8_DEMO_MODE") == "1":
+        logger.info("cloud snapshot heartbeat disabled for isolated demo")
+        return
     interval = max(60, int(os.getenv("CLOUD_SNAPSHOT_INTERVAL_SECONDS", "300") or "300"))
     while True:
         try:
