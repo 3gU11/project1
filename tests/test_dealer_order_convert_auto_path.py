@@ -331,6 +331,7 @@ def test_required_batches_by_variant_ignores_stock_aliases():
         {"机型": "FR-400G", "备注": "加高", "指定批次/来源": {"08-04": 1}},
         {"机型": "FH-300C", "备注": "", "指定批次/来源": {"FINISHED-STOCK": 3}},
         {"机型": "FR-400AUTO", "备注": "", "指定批次/来源": {"库存中": 1}},
+        {"机型": "FR-500XS(PRO)", "备注": "", "指定批次/来源": {"现货(Spot)": 1}},
     ]
 
     required = planning._required_batches_by_variant(details)

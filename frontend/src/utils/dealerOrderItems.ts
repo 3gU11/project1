@@ -55,6 +55,7 @@ export const isStockSourceLine = (item?: { batch_no?: string; inventory_type?: s
   if (STOCK_INVENTORY_TYPES.has(inventoryType)) return true
   const batchNo = String(item.batch_no ?? '').trim()
   if (!batchNo) return true
+  if (batchNo.startsWith('现货')) return true
   return STOCK_BATCH_NOS.has(batchNo) || STOCK_BATCH_NOS.has(batchNo.toUpperCase())
 }
 

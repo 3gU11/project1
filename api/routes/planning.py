@@ -238,8 +238,17 @@ def _inventory_row_high(row: Any) -> bool:
     return _is_high_model_hint(getter("机型", ""), getter("批次号", ""), getter("合同备注", ""))
 
 
-# 「指定批次/来源」里的现货别名不算具体批次。
+# 「指定批次/来源」里的现货别名不算具体批次（历史数据还有「现货(Spot)」等写法）。
 STOCK_SOURCE_ALIASES = frozenset({"FINISHED-STOCK", "库存中", "现货", "现货库存"})
+
+
+def _is_stock_source_batch(batch_no: object) -> bool:
+    value = str(batch_no or "").strip()
+    if not value:
+        return True
+    if value in STOCK_SOURCE_ALIASES or value.upper() == "FINISHED-STOCK":
+        return True
+    return value.startswith("现货")
 
 
 def _required_batches_by_variant(detail_rows: list[dict]) -> dict[tuple[str, bool], set[str]]:
@@ -256,10 +265,9 @@ def _required_batches_by_variant(detail_rows: list[dict]) -> dict[tuple[str, boo
         if not isinstance(alloc, dict):
             continue
         for batch in alloc:
-            batch_no = str(batch or "").strip()
-            if not batch_no or batch_no in STOCK_SOURCE_ALIASES:
+            if _is_stock_source_batch(batch):
                 continue
-            result.setdefault((model, high), set()).add(batch_no)
+            result.setdefault((model, high), set()).add(str(batch).strip())
     return result
 
 
