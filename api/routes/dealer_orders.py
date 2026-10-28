@@ -33,12 +33,17 @@ from utils.contract_ids import contract_no_exists, next_contract_no
 from crud.cloud_dealer_order_sync import (
     sync_cloud_dealer_orders,
     sync_completed_dealer_orders_to_cloud,
+    sync_wechat_batch_summary_to_cloud,
 )
 from crud.cloud_sync_outbox import (
-    enqueue_wechat_batch_summary_sync,
+    get_cloud_sync_event_status,
     get_cloud_sync_status,
     process_due_cloud_sync_events,
     retry_failed_cloud_sync_events,
+)
+from crud.sync_channels import (
+    get_sync_channels_status,
+    record_channel_failure,
 )
 
 router = APIRouter(dependencies=[Depends(require_permissions("DEALER_ORDER_REVIEW"))])
@@ -226,6 +231,7 @@ def sync_cloud_orders(
             status=payload.status,
             page_size=payload.page_size,
             max_pages=payload.max_pages,
+            trigger="manual",
         )
         append_audit_log(
             module="经销商订单",
@@ -250,22 +256,24 @@ def sync_wechat_batch_summary(
     request: Request,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
+    """立即推送一次库存/机型快照（与 5 分钟心跳、库存变化触发共用同一实现）。"""
     operator = _operator(ctx)
     try:
-        event_id = enqueue_wechat_batch_summary_sync("manual_inventory_resync")
+        result = sync_wechat_batch_summary_to_cloud(trigger="manual")
         append_audit_log(
             module="经销商订单",
             action_type="同步云端库存",
             biz_type="库存",
             content=(
                 f"同步 wechat_batch_summary 到云端："
-                f"event_id={event_id}"
+                f"local={result.get('local_rows')}，pushed={result.get('pushed_rows')}"
             ),
             user_id=ctx.get("username"),
             username=operator,
         )
+        # 顺带处理其它已排队事件，避免失败横幅里的积压一直占着队头。
         process_due_cloud_sync_events(limit=5)
-        return {"message": "queued", "event_id": event_id}
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
@@ -298,7 +306,7 @@ def sync_completed_cloud_orders(
 ):
     operator = _operator(ctx)
     try:
-        result = sync_completed_dealer_orders_to_cloud(limit=payload.limit)
+        result = sync_completed_dealer_orders_to_cloud(limit=payload.limit, trigger="manual")
         append_audit_log(
             module="经销商订单",
             action_type="同步完成状态",
@@ -316,6 +324,63 @@ def sync_completed_cloud_orders(
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"同步完成状态失败: {exc}")
+
+
+@router.get("/sync-channels")
+def sync_channels(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    """本地同步通道状态：与云端「同步监控 → V8 桥接上传」同一套通道口径。"""
+    try:
+        return get_sync_channels_status()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"读取同步通道状态失败: {exc}")
+
+
+@router.post("/sync-machine-snapshot")
+def sync_machine_snapshot(
+    request: Request,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    """立即生成并上传一次机台快照（日常由 v8_sync 每日调度自动完成）。"""
+    operator = _operator(ctx)
+    try:
+        from v8_sync.scheduler import run_daily
+
+        result = run_daily()
+    except Exception as exc:
+        record_channel_failure("machine-snapshot", exc)
+        raise HTTPException(status_code=500, detail=f"机台快照同步失败: {exc}")
+    event_id = str(result.get("event_id") or "")
+    event_status: dict[str, Any] | None = None
+    processed: dict[str, Any] = {}
+    if event_id:
+        processed = process_due_cloud_sync_events(limit=5)
+        event_status = get_cloud_sync_event_status(event_id)
+    status = result.get("status")
+    if status == "locked":
+        message = "另一个机台快照任务正在执行，请稍后再试"
+    elif event_status and event_status.get("status") == "synced":
+        message = "机台快照已上传"
+    elif event_id:
+        message = "机台快照已入队，等待重试"
+    else:
+        message = "当日机台快照已上传，无需重复同步"
+    append_audit_log(
+        module="经销商订单",
+        action_type="同步机台快照",
+        biz_type="机台",
+        content=(
+            f"手动同步机台快照：status={status}，event_id={event_id}，"
+            f"event_status={(event_status or {}).get('status')}，{message}"
+        ),
+        user_id=ctx.get("username"),
+        username=operator,
+    )
+    return {
+        **result,
+        "event_status": event_status,
+        "processed": processed,
+        "message": message,
+    }
 
 
 @router.get("/{order_no}/preview")

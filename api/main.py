@@ -56,6 +56,28 @@ async def on_startup():
         app.state.snapshot_heartbeat_task = asyncio.create_task(cloud_snapshot_heartbeat_loop())
     except Exception as e:
         logger.warning("snapshot heartbeat worker not started: %s", e)
+    try:
+        from v8_sync.scheduler import run_startup_sync, run_sync_loop
+
+        async def _v8_sync_bootstrap() -> None:
+            # 启动时先补一次当天机台快照（生成 + 入 outbox），随后进入周期循环。
+            try:
+                result = await run_startup_sync()
+                app.state.v8_sync_startup_result = result
+                logging.getLogger("uvicorn.error").info(
+                    "V8 sync bridge startup result=%s event_id=%s",
+                    (result or {}).get("status"),
+                    (result or {}).get("event_id", ""),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("V8 sync startup failed: %s", exc)
+            await run_sync_loop()
+
+        app.state.v8_sync_task = asyncio.create_task(_v8_sync_bootstrap())
+    except Exception as e:
+        logger.warning("V8 sync worker not started: %s", e)
 
 
 
@@ -74,6 +96,14 @@ async def on_shutdown():
         task.cancel()
         try:
             await task
+        except asyncio.CancelledError:
+            pass
+
+    v8_sync_task = getattr(app.state, "v8_sync_task", None)
+    if v8_sync_task:
+        v8_sync_task.cancel()
+        try:
+            await v8_sync_task
         except asyncio.CancelledError:
             pass
 
@@ -116,12 +146,17 @@ async def cloud_snapshot_heartbeat_loop() -> None:
     while True:
         try:
             from crud.cloud_dealer_order_sync import sync_wechat_batch_summary_to_cloud
-            result = await asyncio.to_thread(sync_wechat_batch_summary_to_cloud)
+            result = await asyncio.to_thread(sync_wechat_batch_summary_to_cloud, "auto")
             logger.info("cloud snapshot heartbeat pushed: rows=%s", (result or {}).get("pushed_rows"))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning("cloud snapshot heartbeat failed: %s", exc)
+            try:
+                from crud.sync_channels import record_channel_failure
+                record_channel_failure("factory-snapshot", exc)
+            except Exception:
+                pass
         await asyncio.sleep(interval)
 
 

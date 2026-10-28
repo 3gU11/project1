@@ -1,8 +1,9 @@
 # V8 数据同步（v8_sync）
 
 只出站的后台同步工具，把工厂端机台档案推送到云端售后系统（8798 的 `machine_index`）。
-不依赖前端页面，也不需要 Windows 计划任务——FastAPI 启动钩子会生成当天快照并加入 outbox，
-由已有的 cloud sync worker 负责发送和重试。
+FastAPI 启动钩子会先补生成当天快照并加入 outbox，随后按 `V8_SYNC_INTERVAL_SECONDS`
+（默认 3600 秒）周期检查；每个业务日期首次生成快照时都会入队上传一次，保证云端
+「机台快照同步」通道按 24 小时周期保持新鲜。发送与重试由已有的 cloud sync worker 负责。
 
 ## 同步什么
 
@@ -43,6 +44,8 @@ V8_SYNC_KEY_ID=<key id>
 V8_SYNC_HMAC_SECRET=<32 字节以上随机值>
 V8_SYNC_TIME=02:30
 V8_SYNC_TIMEZONE=Asia/Shanghai
+# 可选：快照检查周期，默认 3600 秒（最小 300 秒）
+V8_SYNC_INTERVAL_SECONDS=3600
 ```
 
 ## 数据源

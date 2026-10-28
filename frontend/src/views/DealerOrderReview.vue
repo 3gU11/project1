@@ -2,9 +2,10 @@
   <div class="dealer-review-page">
     <PageHeader title="经销商订单审核">
       <template #actions>
-        <el-button :loading="syncing" @click="syncCloudOrders">同步云端</el-button>
-        <el-button :loading="inventorySyncing" @click="syncCloudInventory">同步库存到云端</el-button>
-        <el-button :loading="completedSyncing" @click="syncCompletedCloud">同步完成状态</el-button>
+        <el-button :loading="syncing" @click="syncCloudOrders">立即拉取订单</el-button>
+        <el-button :loading="inventorySyncing" @click="syncCloudInventory">推送库存快照</el-button>
+        <el-button :loading="machineSyncing" @click="syncMachineSnapshot">机台快照同步</el-button>
+        <el-button @click="openSyncChannels">同步通道</el-button>
         <el-button type="primary" :loading="loading" @click="loadOrders">刷新</el-button>
       </template>
     </PageHeader>
@@ -314,6 +315,59 @@
         <el-button type="primary" :loading="convertSaving" @click="submitConvert()">确认转合同</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="channelsDialogVisible" title="同步通道" width="980px" @closed="stopChannelsAutoRefresh">
+      <div class="channels-hint">
+        与云端「同步监控 → V8 桥接上传」同一套通道口径；云端监控仍是最终判据，这里展示本地最近成功/失败与待发送事件。
+        <span v-if="channelsServerTime">（本地时间 {{ channelsServerTime }}）</span>
+      </div>
+      <el-table v-loading="channelsLoading" :data="syncChannels" size="small" border>
+        <el-table-column prop="label" label="同步通道" min-width="150">
+          <template #default="scope">
+            <div>{{ scope.row.label }}</div>
+            <div class="channel-desc">{{ scope.row.description }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="direction" label="方向" width="150" />
+        <el-table-column prop="interval_label" label="设定周期" width="90" align="center" />
+        <el-table-column label="最近成功" width="170">
+          <template #default="scope">
+            <span>{{ scope.row.last_success_at || '-' }}</span>
+            <el-tag v-if="scope.row.last_trigger === 'manual'" size="small" type="info" class="channel-trigger">手动</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="expected_next_at" label="预计下次" width="170">
+          <template #default="scope">{{ scope.row.expected_next_at || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="偏差" width="110" align="center">
+          <template #default="scope">
+            <span v-if="scope.row.overdue_seconds > 0" class="channel-overdue">超期 {{ formatOverdue(scope.row.overdue_seconds) }}</span>
+            <span v-else>未超期</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110" align="center">
+          <template #default="scope">
+            <el-tag :type="channelStateTagType(scope.row.state)" size="small">{{ scope.row.state_label }}</el-tag>
+            <span v-if="scope.row.failed > 0" class="channel-failed">失败 {{ scope.row.failed }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" align="center">
+          <template #default="scope">
+            <el-button
+              v-if="scope.row.manual_action"
+              size="small"
+              :loading="channelActionLoading === scope.row.manual_action"
+              @click="runChannelAction(scope.row.manual_action)"
+            >立即同步</el-button>
+            <span v-else class="channel-desc">自动触发</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="loadSyncChannels">刷新</el-button>
+        <el-button @click="channelsDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -408,12 +462,41 @@ type CloudSyncStatus = {
   }>
 }
 
+type SyncChannel = {
+  key: string
+  label: string
+  direction: string
+  description: string
+  interval_seconds: number | null
+  interval_label: string
+  last_success_at: string | null
+  last_trigger: string | null
+  last_error: string | null
+  pending: number
+  failed: number
+  manual_action: string | null
+  expected_next_at: string | null
+  overdue_seconds: number
+  state: string
+  state_label: string
+}
+
+type SyncChannelsResponse = {
+  server_time: string
+  channels: SyncChannel[]
+}
+
 const loading = ref(false)
 const syncing = ref(false)
 const inventorySyncing = ref(false)
-const completedSyncing = ref(false)
+const machineSyncing = ref(false)
 const retryingCloudSync = ref(false)
 const cloudSyncStatus = ref<CloudSyncStatus>({ pending: 0, failed: 0, recent_failed: [] })
+const channelsDialogVisible = ref(false)
+const channelsLoading = ref(false)
+const channelsServerTime = ref('')
+const syncChannels = ref<SyncChannel[]>([])
+const channelActionLoading = ref('')
 const orders = ref<DealerOrder[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -755,7 +838,7 @@ const retryCloudSync = async () => {
 
 const syncCloudOrders = async () => {
   syncing.value = true
-  ElMessage.info('正在同步云端订单，请稍候…')
+  ElMessage.info('正在拉取云端订单，请稍候…')
   try {
     const res = await apiPost<{
       inserted?: number
@@ -769,15 +852,16 @@ const syncCloudOrders = async () => {
       max_pages: 20,
     }, { timeout: 120_000 })
     const prunedText = Number(res.pruned_cloud_deleted_orders || 0) > 0 ? `，清理 ${res.pruned_cloud_deleted_orders}` : ''
-    ElMessage.success(`同步完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}${prunedText}`)
+    ElMessage.success(`拉取完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}${prunedText}`)
     if (Number(res.factory_pending_orders || 0) > 0) filters.status = 'todo'
     page.value = 1
     selectedOrderNo.value = ''
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadCloudSyncStatus()
     await loadOrders()
+    if (channelsDialogVisible.value) void loadSyncChannels()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '同步云端失败')
+    ElMessage.error(getApiErrorMessage(err) || '拉取云端订单失败')
   } finally {
     syncing.value = false
   }
@@ -785,38 +869,97 @@ const syncCloudOrders = async () => {
 
 const syncCloudInventory = async () => {
   inventorySyncing.value = true
-  ElMessage.info('正在同步库存到云端，请稍候…')
+  ElMessage.info('正在推送库存快照，请稍候…')
   try {
-    const res = await apiPost<{ local_rows?: number; pushed_rows?: number }>('/dealer-orders/sync-wechat-batch-summary', {}, { timeout: 120_000 })
-    ElMessage.success(`库存同步完成：本地 ${res.local_rows || 0} 行，已推送 ${res.pushed_rows || 0} 行`)
+    const res = await apiPost<{ local_rows?: number; pushed_rows?: number }>('/dealer-orders/sync-wechat-batch-summary', {}, { timeout: 180_000 })
+    ElMessage.success(`库存快照已推送：本地 ${res.local_rows || 0} 行，推送 ${res.pushed_rows || 0} 行`)
+    if (channelsDialogVisible.value) void loadSyncChannels()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '同步云端库存失败')
+    ElMessage.error(getApiErrorMessage(err) || '推送库存快照失败')
   } finally {
     inventorySyncing.value = false
   }
 }
 
-const syncCompletedCloud = async () => {
-  completedSyncing.value = true
-  ElMessage.info('正在同步完成状态到云端，请稍候…')
+const syncMachineSnapshot = async () => {
+  machineSyncing.value = true
+  ElMessage.info('正在生成并上传机台快照，请稍候…')
   try {
     const res = await apiPost<{
-      scanned?: number
-      pushed?: number
-      skipped?: number
-      failed?: Array<{ order_no?: string; error?: string }>
-    }>('/dealer-orders/sync-completed-cloud', { limit: 200 }, { timeout: 120_000 })
-    const failed = res.failed?.length || 0
-    if (failed > 0) {
-      ElMessage.warning(`完成状态同步：成功 ${res.pushed || 0}，跳过 ${res.skipped || 0}，失败 ${failed}`)
+      status?: string
+      event_id?: string
+      message?: string
+      event_status?: { status?: string; last_error?: string } | null
+    }>('/dealer-orders/sync-machine-snapshot', {}, { timeout: 180_000 })
+    if (res.event_status?.status === 'failed') {
+      ElMessage.warning(`${res.message || '机台快照已入队'}：${res.event_status.last_error || ''}`)
     } else {
-      ElMessage.success(`完成状态同步：扫描 ${res.scanned || 0}，成功 ${res.pushed || 0}，跳过 ${res.skipped || 0}`)
+      ElMessage.success(res.message || '机台快照同步完成')
     }
+    if (channelsDialogVisible.value) void loadSyncChannels()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '同步完成状态失败')
+    ElMessage.error(getApiErrorMessage(err) || '机台快照同步失败')
   } finally {
-    completedSyncing.value = false
+    machineSyncing.value = false
   }
+}
+
+let channelsTimer: any = null
+
+const loadSyncChannels = async () => {
+  channelsLoading.value = true
+  try {
+    const res = await apiGet<SyncChannelsResponse>('/dealer-orders/sync-channels')
+    syncChannels.value = res.channels || []
+    channelsServerTime.value = res.server_time || ''
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '读取同步通道状态失败')
+  } finally {
+    channelsLoading.value = false
+  }
+}
+
+const openSyncChannels = async () => {
+  channelsDialogVisible.value = true
+  await loadSyncChannels()
+  if (channelsTimer) clearInterval(channelsTimer)
+  channelsTimer = setInterval(() => {
+    if (channelsDialogVisible.value) void loadSyncChannels()
+  }, 30_000)
+}
+
+const stopChannelsAutoRefresh = () => {
+  if (channelsTimer) {
+    clearInterval(channelsTimer)
+    channelsTimer = null
+  }
+}
+
+const runChannelAction = async (action: string) => {
+  channelActionLoading.value = action
+  try {
+    if (action === 'pull-orders') await syncCloudOrders()
+    else if (action === 'push-inventory') await syncCloudInventory()
+    else if (action === 'push-machines') await syncMachineSnapshot()
+  } finally {
+    channelActionLoading.value = ''
+    if (channelsDialogVisible.value) void loadSyncChannels()
+  }
+}
+
+const channelStateTagType = (state: string) => {
+  if (state === 'ok') return 'success'
+  if (state === 'late' || state === 'pending') return 'warning'
+  if (state === 'down' || state === 'failed') return 'danger'
+  return 'info'
+}
+
+const formatOverdue = (seconds: number) => {
+  const value = Number(seconds || 0)
+  if (value >= 86400) return `${(value / 86400).toFixed(1)} 天`
+  if (value >= 3600) return `${(value / 3600).toFixed(1)} 小时`
+  if (value >= 60) return `${Math.round(value / 60)} 分钟`
+  return `${value} 秒`
 }
 
 const approveOrder = async (row: DealerOrder) => {
@@ -1080,6 +1223,7 @@ onUnmounted(() => {
   if (pollTimer) {
     clearInterval(pollTimer)
   }
+  stopChannelsAutoRefresh()
 })
 </script>
 
@@ -1117,6 +1261,33 @@ onUnmounted(() => {
   background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 13px;
+}
+
+.channels-hint {
+  margin-bottom: 10px;
+  color: var(--color-gray-600);
+  font-size: 12px;
+}
+
+.channel-desc {
+  color: var(--color-gray-500);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.channel-trigger {
+  margin-left: 6px;
+}
+
+.channel-overdue {
+  color: #d97706;
+}
+
+.channel-failed {
+  display: block;
+  margin-top: 2px;
+  color: #dc2626;
+  font-size: 12px;
 }
 
 .todo-summary {

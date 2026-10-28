@@ -1020,10 +1020,25 @@ def push_wechat_batch_summary_to_cloud(rows: list[dict[str, Any]], idempotency_k
     return response.json()
 
 
-def sync_wechat_batch_summary_to_cloud() -> dict[str, Any]:
-    local = refresh_local_wechat_batch_summary()
-    rows, excluded_special = fetch_local_wechat_batch_summary()
-    cloud = push_wechat_batch_summary_to_cloud(rows)
+def sync_wechat_batch_summary_to_cloud(trigger: str = "auto") -> dict[str, Any]:
+    try:
+        local = refresh_local_wechat_batch_summary()
+        rows, excluded_special = fetch_local_wechat_batch_summary()
+        cloud = push_wechat_batch_summary_to_cloud(rows)
+    except Exception as exc:
+        try:
+            from crud.sync_channels import record_channel_failure
+
+            record_channel_failure("factory-snapshot", exc)
+        except Exception:
+            pass
+        raise
+    try:
+        from crud.sync_channels import record_channel_success
+
+        record_channel_success("factory-snapshot", trigger)
+    except Exception:
+        pass
     return {
         "message": "wechat batch summary synced",
         "local_rows": local["rows"],
@@ -1034,7 +1049,7 @@ def sync_wechat_batch_summary_to_cloud() -> dict[str, Any]:
     }
 
 
-def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
+def sync_completed_dealer_orders_to_cloud(limit: int = 200, *, trigger: str = "auto") -> dict[str, Any]:
     ensure_dealer_order_tables()
     limit = min(max(1, int(limit or 200)), 1000)
     rows: list[dict[str, Any]] = []
@@ -1078,6 +1093,19 @@ def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
                 pushed += 1
         except Exception as exc:
             failed.append({"order_no": order_no, "error": str(exc)})
+
+    try:
+        from crud.sync_channels import record_channel_failure, record_channel_success
+
+        if failed:
+            record_channel_failure(
+                "status-callback",
+                "; ".join(str(item.get("error") or "") for item in failed[:3]),
+            )
+        elif pushed:
+            record_channel_success("status-callback", trigger)
+    except Exception:
+        pass
 
     return {
         "message": "completed dealer orders synced",
@@ -1232,7 +1260,13 @@ def _prune_cloud_deleted_local_orders(conn: Any, cloud_order_nos: set[str]) -> d
     return {"orders": len(stale_order_nos), "lines": int(deleted_lines or 0)}
 
 
-def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_pages: int = 20) -> dict[str, Any]:
+def sync_cloud_dealer_orders(
+    status: str = "pending",
+    page_size: int = 100,
+    max_pages: int = 20,
+    *,
+    trigger: str = "auto",
+) -> dict[str, Any]:
     ensure_dealer_order_tables()
     orders = fetch_cloud_dealer_orders(status=status, page_size=page_size, max_pages=max_pages)
     contract_drafts_created = 0
@@ -1438,6 +1472,13 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
     except Exception as exc:
         logger.warning("cloud attachment sync unavailable: %s", exc)
 
+    try:
+        from crud.sync_channels import record_channel_success
+
+        record_channel_success("orders-pull", trigger)
+    except Exception:
+        pass
+
     return {
         "message": "cloud dealer orders synced",
         "status": "all" if _clean(status).lower() in {"", "all", "*"} else _normalize_status(status),
@@ -1524,5 +1565,11 @@ async def cloud_pull_worker_loop() -> None:
             raise
         except Exception as exc:
             logger.error("Cloud pull worker tick failed: %s", exc)
+            try:
+                from crud.sync_channels import record_channel_failure
+
+                record_channel_failure("orders-pull", exc)
+            except Exception:
+                pass
 
         await asyncio.sleep(interval)

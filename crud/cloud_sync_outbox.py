@@ -285,17 +285,40 @@ def _mark_failed(event_id: str, error: Exception | str) -> None:
         )
 
 
+def _record_sync_channel_result(event_type: str, *, ok: bool, error: Any = None) -> None:
+    """把 outbox 事件结果同步到本地「同步通道状态」，供页面展示。"""
+    try:
+        from crud.sync_channels import (
+            channel_for_event_type,
+            record_channel_failure,
+            record_channel_success,
+        )
+
+        channel_key = channel_for_event_type(event_type)
+        if not channel_key:
+            return
+        if ok:
+            record_channel_success(channel_key, "auto")
+        else:
+            record_channel_failure(channel_key, error)
+    except Exception as exc:  # pragma: no cover - 状态记录失败不影响同步主流程
+        logger.warning("record sync channel result failed: %s %s", event_type, exc)
+
+
 def process_next_cloud_sync_event() -> dict[str, Any] | None:
     event = _load_due_event()
     if not event:
         return None
     event_id = str(event["event_id"])
+    event_type = str(event.get("event_type") or "")
     try:
         _dispatch_event(event)
         _mark_synced(event_id)
+        _record_sync_channel_result(event_type, ok=True)
         return {"event_id": event_id, "status": "synced"}
     except Exception as exc:
         _mark_failed(event_id, exc)
+        _record_sync_channel_result(event_type, ok=False, error=exc)
         logger.warning("cloud sync event failed: %s %s", event_id, exc)
         return {"event_id": event_id, "status": "failed", "error": str(exc)}
 
@@ -553,6 +576,33 @@ def get_cloud_sync_status(limit: int = 5) -> dict[str, Any]:
             {key: _json_default(value) if isinstance(value, (datetime, date)) else value for key, value in row.items()}
             for row in rows
         ],
+    }
+
+
+def get_cloud_sync_event_status(event_id: str) -> dict[str, Any] | None:
+    """读取单个 outbox 事件的最新状态，供手动触发后回显。"""
+    target = str(event_id or "").strip()
+    if not target:
+        return None
+    ensure_cloud_sync_outbox_table()
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT event_id, event_type, biz_key, status, retry_count, last_error,
+                       next_retry_at, created_at, updated_at, synced_at
+                FROM cloud_sync_outbox
+                WHERE event_id=:event_id
+                LIMIT 1
+                """
+            ),
+            {"event_id": target},
+        ).mappings().first()
+    if not row:
+        return None
+    return {
+        key: _json_default(value) if isinstance(value, (datetime, date)) else value
+        for key, value in dict(row).items()
     }
 
 
