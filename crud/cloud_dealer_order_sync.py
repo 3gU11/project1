@@ -753,123 +753,122 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
             if has_order_remark
             else ""
         )
-        try:
-            conn.execute(text("CALL `refresh_wechat_batch_summary_all`()"))
-        except Exception:
-            conn.execute(text("TRUNCATE TABLE wechat_batch_summary"))
-            conn.execute(
-                text(
-                    f"""
-                    INSERT INTO wechat_batch_summary
-                      (summary_id, batch_no, expected_inbound_time, model, quantity,
-                       heightened, original_batch_no, original_expected_inbound_time,
-                       `批次号`, `预计入库时间`, `机型`, `数量`)
+        # 历史存储过程口径已停用：其加高现货分组会把「已完成批次号」写进
+        # original_batch_no，导致云端大区经理把已完成批次当在产批次分配；统一走 Python SQL 重建。
+        conn.execute(text("TRUNCATE TABLE wechat_batch_summary"))
+        conn.execute(
+            text(
+                f"""
+                INSERT INTO wechat_batch_summary
+                  (summary_id, batch_no, expected_inbound_time, model, quantity,
+                   heightened, original_batch_no, original_expected_inbound_time,
+                   `批次号`, `预计入库时间`, `机型`, `数量`)
+                SELECT
+                  MD5(CONCAT(
+                    s.batch_no, '|',
+                    COALESCE(DATE_FORMAT(s.expected_inbound_time, '%Y-%m-%d %H:%i:%s'), ''),
+                    '|', s.model, '|', s.heightened, '|', COALESCE(s.original_batch_no, '')
+                  )) AS summary_id,
+                  s.batch_no,
+                  s.expected_inbound_time,
+                  s.model,
+                  s.quantity,
+                  s.heightened,
+                  s.original_batch_no,
+                  s.original_expected_inbound_time,
+                  s.batch_no,
+                  s.expected_inbound_time,
+                  s.model,
+                  s.quantity
+                FROM (
+                  SELECT
+                    IF(raw.is_high, '加高', raw.source_batch_no) AS batch_no,
+                    raw.source_expected_inbound_time AS expected_inbound_time,
+                    raw.base_model AS model,
+                    COUNT(*) AS quantity,
+                    IF(raw.is_high, 1, 0) AS heightened,
+                    IF(raw.is_high, raw.source_batch_no, '') AS original_batch_no,
+                    IF(raw.is_high, raw.source_expected_inbound_time, NULL) AS original_expected_inbound_time
+                  FROM (
                     SELECT
-                      MD5(CONCAT(
-                        s.batch_no, '|',
-                        COALESCE(DATE_FORMAT(s.expected_inbound_time, '%Y-%m-%d %H:%i:%s'), ''),
-                        '|', s.model, '|', s.heightened, '|', COALESCE(s.original_batch_no, '')
-                      )) AS summary_id,
-                      s.batch_no,
-                      s.expected_inbound_time,
-                      s.model,
-                      s.quantity,
-                      s.heightened,
-                      s.original_batch_no,
-                      s.original_expected_inbound_time,
-                      s.batch_no,
-                      s.expected_inbound_time,
-                      s.model,
-                      s.quantity
-                    FROM (
-                      SELECT
-                        IF(raw.is_high, '加高', raw.source_batch_no) AS batch_no,
-                        raw.source_expected_inbound_time AS expected_inbound_time,
-                        raw.base_model AS model,
-                        COUNT(*) AS quantity,
-                        IF(raw.is_high, 1, 0) AS heightened,
-                        IF(raw.is_high, raw.source_batch_no, '') AS original_batch_no,
-                        IF(raw.is_high, raw.source_expected_inbound_time, NULL) AS original_expected_inbound_time
-                      FROM (
-                        SELECT
-                          TRIM(`批次号`) AS source_batch_no,
-                          `预计入库时间` AS source_expected_inbound_time,
-                          TRIM(`机型`) AS base_model,
-                          (
-                            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
-                            {order_remark_high_clause}
-                          ) AS is_high
-                        FROM finished_goods_data
-                          INNER JOIN (
-                            SELECT DISTINCT TRIM(model_name) AS model_name
-                            FROM model_dictionary
-                            WHERE enabled = 1
-                          ) md ON md.model_name = TRIM(`机型`)
-                        WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
-                          AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                          AND TRIM(COALESCE(`状态`, '')) = '待入库'
-                      ) raw
-                      WHERE NULLIF(raw.base_model, '') IS NOT NULL
-                      GROUP BY raw.source_batch_no, raw.source_expected_inbound_time, raw.base_model, raw.is_high
-                      UNION ALL
-                      SELECT
-                        '库存中' AS batch_no,
-                        CAST(NULL AS DATETIME) AS expected_inbound_time,
-                        raw.base_model AS model,
-                        COUNT(*) AS quantity,
-                        IF(raw.is_high, 1, 0) AS heightened,
-                        IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '') AS original_batch_no,
-                        CAST(NULL AS DATETIME) AS original_expected_inbound_time
-                      FROM (
-                        SELECT
-                          TRIM(COALESCE(`批次号`, '')) AS source_batch_no,
-                          TRIM(`机型`) AS base_model,
-                          (
-                            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
-                            {order_remark_high_clause}
-                          ) AS is_high
-                        FROM finished_goods_data
-                          INNER JOIN (
-                            SELECT DISTINCT TRIM(model_name) AS model_name
-                            FROM model_dictionary
-                            WHERE enabled = 1
-                          ) md ON md.model_name = TRIM(`机型`)
-                        WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                          AND {BRIDGE_STOCK_STATUS_PREDICATE}
-                      ) raw
-                      WHERE NULLIF(raw.base_model, '') IS NOT NULL
-                      GROUP BY raw.base_model, raw.is_high, IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '')
-                    ) s
-                    ON DUPLICATE KEY UPDATE
-                      batch_no = VALUES(batch_no),
-                      expected_inbound_time = VALUES(expected_inbound_time),
-                      model = VALUES(model),
-                      quantity = VALUES(quantity),
-                      heightened = VALUES(heightened),
-                      original_batch_no = VALUES(original_batch_no),
-                      original_expected_inbound_time = VALUES(original_expected_inbound_time),
-                      `批次号` = VALUES(`批次号`),
-                      `预计入库时间` = VALUES(`预计入库时间`),
-                      `机型` = VALUES(`机型`),
-                      `数量` = VALUES(`数量`)
-                    """
-                )
+                      TRIM(`批次号`) AS source_batch_no,
+                      `预计入库时间` AS source_expected_inbound_time,
+                      TRIM(`机型`) AS base_model,
+                      (
+                        TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                        OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                        OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+                        {order_remark_high_clause}
+                      ) AS is_high
+                    FROM finished_goods_data
+                      INNER JOIN (
+                        SELECT DISTINCT TRIM(model_name) AS model_name
+                        FROM model_dictionary
+                        WHERE enabled = 1
+                      ) md ON md.model_name = TRIM(`机型`)
+                    WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
+                      AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+                      AND TRIM(COALESCE(`状态`, '')) = '待入库'
+                  ) raw
+                  WHERE NULLIF(raw.base_model, '') IS NOT NULL
+                  GROUP BY raw.source_batch_no, raw.source_expected_inbound_time, raw.base_model, raw.is_high
+                  UNION ALL
+                  SELECT
+                    '库存中' AS batch_no,
+                    CAST(NULL AS DATETIME) AS expected_inbound_time,
+                    raw.base_model AS model,
+                    COUNT(*) AS quantity,
+                    IF(raw.is_high, 1, 0) AS heightened,
+                    '' AS original_batch_no,
+                    CAST(NULL AS DATETIME) AS original_expected_inbound_time
+                  FROM (
+                    SELECT
+                      TRIM(COALESCE(`批次号`, '')) AS source_batch_no,
+                      TRIM(`机型`) AS base_model,
+                      (
+                        TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                        OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                        OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+                        {order_remark_high_clause}
+                      ) AS is_high
+                    FROM finished_goods_data
+                      INNER JOIN (
+                        SELECT DISTINCT TRIM(model_name) AS model_name
+                        FROM model_dictionary
+                        WHERE enabled = 1
+                      ) md ON md.model_name = TRIM(`机型`)
+                    WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+                      AND {BRIDGE_STOCK_STATUS_PREDICATE}
+                  ) raw
+                  WHERE NULLIF(raw.base_model, '') IS NOT NULL
+                  GROUP BY raw.base_model, raw.is_high
+                ) s
+                ON DUPLICATE KEY UPDATE
+                  batch_no = VALUES(batch_no),
+                  expected_inbound_time = VALUES(expected_inbound_time),
+                  model = VALUES(model),
+                  quantity = VALUES(quantity),
+                  heightened = VALUES(heightened),
+                  original_batch_no = VALUES(original_batch_no),
+                  original_expected_inbound_time = VALUES(original_expected_inbound_time),
+                  `批次号` = VALUES(`批次号`),
+                  `预计入库时间` = VALUES(`预计入库时间`),
+                  `机型` = VALUES(`机型`),
+                  `数量` = VALUES(`数量`)
+                """
             )
-            conn.execute(
-                text(
-                    """
-                    UPDATE wechat_batch_summary
-                    SET `批次号` = batch_no,
-                        `预计入库时间` = expected_inbound_time,
-                        `机型` = model,
-                        `数量` = quantity
-                    """
-                )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE wechat_batch_summary
+                SET `批次号` = batch_no,
+                    `预计入库时间` = expected_inbound_time,
+                    `机型` = model,
+                    `数量` = quantity
+                """
             )
+        )
         # 机型严格按字典：不在启用字典里的行已在刷新时跳过，这里补一条告警，避免静默丢数据。
         try:
             skipped = conn.execute(

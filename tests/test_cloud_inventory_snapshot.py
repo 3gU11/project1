@@ -86,6 +86,16 @@ def test_unknown_model_rows_are_skipped_and_logged():
     assert "DELETE w FROM wechat_batch_summary w" in source
 
 
+def test_python_fallback_stock_rows_drop_completed_batch_codes():
+    source = Path(__file__).parents[1].joinpath("crud", "cloud_dealer_order_sync.py").read_text(encoding="utf-8")
+
+    # 库存中的加高机不再携带原批次号：避免云端把已完成批次当在产批次分配。
+    assert "'' AS original_batch_no" in source
+    assert "GROUP BY raw.base_model, raw.is_high" in source
+    # 历史存储过程口径已停用（其分组仍会带出已完成批次号）。
+    assert "CALL `refresh_wechat_batch_summary_all`" not in source
+
+
 def test_special_heightened_height_uses_default_height_rule():
     sync = __import__("crud.cloud_dealer_order_sync", fromlist=["x"])
 
