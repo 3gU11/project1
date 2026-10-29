@@ -86,7 +86,7 @@ const openScanner = async () => {
     await scanner.start(
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 240, height: 240 } },
-      (decodedText) => { void handleScanResult(decodedText) },
+      (decodedText: string) => { void handleScanResult(decodedText) },
       () => undefined,
     )
     cameraRunning = true
