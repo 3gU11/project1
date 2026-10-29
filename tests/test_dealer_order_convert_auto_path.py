@@ -456,3 +456,37 @@ def test_convert_endpoint_splits_preorder_into_pending_contract(monkeypatch):
     assert "已规划" in result["message"]
     assert calls["marked"][0][1]["contract_no"] == "HT202610280001、HT202610280009"
     assert calls["rollback_contracts"] == []
+
+
+def test_convert_preorder_only_order_uses_single_pending_contract(monkeypatch):
+    calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    order_items = [
+        {"model": "FR-400G", "quantity": 2, "batch_no": "", "inventory_type": "unmarked"},
+    ]
+    monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: order_items)
+    payload = routes.ConvertToContractPayload(
+        contract_no="HT202610280001",
+        customer_name="客户A",
+        agent_name="代理A",
+        delivery_date="2026-11-01",
+        items=[{"model": "FR-400G", "qty": 2, "high": False, "batch_no": "", "inventory_type": "unmarked"}],
+    )
+
+    result = routes.convert_to_contract(
+        "DO-TEST-5",
+        payload,
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"username": "tester"},
+    )
+
+    assert len(calls["contracts"]) == 1
+    call = calls["contracts"][0]
+    assert call["status_overrides"] == {"HT202610280001": "待规划"}
+    assert call["trigger_sandbox"] is True
+    assert result["contract_ids"] == ["HT202610280001"]
+    assert result["contracts"][0]["status"] == "待规划"
+    assert result["contracts"][0]["path"] == "preorder"
+    assert "沙盘" in result["message"]
+    assert calls["marked"][0][1]["contract_no"] == "HT202610280001"
