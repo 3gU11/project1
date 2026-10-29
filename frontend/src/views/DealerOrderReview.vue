@@ -308,7 +308,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint">按去向生成合同：现货/在制行合成一张「已规划」合同（行级保留批次/来源，到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台，指定批次只做优先匹配提示）；无货预订行单独生成一张「待规划」合同并进入沙盘排产。</div>
+        <div class="save-mode-hint">按去向生成合同：现货行合成一张「已规划」合同（到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台）；在制指定批次行单独一张合同，自动执行「按批次规划并配货」预占机台（订单待二次确认，失败回退已规划人工配货）；无货预订行单独一张「待规划」合同并进入沙盘排产。混合订单最多生成三张合同。</div>
       </div>
 
       <template #footer>
@@ -1101,7 +1101,7 @@ type MessageResponse = {
   contract_no?: string
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
-  contracts?: Array<{ contract_no: string; path: 'auto' | 'preorder'; status?: '已规划' | '待规划'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
+  contracts?: Array<{ contract_no: string; path: 'auto' | 'batch-plan' | 'batch-plan-fallback' | 'preorder'; status?: '已规划' | '待规划' | '已转订单'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
 }
 
 const submitConvert = async () => {
@@ -1177,9 +1177,13 @@ const submitConvert = async () => {
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadOrders()
     const contractList = res.contracts || []
-    const hasPlannedContract = contractList.some((c) => (c.status || '已规划') === '已规划')
-    const hasPreorderContract = contractList.some((c) => c.status === '待规划')
-    if (hasPlannedContract) {
+    const hasAutoPlannedContract = contractList.some((c) => c.status === '已转订单')
+    const hasPlannedContract = contractList.some((c) => c.status === '已规划')
+    const hasPreorderContract = contractList.some((c) => c.status === '待规划' && c.path === 'preorder')
+    if (hasAutoPlannedContract) {
+      // 在制批次已自动预占，去订单配货完成二次确认。
+      router.push({ path: '/order-allocation' })
+    } else if (hasPlannedContract) {
       // 已规划合同由业务人员导入后到订单配货人工分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
     } else if (hasPreorderContract) {

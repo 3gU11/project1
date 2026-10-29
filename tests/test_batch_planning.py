@@ -266,6 +266,47 @@ class BatchPlanningTests(unittest.TestCase):
         self.assertEqual(result.iloc[0]['status'],bp.REVIEW_STATUS)
         save.assert_not_called()
 
+    # ------------------------------------------------------------------
+    # 指定批次自动规划：一张合同 → 多个在产/已确认批次
+    # ------------------------------------------------------------------
+
+    def _insert_designated_contract(self, cid, allocations):
+        for index, alloc in enumerate(allocations):
+            self.sql(
+                """INSERT INTO factory_plan
+                   (`合同号`,`机型`,`排产数量`,`备注`,`客户名`,`代理商`,`要求交期`,`状态`,`订单号`,`指定批次/来源`)
+                   VALUES (:cid,'FR-500','1','','客户','代理','','待规划','',:alloc)""",
+                cid=cid, alloc=json.dumps(alloc, ensure_ascii=False),
+            )
+
+    def test_designated_batches_plan_across_multiple_batches(self):
+        self._insert_designated_contract(
+            "C2", [{"09-01": 1}, {"09-02": 1}]
+        )
+        result = bp.plan_contract_designated_batches("C2", "planner")
+
+        self.assertEqual(result["batch_codes"], ["09-01", "09-02"])
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 1)
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM units WHERE sales_id=:oid", oid=result["order_id"])[0][0], 2)
+        statuses = self.sql("SELECT DISTINCT `状态` FROM factory_plan WHERE `合同号`='C2'")
+        self.assertEqual(statuses, [("已转订单",)])
+        replay = bp.plan_contract_designated_batches("C2", "planner")
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 1)
+
+    def test_designated_batches_reject_missing_or_completed_batch(self):
+        self._insert_designated_contract("C3", [{"09-99": 1}])
+        with self.assertRaises(bp.BatchPlanningError):
+            bp.plan_contract_designated_batches("C3", "planner")
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 0)
+
+        self.sql("INSERT INTO batches VALUES ('B4','09-03','Completed',NULL)")
+        self.sql("INSERT INTO units (unit_id,batch_id,slot_index,serial_no,model_type,status) VALUES ('U9','B4',99,'S9','FR-500','In_Production')")
+        self._insert_designated_contract("C4", [{"09-03": 1}])
+        with self.assertRaises(bp.BatchPlanningError):
+            bp.plan_contract_designated_batches("C4", "planner")
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

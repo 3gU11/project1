@@ -193,6 +193,8 @@ def _patch_convert_endpoint(monkeypatch, *, calls: dict):
     monkeypatch.setattr(routes, "get_engine", lambda: _FakeEngine())
     monkeypatch.setattr(routes, "contract_no_exists", lambda conn, cid: False)
     monkeypatch.setattr(routes, "next_contract_no", lambda conn: "HT202610280009")
+    # 默认没有可自动规划的批次：全部按现货/人工配货兜底（各用例可再覆盖）。
+    monkeypatch.setattr(routes, "_load_batch_status_map", lambda conn, codes: {})
     monkeypatch.setattr(planning, "_assert_models_in_dictionary", lambda names: None)
     monkeypatch.setattr(routes, "append_audit_log", lambda **kwargs: calls["audit"].append(kwargs))
     monkeypatch.setattr(routes, "_attach_order_form_to_contracts", lambda *a, **k: [])
@@ -490,3 +492,105 @@ def test_convert_preorder_only_order_uses_single_pending_contract(monkeypatch):
     assert result["contracts"][0]["path"] == "preorder"
     assert "沙盘" in result["message"]
     assert calls["marked"][0][1]["contract_no"] == "HT202610280001"
+
+
+# ---------------------------------------------------------------------------
+# 七、在制指定批次：自动执行按批次规划（支持多批次）
+# ---------------------------------------------------------------------------
+
+
+def _mixed_payload() -> routes.ConvertToContractPayload:
+    return routes.ConvertToContractPayload(
+        contract_no="HT202610280001",
+        customer_name="客户A",
+        agent_name="代理A",
+        delivery_date="2026-11-01",
+        items=[
+            {"model": "FH-300C", "qty": 2, "high": False, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
+            {"model": "FR-400AUTO", "qty": 1, "high": False, "batch_no": "10-02", "inventory_type": "wip"},
+            {"model": "FR-400G", "qty": 3, "high": False, "batch_no": "", "inventory_type": "unmarked"},
+        ],
+    )
+
+
+def _mixed_order_items() -> list[dict]:
+    return [
+        {"model": "FH-300C", "quantity": 2, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
+        {"model": "FR-400AUTO", "quantity": 1, "batch_no": "10-02", "inventory_type": "wip"},
+        {"model": "FR-400G", "quantity": 3, "batch_no": "", "inventory_type": "unmarked"},
+    ]
+
+
+def test_convert_endpoint_auto_plans_in_production_batch_contract(monkeypatch):
+    calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    monkeypatch.setattr(
+        routes, "_load_batch_status_map", lambda conn, codes: {"10-02": ["In_Production"]}
+    )
+    monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: _mixed_order_items())
+    planned = []
+
+    def fake_plan(cid, operator):
+        planned.append((cid, operator))
+        return {"order_id": "SO-AUTO-1", "batch_codes": ["10-02"], "count": 1}
+
+    monkeypatch.setattr("crud.batch_planning.plan_contract_designated_batches", fake_plan)
+
+    result = routes.convert_to_contract(
+        "DO-TEST-6",
+        _mixed_payload(),
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"username": "tester"},
+    )
+
+    assert planned == [("HT202610280009", "tester")]
+    assert result["contract_ids"] == [
+        "HT202610280001",
+        "HT202610280009",
+        "HT202610280010",
+    ]
+    by_path = {item["path"]: item for item in result["contracts"]}
+    assert by_path["auto"]["status"] == "已规划"
+    assert by_path["batch-plan"]["status"] == "已转订单"
+    assert by_path["preorder"]["status"] == "待规划"
+    assert result["batch_plan"]["ok"] is True
+    assert result["batch_plan"]["order_id"] == "SO-AUTO-1"
+    assert calls["marked"][0][1]["contract_no"] == "HT202610280001、HT202610280009、HT202610280010"
+    call = calls["contracts"][0]
+    assert call["status_overrides"] == {
+        "HT202610280009": "待规划",
+        "HT202610280010": "待规划",
+    }
+    assert call["trigger_sandbox"] is True
+
+
+def test_convert_endpoint_falls_back_to_planned_when_auto_plan_fails(monkeypatch):
+    calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    monkeypatch.setattr(
+        routes, "_load_batch_status_map", lambda conn, codes: {"10-02": ["In_Production"]}
+    )
+    monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: _mixed_order_items())
+    fallback = []
+    monkeypatch.setattr(routes, "_mark_contract_planned", lambda cid: fallback.append(cid))
+
+    def failing_plan(cid, operator):
+        raise RuntimeError("批次 10-02 适配空卡不足")
+
+    monkeypatch.setattr("crud.batch_planning.plan_contract_designated_batches", failing_plan)
+
+    result = routes.convert_to_contract(
+        "DO-TEST-7",
+        _mixed_payload(),
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"username": "tester"},
+    )
+
+    assert fallback == ["HT202610280009"]
+    by_path = {item["path"]: item for item in result["contracts"]}
+    assert by_path["batch-plan-fallback"]["status"] == "已规划"
+    assert result["batch_plan"]["ok"] is False
+    assert "空卡不足" in result["batch_plan"]["error"]
+    assert "失败原因" in result["message"]

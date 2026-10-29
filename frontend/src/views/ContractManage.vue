@@ -633,7 +633,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint path-mode-hint">按去向生成合同：现货/在制行合成一张「已规划」合同（行级保留批次/来源，到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台，指定批次只做优先匹配提示）；无货预订行单独生成一张「待规划」合同并进入沙盘排产。</div>
+        <div class="save-mode-hint path-mode-hint">按去向生成合同：现货行合成一张「已规划」合同（到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台）；在制指定批次行单独一张合同，自动执行「按批次规划并配货」预占机台（订单待二次确认，失败回退已规划人工配货）；无货预订行单独一张「待规划」合同并进入沙盘排产。混合订单最多生成三张合同。</div>
       </div>
 
       <template #footer>
@@ -684,7 +684,8 @@ type MessageResponse = {
   save_mode?: string  // 经销商转合同自动选路返回 auto；手动批量录合同仍为 sandbox/spot
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
-  contracts?: Array<{ contract_no: string; path: 'auto' | 'preorder'; status?: '已规划' | '待规划'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
+  contracts?: Array<{ contract_no: string; path: 'auto' | 'batch-plan' | 'batch-plan-fallback' | 'preorder'; status?: '已规划' | '待规划' | '已转订单'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
+  batch_plan?: { attempted: boolean; ok: boolean; order_id?: string | null; batch_codes?: string[]; error?: string | null }
 }
 type ContractSummary = {
   id: string
@@ -1562,15 +1563,19 @@ const submitDealerConvert = async () => {
       else ElMessage.success(cloudAttachmentNotice.text)
     }
     dealerConvertDialogVisible.value = false
-    const plannedContract = contracts.find((c) => (c.status || '已规划') === '已规划')
+    const autoPlannedContract = contracts.find((c) => c.status === '已转订单')
+    const plannedContract = contracts.find((c) => c.status === '已规划')
     const preorderContract = contracts.find((c) => c.status === '待规划')
-    activeTab.value = plannedContract ? '已规划' : '待规划'
+    activeTab.value = autoPlannedContract ? '已完成' : plannedContract ? '已规划' : '待规划'
     selectedContractId.value = String(
-      (plannedContract || preorderContract)?.contract_no || String(res.contract_no || dealerConvertForm.contractNo).split('、')[0],
+      (autoPlannedContract || plannedContract || preorderContract)?.contract_no || String(res.contract_no || dealerConvertForm.contractNo).split('、')[0],
     ).trim()
     await fetchContracts(true)
     await loadDealerOrders()
-    if (plannedContract) {
+    if (autoPlannedContract) {
+      // 在制批次已自动预占，订单待二次确认。
+      ElMessage.info(`在制合同 ${autoPlannedContract.contract_no} 已自动预占机台${res.batch_plan?.order_id ? `，订单 ${res.batch_plan.order_id} 待二次确认` : ''}，可在订单配货查看`)
+    } else if (plannedContract) {
       // 已规划合同由业务人员导入后到订单配货手动分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
     } else if (preorderContract) {

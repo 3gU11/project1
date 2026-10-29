@@ -76,7 +76,7 @@ export const isStockSourceLine = (item?: { batch_no?: string; inventory_type?: s
 export const convertLinePathLabel = (item?: { batch_no?: string; inventory_type?: string } | null) => {
   if (isPreorderLine(item)) return '无货预订 → 待规划（沙盘）'
   if (isStockSourceLine(item)) return '库存中 → 库存配货'
-  return `批次 ${String(item?.batch_no ?? '').trim()} → 优先按批次配货`
+  return `批次 ${String(item?.batch_no ?? '').trim()} → 自动批次规划`
 }
 
 /** 判断一条经销商订单明细是否加高；只看明细自己的字段，不看订单备注。 */

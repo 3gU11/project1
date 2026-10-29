@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from api.routes.auth import require_permissions
 from crud.audit_logs import append_audit_log
@@ -577,6 +577,10 @@ BATCH_LINE_PATH = "batch"
 CONVERT_PATH_LABEL = "按明细来源自动选路（合同已规划）"
 # 无货预订行单独成一张「待规划」合同，进入沙盘排产。
 PREORDER_PATH_LABEL = "无货预订（合同待规划，进入沙盘）"
+# 在制指定批次：自动执行「按批次规划并配货」，预占机台并生成待二次确认订单。
+BATCH_PLAN_PATH_LABEL = "在制批次（自动批次规划，待二次确认）"
+BATCH_PLAN_FALLBACK_LABEL = "在制批次（自动规划失败，转人工配货）"
+PLANNABLE_BATCH_STATUSES = {"Confirmed", "In_Production"}
 
 
 def _clear_convert_caches() -> None:
@@ -729,6 +733,43 @@ def _next_contract_no_after(conn, used: list[str]) -> str:
     return candidate
 
 
+def _load_batch_status_map(conn, batch_codes: list[str]) -> dict[str, list[str]]:
+    """批次号 → 本地批次状态列表；查不到或查询失败时返回空（按人工配货兜底）。"""
+    codes = [str(code or "").strip() for code in batch_codes if str(code or "").strip()]
+    if not codes:
+        return {}
+    try:
+        rows = conn.execute(
+            text(
+                "SELECT batch_code, status FROM batches WHERE batch_code IN :codes"
+            ).bindparams(bindparam("codes", expanding=True)),
+            {"codes": tuple(codes)},
+        ).fetchall()
+    except Exception as exc:
+        logging.getLogger(__name__).warning("load batch status failed: %s", exc)
+        return {}
+    status_map: dict[str, list[str]] = {}
+    for row in rows:
+        code = str(row[0] or "").strip()
+        if code:
+            status_map.setdefault(code, []).append(str(row[1] or "").strip())
+    return status_map
+
+
+def _mark_contract_planned(contract_no: str) -> None:
+    """自动批次规划失败时把合同回退为「已规划」，转人工导入+配货。"""
+    try:
+        with get_engine().begin() as conn:
+            conn.execute(
+                text("UPDATE factory_plan SET `状态`='已规划' WHERE `合同号`=:cid"),
+                {"cid": contract_no},
+            )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "fallback contract to planned failed contract=%s", contract_no
+        )
+
+
 def _rollback_created_contracts(contract_ids: list[str]) -> None:
     """转合同失败补偿：删掉本次新建的合同、合同通知和尚未处理的急单卡。"""
     ids = [str(cid or "").strip() for cid in contract_ids if str(cid or "").strip()]
@@ -811,17 +852,28 @@ def convert_to_contract(
         delivery_date = str(payload.delivery_date or "").strip() or str(items[0].get("delivery_date") or "").strip()
         total_note = str(payload.contract_note or "").strip()
 
-        # 3. 按后续路径拆两类：现货/在制 → 已规划；无货预订 → 待规划进沙盘。
-        regular_items = [
-            ci
-            for ci in contract_items
-            if not is_preorder_dealer_order_line(ci.get("batch_no"), ci.get("inventory_type"))
-        ]
+        # 3. 按去向分三组：
+        #    现货（含已完工/不可规划批次兜底）→ 已规划；
+        #    在制指定批次 → 待规划后自动批次规划（预占机台 + 待二次确认订单）；
+        #    无货预订 → 待规划并进入沙盘。
         preorder_items = [
             ci
             for ci in contract_items
             if is_preorder_dealer_order_line(ci.get("batch_no"), ci.get("inventory_type"))
         ]
+        non_preorder_items = [
+            ci
+            for ci in contract_items
+            if not is_preorder_dealer_order_line(ci.get("batch_no"), ci.get("inventory_type"))
+        ]
+        batch_codes = sorted(
+            {
+                str(ci.get("batch_no") or "").strip()
+                for ci in non_preorder_items
+                if str(ci.get("batch_no") or "").strip()
+                and not _is_finished_stock_order(ci.get("batch_no"), ci.get("inventory_type"))
+            }
+        )
 
         def _build_group(group_items: list[dict], *, remark_prefix: str = "") -> dict | None:
             if not group_items:
@@ -837,13 +889,33 @@ def convert_to_contract(
             )
             return built if built["add_list"] else None
 
-        regular_contract = _build_group(regular_items)
-        preorder_contract = _build_group(preorder_items, remark_prefix="无货预订")
-        if not regular_contract and not preorder_contract:
-            raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
-
-        # 4. 合同号：沿用前端预取号；无货预订合同在同日序号上顺延
         with get_engine().connect() as conn:
+            batch_status_map = _load_batch_status_map(conn, batch_codes)
+            planable_codes = {
+                code
+                for code, statuses in batch_status_map.items()
+                if any(status in PLANNABLE_BATCH_STATUSES for status in statuses)
+            }
+
+            def _is_batch_plan_item(ci: dict) -> bool:
+                batch = str(ci.get("batch_no") or "").strip()
+                if not batch or batch not in planable_codes:
+                    return False
+                return not _is_finished_stock_order(ci.get("batch_no"), ci.get("inventory_type"))
+
+            batch_plan_items = [ci for ci in non_preorder_items if _is_batch_plan_item(ci)]
+            regular_items = [ci for ci in non_preorder_items if not _is_batch_plan_item(ci)]
+
+            regular_contract = _build_group(regular_items)
+            batch_contract = _build_group(batch_plan_items)
+            preorder_contract = _build_group(preorder_items, remark_prefix="无货预订")
+            if not regular_contract and not batch_contract and not preorder_contract:
+                raise HTTPException(
+                    status_code=422,
+                    detail="没有可新增记录（可能都已存在或字段不完整）",
+                )
+
+            # 4. 合同号：沿用前端预取号；后续合同在同日序号上顺延
             requested = str(payload.contract_no or "").strip()
             if requested and contract_no_exists(conn, requested):
                 raise HTTPException(
@@ -851,22 +923,28 @@ def convert_to_contract(
                     detail=f"合同号已存在，请刷新后重新生成: {requested}",
                 )
             contract_nos: list[str] = []
-            if regular_contract:
-                contract_nos.append(requested or next_contract_no(conn))
-            if preorder_contract:
-                contract_nos.append(requested or _next_contract_no_after(conn, contract_nos))
-                if regular_contract and contract_nos[-1] == contract_nos[0]:
-                    contract_nos[-1] = _next_contract_no_after(conn, contract_nos[:1])
+            for group in (regular_contract, batch_contract, preorder_contract):
+                if not group:
+                    continue
+                if not contract_nos and requested:
+                    contract_nos.append(requested)
+                else:
+                    contract_nos.append(_next_contract_no_after(conn, contract_nos))
             if not contract_nos:
-                raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
+                raise HTTPException(
+                    status_code=422,
+                    detail="没有可新增记录（可能都已存在或字段不完整）",
+                )
 
         add_list: list[dict] = []
         status_overrides: dict[str, str] = {}
         contracts_payload: list[dict] = []
+        contract_no_by_group: dict[str, str] = {}
         cursor = 0
         if regular_contract:
             regular_cid = contract_nos[cursor]
             cursor += 1
+            contract_no_by_group["regular"] = regular_cid
             for row in regular_contract["add_list"]:
                 row["合同号"] = regular_cid
             add_list.extend(regular_contract["add_list"])
@@ -882,8 +960,29 @@ def convert_to_contract(
                     "models": regular_contract["models"],
                 }
             )
+        if batch_contract:
+            batch_cid = contract_nos[cursor]
+            cursor += 1
+            contract_no_by_group["batch"] = batch_cid
+            for row in batch_contract["add_list"]:
+                row["合同号"] = batch_cid
+            add_list.extend(batch_contract["add_list"])
+            status_overrides[batch_cid] = "待规划"
+            contracts_payload.append(
+                {
+                    "contract_no": batch_cid,
+                    "path": "batch-plan",
+                    "status": "待规划",
+                    "batch_nos": batch_contract["batch_nos"],
+                    "path_label": BATCH_PLAN_PATH_LABEL,
+                    "row_count": len(batch_contract["add_list"]),
+                    "qty": batch_contract["qty"],
+                    "models": batch_contract["models"],
+                }
+            )
         if preorder_contract:
             preorder_cid = contract_nos[cursor]
+            contract_no_by_group["preorder"] = preorder_cid
             for row in preorder_contract["add_list"]:
                 row["合同号"] = preorder_cid
             add_list.extend(preorder_contract["add_list"])
@@ -901,7 +1000,7 @@ def convert_to_contract(
                 }
             )
 
-        # 5. 建合同：现货/在制置「已规划」；无货预订置「待规划」并触发沙盘；失败整体回滚
+        # 5. 建合同：现货置「已规划」；在制/无货预订先置「待规划」；失败整体回滚
         current_user = ctx if isinstance(ctx, dict) else {"username": operator, "role": ""}
         try:
             _process_contracts_batch(
@@ -919,7 +1018,33 @@ def convert_to_contract(
             _rollback_created_contracts(contract_nos)
             raise
 
-        # 6. 回写经销商订单；机台分配仍由业务人员在订单配货手动完成
+        # 6. 在制合同：按合同行的指定批次自动执行「按批次规划并配货」（支持多批次）。
+        #    失败不阻塞整单，合同回退「已规划」由业务人工导入+配货。
+        auto_plan: dict | None = None
+        batch_plan_error = ""
+        batch_cid = contract_no_by_group.get("batch", "")
+        if batch_cid:
+            try:
+                from crud.batch_planning import plan_contract_designated_batches
+
+                auto_plan = plan_contract_designated_batches(batch_cid, operator)
+                for item in contracts_payload:
+                    if item["contract_no"] == batch_cid:
+                        item["status"] = "已转订单"
+                        item["path_label"] = BATCH_PLAN_PATH_LABEL
+            except Exception as exc:
+                batch_plan_error = str(exc)
+                _mark_contract_planned(batch_cid)
+                for item in contracts_payload:
+                    if item["contract_no"] == batch_cid:
+                        item["status"] = "已规划"
+                        item["path"] = "batch-plan-fallback"
+                        item["path_label"] = BATCH_PLAN_FALLBACK_LABEL
+                logging.getLogger(__name__).warning(
+                    "auto batch planning failed contract=%s: %s", batch_cid, exc
+                )
+
+        # 7. 回写经销商订单；现货机台仍由业务人员在订单配货手动完成
         try:
             mark_dealer_order_contracted(
                 order_no, contract_no="、".join(contract_nos), operator=operator
@@ -939,7 +1064,9 @@ def convert_to_contract(
             biz_type="订单",
             content=(
                 f"经销商订单按去向转合同：{order_no} → {'、'.join(contract_nos)}；"
-                f"现货/在制 {len(regular_contract['add_list']) if regular_contract else 0} 行（已规划），"
+                f"现货 {len(regular_contract['add_list']) if regular_contract else 0} 行（已规划），"
+                f"在制 {len(batch_contract['add_list']) if batch_contract else 0} 行"
+                f"（自动批次规划：{'成功 ' + str(auto_plan.get('order_id')) if auto_plan else ('失败：' + batch_plan_error if batch_cid else '无')}），"
                 f"无货预订 {len(preorder_contract['add_list']) if preorder_contract else 0} 行（待规划进沙盘）"
                 f"{regular_batch_text}"
             ),
@@ -952,11 +1079,20 @@ def convert_to_contract(
 
         messages: list[str] = []
         if regular_contract:
-            regular_cid = contracts_payload[0]["contract_no"]
-            messages.append(f"{regular_cid}（已规划，请在销售订单导入后人工配货）")
+            messages.append(
+                f"{contract_no_by_group['regular']}（已规划，请在销售订单导入后人工配货）"
+            )
+        if batch_contract:
+            batch_msg = f"{batch_cid}（在制批次已自动规划"
+            if auto_plan:
+                batch_msg += f"，订单 {auto_plan.get('order_id')} 待二次确认）"
+            else:
+                batch_msg += f"，失败原因：{batch_plan_error or '未知'}；已回退为已规划，请人工导入配货）"
+            messages.append(batch_msg)
         if preorder_contract:
-            preorder_cid = contracts_payload[-1]["contract_no"]
-            messages.append(f"{preorder_cid}（无货预订，待规划，已进入沙盘排产）")
+            messages.append(
+                f"{contract_no_by_group['preorder']}（无货预订，待规划，已进入沙盘排产）"
+            )
         message = f"已成功转为合同：{'；'.join(messages)}"
         if regular_batch_text:
             message += regular_batch_text
@@ -967,6 +1103,13 @@ def convert_to_contract(
             "contract_ids": contract_nos,
             "contracts": contracts_payload,
             "save_mode": "auto",
+            "batch_plan": {
+                "attempted": bool(batch_cid),
+                "ok": bool(auto_plan),
+                "order_id": (auto_plan or {}).get("order_id"),
+                "batch_codes": (auto_plan or {}).get("batch_codes") or [],
+                "error": batch_plan_error or None,
+            },
             "order_form_attached_contracts": order_form_contracts,
             "cloud_attachments": cloud_attachments,
         }
