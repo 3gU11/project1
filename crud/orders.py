@@ -454,8 +454,8 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                 row = stock_by_sn[sn]
                 status = str(row.get("status") or "").strip()
                 occupied = str(row.get("sales_id") or "").strip()
-                if not status.startswith("库存中"):
-                    raise ValueError(f"机台 {sn} 不是可用库存现货（当前状态：{status or '空'}）")
+                if not status.startswith("库存中") and status != "待入库":
+                    raise ValueError(f"机台 {sn} 不是可用库存或待入库机台（当前状态：{status or '空'}）")
                 if occupied not in ("", order_id):
                     raise ValueError(f"库存机台 {sn} 已被订单 {occupied} 占用")
                 conn.execute(text("""

@@ -23,6 +23,7 @@ WAREHOUSE_MAX_CAPACITY = 5
 LARGE_WAREHOUSE_MAX_CAPACITY = 15
 SCRAP_WAREHOUSE_MAX_CAPACITY = 5
 UNLIMITED_WAREHOUSE_CAPACITY = float("inf")
+SPECIAL_CAPACITY_SLOT_CODES = {"一楼二车间小机": 100}
 OLD_FACTORY_SLOT_CODES = (
     "老厂一车间400",
     "老厂一车间600",
@@ -46,6 +47,7 @@ REQUIRED_SLOT_CODES = tuple(
     + ["闲置区01", "闲置区02", "实验室区01"]
     + list(OLD_FACTORY_SLOT_CODES)
     + list(EMERGENCY_BUFFER_SLOT_CODES)
+    + ["一楼二车间小机"]
     + ["报废区01"]
 )
 
@@ -80,6 +82,9 @@ def _find_layout_slot(slots, slot_code):
 
 def get_slot_capacity(slot_code):
     normalized = _normalize_slot_code(slot_code)
+    for code, capacity in SPECIAL_CAPACITY_SLOT_CODES.items():
+        if _normalize_slot_code(code) == normalized:
+            return capacity
     if is_unlimited_slot(slot_code):
         return UNLIMITED_WAREHOUSE_CAPACITY
     if any(normalized.startswith(prefix) for prefix in ("大机型区域", "闲置区", "实验室区")):
@@ -413,6 +418,9 @@ def archive_shipped_data(df_shipped):
         current_month = datetime.now().strftime("%Y_%m")
         df_shipped = df_shipped.copy()
         df_shipped['archive_month'] = current_month
+        # Keep the irreversible business event separate from the mutable inventory timestamp.
+        if 'shipping_time' not in df_shipped.columns:
+            df_shipped['shipping_time'] = datetime.now()
         for dt_col in ["预计入库时间", "更新时间"]:
             if dt_col in df_shipped.columns:
                 df_shipped[dt_col] = pd.to_datetime(df_shipped[dt_col], errors="coerce")
@@ -422,6 +430,8 @@ def archive_shipped_data(df_shipped):
                 conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
             if not _has_column(conn, "shipping_history", "合同号"):
                 conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
+            if not _has_column(conn, "shipping_history", "shipping_time"):
+                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `shipping_time` DATETIME NULL AFTER `更新时间`"))
             target_cols = [
                 row[0] for row in conn.execute(text(
                     "SELECT COLUMN_NAME FROM information_schema.COLUMNS "

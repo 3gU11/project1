@@ -585,6 +585,22 @@ func (h *PhotoHandler) UploadTaskPhoto(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "file": saved, "task_status": nextStatus})
 }
 
+func (h *PhotoHandler) appendQRScanOperationLog(c *gin.Context, task machinePhotoTaskRow, value string) {
+	username := strings.TrimSpace(c.GetString("username"))
+	if username == "" {
+		username = "System"
+	}
+	content := fmt.Sprintf("机台流水号：%s；拍照项：%s；二维码：%s", task.SerialNo, task.ItemName, value)
+	if err := h.db.Exec(`
+INSERT INTO sys_operation_log
+  (user_id, username, operate_time, module, action_type, biz_type, serial_no, content)
+VALUES (?, ?, NOW(), '机台档案', '二维码扫描', '机台', ?, ?)`,
+		username, username, task.SerialNo, content).Error; err != nil {
+		// Auditing must not make a successful photo upload fail.
+		return
+	}
+}
+
 func (h *PhotoHandler) fanOutQRTaskFile(source machinePhotoTaskRow, saved gin.H, uploaded *multipart.FileHeader, username string) error {
 	var targets []machinePhotoTaskRow
 	if err := h.db.Table("machine_photo_tasks").
@@ -891,6 +907,15 @@ VALUES (?, ?, ?, ?, ?, 1, 'manual_review', ?)`,
 	if err := tx.Commit().Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	// A single mobile capture fans the same QR value out to every OCR task.
+	// Only the first task writes the audit row so one scan produces one log.
+	var earlierTasks int64
+	if err := h.db.Table("machine_photo_tasks").
+		Where("serial_no = ? AND ocr_enabled = 1 AND enabled = 1 AND (sort_order < ? OR (sort_order = ? AND id < ?))",
+			task.SerialNo, task.SortOrder, task.SortOrder, task.ID).
+		Count(&earlierTasks).Error; err == nil && earlierTasks == 0 {
+		h.appendQRScanOperationLog(c, task, value)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

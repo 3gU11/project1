@@ -283,38 +283,9 @@ def _dispatch_event(event: dict[str, Any]) -> None:
     event_type = str(event.get("event_type") or "")
 
     if event_type == "repair_snapshot_sync":
-        from repair_sync.client import NonRetryableSyncError, upload_snapshot
-        from repair_sync.config import get_config
-        from repair_sync.snapshot_store import (
-            get_snapshot,
-            mark_snapshot_error,
-            mark_snapshot_rejected,
-            mark_snapshot_uploaded,
-        )
-
-        snapshot_id = str(payload.get("snapshot_id") or "").strip()
-        if not snapshot_id:
-            raise ValueError("repair snapshot event missing snapshot_id")
-        snapshot_row = get_snapshot(snapshot_id=snapshot_id)
-        if not snapshot_row:
-            raise ValueError(f"repair snapshot not found: {snapshot_id}")
-        expected_sha = str(payload.get("payload_sha256") or "")
-        actual_sha = str(snapshot_row.get("payload_sha256") or "")
-        if expected_sha and expected_sha != actual_sha:
-            raise ValueError(f"repair snapshot digest mismatch: {snapshot_id}")
-        try:
-            upload_snapshot(
-                snapshot_row["payload"],
-                idempotency_key=event_id,
-                config=get_config(),
-            )
-        except Exception as exc:
-            if isinstance(exc, NonRetryableSyncError):
-                mark_snapshot_rejected(snapshot_id, str(exc))
-            else:
-                mark_snapshot_error(snapshot_id, str(exc))
-            raise
-        mark_snapshot_uploaded(snapshot_id)
+        # Snapshot upload has been retired. Consume legacy outbox rows locally
+        # so they cannot trigger any outbound request.
+        logger.info("Skipping retired repair snapshot sync event %s", event_id)
         return
 
     if event_type == "repair_delta_event_sync":

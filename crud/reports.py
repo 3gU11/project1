@@ -634,7 +634,7 @@ def get_shipment_report_data(
         # Detail query - individual shipment records
         detail_sql = text("""
             SELECT
-                DATE_FORMAT(sh.`更新时间`, '%Y-%m-%d') COLLATE utf8mb4_0900_ai_ci AS `出货日期`,
+                DATE_FORMAT(COALESCE(sh.`shipping_time`, sh.`更新时间`), '%Y-%m-%d') COLLATE utf8mb4_0900_ai_ci AS `出货日期`,
                 sh.`流水号` COLLATE utf8mb4_0900_ai_ci AS `流水号`,
                 sh.`客户` COLLATE utf8mb4_0900_ai_ci AS `客户`,
                 sh.`代理商` COLLATE utf8mb4_0900_ai_ci AS `代理商`,
@@ -649,8 +649,8 @@ def get_shipment_report_data(
                 WHERE COALESCE(`订单号`, '') <> ''
                 GROUP BY `订单号`
             ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-            WHERE (:start_date IS NULL OR sh.`更新时间` >= :start_date)
-                AND (:end_date IS NULL OR sh.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
+                WHERE (:start_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) >= :start_date)
+                AND (:end_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) < DATE_ADD(:end_date, INTERVAL 1 DAY))
                 AND sh.`状态` = '已出库'
                 AND (:customer = '' OR sh.`客户` = :customer)
                 AND (:dealer = '' OR sh.`代理商` = :dealer)
@@ -709,7 +709,7 @@ def get_shipment_report_data(
                 `批次号`
             FROM (
                 SELECT
-                    DATE_FORMAT(sh.`更新时间`, '%Y-%m-%d') COLLATE utf8mb4_0900_ai_ci AS `出货日期`,
+                    DATE_FORMAT(COALESCE(sh.`shipping_time`, sh.`更新时间`), '%Y-%m-%d') COLLATE utf8mb4_0900_ai_ci AS `出货日期`,
                     sh.`客户` COLLATE utf8mb4_0900_ai_ci AS `客户`,
                     sh.`代理商` COLLATE utf8mb4_0900_ai_ci AS `代理商`,
                     sh.`机型` COLLATE utf8mb4_0900_ai_ci AS `机型`,
@@ -723,8 +723,8 @@ def get_shipment_report_data(
                     WHERE COALESCE(`订单号`, '') <> ''
                     GROUP BY `订单号`
                 ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
-                WHERE (:start_date IS NULL OR sh.`更新时间` >= :start_date)
-                    AND (:end_date IS NULL OR sh.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
+                WHERE (:start_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) >= :start_date)
+                    AND (:end_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) < DATE_ADD(:end_date, INTERVAL 1 DAY))
                     AND sh.`状态` = '已出库'
                     AND (:customer = '' OR sh.`客户` = :customer)
                     AND (:dealer = '' OR sh.`代理商` = :dealer)

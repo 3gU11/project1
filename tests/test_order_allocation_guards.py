@@ -41,6 +41,13 @@ class OrderAllocationGuardTests(unittest.TestCase):
             self.assertIn("NOT LIKE '库存中%'", source)
             self.assertIn("'待发货', '已出库', '已发货', '报废'", source)
 
+    def test_pending_inbound_machines_are_allocatable(self):
+        candidate_source = inspect.getsource(_get_order_contract_machine_rows)
+        allocation_source = inspect.getsource(allocate_inventory)
+        self.assertIn('== "待入库"', candidate_source)
+        self.assertIn('.eq("待入库")', candidate_source)
+        self.assertIn('status != "待入库"', allocation_source)
+
     def test_manual_production_allocation_goes_directly_to_pending_shipment(self):
         source = inspect.getsource(allocate_inventory)
         self.assertIn("VALUES (:sn,:batch,:model,'待发货'", source)

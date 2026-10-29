@@ -21,6 +21,7 @@ export const SLOT_CAPACITY = 5
 export const LARGE_SLOT_CAPACITY = 15
 export const SCRAP_SLOT_CAPACITY = 5
 export const UNLIMITED_SLOT_CAPACITY = Number.POSITIVE_INFINITY
+export const SPECIAL_CAPACITY_SLOT_CODES: Record<string, number> = { '一楼二车间小机': 100 }
 export const OLD_FACTORY_SLOT_CODES = [
   '老厂一车间400',
   '老厂一车间600',
@@ -73,6 +74,8 @@ export const prioritizeOldFactorySlots = <T extends { code?: any }>(slots: T[]):
 
 export const getSlotCapacity = (code: any) => {
   const normalized = normalizeSlotCode(code)
+  const specialCode = Object.keys(SPECIAL_CAPACITY_SLOT_CODES).find((key) => normalizeSlotCode(key) === normalized)
+  if (specialCode) return SPECIAL_CAPACITY_SLOT_CODES[specialCode]
   if (isUnlimitedSlot(code)) {
     return UNLIMITED_SLOT_CAPACITY
   }
@@ -92,6 +95,7 @@ const requiredSlotCodes = [
   '实验室区 01',
   ...OLD_FACTORY_SLOT_CODES,
   ...EMERGENCY_BUFFER_SLOT_CODES,
+  '一楼二车间小机',
   '报废区 01',
 ]
 

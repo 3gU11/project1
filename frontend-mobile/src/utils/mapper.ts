@@ -49,6 +49,9 @@ export const mapMachine = (raw: Record<string, unknown>, index = 0): MobileMachi
   }
 }
 
+export const isAfterSalesMachineVisible = (machine: MobileMachine): boolean =>
+  machine.status.includes('待入库') || machine.status.includes('待发货')
+
 export const mapLayoutSlots = (raw: any, inventoryRows: Record<string, unknown>[] = []): MobileSlot[] => {
   const inventoryCountMap = inventoryRows.reduce<Record<string, number>>((acc, row) => {
     const slotCode = String(row.Location_Code ?? row['Location_Code'] ?? '').trim()

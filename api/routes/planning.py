@@ -2165,6 +2165,7 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
             inv_df[col] = ""
     inv_df = inv_df[
         inv_df["状态"].astype(str).str.strip().str.startswith("库存中")
+        | (inv_df["状态"].astype(str).str.strip() == "待入库")
         | (
             (inv_df["占用订单号"].astype(str).str.strip() == order_id)
             & ~inv_df["状态"].astype(str).str.strip().isin(["已出库", "报废"])
@@ -2231,8 +2232,7 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
     if contract_ids:
         linked_rows = inv_df[inv_df["合同号"].astype(str).str.strip().isin(contract_ids)].copy()
 
-    # 补充：按订单所需机型，额外拉取库存中尚未被任何订单占用的空闲机台。
-    # 不限于合同号匹配，没有合同号的空闲机台也可以被配货。
+    # 补充符合需求的空闲库存和待入库机台；未绑定合同的机台也可选。
     needed_models: list[tuple[str, bool]] = []
     if not contract_rows.empty:
         seen_model_keys: set[tuple[str, bool]] = set()
@@ -2264,6 +2264,7 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
             (inv_df["占用订单号"].astype(str).str.strip() == "")
             & (
                 inv_df["状态"].astype(str).str.startswith("库存中")
+                | inv_df["状态"].astype(str).str.strip().eq("待入库")
                 | inv_df["状态"].astype(str).isin(["在产可选"])
             )
         ].copy()
@@ -3330,6 +3331,7 @@ def allocate_order_inventory_api(
             candidate_rows[
                 (candidate_rows["流水号"].astype(str).str.strip() != "")
                 & (candidate_rows["状态"].astype(str).str.strip() != "已出库")
+                & (candidate_rows["状态"].astype(str).str.strip() != "报废")
                 & (
                     (candidate_rows["占用订单号"].astype(str).str.strip() == "")
                     | (candidate_rows["占用订单号"].astype(str).str.strip() == str(order_id))

@@ -79,8 +79,7 @@ def run_daily(
     existing = get_snapshot(business_date=target_date)
     if existing:
         result: dict[str, Any] = {"status": "existing", "snapshot": existing}
-        if config.enabled and existing.get("status") != "uploaded":
-            result["event_id"] = enqueue_snapshot_event(target_date, existing["snapshot_id"], existing.get("payload_sha256"))
+        # Snapshot cloud upload has been retired; retain local snapshot only.
         return result
     with advisory_lock() as acquired:
         if not acquired:
@@ -88,12 +87,7 @@ def run_daily(
         result = run_snapshot(target_date, config=config)
         payload = result.get("payload") or {}
         stored = result.get("snapshot") or {}
-        if config.enabled and payload:
-            result["event_id"] = enqueue_snapshot_event(
-                target_date,
-                str(stored.get("snapshot_id") or payload["snapshotId"]),
-                str(stored.get("payload_sha256") or ""),
-            )
+        # Snapshot cloud upload has been retired; retain local snapshot only.
         return result
 
 

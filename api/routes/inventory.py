@@ -1313,6 +1313,7 @@ def confirm_shipping(
         shipped_rows = hit.copy()
         shipped_rows["状态"] = "已出库"
         shipped_rows["更新时间"] = now_text
+        shipped_rows["shipping_time"] = datetime.now()
 
         if impacted_order_ids:
             orders_df = get_orders()
@@ -1454,7 +1455,7 @@ def get_shipping_return_candidates(
             )
             params["kw"] = f"%{kw}%"
         if date_filter:
-            where_clauses.append("DATE(COALESCE(sh.`更新时间`, fg.`更新时间`)) = :date_filter")
+            where_clauses.append("DATE(COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`)) = :date_filter")
             params["date_filter"] = date_filter
         where_sql = " AND ".join(where_clauses)
         with get_engine().connect() as conn:
@@ -1474,19 +1475,19 @@ def get_shipping_return_candidates(
                         fg.`合同备注`,
                         fg.`Location_Code`,
                         fg.`合同号`,
-                        DATE_FORMAT(COALESCE(sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d') AS `发货日期`,
-                        DATE_FORMAT(COALESCE(sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d %H:%i') AS `发货时间`
+                        DATE_FORMAT(COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d') AS `发货日期`,
+                        DATE_FORMAT(COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d %H:%i') AS `发货时间`
                     FROM finished_goods_data fg
                     LEFT JOIN (
-                        SELECT `流水号`, MAX(`更新时间`) AS `更新时间`
+                        SELECT `流水号`, MAX(COALESCE(`shipping_time`, `更新时间`)) AS `shipping_time`, MAX(`更新时间`) AS `更新时间`
                         FROM shipping_history
                         GROUP BY `流水号`
                     ) sh ON sh.`流水号` COLLATE utf8mb4_general_ci = fg.`流水号` COLLATE utf8mb4_general_ci
                     WHERE {where_sql}
-                    ORDER BY COALESCE(sh.`更新时间`, fg.`更新时间`) DESC, fg.`流水号` ASC
+                    ORDER BY COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`) DESC, fg.`流水号` ASC
                 """
             else:
-                where_sql_no_history = where_sql.replace("COALESCE(sh.`更新时间`, fg.`更新时间`)", "fg.`更新时间`")
+                where_sql_no_history = where_sql.replace("COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`)", "fg.`更新时间`")
                 sql = f"""
                     SELECT
                         fg.`批次号`,

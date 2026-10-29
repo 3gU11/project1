@@ -1,6 +1,7 @@
 from pathlib import Path
 import asyncio
 import logging
+import os
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,17 +27,21 @@ async def on_startup():
             logger.info("DB migration: %s", result.get("message", ""))
     except Exception as e:
         logger.warning("DB migration skipped: %s", e)
-    try:
-        from crud.cloud_sync_outbox import cloud_sync_worker_loop, ensure_cloud_sync_outbox_table
-        ensure_cloud_sync_outbox_table()
-        app.state.cloud_sync_worker_task = asyncio.create_task(cloud_sync_worker_loop())
-    except Exception as e:
-        logger.warning("cloud sync worker not started: %s", e)
-    try:
-        from crud.cloud_dealer_order_sync import cloud_pull_worker_loop
-        app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
-    except Exception as e:
-        logger.warning("cloud pull worker not started: %s", e)
+    cloud_sync_enabled = os.getenv("CLOUD_SYNC_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    if cloud_sync_enabled:
+        try:
+            from crud.cloud_sync_outbox import cloud_sync_worker_loop, ensure_cloud_sync_outbox_table
+            ensure_cloud_sync_outbox_table()
+            app.state.cloud_sync_worker_task = asyncio.create_task(cloud_sync_worker_loop())
+        except Exception as e:
+            logger.warning("cloud sync worker not started: %s", e)
+        try:
+            from crud.cloud_dealer_order_sync import cloud_pull_worker_loop
+            app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
+        except Exception as e:
+            logger.warning("cloud pull worker not started: %s", e)
+    else:
+        logger.info("cloud sync workers disabled by CLOUD_SYNC_ENABLED")
     try:
         app.state.watch_dealer_orders_task = asyncio.create_task(watch_dealer_orders_db())
     except Exception as e:

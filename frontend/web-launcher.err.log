@@ -1,582 +1,516 @@
-14:46:47 [vite] ws proxy socket error:
+11:33:12 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-14:46:48 [vite] ws proxy socket error:
+12:35:58 [vite] http proxy error: /api/v1/inventory/machine-archive/96-08-216/files/%E5%85%B6%E4%BB%96_17_20261014_123558.jpg/thumbnail
+Error: connect ETIMEDOUT 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+16:57:49 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-16:50:08 [vite] ws proxy socket error:
+18:22:33 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-21:24:17 [vite] ws proxy error:
+18:22:34 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-21:24:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+10:07:14 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-21:24:17 [vite] ws proxy error:
+12:20:03 [vite] http proxy error: /api/v1/inventory/machine-archive/96-06-463/files
+Error: connect ETIMEDOUT 127.0.0.1:8000
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+16:56:24 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-21:24:17 [vite] ws proxy error:
+08:39:11 [vite] ws proxy error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-21:24:17 [vite] ws proxy error:
+08:39:11 [vite] ws proxy error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
-21:24:21 [vite] ws proxy error:
+08:39:11 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+08:39:15 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:21 [vite] ws proxy error:
+08:39:15 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:25 [vite] ws proxy error:
+08:39:15 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:26 [vite] ws proxy error:
+08:39:15 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:29 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:33 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:33 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:37 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:41 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:44 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:45 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:49 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:53 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:24:57 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:00 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:01 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:10 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:16 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:22 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:25 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:29 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:36 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:42 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:49 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:25:58 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:00 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:02 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
+16:57:14 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+19:26:29 [vite] http proxy error: /api/v1/inventory/machine-archive/96-09-69/files/%E5%85%B6%E4%BB%96_57_20261019_192628.jpg/thumbnail
+Error: connect ETIMEDOUT 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:10 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:15 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:20 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:24 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:28 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:31 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:32 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:36 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:40 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:44 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:48 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
+19:27:35 [vite] http proxy error: /api/v1/inventory/machine-archive/96-09-72/files/%E5%85%B6%E4%BB%96_26_20261019_192735.jpg/thumbnail
+Error: connect ETIMEDOUT 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:52 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:26:56 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:00 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:02 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:04 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:08 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:12 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:17 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:24 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:30 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
+16:54:57 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+16:57:05 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+11:21:41 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+11:21:42 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+19:58:12 [vite] http proxy error: /api/v1/inventory/machine-archive/96-08-207/files/%E5%85%B6%E4%BB%96_47_20261023_195811.jpg/thumbnail
+Error: connect ETIMEDOUT 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:34 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
-    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:38 [vite] ws proxy error:
-Error: connect ECONNREFUSED 127.0.0.1:8000
+20:03:07 [vite] http proxy error: /api/v1/inventory/machine-archive/96-08-404/files/%E5%85%B6%E4%BB%96_57_20261023_200306.jpg/thumbnail
+Error: connect ETIMEDOUT 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:45 [vite] ws proxy error:
+12:34:00 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:34:00 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:34:00 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:34:02 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:52 [vite] ws proxy error:
+12:34:03 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:27:59 [vite] ws proxy error:
+12:34:04 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:05 [vite] ws proxy error:
+12:34:04 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:08 [vite] ws proxy error:
+12:34:07 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:13 [vite] ws proxy error:
+12:34:07 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:34:08 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:17 [vite] ws proxy error:
+12:34:08 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:22 [vite] ws proxy error:
+12:34:11 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:28 [vite] ws proxy error:
+12:34:12 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:35 [vite] ws proxy error:
+12:34:12 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:40 [vite] ws proxy error:
+12:34:12 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:41 [vite] ws proxy error:
+12:34:15 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:48 [vite] ws proxy error:
+12:34:16 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:28:55 [vite] ws proxy error:
+12:34:16 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:03 [vite] ws proxy error:
+12:34:17 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:11 [vite] ws proxy error:
+12:34:19 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:14 [vite] ws proxy error:
+12:34:20 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:15 [vite] ws proxy error:
+12:34:20 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:34:22 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:23 [vite] ws proxy error:
+12:34:23 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:31 [vite] ws proxy error:
+12:34:23 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:38 [vite] ws proxy error:
+12:34:24 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:46 [vite] ws proxy error:
+12:34:24 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:48 [vite] ws proxy error:
+12:34:27 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:29:53 [vite] ws proxy error:
+12:34:27 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:01 [vite] ws proxy error:
+12:34:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:08 [vite] ws proxy error:
+12:34:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:14 [vite] ws proxy error:
+12:34:31 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:34:31 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:20 [vite] ws proxy error:
+12:34:32 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:22 [vite] ws proxy error:
+12:34:32 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:28 [vite] ws proxy error:
+12:34:35 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:36 [vite] ws proxy error:
+12:34:35 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:42 [vite] ws proxy error:
+12:34:36 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:50 [vite] ws proxy error:
+12:34:37 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:55 [vite] ws proxy error:
+12:34:39 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:30:56 [vite] ws proxy error:
+12:34:39 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:03 [vite] ws proxy error:
+12:34:40 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:09 [vite] ws proxy error:
+12:34:42 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:17 [vite] ws proxy error:
+12:34:43 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:34:43 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:22 [vite] ws proxy error:
+12:34:43 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:29 [vite] ws proxy error:
+12:34:44 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:31 [vite] ws proxy error:
+12:34:47 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:34 [vite] ws proxy error:
+12:34:47 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:41 [vite] ws proxy error:
+12:34:47 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:48 [vite] ws proxy error:
+12:34:48 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:53 [vite] ws proxy error:
+12:34:51 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:31:58 [vite] ws proxy error:
+12:34:51 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:05 [vite] ws proxy error:
+12:34:52 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:06 [vite] ws proxy error:
+12:34:52 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:14 [vite] ws proxy error:
+12:34:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:34:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:19 [vite] ws proxy error:
+12:34:56 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:23 [vite] ws proxy error:
+12:34:56 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:27 [vite] ws proxy error:
+12:34:57 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:31 [vite] ws proxy error:
+12:34:59 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:35 [vite] ws proxy error:
+12:35:00 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:36 [vite] ws proxy error:
+12:35:01 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:39 [vite] ws proxy error:
+12:35:02 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:43 [vite] ws proxy error:
+12:35:03 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:47 [vite] ws proxy error:
+12:35:05 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:51 [vite] ws proxy error:
+12:35:06 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:55 [vite] ws proxy error:
+12:35:07 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:32:59 [vite] ws proxy error:
+12:35:09 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:03 [vite] ws proxy error:
+12:35:12 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:07 [vite] ws proxy error:
+12:35:12 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:07 [vite] ws proxy error:
+12:35:13 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:11 [vite] ws proxy error:
+12:35:16 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:16 [vite] ws proxy error:
+12:35:17 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:35:17 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:22 [vite] ws proxy error:
+12:35:19 [vite] http proxy error: /api/v1/planning/orders?skip=0&limit=1000
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:28 [vite] ws proxy error:
+12:35:19 [vite] http proxy error: /api/v1/model-dictionary/
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:35 [vite] ws proxy error:
+12:35:19 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:40 [vite] ws proxy error:
+12:35:22 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:42 [vite] ws proxy error:
+12:35:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:50 [vite] ws proxy error:
+12:35:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:33:58 [vite] ws proxy error:
+12:35:23 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:05 [vite] ws proxy error:
+12:35:25 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:11 [vite] ws proxy error:
+12:35:26 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:13 [vite] ws proxy error:
+12:35:27 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:35:27 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:18 [vite] ws proxy error:
+12:35:30 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:25 [vite] ws proxy error:
+12:35:31 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:32 [vite] ws proxy error:
+12:35:32 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:40 [vite] ws proxy error:
+12:35:34 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:44 [vite] ws proxy error:
+12:35:35 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:48 [vite] ws proxy error:
+12:35:37 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:52 [vite] ws proxy error:
+12:35:38 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:34:58 [vite] ws proxy error:
+12:35:39 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:05 [vite] ws proxy error:
+12:35:40 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:12 [vite] ws proxy error:
+12:35:41 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:16 [vite] ws proxy error:
+12:35:42 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:35:43 [vite] http proxy error: /api/v1/dealer-orders/pending-count
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:20 [vite] ws proxy error:
+12:35:46 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:28 [vite] ws proxy error:
+12:35:46 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:33 [vite] ws proxy error:
+12:35:46 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:38 [vite] ws proxy error:
+12:35:47 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:46 [vite] ws proxy error:
+12:35:50 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:49 [vite] ws proxy error:
+12:35:51 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:55 [vite] ws proxy error:
+12:35:53 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:35:59 [vite] ws proxy error:
+12:35:54 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:05 [vite] ws proxy error:
+12:35:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:13 [vite] ws proxy error:
+12:35:57 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:35:58 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:19 [vite] ws proxy error:
+12:35:59 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:23 [vite] ws proxy error:
+12:36:01 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:25 [vite] ws proxy error:
+12:36:02 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:32 [vite] ws proxy error:
+12:36:02 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:37 [vite] ws proxy error:
+12:36:04 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:42 [vite] ws proxy error:
+12:36:04 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:47 [vite] ws proxy error:
+12:37:46 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:37:46 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:37:46 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:37:47 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:55 [vite] ws proxy error:
+12:37:49 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:36:58 [vite] ws proxy error:
+12:37:50 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:03 [vite] ws proxy error:
+12:37:50 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:09 [vite] ws proxy error:
+12:37:52 [vite] http proxy error: /api/v1/dealer-orders/?status=todo&page=1&page_size=50
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:17 [vite] ws proxy error:
+12:37:52 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+12:37:54 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:21 [vite] ws proxy error:
+12:37:54 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:27 [vite] ws proxy error:
+12:37:55 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:33 [vite] ws proxy error:
+12:54:17 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:54:18 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:54:18 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+12:54:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:34 [vite] ws proxy error:
+12:54:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:39 [vite] ws proxy error:
+12:54:22 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:44 [vite] ws proxy error:
+12:54:26 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:50 [vite] ws proxy error:
+12:54:26 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:37:58 [vite] ws proxy error:
+12:54:26 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:38:05 [vite] ws proxy error:
+13:32:24 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+13:32:24 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+13:32:24 [vite] ws proxy error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+13:32:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:38:08 [vite] ws proxy error:
+13:32:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:38:10 [vite] ws proxy error:
+13:32:28 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:38:15 [vite] ws proxy error:
+13:32:32 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:38:17 [vite] http proxy error: /api/v1/dealer-orders/pending-count
+13:32:32 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
-21:38:23 [vite] ws proxy error:
+13:32:32 [vite] ws proxy error:
 Error: connect ECONNREFUSED 127.0.0.1:8000
     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1706:16)
+16:35:13 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+16:57:47 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+16:55:41 [vite] ws proxy socket error:
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
