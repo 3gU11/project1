@@ -3920,13 +3920,24 @@ def _process_contracts_batch(
     user_ctx: dict,
     operator: str,
     background_tasks=None,
+    status_overrides: dict[str, str] | None = None,
+    trigger_sandbox: bool = False,
 ) -> dict:
-    """Core contract creation logic, reusable from multiple endpoints."""
+    """Core contract creation logic, reusable from multiple endpoints.
+
+    status_overrides 允许同一次批量录入里不同合同用不同状态（例如经销商转合同：
+    现货/在制合同=已规划，无货预订合同=待规划并进入沙盘）。
+    """
     if not add_list:
         raise HTTPException(status_code=422, detail="没有可新增记录（可能都已存在或字段不完整）")
 
     df_plan = align_factory_plan_models(get_factory_plan())
     now_status = "已规划" if save_mode == "spot" else "待规划"
+    overrides = {
+        str(cid or "").strip(): str(value or "").strip()
+        for cid, value in (status_overrides or {}).items()
+        if str(cid or "").strip() and str(value or "").strip()
+    }
 
     # 机型字段严格对齐机型字典：外部/历史数据把「(加高)」拼在机型后面时，
     # 剥掉后缀并把加高标记补进备注，避免同一机型在排产、统计、订单里拆成两行。
@@ -3960,7 +3971,7 @@ def _process_contracts_batch(
         if dup_mask.any():
             existed += 1
             continue
-        item["状态"] = now_status
+        item["状态"] = overrides.get(cid, now_status)
         clean_add_list.append(item)
         if i < len(rush_source_rows):
             clean_rush_rows.append(rush_source_rows[i])
@@ -3974,7 +3985,10 @@ def _process_contracts_batch(
         created_groups.setdefault(str(row["合同号"]), []).append(row)
     save_factory_plan(df_plan, notification_rows=created_groups, notification_operator=operator)
 
-    if save_mode == "sandbox" and not is_rush and background_tasks:
+    created_statuses = {str(row.get("状态") or "") for row in clean_add_list}
+    if not is_rush and background_tasks and (
+        save_mode == "sandbox" or trigger_sandbox or "待规划" in created_statuses
+    ):
         background_tasks.add_task(_trigger_sandbox_recompute_sync, user_ctx)
 
     rush_q_rows = clean_rush_rows if (is_rush and save_mode == "sandbox") else []

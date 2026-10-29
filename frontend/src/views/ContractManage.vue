@@ -633,7 +633,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint path-mode-hint">整单生成一张合同：库存中行与批次行都置「已规划」并写入同一张合同，行级保留批次/来源。业务人员到「销售订单 → 导入已规划合同」建单后，在「订单配货」人工分配机台；指定批次只做优先匹配提示，可改选其他批次。</div>
+        <div class="save-mode-hint path-mode-hint">按去向生成合同：现货/在制行合成一张「已规划」合同（行级保留批次/来源，到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台，指定批次只做优先匹配提示）；无货预订行单独生成一张「待规划」合同并进入沙盘排产。</div>
       </div>
 
       <template #footer>
@@ -684,7 +684,7 @@ type MessageResponse = {
   save_mode?: string  // 经销商转合同自动选路返回 auto；手动批量录合同仍为 sandbox/spot
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
-  contracts?: Array<{ contract_no: string; path: 'auto'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
+  contracts?: Array<{ contract_no: string; path: 'auto' | 'preorder'; status?: '已规划' | '待规划'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
 }
 type ContractSummary = {
   id: string
@@ -1562,15 +1562,19 @@ const submitDealerConvert = async () => {
       else ElMessage.success(cloudAttachmentNotice.text)
     }
     dealerConvertDialogVisible.value = false
-    activeTab.value = '已规划'
+    const plannedContract = contracts.find((c) => (c.status || '已规划') === '已规划')
+    const preorderContract = contracts.find((c) => c.status === '待规划')
+    activeTab.value = plannedContract ? '已规划' : '待规划'
     selectedContractId.value = String(
-      contracts[0]?.contract_no || String(res.contract_no || dealerConvertForm.contractNo).split('、')[0],
+      (plannedContract || preorderContract)?.contract_no || String(res.contract_no || dealerConvertForm.contractNo).split('、')[0],
     ).trim()
     await fetchContracts(true)
     await loadDealerOrders()
-    if (contracts.length) {
-      // 合同一律置「已规划」，由业务人员导入后到订单配货手动分配机台。
+    if (plannedContract) {
+      // 已规划合同由业务人员导入后到订单配货手动分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    } else if (preorderContract) {
+      ElMessage.info(`无货预订合同 ${preorderContract.contract_no} 已置「待规划」，可进入沙盘排产`)
     }
   }, { errorMessage: '经销商订单转合同失败' })
 }

@@ -266,6 +266,7 @@ def test_convert_endpoint_creates_one_planned_contract(monkeypatch):
         {
             "contract_no": "HT202610280001",
             "path": "auto",
+            "status": "已规划",
             "batch_nos": ["08-04"],
             "path_label": "按明细来源自动选路（合同已规划）",
             "row_count": 2,
@@ -384,3 +385,74 @@ def test_group_orders_keeps_all_split_contract_numbers():
 
     assert order["contract_no"] == "HT-A、HT-B"
     assert order["quantity"] == 3
+
+
+# ---------------------------------------------------------------------------
+# 六、无货预订拆分为待规划合同（进入沙盘）
+# ---------------------------------------------------------------------------
+
+
+def _preorder_payload() -> routes.ConvertToContractPayload:
+    return routes.ConvertToContractPayload(
+        contract_no="HT202610280001",
+        customer_name="客户A",
+        agent_name="代理A",
+        delivery_date="2026-11-01",
+        items=[
+            {"model": "FH-300C", "qty": 2, "high": False, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
+            {"model": "FR-400AUTO", "qty": 1, "high": False, "batch_no": "10-02", "inventory_type": "wip"},
+            {"model": "FR-400G", "qty": 3, "high": False, "batch_no": "", "inventory_type": "unmarked"},
+        ],
+    )
+
+
+def _preorder_order_items() -> list[dict]:
+    return [
+        {"model": "FH-300C", "quantity": 2, "batch_no": "FINISHED-STOCK", "inventory_type": "finished"},
+        {"model": "FR-400AUTO", "quantity": 1, "batch_no": "10-02", "inventory_type": "wip"},
+        {"model": "FR-400G", "quantity": 3, "batch_no": "", "inventory_type": "unmarked"},
+    ]
+
+
+def test_convert_endpoint_splits_preorder_into_pending_contract(monkeypatch):
+    calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: _preorder_order_items())
+
+    result = routes.convert_to_contract(
+        "DO-TEST-4",
+        _preorder_payload(),
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"name": "tester", "username": "tester"},
+    )
+
+    assert len(calls["contracts"]) == 1
+    call = calls["contracts"][0]
+    assert call["save_mode"] == "spot"
+    assert call["is_rush"] is False
+    assert call["trigger_sandbox"] is True
+    assert call["status_overrides"] == {"HT202610280009": "待规划"}
+
+    rows = call["add_list"]
+    assert len(rows) == 3
+    assert [row["合同号"] for row in rows] == [
+        "HT202610280001",
+        "HT202610280001",
+        "HT202610280009",
+    ]
+    # 无货预订行备注带标记，方便沙盘/合同管理识别
+    assert "无货预订" in rows[2]["备注"]
+    assert rows[0]["指定批次/来源"] == {}
+    assert rows[1]["指定批次/来源"] == {"10-02": 1}
+
+    assert len(result["contracts"]) == 2
+    assert result["contract_ids"] == ["HT202610280001", "HT202610280009"]
+    assert result["contracts"][0]["status"] == "已规划"
+    assert result["contracts"][0]["path"] == "auto"
+    assert result["contracts"][1]["status"] == "待规划"
+    assert result["contracts"][1]["path"] == "preorder"
+    assert "沙盘" in result["message"]
+    assert "已规划" in result["message"]
+    assert calls["marked"][0][1]["contract_no"] == "HT202610280001、HT202610280009"
+    assert calls["rollback_contracts"] == []

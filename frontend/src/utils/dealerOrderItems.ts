@@ -45,6 +45,19 @@ const STOCK_INVENTORY_TYPES = new Set(['finished', 'stock', '现货'])
 /** 库存中（现货）来源的 batch_no 取值，必须与后端判定一致。 */
 const STOCK_BATCH_NOS = new Set(['FINISHED-STOCK', '库存中', '现货', '现货库存'])
 
+/** 云端「无货预订/无标识批次需求」的 inventory_type 取值，必须与后端判定一致。 */
+const PREORDER_INVENTORY_TYPES = new Set(['unmarked', 'preorder', 'pre_order', '无货预订'])
+
+/**
+ * 无货预订行：空批次 + inventory_type=unmarked，代表未来排产需求，
+ * 转合同时单独成一张「待规划」合同并进入沙盘。
+ */
+export const isPreorderLine = (item?: { batch_no?: string; inventory_type?: string } | null) => {
+  if (!item) return false
+  if (String(item.batch_no ?? '').trim()) return false
+  return PREORDER_INVENTORY_TYPES.has(String(item.inventory_type ?? '').trim().toLowerCase())
+}
+
 /**
  * 库存中（现货）来源：批次为空、FINISHED-STOCK/库存中/现货/现货库存，
  * 或 inventory_type 为 finished/stock/现货。
@@ -61,6 +74,7 @@ export const isStockSourceLine = (item?: { batch_no?: string; inventory_type?: s
 
 /** 转合同明细的自动路径文案。 */
 export const convertLinePathLabel = (item?: { batch_no?: string; inventory_type?: string } | null) => {
+  if (isPreorderLine(item)) return '无货预订 → 待规划（沙盘）'
   if (isStockSourceLine(item)) return '库存中 → 库存配货'
   return `批次 ${String(item?.batch_no ?? '').trim()} → 优先按批次配货`
 }

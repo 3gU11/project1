@@ -175,6 +175,29 @@ def ensure_dealer_order_tables() -> None:
 
 FINISHED_STOCK_BATCH_ALIASES = ("FINISHED-STOCK", "库存中", "现货", "现货库存")
 FINISHED_INVENTORY_TYPES = ("finished", "stock", "现货")
+# 云端「无货预订/无标识批次需求」：没有批次、inventory_type=unmarked，
+# 代表未来排产需求，转合同时应置「待规划」并进入沙盘，而不是按现货处理。
+PREORDER_INVENTORY_TYPES = ("unmarked", "preorder", "pre_order", "无货预订")
+
+
+def is_preorder_dealer_order_line(batch_no: object, inventory_type: object = "") -> bool:
+    """判断订单行是否为「无货预订」（未来排产需求）。
+
+    只认显式标记：空批次 + inventory_type=unmarked。空批次但没有无标识标记的
+    历史/外部订单仍按现货处理（10-23 修复：外部系统不下发批次，不能一律当预订）。
+    """
+    if str(batch_no or "").strip():
+        return False
+    return str(inventory_type or "").strip().lower() in PREORDER_INVENTORY_TYPES
+
+
+def dealer_order_line_route(batch_no: object, inventory_type: object = "") -> str:
+    """订单行后续路径：preorder（沙盘待规划）/ spot（现货）/ batch（指定批次）。"""
+    if is_preorder_dealer_order_line(batch_no, inventory_type):
+        return "preorder"
+    if _is_finished_stock_order(batch_no, inventory_type):
+        return "spot"
+    return "batch"
 
 
 def _is_finished_stock_order(batch_no: object, inventory_type: object = "") -> bool:
@@ -914,11 +937,14 @@ def list_dealer_orders(
             synced_items = _sync_allocation_status(conn, order_no_key, items)
             for item in synced_items:
                 availability = get_availability(conn, item)
+                route = dealer_order_line_route(item.get("batch_no"), item.get("inventory_type"))
                 item.update(
                     {
                         "summary_qty": availability["summary_qty"],
                         "occupied_qty": availability["occupied_qty"],
                         "available_qty": availability["available_for_current"],
+                        "route": route,
+                        "is_preorder": route == "preorder",
                     }
                 )
                 rows.append(item)
@@ -1271,6 +1297,7 @@ def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
     decorated = []
     for item in items:
         availability = get_availability(conn, item)
+        route = dealer_order_line_route(item.get("batch_no"), item.get("inventory_type"))
         next_item = dict(item)
         next_item.update(
             {
@@ -1278,6 +1305,8 @@ def _decorate_items_with_availability(conn, items: list[dict]) -> list[dict]:
                 "occupied_qty": availability["occupied_qty"],
                 "available_qty": availability["available_for_current"],
                 "summary_batch_no": availability["summary_batch_no"],
+                "route": route,
+                "is_preorder": route == "preorder",
             }
         )
         decorated.append(next_item)
@@ -1299,7 +1328,8 @@ def preview_dealer_order(order_no: str) -> dict:
         items = _decorate_items_with_availability(conn, synced_items)
         order = _group_orders(items)[0]
         can_approve = all(
-            int(item.get("available_qty") or 0)
+            bool(item.get("is_preorder"))
+            or int(item.get("available_qty") or 0)
             >= max(0, int(item.get("quantity") or 0) - int(item.get("allocated_qty") or 0))
             for item in items
         )
@@ -1321,6 +1351,9 @@ def approve_dealer_order(order_no: str, reviewer: str, note: str = "") -> dict:
         if any(item.get("status") != "pending" for item in items):
             raise ValueError("只有整张订单全部处于待审核时才可以通过")
         for item in items:
+            # 无货预订行是未来排产需求，不占库存池，不能按库存可用量拦截审核。
+            if is_preorder_dealer_order_line(item.get("batch_no"), item.get("inventory_type")):
+                continue
             availability = get_availability(conn, item)
             needed = max(0, int(item.get("quantity") or 0) - int(item.get("allocated_qty") or 0))
             if availability["available_for_current"] < needed:

@@ -161,7 +161,8 @@
           <el-table-column prop="allocated_qty" label="已配" width="80" align="right" />
           <el-table-column label="可用" width="90" align="right">
             <template #default="{ row }">
-              <span :class="{ danger: Number(row.available_qty || 0) < Number(row.quantity || 0) - Number(row.allocated_qty || 0) }">
+              <span v-if="row.is_preorder">无货预订</span>
+              <span v-else :class="{ danger: Number(row.available_qty || 0) < Number(row.quantity || 0) - Number(row.allocated_qty || 0) }">
                 {{ row.available_qty ?? '-' }}
               </span>
             </template>
@@ -307,7 +308,7 @@
 
       <div class="save-mode-section">
         <div class="ops-label">路径（按明细批次/来源自动判定）</div>
-        <div class="save-mode-hint">整单生成一张合同：库存中行与批次行都置「已规划」并写入同一张合同，行级保留批次/来源。业务人员到「销售订单 → 导入已规划合同」建单后，在「订单配货」人工分配机台；指定批次只做优先匹配提示，可改选其他批次。</div>
+        <div class="save-mode-hint">按去向生成合同：现货/在制行合成一张「已规划」合同（行级保留批次/来源，到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台，指定批次只做优先匹配提示）；无货预订行单独生成一张「待规划」合同并进入沙盘排产。</div>
       </div>
 
       <template #footer>
@@ -380,7 +381,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ContractDraftReview from '../components/ContractDraftReview.vue'
 import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
 import { isModelInDictionary } from '../utils/modelOrder'
-import { normalizeDealerOrderItems, convertLinePathLabel, type ConvertItemRow } from '../utils/dealerOrderItems'
+import { normalizeDealerOrderItems, convertLinePathLabel, isPreorderLine, type ConvertItemRow } from '../utils/dealerOrderItems'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
@@ -426,6 +427,8 @@ type DealerOrder = {
   summary_qty?: number
   occupied_qty?: number
   available_qty?: number
+  route?: 'spot' | 'batch' | 'preorder'
+  is_preorder?: boolean
   items?: DealerOrder[]
 }
 
@@ -597,6 +600,7 @@ const statusMeta = (rowOrStatus: DealerOrder | string) => {
 }
 
 const displayBatch = (batchNo?: string, inventoryType?: string) => {
+  if (isPreorderLine({ batch_no: batchNo, inventory_type: inventoryType })) return '无货预订'
   if (String(inventoryType || '').trim().toLowerCase() === 'finished') return '库存中'
   if (!batchNo) return '-'
   if (batchNo === 'FINISHED-STOCK') return '库存中'
@@ -605,7 +609,7 @@ const displayBatch = (batchNo?: string, inventoryType?: string) => {
 
 const hasInsufficientItem = (row: DealerOrder) => {
   const items = row.items?.length ? row.items : [row]
-  return items.some((item) => Number(item.available_qty || 0) < Number(item.quantity || 0) - Number(item.allocated_qty || 0))
+  return items.some((item) => !item.is_preorder && Number(item.available_qty || 0) < Number(item.quantity || 0) - Number(item.allocated_qty || 0))
 }
 
 const hasFactoryRemark = (row: DealerOrder) => {
@@ -1097,7 +1101,7 @@ type MessageResponse = {
   contract_no?: string
   cloud_attachments?: CloudAttachmentSyncSummary
   order_form_attached_contracts?: string[]
-  contracts?: Array<{ contract_no: string; path: 'auto'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
+  contracts?: Array<{ contract_no: string; path: 'auto' | 'preorder'; status?: '已规划' | '待规划'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
 }
 
 const submitConvert = async () => {
@@ -1172,9 +1176,15 @@ const submitConvert = async () => {
     convertDialogVisible.value = false
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadOrders()
-    if (res.contracts?.length) {
-      // 合同一律置「已规划」，由业务人员导入后到订单配货手动分配机台。
+    const contractList = res.contracts || []
+    const hasPlannedContract = contractList.some((c) => (c.status || '已规划') === '已规划')
+    const hasPreorderContract = contractList.some((c) => c.status === '待规划')
+    if (hasPlannedContract) {
+      // 已规划合同由业务人员导入后到订单配货人工分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    } else if (hasPreorderContract) {
+      // 无货预订合同已置待规划，到合同管理查看并进入沙盘排产。
+      router.push({ path: '/contracts' })
     }
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '经销商订单转合同失败')
