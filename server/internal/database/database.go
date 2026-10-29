@@ -348,12 +348,10 @@ SELECT
   COALESCE(fg.` + "`Location_Code`" + `, '') AS location_code,
   CASE
     WHEN sh.outbound_at IS NOT NULL THEN DATE(sh.outbound_at)
-    WHEN TRIM(COALESCE(fg.` + "`状态`" + `, '')) LIKE '已出库%' THEN DATE(fg.` + "`更新时间`" + `)
     ELSE NULL
   END AS delivery_date,
   CASE
     WHEN sh.outbound_at IS NOT NULL THEN sh.outbound_at
-    WHEN TRIM(COALESCE(fg.` + "`状态`" + `, '')) LIKE '已出库%' THEN fg.` + "`更新时间`" + `
     ELSE NULL
   END AS outbound_at,
   CONCAT('V8-', t.position_code) AS material_code,

@@ -7,6 +7,7 @@ from sqlalchemy.exc import OperationalError
 
 from database import get_engine
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
+from utils.heightened import normalize_dictionary_model_name
 
 MODEL_CATEGORIES = {"中大型AUTO", "中小型AUTO", "中大型XS", "中小型XS", "中小型G", "特殊"}
 LEGACY_FAMILY_MAP = {
@@ -122,7 +123,7 @@ def get_enabled_model_names() -> list[str]:
 
 
 def is_model_enabled(model_name: object) -> bool:
-    clean = _clean_name(model_name).replace("(加高)", "").strip()
+    clean = normalize_dictionary_model_name(model_name)
     if not clean:
         return False
     try:
@@ -136,7 +137,7 @@ def find_disabled_models(model_names: Iterable[object]) -> list[str]:
     invalid: list[str] = []
     seen = set()
     for name in model_names or []:
-        clean = _clean_name(name).replace("(加高)", "").strip()
+        clean = normalize_dictionary_model_name(name)
         if not clean or clean in enabled or clean in seen:
             continue
         seen.add(clean)

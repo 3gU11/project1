@@ -42,6 +42,38 @@ func NewPhotoHandler(db *gorm.DB, ocrEnabled bool, ocrServiceURL string, qrServi
 	}
 }
 
+func (h *PhotoHandler) writeOperationLog(c *gin.Context, actionType, serialNo, positionCode, content string) {
+	username := strings.TrimSpace(c.GetString("username"))
+	if username == "" {
+		username = "system"
+	}
+	if err := h.db.Exec(`
+CREATE TABLE IF NOT EXISTS sys_operation_log (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id VARCHAR(100) DEFAULT '',
+  username VARCHAR(100) DEFAULT '',
+  operate_time DATETIME NULL,
+  module VARCHAR(100) DEFAULT '',
+  action_type VARCHAR(100) DEFAULT '',
+  biz_type VARCHAR(100) DEFAULT '',
+  serial_no VARCHAR(100) DEFAULT '',
+  order_no VARCHAR(100) DEFAULT '',
+  contract_no VARCHAR(100) DEFAULT '',
+  content TEXT,
+  INDEX idx_sys_operation_log_time (operate_time),
+  INDEX idx_sys_operation_log_user (user_id, operate_time),
+  INDEX idx_sys_operation_log_module (module, action_type, biz_type),
+  INDEX idx_sys_operation_log_sn (serial_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`).Error; err != nil {
+		return
+	}
+	_ = h.db.Exec(`
+INSERT INTO sys_operation_log
+  (user_id, username, operate_time, module, action_type, biz_type, serial_no, content)
+VALUES (?, ?, NOW(), '拍照任务', ?, '机台', ?, ?)`,
+		username, username, actionType, strings.TrimSpace(serialNo), strings.TrimSpace(content)).Error
+}
+
 type photoItemRow struct {
 	ID                  int64  `json:"id" gorm:"column:id"`
 	PositionCode        string `json:"position_code" gorm:"column:position_code"`
@@ -425,10 +457,13 @@ func (h *PhotoHandler) InitMachinePhotoTasks(c *gin.Context) {
 		return
 	}
 	tx := h.db.Begin()
+<<<<<<< HEAD
 	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
 		return
 	}
+=======
+>>>>>>> origin/main
 	createdBy := strings.TrimSpace(c.GetString("username"))
 	if runes := []rune(createdBy); len(runes) > 64 {
 		createdBy = string(runes[:64])
@@ -491,6 +526,7 @@ ON DUPLICATE KEY UPDATE
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.writeOperationLog(c, "生成任务", serialNo, "", fmt.Sprintf("机台流水号：%s，生成拍照任务", serialNo))
 	h.respondTasks(c, serialNo)
 }
 
@@ -582,6 +618,7 @@ func (h *PhotoHandler) UploadTaskPhoto(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.writeOperationLog(c, "上传照片", task.SerialNo, task.PositionCode, fmt.Sprintf("机台流水号：%s，拍照项：%s，文件：%s", task.SerialNo, task.PositionCode, saved["file_name"]))
 	c.JSON(http.StatusOK, gin.H{"success": true, "file": saved, "task_status": nextStatus})
 }
 
@@ -711,6 +748,7 @@ func (h *PhotoHandler) DeleteTaskPhoto(c *gin.Context) {
 			}
 		}
 	}
+	h.writeOperationLog(c, "删除照片", task.SerialNo, task.PositionCode, fmt.Sprintf("机台流水号：%s，拍照项：%s，清空照片并重置任务", task.SerialNo, task.PositionCode))
 	c.JSON(http.StatusOK, gin.H{"success": true, "status": "pending"})
 }
 
@@ -908,6 +946,7 @@ VALUES (?, ?, ?, ?, ?, 1, 'manual_review', ?)`,
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+<<<<<<< HEAD
 	// A single mobile capture fans the same QR value out to every OCR task.
 	// Only the first task writes the audit row so one scan produces one log.
 	var earlierTasks int64
@@ -917,6 +956,9 @@ VALUES (?, ?, ?, ?, ?, 1, 'manual_review', ?)`,
 		Count(&earlierTasks).Error; err == nil && earlierTasks == 0 {
 		h.appendQRScanOperationLog(c, task, value)
 	}
+=======
+	h.writeOperationLog(c, "二维码识别", task.SerialNo, task.PositionCode, fmt.Sprintf("机台流水号：%s，拍照项：%s，识别结果：%s", task.SerialNo, task.PositionCode, value))
+>>>>>>> origin/main
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"status":  "manual_review",
@@ -1055,6 +1097,7 @@ VALUES (?, ?, ?, ?, '', ?, 0, ?, ?, NOW(), ?)`,
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.writeOperationLog(c, "确认拍照任务", task.SerialNo, task.PositionCode, fmt.Sprintf("机台流水号：%s，拍照项：%s，任务状态：%s", task.SerialNo, task.PositionCode, nextStatus))
 	c.JSON(http.StatusOK, gin.H{"success": true, "status": nextStatus})
 }
 
@@ -1086,6 +1129,7 @@ VALUES (?, ?, ?, ?, ?)`,
 		return
 	}
 	_ = h.db.Table("machine_photo_tasks").Where("serial_no = ? AND enabled = 1", serialNo).Update("submit_batch", submitBatch).Error
+	h.writeOperationLog(c, "提交拍照任务", serialNo, "", fmt.Sprintf("机台流水号：%s，提交批次：%s", serialNo, submitBatch))
 	c.JSON(http.StatusOK, gin.H{"success": true, "submit_batch": submitBatch, "summary": summary})
 }
 
@@ -2130,12 +2174,12 @@ SELECT
   COALESCE(fg.`+"`Location_Code`"+`, '') AS location_code,
   CASE
     WHEN sh.outbound_at IS NOT NULL THEN DATE(sh.outbound_at)
-    WHEN TRIM(COALESCE(fg.`+"`状态`"+`, '')) LIKE '已出库%' THEN DATE(fg.`+"`更新时间`"+`)
+
     ELSE NULL
   END AS delivery_date,
   CASE
     WHEN sh.outbound_at IS NOT NULL THEN sh.outbound_at
-    WHEN TRIM(COALESCE(fg.`+"`状态`"+`, '')) LIKE '已出库%' THEN fg.`+"`更新时间`"+`
+
     ELSE NULL
   END AS outbound_at,
   LEFT(CONCAT(t.position_code, '-', TRIM(COALESCE(NULLIF(r.manual_value, ''), r.recognized_value, ''))), 80) AS material_code,

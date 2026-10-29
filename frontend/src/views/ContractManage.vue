@@ -580,10 +580,6 @@
           <div class="ops-label">代理商</div>
           <el-input v-model="dealerConvertForm.agent" />
         </div>
-        <div>
-          <div class="ops-label">急单</div>
-          <el-switch v-model="dealerConvertForm.isRush" active-text="是" inactive-text="否" />
-        </div>
       </div>
 
       <el-divider />
@@ -609,6 +605,11 @@
             <el-checkbox v-model="scope.row.high" />
           </template>
         </el-table-column>
+        <el-table-column label="路径" width="170">
+          <template #default="scope">
+            <el-tag :type="dealerConvertPathTagType(scope.row)" size="small">{{ convertLinePathLabel(scope.row) }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="原备注" min-width="120">
           <template #default="scope">
             <el-input v-model="scope.row.remark" placeholder="原备注" />
@@ -631,19 +632,13 @@
       <el-input v-model="dealerConvertForm.contractNote" placeholder="可选" />
 
       <div class="save-mode-section">
-        <div class="ops-label">保存方式</div>
-        <div class="save-mode-sub">
-          {{ isDealerRushActive ? '进入生产看板（参与急单排产）' : '进入沙盘（参与老板计划排产）' }}或使用现货（直接置为已规划）。
-        </div>
-        <div v-if="!dealerConvertCanUseSpot" class="save-mode-blocked">当前“使用现货”不可用：{{ dealerConvertSpotBlockReason }}</div>
+        <div class="ops-label">路径（按明细批次/来源自动判定）</div>
+        <div class="save-mode-hint path-mode-hint">按去向生成合同：现货行合成一张「已规划」合同（到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台）；在制指定批次行单独一张合同，自动执行「按批次规划并配货」预占机台（订单待二次确认，失败回退已规划人工配货）；无货预订行单独一张「待规划」合同并进入沙盘排产。混合订单最多生成三张合同。</div>
       </div>
 
       <template #footer>
         <el-button @click="dealerConvertDialogVisible = false">取消</el-button>
-        <el-button type="warning" :disabled="!dealerConvertCanUseSpot" :loading="dealerConvertSaving" @click="submitDealerConvert('spot')">使用现货</el-button>
-        <el-button type="primary" :loading="dealerConvertSaving" @click="submitDealerConvert('sandbox')">
-          {{ isDealerRushActive ? '进入生产看板' : '进入沙盘' }}
-        </el-button>
+        <el-button type="primary" :loading="dealerConvertSaving" @click="submitDealerConvert()">确认转合同</el-button>
       </template>
     </el-dialog>
   </div>
@@ -673,7 +668,10 @@ import { useContractsStore } from '../store/contracts'
 import { useRefFormDraft } from '../composables/useFormDraft'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 import { compareModels, isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
+import { normalizeDealerOrderItems, convertLinePathLabel, type ConvertItemRow } from '../utils/dealerOrderItems'
+import { hasHighHint } from '../utils/heightened'
 import { useModelDictionaryStore } from '../store/modelDictionary'
+import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
 import PageHeader from '../components/PageHeader.vue'
 
 const router = useRouter()
@@ -683,7 +681,11 @@ type MessageResponse = {
   message?: string
   rush_created?: number
   rush_auto_inserted?: number
-  save_mode?: 'sandbox' | 'spot'
+  save_mode?: string  // 经销商转合同自动选路返回 auto；手动批量录合同仍为 sandbox/spot
+  cloud_attachments?: CloudAttachmentSyncSummary
+  order_form_attached_contracts?: string[]
+  contracts?: Array<{ contract_no: string; path: 'auto' | 'batch-plan' | 'batch-plan-fallback' | 'preorder'; status?: '已规划' | '待规划' | '已转订单'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
+  batch_plan?: { attempted: boolean; ok: boolean; order_id?: string | null; batch_codes?: string[]; error?: string | null }
 }
 type ContractSummary = {
   id: string
@@ -816,8 +818,6 @@ const dealerOrders = ref<DealerOrder[]>([])
 const dealerOrderSource = ref('')
 const dealerConvertDialogVisible = ref(false)
 const dealerConvertSaving = ref(false)
-const dealerConvertCanUseSpot = ref(true)
-const dealerConvertSpotBlockReason = ref('')
 const openMonths = ref<string[]>([])
 const detailPanelRef = ref<HTMLElement | null>(null)
 const contractEditDialogVisible = ref(false)
@@ -852,19 +852,16 @@ const modelOptions = computed(() => modelDictionaryStore.rows
   .slice()
   .sort((a, b) => a.sort_order - b.sort_order)
   .map((row) => row.model_name))
-type DealerConvertItem = { model: string; qty: number; high: boolean; rowNote: string; remark: string; extraRemark: string; ermq: number }
 const dealerConvertForm = reactive({
   contractNo: '',
   deliveryDate: '',
   customer: '',
   agent: '',
-  isRush: false,
-  items: [] as DealerConvertItem[],
+  items: [] as ConvertItemRow[],
   contractNote: '',
   sourceOrderNo: '',
 })
 const isRushOrderActive = computed(() => batchForm.value.isRush)
-const isDealerRushActive = computed(() => dealerConvertForm.isRush)
 const saveModeDialogVisible = ref(false)
 const canUseSpotMode = ref(true)
 const spotModeBlockReason = ref('')
@@ -942,33 +939,6 @@ const canConvertDealerOrder = (order: DealerOrder) => {
   return ['pending', 'approved'].includes(String(order.status || '').trim()) && Number(order.factory_pending || 0) !== 1
 }
 
-const isRushHint = (order: DealerOrder) => {
-  const remark = String(order.remark || '').toLowerCase()
-  if (remark.includes('急') || remark.includes('加急')) return true
-  const delivery = String(order.delivery_date || '').trim()
-  if (!delivery) return false
-  const days = (new Date(delivery).getTime() - Date.now()) / 86400000
-  return days <= 3
-}
-
-const normalizeDealerOrderItems = (order: DealerOrder) => {
-  const source: DealerOrderLine[] = order.items?.length
-    ? order.items
-    : [{ model: order.model, quantity: order.quantity, remark: order.remark, extra_remark: order.extra_remark, factory_remark: order.factory_remark, ERMQ: order.ERMQ }]
-  return source
-    .map((item) => {
-      const model = String(item.model || '').trim()
-      const qty = Math.max(1, Number(item.quantity || 1))
-      const remark = String(item.remark || '').trim()
-      const extraRemark = String(item.factory_remark || item.extra_remark || '').trim()
-      const ermq = Number(item.ERMQ || 0)
-      const high = model.includes('加高') || remark.includes('加高') || extraRemark.includes('加高')
-      const rowNote = [remark ? `[备注]${remark}` : '', extraRemark ? `[附加]${extraRemark}` : '', ermq > 0 ? `[改数]${ermq}` : ''].filter(Boolean).join(' ')
-      return { model, qty, high, rowNote, remark, extraRemark, ermq }
-    })
-    .filter((item) => item.model)
-}
-
 const openDealerOrderConvertDialog = async (order: DealerOrder) => {
   if (!canConvertDealerOrder(order)) {
     ElMessage.warning('只有待审核或已通过审核的经销商订单可以转合同')
@@ -983,12 +953,9 @@ const openDealerOrderConvertDialog = async (order: DealerOrder) => {
   dealerConvertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   dealerConvertForm.customer = String(order.customer_name || '').trim()
   dealerConvertForm.agent = String(order.contact_name || '').trim()
-  dealerConvertForm.isRush = isRushHint(order)
   dealerConvertForm.items = rows
   dealerConvertForm.contractNote = String(order.review_note || '').trim()
   dealerConvertForm.sourceOrderNo = String(order.order_no || '').trim()
-  dealerConvertCanUseSpot.value = true
-  dealerConvertSpotBlockReason.value = ''
   try {
     dealerConvertForm.contractNo = await fetchNextContractId()
   } catch (err) {
@@ -1520,7 +1487,7 @@ const getInStockCountByModel = async () => {
     const status = String(row['状态'] || '').trim()
     const occupied = String(row['占用订单号'] || '').trim()
     if (!model || !status.startsWith('库存中') || occupied) continue
-    const high = [row['机型'], row['批次号'], row['合同备注']].some((value) => String(value || '').includes('加高'))
+    const high = hasHighHint(row['机型'], row['批次号'], row['合同备注'])
     const key = `${model}||${high ? 'high' : 'normal'}`
     map.set(key, (map.get(key) || 0) + 1)
   }
@@ -1550,7 +1517,11 @@ const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: nu
   }
 }
 
-const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
+/** 路径标签配色：库存行 success，批次行 info。 */
+const dealerConvertPathTagType = (item?: { batch_no?: string; inventory_type?: string } | null) =>
+  convertLinePathLabel(item).startsWith('库存') ? 'success' : 'info'
+
+const submitDealerConvert = async () => {
   if (!hasText(dealerConvertForm.contractNo) || !hasText(dealerConvertForm.customer) || !hasText(dealerConvertForm.deliveryDate)) {
     ElMessage.warning('请先完整填写合同号/客户名/要求交期')
     return
@@ -1570,20 +1541,6 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
     ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
     return
   }
-  if (saveMode === 'spot') {
-    try {
-      const spotAvailability = await evaluateSpotModeAvailability(validItems)
-      if (!spotAvailability.canUseSpot) {
-        dealerConvertCanUseSpot.value = false
-        dealerConvertSpotBlockReason.value = spotAvailability.reason
-        ElMessage.warning(`“使用现货”不可用：${spotAvailability.reason}`)
-        return
-      }
-    } catch (err: any) {
-      ElMessage.error(getApiErrorMessage(err) || '校验现货可用机台失败')
-      return
-    }
-  }
 
   await submitWithLock(dealerConvertSaving, async () => {
     const payload = {
@@ -1591,8 +1548,6 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
       customer_name: dealerConvertForm.customer.trim(),
       agent_name: dealerConvertForm.agent.trim(),
       delivery_date: dealerConvertForm.deliveryDate.trim(),
-      save_mode: saveMode,
-      is_rush: dealerConvertForm.isRush,
       items: validItems,
       contract_note: dealerConvertForm.contractNote.trim(),
     }
@@ -1600,29 +1555,31 @@ const submitDealerConvert = async (saveMode: 'sandbox' | 'spot') => {
       `/dealer-orders/${encodeURIComponent(dealerConvertForm.sourceOrderNo)}/convert-to-contract`,
       payload,
     )
-    const autoInserted = Number(res.rush_auto_inserted || 0)
-    const pendingRushCards = Math.max(0, Number(res.rush_created || 0) - autoInserted)
-    const rushText = [
-      autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
-      pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
-    ].filter(Boolean).join('，')
-    const modeText = saveMode === 'spot'
-      ? '已按“使用现货”处理（合同状态=已规划）'
-      : (dealerConvertForm.isRush ? '已按“进入生产看板”处理（合同状态=待规划）' : '已按“进入沙盘”处理（合同状态=待规划）')
-    ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    const contracts = res.contracts || []
+    ElMessage.success(res.warning || res.message || '转合同成功')
+    const cloudAttachmentNotice = buildCloudAttachmentNotice(res.cloud_attachments)
+    if (cloudAttachmentNotice) {
+      if (cloudAttachmentNotice.level === 'warning') ElMessage.warning(cloudAttachmentNotice.text)
+      else ElMessage.success(cloudAttachmentNotice.text)
+    }
     dealerConvertDialogVisible.value = false
-    activeTab.value = saveMode === 'spot' ? '已规划' : '待规划'
-    selectedContractId.value = String(res.contract_no || dealerConvertForm.contractNo).trim()
+    const autoPlannedContract = contracts.find((c) => c.status === '已转订单')
+    const plannedContract = contracts.find((c) => c.status === '已规划')
+    const preorderContract = contracts.find((c) => c.status === '待规划')
+    activeTab.value = autoPlannedContract ? '已完成' : plannedContract ? '已规划' : '待规划'
+    selectedContractId.value = String(
+      (autoPlannedContract || plannedContract || preorderContract)?.contract_no || String(res.contract_no || dealerConvertForm.contractNo).split('、')[0],
+    ).trim()
     await fetchContracts(true)
     await loadDealerOrders()
-    if (saveMode === 'sandbox') {
-      if (dealerConvertForm.isRush) {
-        router.push('/production-kanban')
-      } else {
-        router.push('/prediction-sandbox')
-      }
-    } else if (saveMode === 'spot') {
+    if (autoPlannedContract) {
+      // 在制批次已自动预占，订单待二次确认。
+      ElMessage.info(`在制合同 ${autoPlannedContract.contract_no} 已自动预占机台${res.batch_plan?.order_id ? `，订单 ${res.batch_plan.order_id} 待二次确认` : ''}，可在订单配货查看`)
+    } else if (plannedContract) {
+      // 已规划合同由业务人员导入后到订单配货手动分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    } else if (preorderContract) {
+      ElMessage.info(`无货预订合同 ${preorderContract.contract_no} 已置「待规划」，可进入沙盘排产`)
     }
   }, { errorMessage: '经销商订单转合同失败' })
 }
@@ -2386,6 +2343,11 @@ onMounted(() => {
   color: var(--color-danger);
   font-size: var(--font-size-sm);
 }
+.save-mode-hint.path-mode-hint {
+  color: var(--color-gray-500);
+  margin-top: 4px;
+  line-height: 1.6;
+}
 .convert-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2393,11 +2355,6 @@ onMounted(() => {
 }
 .save-mode-section {
   margin-top: 16px;
-}
-.save-mode-blocked {
-  color: var(--color-danger);
-  font-size: var(--font-size-sm);
-  margin-top: 6px;
 }
 .dealer-import-toolbar {
   display: flex;

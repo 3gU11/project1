@@ -145,6 +145,19 @@ def save_contract_file(uploaded_file, customer_name, contract_id, uploader_name,
         return False, f"记录保存失败: {e}"
 
 
+def contract_file_exists(contract_id, file_name) -> bool:
+    """判断合同附件是否已存在（同一合同、同一文件名），用于自动归档时幂等去重。"""
+    try:
+        with get_engine().connect() as conn:
+            row = conn.execute(
+                text("SELECT 1 FROM contract_records WHERE contract_id=:cid AND file_name=:fn LIMIT 1"),
+                {"cid": str(contract_id), "fn": str(file_name)},
+            ).first()
+        return row is not None
+    except Exception:
+        return False
+
+
 def delete_contract_file(contract_id, file_name, operator="System"):
     try:
         with get_engine().connect() as conn:

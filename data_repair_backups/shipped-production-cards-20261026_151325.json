@@ -1,0 +1,125 @@
+{
+  "state": {
+    "finished_goods": [
+      {
+        "流水号": "96-07-75",
+        "状态": "已出库",
+        "占用订单号": "SO-20260927-4EDE",
+        "合同号": "HT202609040002",
+        "批次号": "07-03附加",
+        "更新时间": "2026-09-30 07:18:00"
+      },
+      {
+        "流水号": "96-08-210",
+        "状态": "已出库",
+        "占用订单号": "SO-20260927-4EDE",
+        "合同号": "HT202609040002",
+        "批次号": "08-08附加",
+        "更新时间": "2026-09-30 07:18:00"
+      }
+    ],
+    "units": [
+      {
+        "unit_id": "BATCH-202607-SPECIAL-022-55378522-AF-02-341129",
+        "batch_id": "BATCH-202607-SPECIAL-022-55378522",
+        "status": "In_Production",
+        "production_line_id": "line-20",
+        "contract_no": "HT202609040002",
+        "sales_id": "SO-20260927-4EDE",
+        "serial_no": "96-07-75",
+        "batch_code": "07-03附加",
+        "batch_status": "In_Production",
+        "line_status": "Busy",
+        "current_batch_id": "BATCH-202607-SPECIAL-022-00535899"
+      },
+      {
+        "unit_id": "BATCH-202608-SPECIAL-022-54094926-S01",
+        "batch_id": "BATCH-202608-SPECIAL-022-54094926",
+        "status": "In_Production",
+        "production_line_id": "line-19",
+        "contract_no": "HT202609040002",
+        "sales_id": "SO-20260927-4EDE",
+        "serial_no": "96-08-210",
+        "batch_code": "08-08附加",
+        "batch_status": "In_Production",
+        "line_status": "Busy",
+        "current_batch_id": "BATCH-202608-SPECIAL-022-54094926"
+      }
+    ]
+  },
+  "report": {
+    "order": "SO-20260927-4EDE",
+    "serials": [
+      "96-07-75",
+      "96-08-210"
+    ],
+    "apply": true,
+    "run_id": "20261026_151325",
+    "before": {
+      "finished_goods": [
+        {
+          "流水号": "96-07-75",
+          "状态": "已出库",
+          "占用订单号": "SO-20260927-4EDE",
+          "合同号": "HT202609040002",
+          "批次号": "07-03附加",
+          "更新时间": "2026-09-30 07:18:00"
+        },
+        {
+          "流水号": "96-08-210",
+          "状态": "已出库",
+          "占用订单号": "SO-20260927-4EDE",
+          "合同号": "HT202609040002",
+          "批次号": "08-08附加",
+          "更新时间": "2026-09-30 07:18:00"
+        }
+      ],
+      "units": [
+        {
+          "unit_id": "BATCH-202607-SPECIAL-022-55378522-AF-02-341129",
+          "batch_id": "BATCH-202607-SPECIAL-022-55378522",
+          "status": "In_Production",
+          "production_line_id": "line-20",
+          "contract_no": "HT202609040002",
+          "sales_id": "SO-20260927-4EDE",
+          "serial_no": "96-07-75",
+          "batch_code": "07-03附加",
+          "batch_status": "In_Production",
+          "line_status": "Busy",
+          "current_batch_id": "BATCH-202607-SPECIAL-022-00535899"
+        },
+        {
+          "unit_id": "BATCH-202608-SPECIAL-022-54094926-S01",
+          "batch_id": "BATCH-202608-SPECIAL-022-54094926",
+          "status": "In_Production",
+          "production_line_id": "line-19",
+          "contract_no": "HT202609040002",
+          "sales_id": "SO-20260927-4EDE",
+          "serial_no": "96-08-210",
+          "batch_code": "08-08附加",
+          "batch_status": "In_Production",
+          "line_status": "Busy",
+          "current_batch_id": "BATCH-202608-SPECIAL-022-54094926"
+        }
+      ]
+    },
+    "backups": {
+      "units": "repair_backup_shipped_cards_20261026_151325_units",
+      "ledger": "repair_backup_shipped_cards_20261026_151325_ledger",
+      "batches": "repair_backup_shipped_cards_20261026_151325_batches",
+      "lines": "repair_backup_shipped_cards_20261026_151325_lines"
+    },
+    "retired": {
+      "unit_ids": [
+        "BATCH-202607-SPECIAL-022-55378522-AF-02-341129",
+        "BATCH-202608-SPECIAL-022-54094926-S01"
+      ],
+      "completed_batches": [],
+      "affected_lines": [
+        "line-19",
+        "line-20"
+      ]
+    },
+    "backup_json": "data_repair_backups\\shipped-production-cards-20261026_151325.json"
+  }
+}

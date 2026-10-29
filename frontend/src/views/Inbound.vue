@@ -38,7 +38,9 @@
           <el-table-column prop="流水号" label="流水号" width="170" />
           <el-table-column prop="客户" label="客户" min-width="120" />
           <el-table-column prop="代理商" label="代理商" min-width="120" />
-          <el-table-column prop="合同备注" label="合同备注" min-width="200" show-overflow-tooltip />
+          <el-table-column label="合同备注" min-width="200" show-overflow-tooltip>
+            <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+          </el-table-column>
         </el-table>
         <div class="selection-hint">已选择入库设备：{{ selectedPendingRows.length }} 台</div>
 
@@ -167,6 +169,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { ElMessage } from 'element-plus'
 import { compareModels, getModelOrderList } from '../utils/modelOrder'
+import { singleLineOrderRemark } from '../utils/orderNotes'
 import {
   buildSlotStats,
   defaultSlots,

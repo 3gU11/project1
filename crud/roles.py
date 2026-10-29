@@ -57,6 +57,7 @@ PERMISSION_CATALOG = [
     {"code": "KANBAN_VIEW", "label": "生产看板(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_VIEW", "label": "预测沙盘(查看)", "group": "管理与统筹"},
     {"code": "SANDBOX_EDIT", "label": "预测沙盘(编辑)", "group": "管理与统筹"},
+    {"code": "NOTIFICATION_VIEW", "label": "合同消息盒子", "group": "管理与统筹"},
     {"code": "MOBILE_KANBAN_VIEW", "label": "移动端生产看板(查看)", "group": "移动端"},
     {"code": "MOBILE_KANBAN_ASSIGN", "label": "移动端待产批次分配", "group": "移动端"},
 ]

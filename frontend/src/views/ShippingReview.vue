@@ -64,7 +64,9 @@
                   <el-table-column prop="流水号" label="流水号" width="150" />
                   <el-table-column prop="机型" label="机型" min-width="160" />
                   <el-table-column prop="发货时间" label="发货时间" width="120" />
-                  <el-table-column prop="合同备注" label="合同备注" min-width="160" />
+                  <el-table-column label="合同备注" min-width="160" show-overflow-tooltip>
+                    <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+                  </el-table-column>
                 </el-table>
                 <div class="ops">
                   <el-button type="primary" :loading="saving" @click="confirmShip">🚚 确认发货</el-button>
@@ -205,7 +207,9 @@
                   <el-table-column prop="流水号" label="流水号" width="150" />
                   <el-table-column prop="机型" label="机型" min-width="160" />
                   <el-table-column prop="发货时间" label="发货时间" width="150" />
-                  <el-table-column prop="合同备注" label="合同备注" min-width="180" />
+                  <el-table-column label="合同备注" min-width="180" show-overflow-tooltip>
+                    <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+                  </el-table-column>
                 </el-table>
 
                 <div class="ops">
@@ -225,6 +229,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getMachineArchivePreviewObjectUrl } from '../utils/machineArchivePreview'
+import { singleLineOrderRemark } from '../utils/orderNotes'
 import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from '../store/cache'
 import PageHeader from '../components/PageHeader.vue'

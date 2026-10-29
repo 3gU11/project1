@@ -55,10 +55,6 @@ def get_engine():
         pool_pre_ping=True,
         pool_recycle=3600,
         connect_args={
-            "auth_plugin_map": {
-                "caching_sha2_password": "mysql_native_password",
-                "sha256_password": "mysql_native_password"
-            },
             "init_command": "SET NAMES utf8mb4 COLLATE utf8mb4_general_ci"
         },
     )
@@ -297,6 +293,10 @@ def init_mysql_tables():
           dealer_name VARCHAR(255) NOT NULL,
           dealer_phone VARCHAR(64) DEFAULT '',
           customer_name VARCHAR(255) NOT NULL,
+          delivery_address VARCHAR(500) DEFAULT '',
+          office_name VARCHAR(128) DEFAULT '',
+          office_contact VARCHAR(128) DEFAULT '',
+          office_phone VARCHAR(64) DEFAULT '',
           contact_name VARCHAR(128) NOT NULL,
           contact_phone VARCHAR(64) NOT NULL,
           model VARCHAR(255) NOT NULL,
@@ -844,7 +844,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 15
+CURRENT_SCHEMA_VERSION = 17
 
 
 def ensure_finished_goods_unique_serial(conn):
@@ -1421,6 +1421,10 @@ def init_mysql_tables_v2():
                   dealer_name VARCHAR(255) NOT NULL,
                   dealer_phone VARCHAR(64) DEFAULT '',
                   customer_name VARCHAR(255) NOT NULL,
+                  delivery_address VARCHAR(500) DEFAULT '',
+                  office_name VARCHAR(128) DEFAULT '',
+                  office_contact VARCHAR(128) DEFAULT '',
+                  office_phone VARCHAR(64) DEFAULT '',
                   contact_name VARCHAR(128) NOT NULL,
                   contact_phone VARCHAR(64) NOT NULL,
                   model VARCHAR(255) NOT NULL,
@@ -1639,6 +1643,38 @@ def init_mysql_tables_v2():
         if current_version < 15:
             ensure_finished_goods_unique_serial(conn)
             _record_schema_version(conn, 15, "enforce unique finished goods serial number")
+
+        if current_version < 16:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS contract_notifications (
+                    contract_id VARCHAR(100) NOT NULL PRIMARY KEY,
+                    created_snapshot JSON NULL,
+                    created_by VARCHAR(100) NULL,
+                    created_at DATETIME(6) NULL,
+                    converted_snapshot JSON NULL,
+                    converted_by VARCHAR(100) NULL,
+                    converted_at DATETIME(6) NULL,
+                    order_id VARCHAR(100) NULL,
+                    latest_at DATETIME(6) NOT NULL,
+                    version INT NOT NULL DEFAULT 1,
+                    INDEX idx_contract_notifications_latest (latest_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS contract_notification_reads (
+                    username VARCHAR(100) NOT NULL,
+                    contract_id VARCHAR(100) NOT NULL,
+                    read_version INT NOT NULL DEFAULT 0,
+                    PRIMARY KEY (username, contract_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            _record_schema_version(conn, 16, "add boss contract notifications")
+
+        if current_version < 17:
+            conn.execute(text("ALTER TABLE contract_notifications ADD COLUMN planned_snapshot JSON NULL"))
+            conn.execute(text("ALTER TABLE contract_notifications ADD COLUMN planned_by VARCHAR(100) NULL"))
+            conn.execute(text("ALTER TABLE contract_notifications ADD COLUMN planned_at DATETIME(6) NULL"))
+            _record_schema_version(conn, 17, "add planned stage to contract notifications")
 
         return {
             "initialized": True,

@@ -22,6 +22,7 @@ class BatchPlanningTests(unittest.TestCase):
             "CREATE TABLE finished_goods_data (`流水号` TEXT PRIMARY KEY,`机型` TEXT,`状态` TEXT,`合同号` TEXT,`占用订单号` TEXT,`客户` TEXT,`代理商` TEXT,`合同备注` TEXT,`批次号` TEXT,`预计入库时间` TEXT,`更新时间` TEXT)",
             "CREATE TABLE production_queue (contract_no TEXT,quantity_remaining INTEGER,status TEXT,model_type TEXT,customer TEXT,dealer TEXT,due_date TEXT)",
             "CREATE TABLE rush_order_queue (id INTEGER PRIMARY KEY,contract_no TEXT,status TEXT,updated_by TEXT)",
+            "CREATE TABLE contract_notifications (contract_id TEXT PRIMARY KEY,created_snapshot TEXT,created_by TEXT,created_at TEXT,converted_snapshot TEXT,converted_by TEXT,converted_at TEXT,order_id TEXT,latest_at TEXT,version INTEGER)",
             "CREATE TABLE production_lines (line_id TEXT,status TEXT)",
         ]
         with self.engine.begin() as c:
@@ -264,6 +265,51 @@ class BatchPlanningTests(unittest.TestCase):
             result=planning._reconcile_completed_orders(orders)
         self.assertEqual(result.iloc[0]['status'],bp.REVIEW_STATUS)
         save.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # 指定批次自动规划：一张合同 → 多个在产/已确认批次
+    # ------------------------------------------------------------------
+
+    def _insert_designated_contract(self, cid, allocations):
+        for index, alloc in enumerate(allocations):
+            self.sql(
+                """INSERT INTO factory_plan
+                   (`合同号`,`机型`,`排产数量`,`备注`,`客户名`,`代理商`,`要求交期`,`状态`,`订单号`,`指定批次/来源`)
+                   VALUES (:cid,'FR-500','1','','客户','代理','','待规划','',:alloc)""",
+                cid=cid, alloc=json.dumps(alloc, ensure_ascii=False),
+            )
+
+    def test_designated_batches_plan_across_multiple_batches(self):
+        self._insert_designated_contract(
+            "C2", [{"09-01": 1}, {"09-02": 1}]
+        )
+        result = bp.plan_contract_designated_batches("C2", "planner")
+
+        self.assertEqual(result["batch_codes"], ["09-01", "09-02"])
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 1)
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM units WHERE sales_id=:oid", oid=result["order_id"])[0][0], 2)
+        statuses = self.sql("SELECT DISTINCT `状态` FROM factory_plan WHERE `合同号`='C2'")
+        self.assertEqual(statuses, [("已转订单",)])
+        # 每行保留本行实际指定批次，不能把整份合同的批次映射复制到每一行。
+        row_allocs = self.sql("SELECT `指定批次/来源` FROM factory_plan WHERE `合同号`='C2' ORDER BY id")
+        self.assertEqual(json.loads(row_allocs[0][0]), {"09-01": 1})
+        self.assertEqual(json.loads(row_allocs[1][0]), {"09-02": 1})
+        replay = bp.plan_contract_designated_batches("C2", "planner")
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 1)
+
+    def test_designated_batches_reject_missing_or_completed_batch(self):
+        self._insert_designated_contract("C3", [{"09-99": 1}])
+        with self.assertRaises(bp.BatchPlanningError):
+            bp.plan_contract_designated_batches("C3", "planner")
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 0)
+
+        self.sql("INSERT INTO batches VALUES ('B4','09-03','Completed',NULL)")
+        self.sql("INSERT INTO units (unit_id,batch_id,slot_index,serial_no,model_type,status) VALUES ('U9','B4',99,'S9','FR-500','In_Production')")
+        self._insert_designated_contract("C4", [{"09-03": 1}])
+        with self.assertRaises(bp.BatchPlanningError):
+            bp.plan_contract_designated_batches("C4", "planner")
+        self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 0)
 
 
 if __name__ == "__main__":

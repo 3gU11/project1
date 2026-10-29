@@ -41,6 +41,8 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 
 	v1Auth := v1.Group("")
 	v1Auth.Use(middleware.AuthMiddleware(db))
+	v1Admin := v1.Group("")
+	v1Admin.Use(middleware.AdminOnly(db))
 	{
 		v1Auth.GET("/machines/:serialNo/photo-profile", ph.MachinePhotoProfile)
 		v1Auth.POST("/machines/:serialNo/photo-tasks/init", ph.InitMachinePhotoTasks)
@@ -55,8 +57,6 @@ func Setup(r *gin.Engine, db *gorm.DB, hub *ws.Hub,
 		v1Auth.GET("/model-dictionary/", ph.ListModelDictionary)
 	}
 
-	v1Admin := v1.Group("")
-	v1Admin.Use(middleware.AdminOnly(db))
 	{
 		v1Admin.POST("/model-dictionary/save", ph.SaveModelDictionary)
 		v1Admin.GET("/model-dictionary/:modelId/photo-config", ph.GetModelPhotoConfig)

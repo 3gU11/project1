@@ -68,6 +68,12 @@
               <el-table-column prop="need" label="需求" width="90" />
               <el-table-column prop="allocated" label="已确认" width="90" />
               <el-table-column prop="pending" label="待确认" width="90" />
+              <el-table-column label="单行备注" min-width="180" show-overflow-tooltip>
+                <template #default="scope">{{ scope.row.remark || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="指定批次" min-width="120" show-overflow-tooltip>
+                <template #default="scope">{{ scope.row.batches || '-' }}</template>
+              </el-table-column>
               <el-table-column label="状态" width="120">
                 <template #default="scope">
                   <el-tag :type="scope.row.pending <= 0 ? 'success' : 'warning'">
@@ -81,14 +87,15 @@
             <template v-if="isBatchReview">
               <el-alert :title="reservationInfo?.label || '正在核查预占状态'" type="warning" :closable="false">
                 <template #default>
-                  <div>当前批次已预占 {{ reservationInfo?.reserved_days ?? '-' }} 天；合同交期：{{ reservationInfo?.contract_due_date || '未填写' }}。</div>
+                  <div>当前预占批次：{{ (reservationInfo?.batch_codes?.length ? reservationInfo.batch_codes : [reservationInfo?.batch_code]).filter(Boolean).join('、') || '-' }}；已预占 {{ reservationInfo?.reserved_days ?? '-' }} 天；合同交期：{{ reservationInfo?.contract_due_date || '未填写' }}。</div>
                   <div v-if="reservationInfo?.risk">{{ reservationInfo.risk }}</div>
-                  <div>未投产时可以改配其他批次，或撤销本次规划恢复合同需求。</div>
+                  <div v-if="(reservationInfo?.batch_codes?.length || 1) > 1">多批次预占不支持整体改配；如需调整请先撤销本次规划后重新规划。</div>
+                  <div v-else>未投产时可以改配其他批次，或撤销本次规划恢复合同需求。</div>
                 </template>
               </el-alert>
               <div class="ops">
                 <el-button type="success" :loading="saving" :disabled="!reservationInfo?.can_confirm" @click="confirmBatchReview">确认全部配货</el-button>
-                <el-button :disabled="saving" @click="openReplacement">改配批次</el-button>
+                <el-button v-if="(reservationInfo?.batch_codes?.length || 1) <= 1" :disabled="saving" @click="openReplacement">改配批次</el-button>
                 <el-button type="danger" plain :disabled="saving" @click="cancelReservation">撤销本次规划</el-button>
               </div>
               <el-table :data="allocations" border stripe max-height="460">
@@ -97,7 +104,9 @@
                 <el-table-column prop="批次号" label="批次号" min-width="120" />
                 <el-table-column prop="货源" label="货源" min-width="120" />
                 <el-table-column label="状态" min-width="160"><template #default="scope">{{ reservationInfo?.machine_states?.[scope.row['流水号']] || '正在核查' }}</template></el-table-column>
-                <el-table-column prop="合同备注" label="合同备注" min-width="150" />
+                <el-table-column label="合同备注" min-width="150" show-overflow-tooltip>
+                  <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+                </el-table-column>
               </el-table>
             </template>
             <template v-else>
@@ -127,7 +136,16 @@
               <el-table-column prop="货源" label="货源" width="100" />
               <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
-              <el-table-column prop="合同备注" label="合同备注" min-width="160" />
+              <el-table-column label="批次匹配" width="100">
+                <template #default="scope">
+                  <el-tag v-if="scope.row['_batch_match'] === '匹配'" type="success" size="small">匹配</el-tag>
+                  <el-tag v-else-if="scope.row['_batch_match'] === '其他批次'" type="warning" size="small">其他批次</el-tag>
+                  <span v-else>-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="合同备注" min-width="160" show-overflow-tooltip>
+                <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+              </el-table-column>
             </el-table>
             <div class="ops">
               <el-button type="primary" :loading="saving" @click="allocateSelected">复核确认配货</el-button>
@@ -150,7 +168,9 @@
               <el-table-column prop="货源" label="货源" width="100" />
               <el-table-column prop="状态" label="状态" width="120" />
               <el-table-column prop="批次号" label="批次号" width="120" />
-              <el-table-column prop="合同备注" label="合同备注" min-width="160" />
+              <el-table-column label="合同备注" min-width="160" show-overflow-tooltip>
+                <template #default="scope">{{ singleLineOrderRemark(scope.row['合同备注']) || '-' }}</template>
+              </el-table-column>
             </el-table>
             <div class="ops">
               <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
@@ -179,6 +199,8 @@ import { useRoute } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useCacheStore } from '../store/cache'
 import { compareModels, normalizeModelName, sortRowsByModel } from '../utils/modelOrder'
+import { hasHighHint } from '../utils/heightened'
+import { singleLineOrderRemark } from '../utils/orderNotes'
 import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type ListResponse<T = any> = { data: T[] }
@@ -193,7 +215,7 @@ const orderKeyword = ref('')
 const orderModelFilter = ref('')
 const orders = ref<Row[]>([])
 const allocations = ref<Row[]>([])
-const orderDetailRows = ref<Array<{ model: string; high: boolean; qty: number }>>([])
+const orderDetailRows = ref<Array<{ model: string; high: boolean; qty: number; remark: string; batches: string }>>([])
 const orderDetailsSource = ref<'factory_plan' | 'sales_orders' | ''>('')
 const cacheStore = useCacheStore()
 const route = useRoute()
@@ -258,7 +280,7 @@ const selectedAllocatedSerials = ref<string[]>([])
 const candidateStatusFilter = ref('')
 const candidateKeyword = ref('')
 
-const isHighHint = (...values: unknown[]) => values.some((value) => String(value || '').includes('加高'))
+const isHighHint = (...values: unknown[]) => hasHighHint(...values)
 
 const variantKey = (model: string, high: boolean) => `${model}||${high ? 'high' : 'normal'}`
 
@@ -397,8 +419,39 @@ const allocationModelCountMap = computed(() => {
   return map
 })
 
+const demandRemarkMap = computed(() => {
+  const map = new Map<string, string[]>()
+  if (orderDetailsSource.value !== 'factory_plan') return map
+  for (const row of orderDetailRows.value) {
+    const remark = String(row.remark || '').trim()
+    if (!remark) continue
+    const key = variantKey(row.model, row.high)
+    const list = map.get(key) || []
+    if (!list.includes(remark)) list.push(remark)
+    map.set(key, list)
+  }
+  return map
+})
+
+const demandBatchesMap = computed(() => {
+  const map = new Map<string, string[]>()
+  if (orderDetailsSource.value !== 'factory_plan') return map
+  for (const row of orderDetailRows.value) {
+    const batches = String(row.batches || '').trim()
+    if (!batches) continue
+    const key = variantKey(row.model, row.high)
+    const list = map.get(key) || []
+    for (const batch of batches.split('、')) {
+      const value = batch.trim()
+      if (value && !list.includes(value)) list.push(value)
+    }
+    map.set(key, list)
+  }
+  return map
+})
+
 const demandRows = computed(() => {
-  const rows: Array<{ model: string; high: boolean; displayModel: string; need: number; allocated: number; pending: number }> = []
+  const rows: Array<{ model: string; high: boolean; displayModel: string; need: number; allocated: number; pending: number; remark: string; batches: string }> = []
   for (const [key, item] of demandMap.value.entries()) {
     const allocated = allocationModelCountMap.value.get(key) || 0
     rows.push({
@@ -408,6 +461,8 @@ const demandRows = computed(() => {
       need: item.qty,
       allocated,
       pending: Math.max(0, item.qty - allocated),
+      remark: (demandRemarkMap.value.get(key) || []).join('；'),
+      batches: (demandBatchesMap.value.get(key) || []).join('、'),
     })
   }
   return rows.sort((a, b) => compareModels(a.model, b.model))
@@ -506,11 +561,26 @@ const loadOrderDetails = async () => {
     orderDetailRows.value = details
       .map((item: any) => {
         const model = normalizeModelName(item?.['机型'])
-        const remark = String(item?.['备注'] || '')
+        const rawRemark = String(item?.['备注'] || '')
+        const alloc = item?.['指定批次/来源']
+        const batches =
+          alloc && typeof alloc === 'object'
+            ? Object.keys(alloc)
+                .map((batch) => String(batch || '').trim())
+                .filter(
+                  (batch) =>
+                    batch &&
+                    !['FINISHED-STOCK', '库存中', '现货', '现货库存'].includes(batch),
+                )
+                .join('、')
+            : ''
         return {
           model,
-          high: isHighHint(item?.['机型'], remark),
+          high: isHighHint(item?.['机型'], rawRemark),
           qty: Math.max(0, Number(item?.['数量'] || 0) || 0),
+          // 后端返回单行备注；旧接口没有该字段时用原始备注按同口径压成一行。
+          remark: String(item?.['单行备注'] ?? '') || singleLineOrderRemark(rawRemark),
+          batches,
         }
       })
       .filter((item: { model: string; qty: number }) => item.model && item.qty > 0)
@@ -651,10 +721,20 @@ const allocateSelected = async () => {
 
   saving.value = true
   try {
-    await apiPost(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`, {
-      selected_serial_nos: selectedCandidateSerials.value,
-    })
-    ElMessage.success('配货复核已确认')
+    const res = await apiPost<{ batch_mismatch?: Array<{ 流水号: string; 机型: string; 批次号: string }> }>(
+      `/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`,
+      { selected_serial_nos: selectedCandidateSerials.value },
+    )
+    const mismatches = res.batch_mismatch || []
+    if (mismatches.length > 0) {
+      const text = mismatches
+        .slice(0, 5)
+        .map((item) => `${item['流水号']}（${item['批次号'] || '无批次'}）`)
+        .join('、')
+      ElMessage.warning(`已配货，但 ${mismatches.length} 台不是订单指定批次：${text}`)
+    } else {
+      ElMessage.success('配货复核已确认')
+    }
     selectedCandidateSerials.value = []
     await refreshCurrentOrder()
   } catch (err: any) {
@@ -692,8 +772,18 @@ const completeAllocation = async () => {
   if (!selectedOrderId.value) return
   saving.value = true
   try {
-    const res = await apiPost<{ message?: string; status?: string }>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`, {})
-    ElMessage.success(res.message || '配货完成')
+    const res = await apiPost<{ message?: string; status?: string; batch_mismatch?: Array<{ 流水号: string; 机型: string; 批次号: string }> }>(
+      `/planning/orders/${encodeURIComponent(selectedOrderId.value)}/complete-allocation`,
+      {},
+    )
+    const mismatches = res.batch_mismatch || []
+    if (mismatches.length > 0) {
+      ElMessage.warning(
+        `${res.message || '配货完成'}；其中 ${mismatches.length} 台不是订单指定批次，请核对`,
+      )
+    } else {
+      ElMessage.success(res.message || '配货完成')
+    }
     await refreshCurrentOrder(res.status || 'ready')
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '配货完成失败')

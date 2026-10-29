@@ -18,6 +18,7 @@ SYNC_EVENT_TYPES = {
     "dealer_order_reviewed",
     "dealer_order_contracted",
     "dealer_order_allocated",
+    "dealer_order_cancelled",
     "dealer_order_completed",
     "wechat_batch_summary_sync",
     "repair_snapshot_sync",
@@ -124,6 +125,54 @@ def insert_cloud_sync_event(conn: Any, event_id: str, event_type: str, biz_key: 
             "payload_json": payload_json,
         },
     )
+
+
+def supersede_pending_cloud_sync_events(event_type: str, biz_key: str) -> int:
+    ensure_cloud_sync_outbox_table()
+    with get_engine().begin() as conn:
+        result = conn.execute(
+            text(
+                """
+                UPDATE cloud_sync_outbox
+                SET status='superseded', last_error='replaced by a newer snapshot',
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE event_type=:event_type AND biz_key=:biz_key
+                  AND status IN ('pending', 'failed')
+                """
+            ),
+            {"event_type": event_type, "biz_key": biz_key},
+        )
+    return int(result.rowcount or 0)
+
+
+def supersede_pending_order_sync_events(
+    conn: Any,
+    order_no: str,
+    *,
+    reason: str = "superseded by newer terminal event",
+) -> int:
+    """作废同一订单尚未发送的 dealer_order_* 事件。
+
+    由调用方事务保证：在入队取消/终态事件之前调用，把该订单所有 pending/failed 的
+    旧回传事件置为 superseded，避免退避重试中的旧事件晚到又把云端状态覆盖回旧值。
+    传入的 conn 必须是调用方已开启的事务连接（本函数不新开事务、不负责建表）。
+    """
+    order_no = str(order_no or "").strip()
+    if not order_no:
+        return 0
+    result = conn.execute(
+        text(
+            """
+            UPDATE cloud_sync_outbox
+            SET status='superseded', last_error=:reason, updated_at=CURRENT_TIMESTAMP
+            WHERE biz_key=:order_no
+              AND event_type LIKE 'dealer_order_%'
+              AND status IN ('pending', 'failed')
+            """
+        ),
+        {"order_no": order_no, "reason": str(reason or "")[:4000]},
+    )
+    return int(result.rowcount or 0)
 
 
 def enqueue_wechat_batch_summary_sync(reason: str = "") -> str:
@@ -236,17 +285,40 @@ def _mark_failed(event_id: str, error: Exception | str) -> None:
         )
 
 
+def _record_sync_channel_result(event_type: str, *, ok: bool, error: Any = None) -> None:
+    """把 outbox 事件结果同步到本地「同步通道状态」，供页面展示。"""
+    try:
+        from crud.sync_channels import (
+            channel_for_event_type,
+            record_channel_failure,
+            record_channel_success,
+        )
+
+        channel_key = channel_for_event_type(event_type)
+        if not channel_key:
+            return
+        if ok:
+            record_channel_success(channel_key, "auto")
+        else:
+            record_channel_failure(channel_key, error)
+    except Exception as exc:  # pragma: no cover - 状态记录失败不影响同步主流程
+        logger.warning("record sync channel result failed: %s %s", event_type, exc)
+
+
 def process_next_cloud_sync_event() -> dict[str, Any] | None:
     event = _load_due_event()
     if not event:
         return None
     event_id = str(event["event_id"])
+    event_type = str(event.get("event_type") or "")
     try:
         _dispatch_event(event)
         _mark_synced(event_id)
+        _record_sync_channel_result(event_type, ok=True)
         return {"event_id": event_id, "status": "synced"}
     except Exception as exc:
         _mark_failed(event_id, exc)
+        _record_sync_channel_result(event_type, ok=False, error=exc)
         logger.warning("cloud sync event failed: %s %s", event_id, exc)
         return {"event_id": event_id, "status": "failed", "error": str(exc)}
 
@@ -267,10 +339,63 @@ def process_due_cloud_sync_events(limit: int = 20) -> dict[str, Any]:
     return {"processed": processed, "synced": synced, "failed": failed}
 
 
+# 云端订单状态语义下的先后顺序：数字越大越接近终态。
+# 与 crud.dealer_orders._aggregate_status 聚合出的本地状态配合，用于丢弃
+# “本地状态已推进、事件仍停留在旧状态”的过期回传（例如取消成功后晚到的 allocated）。
+# rejected 不是云端终态（云端只保护 cancelled/completed），已完成事件允许覆盖已驳回，
+# 因此 completed 排在 rejected 之后。
+_ORDER_STATUS_RANK = {
+    "pending": 0,
+    "approved": 1,
+    "contracted": 2,
+    "partial_allocated": 3,
+    "allocated": 4,
+    "rejected": 5,
+    "completed": 6,
+    "complete": 6,
+    "cancelled": 7,
+}
+
+
+def _order_status_rank(status: Any) -> int:
+    return _ORDER_STATUS_RANK.get(str(status or "").strip(), -1)
+
+
+def _event_intended_status(event_type: str, payload: dict[str, Any]) -> str:
+    """事件想把云端订单改成什么状态；未知事件返回空串（不参与过期判断）。"""
+    if event_type == "dealer_order_cancelled":
+        return "cancelled"
+    if event_type == "dealer_order_contracted":
+        return "contracted"
+    if event_type == "dealer_order_completed":
+        return "completed"
+    if event_type == "dealer_order_allocated":
+        return str(payload.get("status") or "allocated")
+    if event_type == "dealer_order_reviewed":
+        return str(payload.get("status") or "")
+    return ""
+
+
+def _load_local_order_aggregate_status(order_no: str) -> str:
+    """按 dealer_orders 行聚合出本地订单状态（与订单审核列表同一套 _aggregate_status）。"""
+    from crud.dealer_orders import _aggregate_status
+
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            text("SELECT * FROM dealer_orders WHERE order_no=:order_no ORDER BY line_no, id"),
+            {"order_no": order_no},
+        ).mappings().all()
+    items = [dict(row) for row in rows]
+    if not items:
+        return ""
+    return _aggregate_status(items)
+
+
 def _dispatch_event(event: dict[str, Any]) -> None:
     from crud.cloud_dealer_order_sync import (
         fetch_local_wechat_batch_summary,
         push_cloud_allocate,
+        push_cloud_cancel,
         push_cloud_completed_state,
         push_cloud_contract,
         push_cloud_review,
@@ -283,13 +408,48 @@ def _dispatch_event(event: dict[str, Any]) -> None:
     event_type = str(event.get("event_type") or "")
 
     if event_type == "repair_snapshot_sync":
+<<<<<<< HEAD
         # Snapshot upload has been retired. Consume legacy outbox rows locally
         # so they cannot trigger any outbound request.
         logger.info("Skipping retired repair snapshot sync event %s", event_id)
+=======
+        from v8_sync.client import NonRetryableSyncError, upload_snapshot
+        from v8_sync.config import get_config
+        from v8_sync.snapshot_store import (
+            get_snapshot,
+            mark_snapshot_error,
+            mark_snapshot_rejected,
+            mark_snapshot_uploaded,
+        )
+
+        snapshot_id = str(payload.get("snapshot_id") or "").strip()
+        if not snapshot_id:
+            raise ValueError("repair snapshot event missing snapshot_id")
+        snapshot_row = get_snapshot(snapshot_id=snapshot_id)
+        if not snapshot_row:
+            raise ValueError(f"repair snapshot not found: {snapshot_id}")
+        expected_sha = str(payload.get("payload_sha256") or "")
+        actual_sha = str(snapshot_row.get("payload_sha256") or "")
+        if expected_sha and expected_sha != actual_sha:
+            raise ValueError(f"repair snapshot digest mismatch: {snapshot_id}")
+        try:
+            upload_snapshot(
+                snapshot_row["payload"],
+                idempotency_key=event_id,
+                config=get_config(),
+            )
+        except Exception as exc:
+            if isinstance(exc, NonRetryableSyncError):
+                mark_snapshot_rejected(snapshot_id, str(exc))
+            else:
+                mark_snapshot_error(snapshot_id, str(exc))
+            raise
+        mark_snapshot_uploaded(snapshot_id)
+>>>>>>> origin/main
         return
 
     if event_type == "repair_delta_event_sync":
-        from repair_sync.client import NonRetryableSyncError
+        from v8_sync.client import NonRetryableSyncError
 
         raise NonRetryableSyncError("repair delta event upload is reserved for the realtime sync phase")
     order_no = str(payload.get("order_no") or event.get("biz_key") or "").strip()
@@ -305,6 +465,31 @@ def _dispatch_event(event: dict[str, Any]) -> None:
             )
         if exists <= 0:
             logger.info("Skipping cloud sync event %s because local dealer order %s no longer exists", event_id, order_no)
+            return
+
+    # 本地订单已经推进到更靠后的状态时，丢弃退避重试中晚到的旧事件，避免把云端
+    # 从 cancelled/completed 等终态覆盖回 allocated/approved；取消事件本身永不拦截。
+    if (
+        event_type.startswith("dealer_order_")
+        and event_type != "dealer_order_cancelled"
+        and order_no
+    ):
+        intended_status = _event_intended_status(event_type, payload)
+        intended_rank = _order_status_rank(intended_status)
+        local_status = _load_local_order_aggregate_status(order_no)
+        local_rank = _order_status_rank(local_status)
+        # intended_rank < 0：事件目标状态不可识别，交回原推送逻辑处理（由其报错/重试）。
+        if intended_rank >= 0 and local_rank > intended_rank:
+            logger.info(
+                "skipped-stale cloud sync event %s: order=%s local=%s(rank %s) > "
+                "intended=%s(rank %s), local order already advanced",
+                event_id,
+                order_no,
+                local_status,
+                local_rank,
+                intended_status,
+                intended_rank,
+            )
             return
 
     if event_type == "dealer_order_reviewed":
@@ -335,6 +520,18 @@ def _dispatch_event(event: dict[str, Any]) -> None:
             operator=str(payload.get("operator") or "system"),
             v7_order_no=str(payload.get("v7_order_no") or ""),
             idempotency_key=event_id,
+            status=str(payload.get("status") or "allocated"),
+        )
+        return
+
+    if event_type == "dealer_order_cancelled":
+        push_cloud_cancel(
+            order_no,
+            contract_no=str(payload.get("contract_no") or ""),
+            operator=str(payload.get("operator") or "system"),
+            note=str(payload.get("note") or payload.get("reason") or ""),
+            line_nos=payload.get("line_nos"),
+            idempotency_key=event_id,
         )
         return
 
@@ -350,7 +547,7 @@ def _dispatch_event(event: dict[str, Any]) -> None:
 
     if event_type == "wechat_batch_summary_sync":
         refresh_local_wechat_batch_summary()
-        rows = fetch_local_wechat_batch_summary()
+        rows, _excluded_special = fetch_local_wechat_batch_summary()
         push_wechat_batch_summary_to_cloud(rows, idempotency_key=event_id)
         return
 
@@ -385,6 +582,33 @@ def get_cloud_sync_status(limit: int = 5) -> dict[str, Any]:
             {key: _json_default(value) if isinstance(value, (datetime, date)) else value for key, value in row.items()}
             for row in rows
         ],
+    }
+
+
+def get_cloud_sync_event_status(event_id: str) -> dict[str, Any] | None:
+    """读取单个 outbox 事件的最新状态，供手动触发后回显。"""
+    target = str(event_id or "").strip()
+    if not target:
+        return None
+    ensure_cloud_sync_outbox_table()
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT event_id, event_type, biz_key, status, retry_count, last_error,
+                       next_retry_at, created_at, updated_at, synced_at
+                FROM cloud_sync_outbox
+                WHERE event_id=:event_id
+                LIMIT 1
+                """
+            ),
+            {"event_id": target},
+        ).mappings().first()
+    if not row:
+        return None
+    return {
+        key: _json_default(value) if isinstance(value, (datetime, date)) else value
+        for key, value in dict(row).items()
     }
 
 

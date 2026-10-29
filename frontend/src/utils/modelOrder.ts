@@ -24,8 +24,12 @@ const rebuildOrderCache = () => {
 }
 rebuildOrderCache()
 
+// 机型字段严格对齐机型字典：字典里只有基础机型，「(加高)」「（加高）」是规格属性，
+// 历史数据/外部系统把它拼在机型后面时要剥掉，避免同一机型拆成两行。
+const HEIGHTENED_NAME_SUFFIX_RE = /\s*[（(]\s*加高\s*[）)]\s*/g
+
 export const normalizeModelName = (model: unknown) => {
-  return String(model || '').replace('(加高)', '').trim()
+  return String(model || '').replace(HEIGHTENED_NAME_SUFFIX_RE, '').trim()
 }
 
 const isHighModel = (model: unknown) => String(model || '').includes('加高')

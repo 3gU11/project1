@@ -9,6 +9,7 @@ frontend/dist/
 
 .env
 server/.env
+.env.local
 
 # Local runtime state and generated reports
 *.out.log

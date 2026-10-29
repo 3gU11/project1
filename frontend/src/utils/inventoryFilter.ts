@@ -1,4 +1,6 @@
 import { getInventoryLifecycleStatus, isMachineBound, isPendingInbound, isProductionBound } from './inventoryState'
+import { hasHighHint } from './heightened'
+import { normalizeModelName } from './modelOrder'
 
 export type InventoryFilterParams = {
   selectedModels: string[]
@@ -20,10 +22,12 @@ export type IndexedInventoryRow = {
 
 export const buildInventoryIndex = (rows: any[]): IndexedInventoryRow[] => {
   return rows.map((row) => {
-    const model = String(row['机型'] || '')
+    const rawModel = String(row['机型'] || '')
+    // 筛选/统计按机型字典的基础机型匹配，加高只作为规格属性，不再参与机型拆分。
+    const model = normalizeModelName(rawModel)
     const status = getInventoryLifecycleStatus(row)
-    const highHint = `${model}|${String(row['合同备注'] || '')}`
-    const searchText = `${String(row['流水号'] || '')}|${model}|${String(row['批次号'] || '')}|${String(row['客户'] || '')}`.toLowerCase()
+    const highHint = hasHighHint(rawModel, row['合同备注']) ? '加高' : ''
+    const searchText = `${String(row['流水号'] || '')}|${rawModel}|${String(row['批次号'] || '')}|${String(row['客户'] || '')}`.toLowerCase()
     return {
       row,
       searchText,

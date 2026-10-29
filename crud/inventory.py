@@ -13,6 +13,7 @@ from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 from crud.inbound_history import notify_inbound_completion, record_inbound_history
 from crud.inventory_guards import require_inventory_order
 from utils.cache import fetch_data_with_cache
+from utils.heightened import is_high_text_hint, split_heightened_model_name
 from utils.local_cache import ttl_cache
 
 
@@ -299,6 +300,29 @@ def clear_inventory_data_caches():
     get_data_v2.cache_clear()
 
 
+def _align_inventory_models(df):
+    """机型字段严格对齐机型字典：剥掉历史数据拼在机型后面的「(加高)」，
+
+    加高信息保留在合同备注里（已有加高描述时不重复追加），避免同一机型拆成两行。
+    """
+    if df.empty or "机型" not in df.columns:
+        return df
+    df = df.copy()
+    pairs = df["机型"].map(split_heightened_model_name)
+    df["机型"] = pairs.map(lambda pair: pair[0])
+    if "合同备注" in df.columns:
+        heightened = pairs.map(lambda pair: pair[1])
+        if bool(heightened.any()):
+            def _append_high(note):
+                text = str(note or "").strip()
+                if is_high_text_hint(text):
+                    return text
+                return " ".join(part for part in [text, "加高"] if part).strip()
+
+            df.loc[heightened, "合同备注"] = df.loc[heightened, "合同备注"].map(_append_high)
+    return df
+
+
 def save_data(df):
     clear_inventory_data_caches()
     try:
@@ -313,6 +337,7 @@ def save_data(df):
         fill_cols = [c for c in INVENTORY_COLS if c not in ["预计入库时间", "更新时间", "占用订单号"]]
         for col in fill_cols:
             df[col] = df[col].fillna("")
+        df = _align_inventory_models(df)
         with get_engine().begin() as conn:
             _ensure_finished_goods_contract_note_column(conn)
             result = conn.execute(text("SHOW COLUMNS FROM finished_goods_data LIKE 'Location_Code'"))
@@ -353,6 +378,8 @@ def save_data_v2(df):
         fill_cols = [c for c in INVENTORY_COLS if c not in ["预计入库时间", "更新时间", "占用订单号"]]
         for col in fill_cols:
             df[col] = df[col].fillna("").astype(str).str.strip()
+
+        df = _align_inventory_models(df)
 
         with get_engine().begin() as conn:
             _ensure_finished_goods_contract_note_column(conn)
@@ -414,6 +441,7 @@ def save_data_v2(df):
 
 
 def archive_shipped_data(df_shipped):
+<<<<<<< HEAD
     try:
         current_month = datetime.now().strftime("%Y_%m")
         df_shipped = df_shipped.copy()
@@ -443,6 +471,41 @@ def archive_shipped_data(df_shipped):
         df_shipped.fillna("").to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
     except (OperationalError, Exception) as e:
         print(f"archive_shipped_data error: {e}")
+=======
+    """归档发货复核记录到 shipping_history。
+
+    注意：DATETIME 列必须保持 NaT/None（to_sql 会写 NULL），不能填空字符串，
+    否则 MySQL 严格模式会整批拒绝。归档失败时向上抛出，由调用方决定是否阻断业务。
+    """
+    current_month = datetime.now().strftime("%Y_%m")
+    df_shipped = df_shipped.copy()
+    df_shipped['archive_month'] = current_month
+    date_cols = ["预计入库时间", "更新时间"]
+    for dt_col in date_cols:
+        if dt_col in df_shipped.columns:
+            df_shipped[dt_col] = pd.to_datetime(df_shipped[dt_col], errors="coerce")
+    engine = get_engine()
+    with engine.begin() as conn:
+        if not _has_column(conn, "shipping_history", "合同备注"):
+            conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
+        if not _has_column(conn, "shipping_history", "合同号"):
+            conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
+        target_cols = [
+            row[0] for row in conn.execute(text(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "AND TABLE_NAME = 'shipping_history'"
+            )).fetchall()
+        ]
+    df_shipped = df_shipped[[col for col in target_cols if col in df_shipped.columns]]
+    # 只对非日期列填空字符串；日期列留 NaT，交给 to_sql 写成 NULL
+    present_date_cols = [c for c in date_cols if c in df_shipped.columns]
+    text_cols = [c for c in df_shipped.columns if c not in present_date_cols]
+    if text_cols:
+        df_shipped[text_cols] = df_shipped[text_cols].fillna("")
+    df_shipped.to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
+    logger.info("archive_shipped_data 归档 %s 行", len(df_shipped))
+>>>>>>> origin/main
 
 
 def get_import_staging():

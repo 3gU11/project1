@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 11:33:12 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
@@ -514,3 +515,5 @@ Error: read ECONNRESET
 16:55:41 [vite] ws proxy socket error:
 Error: read ECONNRESET
     at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+=======
+>>>>>>> origin/main

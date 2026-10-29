@@ -7,7 +7,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode, notifications
+from api.routes import contract_drafts
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,11 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def on_startup():
+    try:
+        from contract_bridge.worker import worker_loop
+        app.state.contract_bridge_task = asyncio.create_task(worker_loop())
+    except Exception as e:
+        logger.warning("contract bridge worker not started: %s", e)
     from database import init_mysql_tables_v2
     try:
         result = init_mysql_tables_v2()
@@ -50,16 +56,58 @@ async def on_startup():
         app.state.watch_finished_goods_task = asyncio.create_task(watch_finished_goods_db())
     except Exception as e:
         logger.warning("finished goods db watch worker not started: %s", e)
+    try:
+        app.state.snapshot_heartbeat_task = asyncio.create_task(cloud_snapshot_heartbeat_loop())
+    except Exception as e:
+        logger.warning("snapshot heartbeat worker not started: %s", e)
+    try:
+        from v8_sync.scheduler import run_startup_sync, run_sync_loop
+
+        async def _v8_sync_bootstrap() -> None:
+            # 启动时先补一次当天机台快照（生成 + 入 outbox），随后进入周期循环。
+            try:
+                result = await run_startup_sync()
+                app.state.v8_sync_startup_result = result
+                logging.getLogger("uvicorn.error").info(
+                    "V8 sync bridge startup result=%s event_id=%s",
+                    (result or {}).get("status"),
+                    (result or {}).get("event_id", ""),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("V8 sync startup failed: %s", exc)
+            await run_sync_loop()
+
+        app.state.v8_sync_task = asyncio.create_task(_v8_sync_bootstrap())
+    except Exception as e:
+        logger.warning("V8 sync worker not started: %s", e)
 
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    contract_task = getattr(app.state, "contract_bridge_task", None)
+    if contract_task:
+        contract_task.cancel()
+        try:
+            await contract_task
+        except asyncio.CancelledError:
+            pass
+
     task = getattr(app.state, "cloud_sync_worker_task", None)
     if task:
         task.cancel()
         try:
             await task
+        except asyncio.CancelledError:
+            pass
+
+    v8_sync_task = getattr(app.state, "v8_sync_task", None)
+    if v8_sync_task:
+        v8_sync_task.cancel()
+        try:
+            await v8_sync_task
         except asyncio.CancelledError:
             pass
 
@@ -87,6 +135,34 @@ async def on_shutdown():
         except asyncio.CancelledError:
             pass
 
+    heartbeat_task = getattr(app.state, "snapshot_heartbeat_task", None)
+    if heartbeat_task:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def cloud_snapshot_heartbeat_loop() -> None:
+    """按固定周期推送库存快照：即使库存无变化也刷新云端回执，满足 5 分钟同步监控。"""
+    interval = max(60, int(os.getenv("CLOUD_SNAPSHOT_INTERVAL_SECONDS", "300") or "300"))
+    while True:
+        try:
+            from crud.cloud_dealer_order_sync import sync_wechat_batch_summary_to_cloud
+            result = await asyncio.to_thread(sync_wechat_batch_summary_to_cloud, "auto")
+            logger.info("cloud snapshot heartbeat pushed: rows=%s", (result or {}).get("pushed_rows"))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("cloud snapshot heartbeat failed: %s", exc)
+            try:
+                from crud.sync_channels import record_channel_failure
+                record_channel_failure("factory-snapshot", exc)
+            except Exception:
+                pass
+        await asyncio.sleep(interval)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -106,6 +182,7 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(inventory.router, prefix="/api/v1/inventory", tags=["Inventory"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(planning.router, prefix="/api/v1/planning", tags=["Planning"])
+app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["Notifications"])
 app.include_router(planning.internal_router, prefix="/internal/planning", tags=["Internal"])
 app.include_router(logs.router, prefix="/api/v1/logs", tags=["Logs"])
 app.include_router(traceability.router, prefix="/api/v1/traceability", tags=["Traceability"])
@@ -113,6 +190,7 @@ app.include_router(model_dictionary.router, prefix="/api/v1/model-dictionary", t
 app.include_router(roles.router, prefix="/api/v1/roles", tags=["Roles"])
 app.include_router(sandbox.router, prefix="/api/v1/sandbox", tags=["Sandbox"])
 app.include_router(dealer_orders.router, prefix="/api/v1/dealer-orders", tags=["DealerOrders"])
+app.include_router(contract_drafts.router, prefix="/api/v1/contract-drafts", tags=["ContractDrafts"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(repair_identity.router, prefix="/api/v1/repair-identity", tags=["RepairIdentity"])
 app.include_router(repair_catalog.router, prefix="/api/v1/repair-model-components", tags=["RepairCatalog"])

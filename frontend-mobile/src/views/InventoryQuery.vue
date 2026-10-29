@@ -191,6 +191,7 @@ const countTitle = computed(() => {
 })
 const visibleList = computed(() => {
   let list = inventoryStore.list
+<<<<<<< ours
   if (isAfterSales.value) {
     // 售后扫码任务只处理尚未入库的机台；已入库记录不应继续占用待处理数量。
     // 线上已配货的机台状态会变成待发货，也要保留在拍照列表中。
@@ -198,6 +199,16 @@ const visibleList = computed(() => {
     return list
   }
   if (isProd.value) {
+||||||| base
+  if (isProd.value || isAfterSales.value) {
+=======
+  if (isAfterSales.value) {
+    // 售后扫码任务只处理尚未入库的机台；已入库记录不应继续占用待处理数量。
+    list = list.filter((item) => item.status.includes('待入库'))
+    return list
+  }
+  if (isProd.value) {
+>>>>>>> theirs
     if (onlyShippingReview.value) {
       list = list.filter((item) => item.status.includes('待发货'))
     }

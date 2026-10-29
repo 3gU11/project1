@@ -1,7 +1,7 @@
 <template>
   <div class="layout">
     <div class="layout__content">
-      <router-view />
+      <router-view :key="viewKey" />
     </div>
 
     <van-tabbar route safe-area-inset-bottom>
@@ -19,13 +19,16 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { startInventorySync, stopInventorySync } from '@/utils/inventorySync'
 
 const userStore = useUserStore()
+const route = useRoute()
+const viewKey = computed(() => `${route.fullPath}:${String(userStore.userInfo?.role || '').trim().toLowerCase()}`)
 
 const tabbarItems = computed(() => {
-  const role = userStore.userInfo?.role
+  const role = String(userStore.userInfo?.role || '').trim()
 
   if (role === 'LineOperator') {
     return [
@@ -62,7 +65,10 @@ const tabbarItems = computed(() => {
   ]
 })
 
-onMounted(() => startInventorySync(userStore.token))
+onMounted(async () => {
+  await userStore.refreshUser()
+  startInventorySync(userStore.token)
+})
 onBeforeUnmount(stopInventorySync)
 </script>
 

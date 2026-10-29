@@ -78,7 +78,7 @@
             <div class="c status">{{ row['状态'] || '-' }}</div>
             <div class="c loc">{{ row['Location_Code'] || '-' }}</div>
             <div class="c order">{{ row['占用订单号'] || '-' }}</div>
-            <div class="c note">{{ row['合同备注'] || '-' }}</div>
+            <div class="c note">{{ singleLineOrderRemark(row['合同备注']) || '-' }}</div>
             <div class="c time">{{ row['更新时间'] || '-' }}</div>
           </div>
         </template>
@@ -133,6 +133,7 @@ import { apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { normalizeModelName } from '../utils/modelOrder'
 import { productionGroupOfCategory } from '../utils/sandboxCategory'
+import { singleLineOrderRemark } from '../utils/orderNotes'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type MessageResponse = { message?: string }
 

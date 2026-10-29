@@ -1,5 +1,6 @@
 import { buildInventoryIndex, filterInventoryRows } from './inventoryFilter'
-import { compareModels, isModelInDictionary } from './modelOrder'
+import { hasHighHint } from './heightened'
+import { compareModels, isModelInDictionary, normalizeModelName } from './modelOrder'
 import { getInventoryLifecycleStatus, isMachineBound, isPendingInbound } from './inventoryState'
 
 export type ModelInventorySummary = {
@@ -33,16 +34,16 @@ export const getActiveInventoryRows = (rows: any[]) => {
 export const buildModelInventorySummary = (rows: any[]): ModelInventorySummary[] => {
   const map = new Map<string, ModelInventorySummary>()
   for (const row of rows) {
-    const model = String(row['机型'] || '未知')
+    // 机型严格对齐机型字典：统一成字典基础机型，加高只体现在「加高」列。
+    const model = normalizeModelName(row['机型'] || '未知')
     if (!isModelInDictionary(model)) continue
     if (!map.has(model)) map.set(model, { 机型: model, 库存中: 0, 待入库: 0, 已绑定: 0, 全部: 0, 加高: 0 })
     const hit = map.get(model)!
     const status = getInventoryLifecycleStatus(row)
-    const highHint = `${model}|${String(row['合同备注'] || '')}`
     if (status.startsWith('库存中')) hit.库存中 += 1
     if (isPendingInbound(row)) hit.待入库 += 1
     if (isMachineBound(row)) hit.已绑定 += 1
-    if (highHint.includes('加高')) hit.加高 += 1
+    if (hasHighHint(row['机型'], row['合同备注'])) hit.加高 += 1
     hit.全部 += 1
   }
   return Array.from(map.values())

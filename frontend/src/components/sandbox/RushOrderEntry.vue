@@ -58,6 +58,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage } from 'element-plus'
 import { useRushStore } from '../../stores/useSandboxRushStore'
 import { MODEL_COLORS } from '../../utils/sandboxModelType'
+import { hasHighHint } from '../../utils/heightened'
 import * as sandboxApi from '../../services/sandboxApi'
 import { getApiErrorMessage } from '../../utils/request'
 
@@ -104,7 +105,7 @@ async function autoInsert(order: any) {
     return
   }
 
-  const isHigh = String(order?.remark || '').includes('加高')
+  const isHigh = hasHighHint(order?.remark)
   const family = rushModel.replace(/加高$/, '').replace(/标准$/, '')
 
   try {

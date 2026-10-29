@@ -23,7 +23,8 @@ describe('inventoryFilter performance', () => {
     const indexed = buildInventoryIndex(rows)
     const t0 = performance.now()
     const result = filterInventoryRows(indexed, {
-      selectedModels: ['FH-260C(加高)'],
+      // 机型严格对齐机型字典：筛选值用字典基础机型，加高只作为规格属性
+      selectedModels: ['FH-260C'],
       statusFilter: '库存中',
       searchQuery: 'SN-1',
       highOnly: true,

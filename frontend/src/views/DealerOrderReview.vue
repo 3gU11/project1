@@ -2,13 +2,22 @@
   <div class="dealer-review-page">
     <PageHeader title="经销商订单审核">
       <template #actions>
-        <el-button :loading="syncing" @click="syncCloudOrders">同步云端</el-button>
-        <el-button :loading="inventorySyncing" @click="syncCloudInventory">同步库存到云端</el-button>
-        <el-button :loading="completedSyncing" @click="syncCompletedCloud">同步完成状态</el-button>
+        <el-button :loading="syncing" @click="syncCloudOrders">立即拉取订单</el-button>
+        <el-button :loading="inventorySyncing" @click="syncCloudInventory">推送库存快照</el-button>
+        <el-button :loading="machineSyncing" @click="syncMachineSnapshot">机台快照同步</el-button>
+        <el-button @click="openSyncChannels">同步通道</el-button>
         <el-button type="primary" :loading="loading" @click="loadOrders">刷新</el-button>
       </template>
     </PageHeader>
 
+    <ContractDraftReview
+      ref="contractDraftReview"
+      :confirm-order-approve="approveContractReviewOrder"
+      :confirm-order-reject="rejectContractReviewOrder"
+      :can-approve-order="!!contractReviewOrder && canApprove(contractReviewOrder)"
+      @done="onContractReviewDone"
+      @approve-order="onApproveWithoutContract"
+    />
     <div v-if="cloudSyncStatus.pending || cloudSyncStatus.failed" class="cloud-sync-strip">
       <span>Cloud pending: <strong>{{ cloudSyncStatus.pending }}</strong></span>
       <span>Failed: <strong :class="{ danger: cloudSyncStatus.failed > 0 }">{{ cloudSyncStatus.failed }}</strong></span>
@@ -28,15 +37,15 @@
         @clear="loadOrders"
       />
       <el-radio-group v-model="filters.status" class="status-tabs" @change="onStatusChange">
-        <el-radio-button label="">全部订单</el-radio-button>
-        <el-radio-button label="todo">待审核</el-radio-button>
-        <el-radio-button label="approved">已通过</el-radio-button>
-        <el-radio-button label="contracted">已转合同</el-radio-button>
-        <el-radio-button label="partial_allocated">部分配货</el-radio-button>
-        <el-radio-button label="allocated">已配货</el-radio-button>
-        <el-radio-button label="rejected">已驳回</el-radio-button>
-        <el-radio-button label="cancelled">已取消</el-radio-button>
-        <el-radio-button label="completed">已完成</el-radio-button>
+        <el-radio-button value="">全部订单</el-radio-button>
+        <el-radio-button value="todo">待审核</el-radio-button>
+        <el-radio-button value="approved">已通过</el-radio-button>
+        <el-radio-button value="contracted">已转合同</el-radio-button>
+        <el-radio-button value="partial_allocated">部分配货</el-radio-button>
+        <el-radio-button value="allocated">已配货</el-radio-button>
+        <el-radio-button value="rejected">已驳回</el-radio-button>
+        <el-radio-button value="cancelled">已取消</el-radio-button>
+        <el-radio-button value="completed">已完成</el-radio-button>
       </el-radio-group>
       <el-button @click="loadOrders">查询</el-button>
     </div>
@@ -63,8 +72,10 @@
           <el-tag :type="statusMeta(row).type">{{ statusMeta(row).text }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="regional_manager_name" label="经销商" width="90" show-overflow-tooltip />
-      <el-table-column prop="customer_name" label="客户名" min-width="390" show-overflow-tooltip />
+      <el-table-column prop="dealer_name" label="经销商" width="90" show-overflow-tooltip />
+      <el-table-column prop="customer_name" label="客户名" min-width="390" show-overflow-tooltip>
+        <template #default="{ row }">{{ customerDisplay(row) }}</template>
+      </el-table-column>
       <el-table-column prop="model" label="机型明细" min-width="150" show-overflow-tooltip />
       <el-table-column prop="batch_no" label="批次/来源" width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ displayBatch(row.batch_no, row.inventory_type) }}</template>
@@ -86,12 +97,20 @@
       <el-table-column prop="remark" label="原备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="extra_remark" label="附加备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="ERMQ" label="需改数量" width="80" align="center" />
-      <el-table-column label="操作" width="260" align="center" fixed="right">
+      <el-table-column label="操作" width="300" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
-            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="approveOrder(row)">通过</el-button>
+            <el-button size="small" type="success" @click.stop="openContractReview(row)">
+              {{ reviewButtonLabel(row) }}
+            </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
-            <el-button size="small" type="warning" :disabled="!canConvertDealerOrder(row)" @click.stop="openConvertDialog(row._order || row)">
+            <el-button
+              size="small"
+              type="warning"
+              :disabled="!canConvertDealerOrder(row)"
+              :title="canConvertDealerOrder(row) ? '' : '请先审核通过后再转合同'"
+              @click.stop="openConvertDialog(row._order || row)"
+            >
               转合同
             </el-button>
           </div>
@@ -118,6 +137,11 @@
           <span>订单号</span><strong>{{ selectedOrder.order_no }}</strong>
           <span>经销商</span><strong>{{ selectedOrder.dealer_name || '-' }}</strong>
           <span>客户</span><strong>{{ selectedOrder.customer_name || '-' }}</strong>
+          <span>地址</span><strong>{{ selectedOrder.delivery_address || '-' }}</strong>
+          <span>客户名（地址合并）</span><strong>{{ customerDisplay(selectedOrder) }}</strong>
+          <span>办事处</span><strong>{{ selectedOrder.office_name || '-' }}</strong>
+          <span>办事处联系人</span><strong>{{ selectedOrder.office_contact || '-' }}</strong>
+          <span>办事处联系方式</span><strong>{{ selectedOrder.office_phone || '-' }}</strong>
           <span>联系人</span><strong>{{ selectedOrder.contact_name || '-' }}</strong>
           <span>电话</span><strong>{{ selectedOrder.contact_phone || '-' }}</strong>
           <span>当前状态</span><strong>{{ statusMeta(selectedOrder).text }}</strong>
@@ -137,7 +161,8 @@
           <el-table-column prop="allocated_qty" label="已配" width="80" align="right" />
           <el-table-column label="可用" width="90" align="right">
             <template #default="{ row }">
-              <span :class="{ danger: Number(row.available_qty || 0) < Number(row.quantity || 0) - Number(row.allocated_qty || 0) }">
+              <span v-if="row.is_preorder">无货预订</span>
+              <span v-else :class="{ danger: Number(row.available_qty || 0) < Number(row.quantity || 0) - Number(row.allocated_qty || 0) }">
                 {{ row.available_qty ?? '-' }}
               </span>
             </template>
@@ -179,9 +204,16 @@
         <div class="note-box">{{ selectedOrder.review_note || '-' }}</div>
 
         <div class="drawer-actions">
-          <el-button :disabled="!canApprove(selectedOrder)" @click="approveOrder(selectedOrder)">通过</el-button>
+          <el-button @click="openContractReview(selectedOrder)">
+            {{ reviewButtonLabel(selectedOrder) }}
+          </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
-          <el-button type="warning" :disabled="!canConvertDealerOrder(selectedOrder)" @click="openConvertDialog(selectedOrder)">转合同</el-button>
+          <el-button
+            type="warning"
+            :disabled="!canConvertDealerOrder(selectedOrder)"
+            :title="canConvertDealerOrder(selectedOrder) ? '' : '请先审核通过后再转合同'"
+            @click="openConvertDialog(selectedOrder)"
+          >转合同</el-button>
         </div>
       </template>
     </el-drawer>
@@ -210,10 +242,6 @@
           <div class="ops-label">代理商</div>
           <el-input v-model="convertForm.agent" />
         </div>
-        <div>
-          <div class="ops-label">急单</div>
-          <el-switch v-model="convertForm.isRush" active-text="是" inactive-text="否" />
-        </div>
       </div>
 
       <el-divider />
@@ -237,6 +265,11 @@
         <el-table-column label="加高" width="70">
           <template #default="scope">
             <el-checkbox v-model="scope.row.high" />
+          </template>
+        </el-table-column>
+        <el-table-column label="路径" width="170">
+          <template #default="scope">
+            <el-tag :type="convertPathTagType(scope.row)" size="small">{{ convertLinePathLabel(scope.row) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="原备注" min-width="120">
@@ -274,19 +307,66 @@
       </el-upload>
 
       <div class="save-mode-section">
-        <div class="ops-label">保存方式</div>
-        <div class="save-mode-hint">
-          {{ isRushActive ? '进入生产看板（参与急单排产）' : '进入沙盘（参与老板计划排产）' }}或使用现货（直接置为已规划）。
-        </div>
-        <div v-if="!convertCanUseSpot" class="save-mode-blocked">当前"使用现货"不可用：{{ convertSpotBlockReason }}</div>
+        <div class="ops-label">路径（按明细批次/来源自动判定）</div>
+        <div class="save-mode-hint">按去向生成合同：现货行合成一张「已规划」合同（到「销售订单 → 导入已规划合同」建单后在「订单配货」人工分配机台）；在制指定批次行单独一张合同，自动执行「按批次规划并配货」预占机台（订单待二次确认，失败回退已规划人工配货）；无货预订行单独一张「待规划」合同并进入沙盘排产。混合订单最多生成三张合同。</div>
       </div>
 
       <template #footer>
         <el-button @click="convertDialogVisible = false">取消</el-button>
-        <el-button type="warning" :disabled="!convertCanUseSpot" :loading="convertSaving" @click="submitConvert('spot')">使用现货</el-button>
-        <el-button type="primary" :loading="convertSaving" @click="submitConvert('sandbox')">
-          {{ isRushActive ? '进入生产看板' : '进入沙盘' }}
-        </el-button>
+        <el-button type="primary" :loading="convertSaving" @click="submitConvert()">确认转合同</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="channelsDialogVisible" title="同步通道" width="980px" @closed="stopChannelsAutoRefresh">
+      <div class="channels-hint">
+        与云端「同步监控 → V8 桥接上传」同一套通道口径；云端监控仍是最终判据，这里展示本地最近成功/失败与待发送事件。
+        <span v-if="channelsServerTime">（本地时间 {{ channelsServerTime }}）</span>
+      </div>
+      <el-table v-loading="channelsLoading" :data="syncChannels" size="small" border>
+        <el-table-column prop="label" label="同步通道" min-width="150">
+          <template #default="scope">
+            <div>{{ scope.row.label }}</div>
+            <div class="channel-desc">{{ scope.row.description }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="direction" label="方向" width="150" />
+        <el-table-column prop="interval_label" label="设定周期" width="90" align="center" />
+        <el-table-column label="最近成功" width="170">
+          <template #default="scope">
+            <span>{{ scope.row.last_success_at || '-' }}</span>
+            <el-tag v-if="scope.row.last_trigger === 'manual'" size="small" type="info" class="channel-trigger">手动</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="expected_next_at" label="预计下次" width="170">
+          <template #default="scope">{{ scope.row.expected_next_at || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="偏差" width="110" align="center">
+          <template #default="scope">
+            <span v-if="scope.row.overdue_seconds > 0" class="channel-overdue">超期 {{ formatOverdue(scope.row.overdue_seconds) }}</span>
+            <span v-else>未超期</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110" align="center">
+          <template #default="scope">
+            <el-tag :type="channelStateTagType(scope.row.state)" size="small">{{ scope.row.state_label }}</el-tag>
+            <span v-if="scope.row.failed > 0" class="channel-failed">失败 {{ scope.row.failed }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" align="center">
+          <template #default="scope">
+            <el-button
+              v-if="scope.row.manual_action"
+              size="small"
+              :loading="channelActionLoading === scope.row.manual_action"
+              @click="runChannelAction(scope.row.manual_action)"
+            >立即同步</el-button>
+            <span v-else class="channel-desc">自动触发</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="loadSyncChannels">刷新</el-button>
+        <el-button @click="channelsDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -298,10 +378,14 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
-import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
-import { isModelInDictionary, normalizeModelName } from '../utils/modelOrder'
+import ContractDraftReview from '../components/ContractDraftReview.vue'
+import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
+import { isModelInDictionary } from '../utils/modelOrder'
+import { normalizeDealerOrderItems, convertLinePathLabel, isPreorderLine, type ConvertItemRow } from '../utils/dealerOrderItems'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
+import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
+const contractDraftReview = ref<InstanceType<typeof ContractDraftReview>>()
 
 type DealerOrder = {
   id: number
@@ -313,6 +397,10 @@ type DealerOrder = {
   dealer_phone?: string
   regional_manager_name?: string
   customer_name?: string
+  delivery_address?: string
+  office_name?: string
+  office_contact?: string
+  office_phone?: string
   contact_name?: string
   contact_phone?: string
   model: string
@@ -339,6 +427,8 @@ type DealerOrder = {
   summary_qty?: number
   occupied_qty?: number
   available_qty?: number
+  route?: 'spot' | 'batch' | 'preorder'
+  is_preorder?: boolean
   items?: DealerOrder[]
 }
 
@@ -375,12 +465,41 @@ type CloudSyncStatus = {
   }>
 }
 
+type SyncChannel = {
+  key: string
+  label: string
+  direction: string
+  description: string
+  interval_seconds: number | null
+  interval_label: string
+  last_success_at: string | null
+  last_trigger: string | null
+  last_error: string | null
+  pending: number
+  failed: number
+  manual_action: string | null
+  expected_next_at: string | null
+  overdue_seconds: number
+  state: string
+  state_label: string
+}
+
+type SyncChannelsResponse = {
+  server_time: string
+  channels: SyncChannel[]
+}
+
 const loading = ref(false)
 const syncing = ref(false)
 const inventorySyncing = ref(false)
-const completedSyncing = ref(false)
+const machineSyncing = ref(false)
 const retryingCloudSync = ref(false)
 const cloudSyncStatus = ref<CloudSyncStatus>({ pending: 0, failed: 0, recent_failed: [] })
+const channelsDialogVisible = ref(false)
+const channelsLoading = ref(false)
+const channelsServerTime = ref('')
+const syncChannels = ref<SyncChannel[]>([])
+const channelActionLoading = ref('')
 const orders = ref<DealerOrder[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -481,6 +600,7 @@ const statusMeta = (rowOrStatus: DealerOrder | string) => {
 }
 
 const displayBatch = (batchNo?: string, inventoryType?: string) => {
+  if (isPreorderLine({ batch_no: batchNo, inventory_type: inventoryType })) return '无货预订'
   if (String(inventoryType || '').trim().toLowerCase() === 'finished') return '库存中'
   if (!batchNo) return '-'
   if (batchNo === 'FINISHED-STOCK') return '库存中'
@@ -489,7 +609,7 @@ const displayBatch = (batchNo?: string, inventoryType?: string) => {
 
 const hasInsufficientItem = (row: DealerOrder) => {
   const items = row.items?.length ? row.items : [row]
-  return items.some((item) => Number(item.available_qty || 0) < Number(item.quantity || 0) - Number(item.allocated_qty || 0))
+  return items.some((item) => !item.is_preorder && Number(item.available_qty || 0) < Number(item.quantity || 0) - Number(item.allocated_qty || 0))
 }
 
 const hasFactoryRemark = (row: DealerOrder) => {
@@ -501,7 +621,13 @@ const hasFactoryRemark = (row: DealerOrder) => {
 const isFactoryPending = (row: DealerOrder) => Number(row.factory_pending || 0) === 1 && !['complete', 'completed'].includes(row.status)
 const canApprove = (row: DealerOrder) => isFactoryPending(row) || row.status === 'pending'
 const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemark(row) : ['pending', 'approved'].includes(row.status))
-const canConvertDealerOrder = (row: DealerOrder) => ['pending', 'approved'].includes(String(row.status || '').trim()) && !isFactoryPending(row)
+const canConvertDealerOrder = (row: DealerOrder) => String(row.status || '').trim() === 'approved' && !isFactoryPending(row)
+
+// 待审核显示"预览并审批"，其它状态一律只读查看合同附件。
+const reviewButtonLabel = (row: DealerOrder) => {
+  if (isFactoryPending(row)) return '通过'
+  return canApprove(row) ? '预览并审批' : '查看合同'
+}
 
 const modelDictionaryStore = useModelDictionaryStore()
 const modelOptions = computed(() => modelDictionaryStore.rows
@@ -510,22 +636,21 @@ const modelOptions = computed(() => modelDictionaryStore.rows
   .sort((a, b) => a.sort_order - b.sort_order)
   .map((row) => row.model_name))
 const router = useRouter()
-const isRushActive = computed(() => convertForm.isRush)
-type ConvertItem = { model: string; qty: number; high: boolean; rowNote: string; remark: string; extraRemark: string; ermq: number }
 const convertDialogVisible = ref(false)
 const convertSaving = ref(false)
-const convertCanUseSpot = ref(true)
-const convertSpotBlockReason = ref('')
 const convertForm = reactive({
   contractNo: '',
   deliveryDate: '',
   customer: '',
   agent: '',
-  isRush: false,
-  items: [] as ConvertItem[],
+  items: [] as ConvertItemRow[],
   contractNote: '',
   sourceOrderNo: '',
 })
+
+/** 路径标签配色：库存行 success，批次行 info。 */
+const convertPathTagType = (item?: { batch_no?: string; inventory_type?: string } | null) =>
+  convertLinePathLabel(item).startsWith('库存') ? 'success' : 'info'
 
 const convertPickedFiles = ref<File[]>([])
 const convertUploadRef = ref<any>(null)
@@ -548,38 +673,16 @@ const fetchNextContractId = async () => {
   return String(res.contract_no || '').trim()
 }
 
-const isRushHint = (order: DealerOrder) => {
-  const remark = String(order.remark || '').toLowerCase()
-  if (remark.includes('急') || remark.includes('加急')) return true
-  const delivery = String(order.delivery_date || '').trim()
-  if (!delivery) return false
-  const days = (new Date(delivery).getTime() - Date.now()) / 86400000
-  return days <= 3
-}
-
-const normalizeDealerOrderItems = (order: DealerOrder) => {
-  const source = order.items?.length ? order.items : [order]
-  return source
-    .map((item) => {
-      const model = String(item.model || '').trim()
-      const qty = Math.max(1, Number(item.quantity || 1))
-      const remark = String(item.remark || '').trim()
-      const extraRemark = String(item.factory_remark || item.extra_remark || '').trim()
-      const ermq = Number(item.ERMQ || 0)
-      const high = model.includes('加高') || remark.includes('加高') || extraRemark.includes('加高')
-      const rowNote = [
-        remark ? `[备注]${remark}` : '',
-        extraRemark ? `[附加]${extraRemark}` : '',
-        ermq > 0 ? `[改数]${ermq}` : '',
-      ].filter(Boolean).join(' ')
-      return { model, qty, high, rowNote, remark, extraRemark, ermq }
-    })
-    .filter((item) => item.model)
+const customerDisplay = (order: DealerOrder | Record<string, any>) => {
+  const customer = String((order as any).customer_name || '').trim()
+  const address = String((order as any).delivery_address || '').trim()
+  if (!address) return customer || '-'
+  return `${address}（${customer || '-'}）`
 }
 
 const openConvertDialog = async (order: DealerOrder) => {
   if (!canConvertDealerOrder(order)) {
-    ElMessage.warning('只有待审核或已通过的经销商订单可以转合同')
+    ElMessage.warning('只有审核通过的经销商订单可以转合同，请先在「预览并审批」中完成审核')
     return
   }
   const rows = normalizeDealerOrderItems(order)
@@ -591,12 +694,9 @@ const openConvertDialog = async (order: DealerOrder) => {
   convertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   convertForm.customer = String(order.customer_name || '').trim()
   convertForm.agent = String(order.contact_name || '').trim()
-  convertForm.isRush = isRushHint(order)
   convertForm.items = rows
   convertForm.contractNote = String(order.review_note || order.regional_review_note || '').trim()
   convertForm.sourceOrderNo = String(order.order_no || '').trim()
-  convertCanUseSpot.value = true
-  convertSpotBlockReason.value = ''
   try {
     convertForm.contractNo = await fetchNextContractId()
   } catch (err) {
@@ -609,41 +709,6 @@ const openConvertDialog = async (order: DealerOrder) => {
   convertUploadRef.value?.clearFiles()
 
   convertDialogVisible.value = true
-}
-
-const getInStockCountByModel = async () => {
-  const inventoryRows = await apiGetAll<any>('/inventory/')
-  const map = new Map<string, number>()
-  for (const row of inventoryRows) {
-    const model = normalizeModelName(row['机型'])
-    const status = String(row['状态'] || '').trim()
-    const occupied = String(row['占用订单号'] || '').trim()
-    if (!model || !status.startsWith('库存中') || occupied) continue
-    const high = [row['机型'], row['批次号'], row['合同备注']].some((value) => String(value || '').includes('加高'))
-    const key = `${model}||${high ? 'high' : 'normal'}`
-    map.set(key, (map.get(key) || 0) + 1)
-  }
-  return map
-}
-
-const evaluateSpotModeAvailability = async (rows: Array<{ model: string; qty: number; high?: boolean }>) => {
-  const requiredByModel = new Map<string, number>()
-  for (const row of rows) {
-    const model = normalizeModelName(row.model)
-    if (!model) continue
-    const key = `${model}||${row.high ? 'high' : 'normal'}`
-    requiredByModel.set(key, (requiredByModel.get(key) || 0) + Number(row.qty || 0))
-  }
-  const stockByModel = await getInStockCountByModel()
-  const blocked: string[] = []
-  for (const [key, required] of requiredByModel.entries()) {
-    const [model, variant] = key.split('||')
-    const label = `${model}${variant === 'high' ? '（加高）' : '（普通）'}`
-    const inStock = Number(stockByModel.get(key) || 0)
-    if (inStock <= 0) blocked.push(`${label}(无机台)`)
-    else if (inStock < required) blocked.push(`${label}(库存${inStock} < 需求${required})`)
-  }
-  return { canUseSpot: blocked.length === 0, reason: blocked.length === 0 ? '' : blocked.join('，') }
 }
 
 const loadPreview = async (orderNo: string) => {
@@ -777,7 +842,7 @@ const retryCloudSync = async () => {
 
 const syncCloudOrders = async () => {
   syncing.value = true
-  ElMessage.info('正在同步云端订单，请稍候…')
+  ElMessage.info('正在拉取云端订单，请稍候…')
   try {
     const res = await apiPost<{
       inserted?: number
@@ -791,15 +856,16 @@ const syncCloudOrders = async () => {
       max_pages: 20,
     }, { timeout: 120_000 })
     const prunedText = Number(res.pruned_cloud_deleted_orders || 0) > 0 ? `，清理 ${res.pruned_cloud_deleted_orders}` : ''
-    ElMessage.success(`同步完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}${prunedText}`)
+    ElMessage.success(`拉取完成：新增 ${res.inserted || 0}，更新 ${res.updated || 0}，跳过 ${res.skipped || 0}${prunedText}`)
     if (Number(res.factory_pending_orders || 0) > 0) filters.status = 'todo'
     page.value = 1
     selectedOrderNo.value = ''
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadCloudSyncStatus()
     await loadOrders()
+    if (channelsDialogVisible.value) void loadSyncChannels()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '同步云端失败')
+    ElMessage.error(getApiErrorMessage(err) || '拉取云端订单失败')
   } finally {
     syncing.value = false
   }
@@ -807,41 +873,101 @@ const syncCloudOrders = async () => {
 
 const syncCloudInventory = async () => {
   inventorySyncing.value = true
-  ElMessage.info('正在同步库存到云端，请稍候…')
+  ElMessage.info('正在推送库存快照，请稍候…')
   try {
-    const res = await apiPost<{ local_rows?: number; pushed_rows?: number }>('/dealer-orders/sync-wechat-batch-summary', {}, { timeout: 120_000 })
-    ElMessage.success(`库存同步完成：本地 ${res.local_rows || 0} 行，已推送 ${res.pushed_rows || 0} 行`)
+    const res = await apiPost<{ local_rows?: number; pushed_rows?: number }>('/dealer-orders/sync-wechat-batch-summary', {}, { timeout: 180_000 })
+    ElMessage.success(`库存快照已推送：本地 ${res.local_rows || 0} 行，推送 ${res.pushed_rows || 0} 行`)
+    if (channelsDialogVisible.value) void loadSyncChannels()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '同步云端库存失败')
+    ElMessage.error(getApiErrorMessage(err) || '推送库存快照失败')
   } finally {
     inventorySyncing.value = false
   }
 }
 
-const syncCompletedCloud = async () => {
-  completedSyncing.value = true
-  ElMessage.info('正在同步完成状态到云端，请稍候…')
+const syncMachineSnapshot = async () => {
+  machineSyncing.value = true
+  ElMessage.info('正在生成并上传机台快照，请稍候…')
   try {
     const res = await apiPost<{
-      scanned?: number
-      pushed?: number
-      skipped?: number
-      failed?: Array<{ order_no?: string; error?: string }>
-    }>('/dealer-orders/sync-completed-cloud', { limit: 200 }, { timeout: 120_000 })
-    const failed = res.failed?.length || 0
-    if (failed > 0) {
-      ElMessage.warning(`完成状态同步：成功 ${res.pushed || 0}，跳过 ${res.skipped || 0}，失败 ${failed}`)
+      status?: string
+      event_id?: string
+      message?: string
+      event_status?: { status?: string; last_error?: string } | null
+    }>('/dealer-orders/sync-machine-snapshot', {}, { timeout: 180_000 })
+    if (res.event_status?.status === 'failed') {
+      ElMessage.warning(`${res.message || '机台快照已入队'}：${res.event_status.last_error || ''}`)
     } else {
-      ElMessage.success(`完成状态同步：扫描 ${res.scanned || 0}，成功 ${res.pushed || 0}，跳过 ${res.skipped || 0}`)
+      ElMessage.success(res.message || '机台快照同步完成')
     }
+    if (channelsDialogVisible.value) void loadSyncChannels()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '同步完成状态失败')
+    ElMessage.error(getApiErrorMessage(err) || '机台快照同步失败')
   } finally {
-    completedSyncing.value = false
+    machineSyncing.value = false
   }
 }
 
+let channelsTimer: any = null
+
+const loadSyncChannels = async () => {
+  channelsLoading.value = true
+  try {
+    const res = await apiGet<SyncChannelsResponse>('/dealer-orders/sync-channels')
+    syncChannels.value = res.channels || []
+    channelsServerTime.value = res.server_time || ''
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '读取同步通道状态失败')
+  } finally {
+    channelsLoading.value = false
+  }
+}
+
+const openSyncChannels = async () => {
+  channelsDialogVisible.value = true
+  await loadSyncChannels()
+  if (channelsTimer) clearInterval(channelsTimer)
+  channelsTimer = setInterval(() => {
+    if (channelsDialogVisible.value) void loadSyncChannels()
+  }, 30_000)
+}
+
+const stopChannelsAutoRefresh = () => {
+  if (channelsTimer) {
+    clearInterval(channelsTimer)
+    channelsTimer = null
+  }
+}
+
+const runChannelAction = async (action: string) => {
+  channelActionLoading.value = action
+  try {
+    if (action === 'pull-orders') await syncCloudOrders()
+    else if (action === 'push-inventory') await syncCloudInventory()
+    else if (action === 'push-machines') await syncMachineSnapshot()
+  } finally {
+    channelActionLoading.value = ''
+    if (channelsDialogVisible.value) void loadSyncChannels()
+  }
+}
+
+const channelStateTagType = (state: string) => {
+  if (state === 'ok') return 'success'
+  if (state === 'late' || state === 'pending') return 'warning'
+  if (state === 'down' || state === 'failed') return 'danger'
+  return 'info'
+}
+
+const formatOverdue = (seconds: number) => {
+  const value = Number(seconds || 0)
+  if (value >= 86400) return `${(value / 86400).toFixed(1)} 天`
+  if (value >= 3600) return `${(value / 3600).toFixed(1)} 小时`
+  if (value >= 60) return `${Math.round(value / 60)} 分钟`
+  return `${value} 秒`
+}
+
 const approveOrder = async (row: DealerOrder) => {
+  let res: { message?: string; warning?: string }
   try {
     const factoryPending = isFactoryPending(row)
     const note = await ElMessageBox.prompt(factoryPending ? '复审备注（可选）' : '审核备注（可选）', factoryPending ? '新备注复审通过' : '通过订单', {
@@ -851,11 +977,17 @@ const approveOrder = async (row: DealerOrder) => {
       cancelButtonText: '取消',
     })
     const endpoint = factoryPending ? 'extra-review/approve' : 'approve'
-    const res = await apiPost<{ message?: string; warning?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/${endpoint}`, {
+    res = await apiPost<{ message?: string; warning?: string }>(`/dealer-orders/${encodeURIComponent(row.order_no)}/${endpoint}`, {
       note: note.value || '',
     })
-    ElMessage.success(res.warning || res.message || (factoryPending ? '新备注复审通过' : '已通过'))
-    window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  } catch (err: any) {
+    if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '操作失败')
+    return false
+  }
+
+  ElMessage.success(res.warning || res.message || (isFactoryPending(row) ? '新备注复审通过' : '已通过'))
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  try {
     await loadOrders()
     if (selectedOrderNo.value) {
       try {
@@ -864,9 +996,64 @@ const approveOrder = async (row: DealerOrder) => {
         preview.value = null
       }
     }
-  } catch (err: any) {
-    if (err !== 'cancel') ElMessage.error(getApiErrorMessage(err) || '操作失败')
+  } catch {
+    preview.value = null
+    ElMessage.warning('订单已通过，但订单列表刷新失败')
   }
+  return true
+}
+
+// 合同附件审批已并入订单行：点"预览并审批"只加载该订单自己的合同附件。
+const contractReviewOrder = ref<DealerOrder | null>(null)
+
+const openContractReview = async (row: DealerOrder) => {
+  const target = (row as DealerOrderTableRow)._order || row
+  // 新备注复审不是合同审批，沿用原来的直接通过。
+  if (isFactoryPending(target) && canApprove(target)) {
+    await approveOrder(target)
+    return
+  }
+  contractReviewOrder.value = target
+  await contractDraftReview.value?.openForOrder(target.order_no)
+}
+
+const approveContractReviewOrder = async (): Promise<boolean> => {
+  const target = contractReviewOrder.value
+  if (!target) throw new Error('未选择订单')
+  await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/approve`, {
+    note: String(target.remark || ''),
+  })
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  void loadOrders(true)
+  return true
+}
+
+const rejectContractReviewOrder = async (reason: string): Promise<boolean> => {
+  const target = contractReviewOrder.value
+  if (!target) throw new Error('未选择订单')
+  // 订单与合同附件一起驳回；后端会把该订单未归档的草稿同步置为 rejected。
+  await apiPost(`/dealer-orders/${encodeURIComponent(target.order_no)}/reject`, { reason })
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  void loadOrders(true)
+  return true
+}
+
+const onContractReviewDone = async () => {
+  contractReviewOrder.value = null
+  await loadOrders()
+  if (selectedOrderNo.value) {
+    try {
+      await loadPreview(selectedOrderNo.value)
+    } catch {
+      preview.value = null
+    }
+  }
+}
+
+const onApproveWithoutContract = async () => {
+  const target = contractReviewOrder.value
+  contractReviewOrder.value = null
+  if (target) await approveOrder(target)
 }
 
 const rejectOrder = async (row: DealerOrder) => {
@@ -908,9 +1095,16 @@ const rejectOrder = async (row: DealerOrder) => {
   }
 }
 
-type MessageResponse = { message?: string; rush_created?: number; rush_auto_inserted?: number; warning?: string; contract_no?: string }
+type MessageResponse = {
+  message?: string
+  warning?: string
+  contract_no?: string
+  cloud_attachments?: CloudAttachmentSyncSummary
+  order_form_attached_contracts?: string[]
+  contracts?: Array<{ contract_no: string; path: 'auto' | 'batch-plan' | 'batch-plan-fallback' | 'preorder'; status?: '已规划' | '待规划' | '已转订单'; batch_nos: string[]; path_label: string; row_count: number; qty: number; models: string[] }>
+}
 
-const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
+const submitConvert = async () => {
   if (!hasText(convertForm.contractNo) || !hasText(convertForm.customer) || !hasText(convertForm.deliveryDate)) {
     ElMessage.warning('请先完整填写合同号、客户名、要求交期')
     return
@@ -934,20 +1128,6 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
     ElMessage.warning(`以下机型不在字典中：${Array.from(new Set(invalidModels)).join('，')}`)
     return
   }
-  if (saveMode === 'spot') {
-    try {
-      const spotAvailability = await evaluateSpotModeAvailability(validItems)
-      if (!spotAvailability.canUseSpot) {
-        convertCanUseSpot.value = false
-        convertSpotBlockReason.value = spotAvailability.reason
-        ElMessage.warning(`"使用现货"不可用：${spotAvailability.reason}`)
-        return
-      }
-    } catch (err: any) {
-      ElMessage.error(getApiErrorMessage(err) || '校验现货可用机台失败')
-      return
-    }
-  }
 
   convertSaving.value = true
   try {
@@ -956,13 +1136,16 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
       customer_name: convertForm.customer.trim(),
       agent_name: convertForm.agent.trim(),
       delivery_date: convertForm.deliveryDate.trim(),
-      save_mode: saveMode,
-      is_rush: convertForm.isRush,
       items: validItems,
       contract_note: convertForm.contractNote.trim(),
     }
     const res = await apiPost<MessageResponse>(`/dealer-orders/${encodeURIComponent(convertForm.sourceOrderNo)}/convert-to-contract`, payload)
     
+    if ((res as any)?.approval_pending) {
+      ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）')
+      window.dispatchEvent(new Event('workflow-pending-updated'))
+      return
+    }
     // 上传附件（如果有选中文件）
     if (convertPickedFiles.value.length > 0) {
       const contractNoStr = res.contract_no || convertForm.contractNo || ''
@@ -984,27 +1167,28 @@ const submitConvert = async (saveMode: 'sandbox' | 'spot') => {
       }
     }
 
-    const autoInserted = Number(res.rush_auto_inserted || 0)
-    const pendingRushCards = Math.max(0, Number(res.rush_created || 0) - autoInserted)
-    const rushText = [
-      autoInserted > 0 ? `已自动进入沙盘 ${autoInserted} 条` : '',
-      pendingRushCards > 0 ? `已生成急单卡 ${pendingRushCards} 张` : '',
-    ].filter(Boolean).join('，')
-    const modeText = saveMode === 'spot'
-      ? '已按“使用现货”处理（合同状态：已规划）'
-      : (convertForm.isRush ? '已按“进入生产看板”处理（合同状态：待规划）' : '已按“进入沙盘”处理（合同状态：待规划）')
-    ElMessage.success(res.warning || `${res.message || '转合同成功'}，${modeText}${rushText ? `，${rushText}` : ''}`)
+    ElMessage.success(res.warning || res.message || '转合同成功')
+    const cloudAttachmentNotice = buildCloudAttachmentNotice(res.cloud_attachments)
+    if (cloudAttachmentNotice) {
+      if (cloudAttachmentNotice.level === 'warning') ElMessage.warning(cloudAttachmentNotice.text)
+      else ElMessage.success(cloudAttachmentNotice.text)
+    }
     convertDialogVisible.value = false
     window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
     await loadOrders()
-    if (saveMode === 'sandbox') {
-      if (convertForm.isRush) {
-        router.push('/production-kanban')
-      } else {
-        router.push('/prediction-sandbox')
-      }
-    } else if (saveMode === 'spot') {
+    const contractList = res.contracts || []
+    const hasAutoPlannedContract = contractList.some((c) => c.status === '已转订单')
+    const hasPlannedContract = contractList.some((c) => c.status === '已规划')
+    const hasPreorderContract = contractList.some((c) => c.status === '待规划' && c.path === 'preorder')
+    if (hasAutoPlannedContract) {
+      // 在制批次已自动预占，去订单配货完成二次确认。
+      router.push({ path: '/order-allocation' })
+    } else if (hasPlannedContract) {
+      // 已规划合同由业务人员导入后到订单配货人工分配机台。
       router.push({ path: '/sales-orders', query: { tab: 'import' } })
+    } else if (hasPreorderContract) {
+      // 无货预订合同已置待规划，到合同管理查看并进入沙盘排产。
+      router.push({ path: '/contracts' })
     }
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '经销商订单转合同失败')
@@ -1053,6 +1237,7 @@ onUnmounted(() => {
   if (pollTimer) {
     clearInterval(pollTimer)
   }
+  stopChannelsAutoRefresh()
 })
 </script>
 
@@ -1090,6 +1275,33 @@ onUnmounted(() => {
   background: var(--color-gray-50);
   color: var(--color-gray-700);
   font-size: 13px;
+}
+
+.channels-hint {
+  margin-bottom: 10px;
+  color: var(--color-gray-600);
+  font-size: 12px;
+}
+
+.channel-desc {
+  color: var(--color-gray-500);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.channel-trigger {
+  margin-left: 6px;
+}
+
+.channel-overdue {
+  color: #d97706;
+}
+
+.channel-failed {
+  display: block;
+  margin-top: 2px;
+  color: #dc2626;
+  font-size: 12px;
 }
 
 .todo-summary {
@@ -1205,12 +1417,6 @@ onUnmounted(() => {
   color: var(--color-gray-500);
   font-size: 13px;
   margin: 4px 0 8px;
-}
-
-.save-mode-blocked {
-  color: #dc2626;
-  font-size: 13px;
-  margin-bottom: 8px;
 }
 
 .qty-highlight {

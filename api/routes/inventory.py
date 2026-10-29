@@ -34,8 +34,9 @@ from crud.inventory import (
 from utils.cache_adapter import cache
 from utils.model_compatibility import normalize_model_family, production_group_for_family
 from crud.logs import append_log
-from crud.model_dictionary import find_disabled_models, get_model_dictionary, is_model_enabled
+from crud.model_dictionary import find_disabled_models, get_enabled_model_names, get_model_dictionary, is_model_enabled
 from crud.orders import get_orders, revert_to_inbound, save_orders
+from crud.production_cards import restore_shipped_production_cards, retire_shipped_production_cards
 from crud.order_reservations import release_completed_order_reservations
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token
 from api.websockets.manager import manager
@@ -510,14 +511,19 @@ def get_production_queue_summary():
     """
     with get_engine().connect() as conn:
         rows = conn.execute(text(sql)).mappings().all()
+    # 机型严格对齐机型字典：待产机台也按字典基础机型汇总，加高信息不参与这里的分行。
+    enabled_models = set(get_enabled_model_names())
     batches = set()
     models = {}
     for row in rows:
         batches.add(row['batch_id'])
         if row['unit_id'] is None:
             continue
-        item = models.setdefault(row['model'], {
-            'model': row['model'], 'pending': 0, 'ordered': 0, 'batch_ids': set(),
+        model = _normalize_model_for_edit_rule(row['model'])
+        if not model or (enabled_models and model not in enabled_models):
+            continue
+        item = models.setdefault(model, {
+            'model': model, 'pending': 0, 'ordered': 0, 'batch_ids': set(),
         })
         item['pending'] += 1
         item['ordered'] += int(row['ordered'])
@@ -1301,6 +1307,9 @@ def confirm_shipping(
                 return {"message": "所选机台已发货，无需重复确认", "warning": "", "cloud_synced": 0}
             sns_to_ship = [str(row.get("流水号", "") or "").strip() for row in rows_to_ship if str(row.get("流水号", "") or "").strip()]
             conn.execute(update_stmt, {"sns": sns_to_ship, "now_text": now_text})
+            # 在产预占直发的机台发货后，生产看板卡片必须同步完工并释放产线位置，
+            # 否则整批自动完工（依赖入库事件）永远不会触发，卡片会一直显示在产。
+            retire_shipped_production_cards(conn, sns_to_ship, now_text)
         cache.inventory.cache_clear()
         enqueue_wechat_batch_summary_sync("shipping_confirm_inventory")
 
@@ -1356,7 +1365,12 @@ def confirm_shipping(
             if changed:
                 save_orders(orders_df)
 
-        archive_shipped_data(shipped_rows)
+        archive_warning = ""
+        try:
+            archive_shipped_data(shipped_rows)
+        except Exception as archive_exc:
+            logger.exception("发货归档失败")
+            archive_warning = f"发货已生效，但发货归档失败（将影响保修日期查询）：{archive_exc}"
         append_log("正式发货", sns_to_ship, operator=current_operator)
         append_audit_log(
             module="发货复核",
@@ -1366,7 +1380,7 @@ def confirm_shipping(
             user_id=current_user.get("username"),
             username=current_operator,
         )
-        cloud_warning = ""
+        cloud_warning = archive_warning
         cloud_synced = 0
         if impacted_order_ids:
             try:
@@ -1418,6 +1432,13 @@ def revert_shipping(
         if not sns:
             raise HTTPException(status_code=422, detail="请先勾选至少 1 台机台")
         revert_to_inbound(sns, reason="正式发货撤回", operator=current_operator)
+        try:
+            with get_engine().begin() as conn:
+                restore_shipped_production_cards(
+                    conn, sns, datetime.now().strftime("%Y-%m-%d %H:%M")
+                )
+        except Exception as restore_exc:
+            logger.warning("恢复发货撤回机台的生产卡片失败: %s", restore_exc)
         append_audit_log(
             module="发货复核",
             action_type="撤回发货",

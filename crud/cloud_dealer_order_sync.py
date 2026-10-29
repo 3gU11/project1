@@ -1,20 +1,180 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, inspect, text
 
 from crud.dealer_orders import ensure_dealer_order_tables
+from crud.cloud_bridge_auth import signed_headers, snapshot_content_id
 from database import get_engine
 
+BRIDGE_STOCK_STATUS_PREDICATE = "TRIM(COALESCE(`状态`, '')) LIKE '库存中%'"
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 可选购加高只允许默认高度：FR-400G 为 100mm，其余机型为 200mm。
+# 非默认高度（如 8060XS「加高400mm」「加高100mm」）属于特殊加高，只能走合同预订，
+# 不能作为可选购库存同步到云端/小程序，否则会被当成默认 200mm 加高售卖。
+# ---------------------------------------------------------------------------
+HEIGHTENED_DEFAULT_MM = 200
+HEIGHTENED_DEFAULT_MM_BY_MODEL = {"FR-400G": 100}
+
+_HEIGHTENED_SUFFIX_RE = re.compile(r"[（(]\s*加高[^）)]*[）)]", re.IGNORECASE)
+_HEIGHTENED_HEIGHT_RE = re.compile(r"加高\s*(?:到|至|为)?\s*(\d{2,4})", re.IGNORECASE)
+_HEIGHTENED_HEIGHT_BEFORE_RE = re.compile(r"(\d{2,4})\s*(?:mm|毫米)\s*加高", re.IGNORECASE)
+
+
+def _heightened_default_mm(model: Any) -> int:
+    name = _HEIGHTENED_SUFFIX_RE.sub("", str(model or "")).strip().upper()
+    return HEIGHTENED_DEFAULT_MM_BY_MODEL.get(name, HEIGHTENED_DEFAULT_MM)
+
+
+def parse_heightened_height_mm(*remarks: Any) -> int | None:
+    """从合同/订单备注里解析加高高度（mm）；没写具体高度返回 None（按默认高度处理）。"""
+    for remark in remarks:
+        value = str(remark or "")
+        if "加高" not in value:
+            continue
+        match = _HEIGHTENED_HEIGHT_RE.search(value) or _HEIGHTENED_HEIGHT_BEFORE_RE.search(value)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def is_special_heightened(model: Any, *remarks: Any) -> bool:
+    """备注写明了非默认加高高度时返回 True；未写高度或等于默认高度返回 False。"""
+    height = parse_heightened_height_mm(*remarks)
+    if height is None:
+        return False
+    return height != _heightened_default_mm(model)
+
+
+def _normalize_snapshot_eta(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value).replace("T", " ")[:19]
+
+
+def _heightened_remark_expr(conn) -> str:
+    """拼装备注的 SQL 表达式；旧库没有「订单备注」列时只读「合同备注」。"""
+    try:
+        columns = {str(column["name"]) for column in inspect(conn).get_columns("finished_goods_data")}
+    except Exception:
+        columns = set()
+    if "订单备注" in columns:
+        return "CONCAT_WS(' ', COALESCE(`合同备注`, ''), COALESCE(`订单备注`, ''))"
+    return "COALESCE(`合同备注`, '')"
+
+
+def _special_heightened_units(conn) -> tuple[dict[tuple, int], dict[tuple, int]]:
+    """统计特殊加高台数：待入库按 (批次号, 预计入库时间, 机型)，库存中按 (机型, 原批次号)。"""
+    remark_expr = _heightened_remark_expr(conn)
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT TRIM(`批次号`) AS batch_no,
+                   `预计入库时间` AS eta,
+                   TRIM(`机型`) AS model,
+                   `状态` AS status,
+                   {remark_expr} AS remarks
+            FROM finished_goods_data
+            WHERE (`状态` = '待入库' OR TRIM(COALESCE(`状态`, '')) LIKE '库存中%')
+            """
+        )
+    ).mappings().all()
+    pending: dict[tuple, int] = {}
+    stock: dict[tuple, int] = {}
+    for row in rows:
+        status = str(row.get("status") or "").strip()
+        batch_no = str(row.get("batch_no") or "").strip()
+        model = str(row.get("model") or "").strip()
+        remarks = str(row.get("remarks") or "")
+        if not model:
+            continue
+        if status == "待入库":
+            if not batch_no:
+                continue
+            key = (batch_no, _normalize_snapshot_eta(row.get("eta")), model)
+            target = pending
+        elif status.startswith("库存中"):
+            key = ("库存中", model, batch_no or "库存中")
+            target = stock
+        else:
+            continue
+        is_heightened = "加高" in remarks or "加高" in batch_no or "附加" in batch_no
+        if not is_heightened or not is_special_heightened(model, remarks):
+            continue
+        target[key] = target.get(key, 0) + 1
+    return pending, stock
+
+
+def strip_special_heightened_rows(
+    conn, rows: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int]:
+    """从待推送快照中剔除特殊加高（非默认高度）机台，返回 (保留行, 剔除台数)。
+
+    云端 wechat_batch_summary 是整表替换的只读视图，小程序/门户直接读取；
+    特殊加高不是可选购库存，只能在推送前扣减，避免混入「加高」可选机型。
+    """
+    if not rows:
+        return rows, 0
+    try:
+        pending, stock = _special_heightened_units(conn)
+    except Exception as exc:  # 过滤不可用时宁可保留原快照，也不阻断库存同步
+        logger.warning("wechat_batch_summary: 特殊加高过滤不可用，按原快照推送：%s", exc)
+        return rows, 0
+    if not pending and not stock:
+        return rows, 0
+
+    kept: list[dict[str, Any]] = []
+    excluded = 0
+    for row in rows:
+        if int(row.get("heightened") or 0) == 0:
+            kept.append(row)
+            continue
+        model = str(row.get("model") or "").strip()
+        if row.get("batch_no") == "库存中":
+            special = stock.get(
+                ("库存中", model, str(row.get("original_batch_no") or "库存中").strip()), 0
+            )
+        else:
+            key = (
+                str(row.get("original_batch_no") or "").strip(),
+                _normalize_snapshot_eta(row.get("original_expected_inbound_time")),
+                model,
+            )
+            special = pending.get(key, 0)
+        if special <= 0:
+            kept.append(row)
+            continue
+        original = int(row.get("quantity") or 0)
+        quantity = original - special
+        excluded += min(special, original)
+        if quantity <= 0:
+            continue
+        adjusted = dict(row)
+        adjusted["quantity"] = quantity
+        kept.append(adjusted)
+
+    if excluded:
+        logger.info(
+            "wechat_batch_summary: 云端快照剔除 %s 台非默认加高（特殊加高只能合同预订）",
+            excluded,
+        )
+    return kept, excluded
 
 # ---------------------------------------------------------------------------
 # Shared httpx client (connection pool reuse)
@@ -29,11 +189,10 @@ def _get_http_client() -> httpx.Client:
     if _http_client is None or _http_client.is_closed:
         with _http_lock:
             if _http_client is None or _http_client.is_closed:
-                _, api_key = _cloud_config()
+                _cloud_config()
                 _http_client = httpx.Client(
                     timeout=30.0,
                     trust_env=False,
-                    headers={"X-V7-API-KEY": api_key},
                     limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
                 )
     return _http_client
@@ -62,6 +221,19 @@ CLOUD_READ_STATUSES = (
     "completed",
     "rejected",
     "cancelled",
+)
+# 云端 v8-status 允许 V8 回写的工厂状态；cancelled 由 push_cloud_cancel 单独回传。
+# 附加备注复审通过时按订单真实状态回写，避免把已转合同/已配货订单退回 approved。
+CLOUD_WRITABLE_ORDER_STATUSES = frozenset(
+    {
+        "pending",
+        "approved",
+        "rejected",
+        "contracted",
+        "partial_allocated",
+        "allocated",
+        "completed",
+    }
 )
 
 
@@ -161,8 +333,6 @@ def _cloud_config() -> tuple[str, str]:
     api_key = (os.getenv("V7_API_KEY") or _read_dotenv_value("V7_API_KEY")).strip()
     if not base_url:
         raise ValueError("WECHAT_CLOUD_API_BASE is not configured")
-    if not api_key:
-        raise ValueError("V7_API_KEY is not configured")
     return base_url, api_key
 
 
@@ -177,7 +347,14 @@ def _sync_secret() -> str:
 
 def _as_int(value: Any, default: int = 0) -> int:
     try:
-        return int(value if value is not None else default)
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        # bridge 返回的是 DECIMAL 字符串，例如 "5.000"
+        return int(float(str(value).strip()))
     except (TypeError, ValueError):
         return default
 
@@ -204,6 +381,9 @@ def _jsonable(value: Any) -> Any:
 
 
 def _status_rank(status: str) -> int:
+    # 下拉合并时的“本地状态不可被低阶云端状态覆盖”优先级。
+    # 与推送侧 crud.cloud_sync_outbox._ORDER_STATUS_RANK 保持一致：云端只把
+    # cancelled/completed 当终态，completed 允许覆盖 rejected（工厂驳回不是终态）。
     return {
         "regional_pending": -1,
         "pending": 0,
@@ -211,10 +391,10 @@ def _status_rank(status: str) -> int:
         "contracted": 2,
         "partial_allocated": 3,
         "allocated": 4,
-        "completed": 5,
-        "complete": 5,
+        "rejected": 5,
         "regional_rejected": 6,
-        "rejected": 6,
+        "completed": 6,
+        "complete": 6,
         "cancelled": 7,
     }.get(status or "", -1)
 
@@ -232,16 +412,21 @@ def _iter_cloud_items(order: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _fetch_cloud_dealer_orders_by_status(status: str, page_size: int = 100, max_pages: int = 20) -> list[dict[str, Any]]:
-    base_url, api_key = _cloud_config()
+    base_url, _ = _cloud_config()
     status = _normalize_status(status)
     page_size = min(max(1, int(page_size or 100)), 200)
     max_pages = max(1, int(max_pages or 1))
     orders: list[dict[str, Any]] = []
     client = _get_http_client()
+    secret = _sync_secret()
+    if not secret:
+        raise ValueError("V8_SYNC_SECRET is required for signed bridge requests")
     for page in range(1, max_pages + 1):
+        query = urlencode({"status": status, "page": page, "page_size": page_size})
+        request_path = f"/api/v8/bridge/orders?{query}"
         response = client.get(
-            f"{base_url}/api/v7/dealer-orders",
-            params={"status": status, "page": page, "page_size": page_size},
+            f"{base_url}{request_path}",
+            headers=signed_headers(secret, "GET", request_path, b""),
         )
         response.raise_for_status()
         payload = response.json()
@@ -280,8 +465,15 @@ def fetch_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max
         for order in status_results.get(read_status, []):
             items = _iter_cloud_items(order)
             first_item = items[0] if items else order
+            # 生产云 /api/v8/bridge/orders 的顶层订单号字段是 id（listDealerOrders 用 order_no AS id），
+            # 必须与 _line_payload / find_cloud_dealer_order 一样补 id 兜底；否则所有订单的
+            # 去重键都会变成 ("", 1)，一次拉取会被折叠成 1 条订单，导致状态同步不完整。
+            order_no = _clean(
+                _pick(first_item, "order_no", "orderNo", "id")
+                or _pick(order, "order_no", "orderNo", "id")
+            )
             key = (
-                _clean(_pick(first_item, "order_no", "orderNo") or _pick(order, "order_no", "orderNo")),
+                order_no,
                 _as_int(_pick(first_item, "line_no", "lineNo"), 1),
             )
             if key in seen_keys:
@@ -292,19 +484,26 @@ def fetch_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max
 
 
 def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-    base_url, api_key = _cloud_config()
+    base_url, _ = _cloud_config()
     order_no = _clean(order_no)
     if not order_no:
         raise ValueError("order_no is required")
     client = _get_http_client()
-    headers = {"Idempotency-Key": idempotency_key}
     secret = _sync_secret()
-    if secret:
-        headers["X-V8-Sync-Secret"] = secret
+    if not secret:
+        raise ValueError("V8_SYNC_SECRET is required for signed bridge requests")
+    url = f"{base_url}/api/dealer/orders/{quote(order_no, safe='')}/{path_suffix}"
+    path = urlsplit(url).path
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotency_key,
+        **signed_headers(secret, "POST", path, body, idempotency_key=idempotency_key),
+    }
     response = client.post(
-        f"{base_url}/api/dealer/orders/{order_no}/v8-status",
+        url,
         headers=headers,
-        json=payload,
+        content=body,
     )
     if response.status_code == 404:
         # 404 means the order doesn't exist on the cloud yet.
@@ -338,8 +537,11 @@ def push_cloud_review(
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     next_status = _clean(status)
-    if next_status not in {"approved", "rejected"}:
-        raise ValueError("cloud review status must be approved or rejected")
+    if next_status not in CLOUD_WRITABLE_ORDER_STATUSES:
+        raise ValueError(
+            "cloud review status must be one of: "
+            + ", ".join(sorted(CLOUD_WRITABLE_ORDER_STATUSES))
+        )
     payload = {
         "status": next_status,
         "reviewedBy": _clean(reviewer),
@@ -384,19 +586,75 @@ def push_cloud_allocate(
     operator: str = "",
     v7_order_no: str = "",
     idempotency_key: str | None = None,
+    status: str = "allocated",
 ) -> dict[str, Any]:
+    next_status = _clean(status) or "allocated"
+    if next_status not in {"allocated", "partial_allocated"}:
+        raise ValueError("cloud allocation status must be allocated or partial_allocated")
+    default_key = (
+        f"v8-outbox-allocate-{_clean(order_no)}-{_clean(contract_no)}-{_clean(v7_order_no)}"
+    )
+    if next_status != "allocated":
+        # 部分配货与全部配货必须是不同幂等键，否则云端会把后一次请求当成重复请求。
+        default_key = f"{default_key}-{next_status}"
     return _post_cloud_order(
         order_no=order_no,
         path_suffix="v8-status",
         payload={
-            "status": "allocated",
+            "status": next_status,
             "contractNo": _clean(contract_no),
             "v7OrderNo": _clean(v7_order_no),
             "reviewedBy": _clean(operator),
             "reviewNote": "V8 allocation sync",
             "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         },
-        idempotency_key=idempotency_key or f"v8-outbox-allocate-{_clean(order_no)}-{_clean(contract_no)}-{_clean(v7_order_no)}",
+        idempotency_key=idempotency_key or default_key,
+    )
+
+
+def push_cloud_cancel(
+    order_no: str,
+    contract_no: str = "",
+    operator: str = "",
+    note: str = "",
+    line_nos: list[int] | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """回传订单取消状态；line_nos 非空时按行回传 cancelled，云端据此只取消对应明细。
+
+    注意：云端 contract_no 的回写口径是 COALESCE(NULLIF(?, ''), contract_no)，即空值保留原值。
+    只有「整单取消 + 单一合同」时才回传 contractNo；按行取消或多合同并集回传会把云端
+    每一行的原合同号污染成「A、B」，因此这些场景让云端保留各行自己的合同号。
+    """
+    normalized_line_nos: list[int] = []
+    for raw_line_no in line_nos or []:
+        line_no = _as_int(raw_line_no, 0)
+        if line_no > 0 and line_no not in normalized_line_nos:
+            normalized_line_nos.append(line_no)
+    contract_nos = [
+        part.strip()
+        for part in re.split(r"[、，,/／;；\s]+", _clean(contract_no))
+        if part.strip()
+    ]
+    payload: dict[str, Any] = {
+        "status": "cancelled",
+        "reviewedBy": _clean(operator),
+        "reviewNote": _clean(note),
+        "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if not normalized_line_nos and len(contract_nos) == 1:
+        payload["contractNo"] = contract_nos[0]
+    if normalized_line_nos:
+        payload["items"] = [
+            {"lineNo": line_no, "status": "cancelled"} for line_no in normalized_line_nos
+        ]
+    # 默认幂等键只能是 ASCII（HTTP 头要求）；多合同号里的「、」等字符做兜底替换。
+    key_contract = re.sub(r"[^0-9A-Za-z._-]+", "_", _clean(contract_no)).strip("_")
+    return _post_cloud_order(
+        order_no=order_no,
+        path_suffix="v8-status",
+        payload=payload,
+        idempotency_key=idempotency_key or f"v8-outbox-cancel-{_clean(order_no)}-{key_contract}",
     )
 
 
@@ -482,133 +740,312 @@ def push_cloud_completed_state(
     return result
 
 
-def refresh_local_wechat_batch_summary() -> dict[str, Any]:
-    """Rebuild the local mini-program inventory read model from finished_goods_data."""
-    with get_engine().begin() as conn:
-        _ensure_wechat_batch_summary_schema(conn)
-        try:
-            conn.execute(text("CALL `refresh_wechat_batch_summary_all`()"))
-        except Exception:
-            has_order_remark = conn.execute(
-                text("SHOW COLUMNS FROM finished_goods_data LIKE '订单备注'")
-            ).fetchone() is not None
-            order_remark_high_clause = (
-                "OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'"
-                if has_order_remark
-                else ""
-            )
+def _snapshot_summary_id(batch_no: Any, eta: Any, model: Any, heightened: Any, original_batch_no: Any = "") -> str:
+    import hashlib
 
-            conn.execute(text("TRUNCATE TABLE wechat_batch_summary"))
+    eta_text = eta.strftime("%Y-%m-%d %H:%M:%S") if isinstance(eta, datetime) else str(eta or "")
+    raw = f"{batch_no or ''}|{eta_text}|{model or ''}|{1 if int(heightened or 0) else 0}|{original_batch_no or ''}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def _normalize_completed_inbound_batches(conn: Any) -> dict[str, Any]:
+    """把「已完成批次」的待入库机台归并到虚拟「待入库」桶。
+
+    云端候选按快照批次号展示；已完成批次不能作为生产批次插入合同。这里在快照生成端
+    把「只存在 Completed 批次」的待入库行改名为 batch_no=待入库（加高也归并），
+    云端候选/可订货统计会自动把它当成待入库批次而不是已完成生产批次。
+    """
+    try:
+        if not inspect(conn).has_table("batches"):
+            return {"renamed": 0, "groups": 0}
+        codes = [
+            str(row[0] or "").strip()
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT batch_code FROM batches
+                    WHERE NULLIF(TRIM(batch_code), '') IS NOT NULL
+                    GROUP BY batch_code
+                    HAVING SUM(CASE WHEN status IN ('Confirmed', 'In_Production') THEN 1 ELSE 0 END) = 0
+                       AND SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) > 0
+                    """
+                )
+            ).fetchall()
+        ]
+        codes = [code for code in codes if code]
+        if not codes:
+            return {"renamed": 0, "groups": 0}
+        rows = conn.execute(
+            text(
+                """
+                SELECT summary_id, batch_no, original_batch_no, model, heightened,
+                       expected_inbound_time, quantity
+                FROM wechat_batch_summary
+                WHERE expected_inbound_time IS NOT NULL
+                  AND (batch_no IN :codes OR original_batch_no IN :codes)
+                """
+            ).bindparams(bindparam("codes", expanding=True)),
+            {"codes": tuple(codes)},
+        ).mappings().all()
+        if not rows:
+            return {"renamed": 0, "groups": 0}
+        groups: dict[tuple[str, int], dict[str, Any]] = {}
+        delete_ids: list[str] = []
+        for row in rows:
+            model = str(row["model"] or "").strip()
+            high = 1 if int(row["heightened"] or 0) else 0
+            if not model:
+                continue
+            eta_text = (
+                row["expected_inbound_time"].strftime("%Y-%m-%d %H:%M:%S")
+                if isinstance(row["expected_inbound_time"], datetime)
+                else str(row["expected_inbound_time"] or "")
+            )
+            group = groups.setdefault(
+                (model, high), {"quantity": 0, "eta": eta_text or None}
+            )
+            group["quantity"] += int(row["quantity"] or 0)
+            if eta_text and (not group["eta"] or eta_text < group["eta"]):
+                group["eta"] = eta_text
+            delete_ids.append(str(row["summary_id"]))
+        if delete_ids:
             conn.execute(
                 text(
-                    f"""
+                    "DELETE FROM wechat_batch_summary WHERE summary_id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": tuple(delete_ids)},
+            )
+        for (model, high), group in groups.items():
+            batch_no = "待入库"
+            eta = group["eta"]
+            summary_id = _snapshot_summary_id(batch_no, eta, model, high, "")
+            conn.execute(
+                text(
+                    """
                     INSERT INTO wechat_batch_summary
                       (summary_id, batch_no, expected_inbound_time, model, quantity,
                        heightened, original_batch_no, original_expected_inbound_time,
                        `批次号`, `预计入库时间`, `机型`, `数量`)
+                    VALUES
+                      (:summary_id, :batch_no, :eta, :model, :quantity,
+                       :high, '', NULL, :batch_no, :eta, :model, :quantity)
+                    """
+                ),
+                {
+                    "summary_id": summary_id,
+                    "batch_no": batch_no,
+                    "eta": eta,
+                    "model": model,
+                    "quantity": group["quantity"],
+                    "high": high,
+                },
+            )
+        return {"renamed": len(rows), "groups": len(groups)}
+    except Exception as exc:
+        logger.warning("normalize completed inbound batches failed: %s", exc)
+        return {"renamed": 0, "groups": 0, "error": str(exc)}
+
+
+def refresh_local_wechat_batch_summary() -> dict[str, Any]:
+    """Rebuild the local mini-program inventory read model from finished_goods_data."""
+    with get_engine().begin() as conn:
+        _ensure_wechat_batch_summary_schema(conn)
+        # 加高只认备注：合同备注/订单备注含“加高”；机型必须严格命中启用的机型字典。
+        has_order_remark = conn.execute(
+            text("SHOW COLUMNS FROM finished_goods_data LIKE '订单备注'")
+        ).fetchone() is not None
+        order_remark_high_clause = (
+            "OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'"
+            if has_order_remark
+            else ""
+        )
+        # 历史存储过程口径已停用：其加高现货分组会把「已完成批次号」写进
+        # original_batch_no，导致云端大区经理把已完成批次当在产批次分配；统一走 Python SQL 重建。
+        conn.execute(text("TRUNCATE TABLE wechat_batch_summary"))
+        conn.execute(
+            text(
+                f"""
+                INSERT INTO wechat_batch_summary
+                  (summary_id, batch_no, expected_inbound_time, model, quantity,
+                   heightened, original_batch_no, original_expected_inbound_time,
+                   `批次号`, `预计入库时间`, `机型`, `数量`)
+                SELECT
+                  MD5(CONCAT(
+                    s.batch_no, '|',
+                    COALESCE(DATE_FORMAT(s.expected_inbound_time, '%Y-%m-%d %H:%i:%s'), ''),
+                    '|', s.model, '|', s.heightened, '|', COALESCE(s.original_batch_no, '')
+                  )) AS summary_id,
+                  s.batch_no,
+                  s.expected_inbound_time,
+                  s.model,
+                  s.quantity,
+                  s.heightened,
+                  s.original_batch_no,
+                  s.original_expected_inbound_time,
+                  s.batch_no,
+                  s.expected_inbound_time,
+                  s.model,
+                  s.quantity
+                FROM (
+                  SELECT
+                    IF(raw.is_high, '加高', raw.source_batch_no) AS batch_no,
+                    raw.source_expected_inbound_time AS expected_inbound_time,
+                    raw.base_model AS model,
+                    COUNT(*) AS quantity,
+                    IF(raw.is_high, 1, 0) AS heightened,
+                    IF(raw.is_high, raw.source_batch_no, '') AS original_batch_no,
+                    IF(raw.is_high, raw.source_expected_inbound_time, NULL) AS original_expected_inbound_time
+                  FROM (
                     SELECT
-                      MD5(CONCAT(
-                        s.batch_no, '|',
-                        COALESCE(DATE_FORMAT(s.expected_inbound_time, '%Y-%m-%d %H:%i:%s'), ''),
-                        '|', s.model, '|', s.heightened, '|', COALESCE(s.original_batch_no, '')
-                      )) AS summary_id,
-                      s.batch_no,
-                      s.expected_inbound_time,
-                      s.model,
-                      s.quantity,
-                      s.heightened,
-                      s.original_batch_no,
-                      s.original_expected_inbound_time,
-                      s.batch_no,
-                      s.expected_inbound_time,
-                      s.model,
-                      s.quantity
-                    FROM (
-                      SELECT
-                        IF(raw.is_high, '加高', raw.source_batch_no) AS batch_no,
-                        raw.source_expected_inbound_time AS expected_inbound_time,
-                        raw.base_model AS model,
-                        COUNT(*) AS quantity,
-                        IF(raw.is_high, 1, 0) AS heightened,
-                        IF(raw.is_high, raw.source_batch_no, '') AS original_batch_no,
-                        IF(raw.is_high, raw.source_expected_inbound_time, NULL) AS original_expected_inbound_time
-                      FROM (
-                        SELECT
-                          TRIM(`批次号`) AS source_batch_no,
-                          `预计入库时间` AS source_expected_inbound_time,
-                          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
-                          (
-                            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
-                            {order_remark_high_clause}
-                          ) AS is_high
-                        FROM finished_goods_data
-                        WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
-                          AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                          AND TRIM(COALESCE(`状态`, '')) = '待入库'
-                      ) raw
-                      WHERE NULLIF(raw.base_model, '') IS NOT NULL
-                      GROUP BY raw.source_batch_no, raw.source_expected_inbound_time, raw.base_model, raw.is_high
-                      UNION ALL
-                      SELECT
-                        IF(raw.is_high, '加高', '库存中') AS batch_no,
-                        CAST(NULL AS DATETIME) AS expected_inbound_time,
-                        raw.base_model AS model,
-                        COUNT(*) AS quantity,
-                        IF(raw.is_high, 1, 0) AS heightened,
-                        IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '') AS original_batch_no,
-                        CAST(NULL AS DATETIME) AS original_expected_inbound_time
-                      FROM (
-                        SELECT
-                          TRIM(COALESCE(`批次号`, '')) AS source_batch_no,
-                          TRIM(REPLACE(REPLACE(TRIM(`机型`), '(加高)', ''), '加高', '')) AS base_model,
-                          (
-                            TRIM(COALESCE(`机型`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-                            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
-                            OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
-                            {order_remark_high_clause}
-                          ) AS is_high
-                        FROM finished_goods_data
-                        WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
-                          AND TRIM(COALESCE(`状态`, '')) = '库存中'
-                      ) raw
-                      WHERE NULLIF(raw.base_model, '') IS NOT NULL
-                      GROUP BY raw.base_model, raw.is_high, IF(raw.is_high, COALESCE(NULLIF(raw.source_batch_no, ''), '库存中'), '')
-                    ) s
-                    ON DUPLICATE KEY UPDATE
-                      batch_no = VALUES(batch_no),
-                      expected_inbound_time = VALUES(expected_inbound_time),
-                      model = VALUES(model),
-                      quantity = VALUES(quantity),
-                      heightened = VALUES(heightened),
-                      original_batch_no = VALUES(original_batch_no),
-                      original_expected_inbound_time = VALUES(original_expected_inbound_time),
-                      `批次号` = VALUES(`批次号`),
-                      `预计入库时间` = VALUES(`预计入库时间`),
-                      `机型` = VALUES(`机型`),
-                      `数量` = VALUES(`数量`)
-                    """
-                )
+                      TRIM(`批次号`) AS source_batch_no,
+                      `预计入库时间` AS source_expected_inbound_time,
+                      TRIM(`机型`) AS base_model,
+                      (
+                        TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                        OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                        OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+                        {order_remark_high_clause}
+                      ) AS is_high
+                    FROM finished_goods_data
+                      INNER JOIN (
+                        SELECT DISTINCT TRIM(model_name) AS model_name
+                        FROM model_dictionary
+                        WHERE enabled = 1
+                      ) md ON md.model_name = TRIM(`机型`)
+                    WHERE NULLIF(TRIM(COALESCE(`批次号`, '')), '') IS NOT NULL
+                      AND NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+                      AND TRIM(COALESCE(`状态`, '')) = '待入库'
+                  ) raw
+                  WHERE NULLIF(raw.base_model, '') IS NOT NULL
+                  GROUP BY raw.source_batch_no, raw.source_expected_inbound_time, raw.base_model, raw.is_high
+                  UNION ALL
+                  SELECT
+                    '库存中' AS batch_no,
+                    CAST(NULL AS DATETIME) AS expected_inbound_time,
+                    raw.base_model AS model,
+                    COUNT(*) AS quantity,
+                    IF(raw.is_high, 1, 0) AS heightened,
+                    '' AS original_batch_no,
+                    CAST(NULL AS DATETIME) AS original_expected_inbound_time
+                  FROM (
+                    SELECT
+                      TRIM(COALESCE(`批次号`, '')) AS source_batch_no,
+                      TRIM(`机型`) AS base_model,
+                      (
+                        TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
+                        OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                        OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
+                        {order_remark_high_clause}
+                      ) AS is_high
+                    FROM finished_goods_data
+                      INNER JOIN (
+                        SELECT DISTINCT TRIM(model_name) AS model_name
+                        FROM model_dictionary
+                        WHERE enabled = 1
+                      ) md ON md.model_name = TRIM(`机型`)
+                    WHERE NULLIF(TRIM(COALESCE(`机型`, '')), '') IS NOT NULL
+                      AND {BRIDGE_STOCK_STATUS_PREDICATE}
+                  ) raw
+                  WHERE NULLIF(raw.base_model, '') IS NOT NULL
+                  GROUP BY raw.base_model, raw.is_high
+                ) s
+                ON DUPLICATE KEY UPDATE
+                  batch_no = VALUES(batch_no),
+                  expected_inbound_time = VALUES(expected_inbound_time),
+                  model = VALUES(model),
+                  quantity = VALUES(quantity),
+                  heightened = VALUES(heightened),
+                  original_batch_no = VALUES(original_batch_no),
+                  original_expected_inbound_time = VALUES(original_expected_inbound_time),
+                  `批次号` = VALUES(`批次号`),
+                  `预计入库时间` = VALUES(`预计入库时间`),
+                  `机型` = VALUES(`机型`),
+                  `数量` = VALUES(`数量`)
+                """
             )
-            conn.execute(
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE wechat_batch_summary
+                SET `批次号` = batch_no,
+                    `预计入库时间` = expected_inbound_time,
+                    `机型` = model,
+                    `数量` = quantity
+                """
+            )
+        )
+        # 机型严格按字典：不在启用字典里的行已在刷新时跳过，这里补一条告警，避免静默丢数据。
+        try:
+            skipped = conn.execute(
                 text(
-                    """
-                    UPDATE wechat_batch_summary
-                    SET `批次号` = batch_no,
-                        `预计入库时间` = expected_inbound_time,
-                        `机型` = model,
-                        `数量` = quantity
+                    f"""
+                    SELECT TRIM(f.`机型`) AS model, COUNT(*) AS cnt,
+                           MAX((
+                             TRIM(COALESCE(f.`合同备注`, '')) LIKE '%加高%'
+                             {order_remark_high_clause}
+                           )) AS remark_high
+                    FROM finished_goods_data f
+                    LEFT JOIN (
+                      SELECT DISTINCT TRIM(model_name) AS model_name
+                      FROM model_dictionary
+                      WHERE enabled = 1
+                    ) md ON md.model_name = TRIM(f.`机型`)
+                    WHERE (
+                        (NULLIF(TRIM(COALESCE(f.`批次号`, '')), '') IS NOT NULL
+                          AND TRIM(COALESCE(f.`状态`, '')) = '待入库')
+                        OR TRIM(COALESCE(f.`状态`, '')) LIKE '库存中%'
+                      )
+                      AND NULLIF(TRIM(COALESCE(f.`机型`, '')), '') IS NOT NULL
+                      AND md.model_name IS NULL
+                    GROUP BY TRIM(f.`机型`)
+                    ORDER BY cnt DESC
+                    LIMIT 10
                     """
                 )
+            ).mappings().all()
+        except Exception as exc:  # 告警查询失败不影响库存刷新本身
+            logger.warning("wechat_batch_summary: 机型字典校验查询失败：%s", exc)
+            skipped = []
+        skipped_rows = sum(int(row["cnt"]) for row in skipped)
+        if skipped_rows:
+            samples = [
+                f"{row['model']}×{row['cnt']}" + ("（备注加高）" if int(row.get("remark_high") or 0) else "")
+                for row in skipped
+            ]
+            logger.warning(
+                "wechat_batch_summary: 跳过 %s 行机型不在启用中的机型字典里（例：%s）；"
+                "加高只按备注识别，这些行不会同步到小程序，请让工厂修正机型/字典",
+                skipped_rows,
+                "，".join(samples),
             )
+        # 兼容旧版存储过程：即使部署的刷新过程还没更新，也把非字典机型从快照里清掉，保证机型严格按字典。
+        conn.execute(
+            text(
+                """
+                DELETE w FROM wechat_batch_summary w
+                LEFT JOIN (
+                  SELECT DISTINCT TRIM(model_name) AS model_name
+                  FROM model_dictionary
+                  WHERE enabled = 1
+                ) md ON md.model_name = TRIM(w.model)
+                WHERE md.model_name IS NULL
+                """
+            )
+        )
+        # 已完成批次不能作为生产批次分配：待入库行归并到虚拟「待入库」桶。
+        normalized = _normalize_completed_inbound_batches(conn)
         total = conn.execute(text("SELECT COUNT(*) FROM wechat_batch_summary")).scalar() or 0
-    return {"refreshed": True, "rows": int(total)}
+    return {
+        "refreshed": True,
+        "rows": int(total),
+        "skipped_unknown_models": int(skipped_rows),
+        "skipped_unknown_samples": [row["model"] for row in skipped],
+        "normalized_completed_inbound": normalized,
+    }
 
 
-def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
+def fetch_local_wechat_batch_summary() -> tuple[list[dict[str, Any]], int]:
     with get_engine().begin() as conn:
         _ensure_wechat_batch_summary_schema(conn)
         rows = conn.execute(
@@ -629,35 +1066,98 @@ def fetch_local_wechat_batch_summary() -> list[dict[str, Any]]:
                 """
             )
         ).mappings().all()
-    return [{key: _jsonable(value) for key, value in row.items()} for row in rows]
+        rows, excluded = strip_special_heightened_rows(conn, [dict(row) for row in rows])
+    return [{key: _jsonable(value) for key, value in row.items()} for row in rows], excluded
+
+
+def fetch_local_ordering_models() -> list[dict[str, Any]]:
+    with get_engine().begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT model_name, model_family, sort_order, enabled
+                FROM model_dictionary
+                ORDER BY model_name
+                """
+            )
+        ).mappings().all()
+    return [
+        {
+            "model_name": _clean(row["model_name"]),
+            "model_family": _clean(row["model_family"]),
+            "sort_order": _as_int(row["sort_order"]),
+            "enabled": 1 if _as_int(row["enabled"], 1) else 0,
+        }
+        for row in rows
+    ]
 
 
 def push_wechat_batch_summary_to_cloud(rows: list[dict[str, Any]], idempotency_key: str | None = None) -> dict[str, Any]:
-    base_url, api_key = _cloud_config()
-    client = _get_http_client()
-    response = client.post(
-        f"{base_url}/api/v7/wechat-batch-summary/sync",
-        headers={"Idempotency-Key": idempotency_key or f"v8-outbox-wechat-batch-summary-{datetime.now().strftime('%Y%m%d%H%M%S')}"},
-        json={"mode": "replace", "rows": rows},
-        timeout=60.0,
-    )
+    base_url = (
+        os.getenv("WECHAT_CLOUD_API_BASE")
+        or _read_dotenv_value("WECHAT_CLOUD_API_BASE")
+    ).strip().rstrip("/")
+    if not base_url:
+        raise ValueError("WECHAT_CLOUD_API_BASE is not configured")
+    secret = _sync_secret()
+    if not secret:
+        raise ValueError("V8_SYNC_SECRET is required for signed bridge requests")
+
+    models = fetch_local_ordering_models()
+    snapshot_id = snapshot_content_id(rows, models)
+    payload = {
+        "schemaVersion": 1,
+        "snapshotId": snapshot_id,
+        "generatedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "rows": rows,
+        "models": models,
+    }
+    if (os.getenv("V8_BRIDGE_ALLOW_EMPTY_INVENTORY") or _read_dotenv_value("V8_BRIDGE_ALLOW_EMPTY_INVENTORY")).strip() == "1":
+        payload["allowEmptyInventory"] = True
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    path = "/api/v8/bridge/snapshot"
+    request_id = idempotency_key or snapshot_id
+    headers = {
+        "Content-Type": "application/json",
+        "Idempotency-Key": request_id,
+        **signed_headers(secret, "POST", path, body, idempotency_key=request_id),
+    }
+    with httpx.Client(timeout=60.0, trust_env=False) as client:
+        response = client.post(f"{base_url}{path}", headers=headers, content=body)
     response.raise_for_status()
     return response.json()
 
 
-def sync_wechat_batch_summary_to_cloud() -> dict[str, Any]:
-    local = refresh_local_wechat_batch_summary()
-    rows = fetch_local_wechat_batch_summary()
-    cloud = push_wechat_batch_summary_to_cloud(rows)
+def sync_wechat_batch_summary_to_cloud(trigger: str = "auto") -> dict[str, Any]:
+    try:
+        local = refresh_local_wechat_batch_summary()
+        rows, excluded_special = fetch_local_wechat_batch_summary()
+        cloud = push_wechat_batch_summary_to_cloud(rows)
+    except Exception as exc:
+        try:
+            from crud.sync_channels import record_channel_failure
+
+            record_channel_failure("factory-snapshot", exc)
+        except Exception:
+            pass
+        raise
+    try:
+        from crud.sync_channels import record_channel_success
+
+        record_channel_success("factory-snapshot", trigger)
+    except Exception:
+        pass
     return {
         "message": "wechat batch summary synced",
         "local_rows": local["rows"],
         "pushed_rows": len(rows),
+        "excluded_special_heightened": excluded_special,
+        "model_rows": len(fetch_local_ordering_models()),
         "cloud": cloud,
     }
 
 
-def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
+def sync_completed_dealer_orders_to_cloud(limit: int = 200, *, trigger: str = "auto") -> dict[str, Any]:
     ensure_dealer_order_tables()
     limit = min(max(1, int(limit or 200)), 1000)
     rows: list[dict[str, Any]] = []
@@ -702,6 +1202,19 @@ def sync_completed_dealer_orders_to_cloud(limit: int = 200) -> dict[str, Any]:
         except Exception as exc:
             failed.append({"order_no": order_no, "error": str(exc)})
 
+    try:
+        from crud.sync_channels import record_channel_failure, record_channel_success
+
+        if failed:
+            record_channel_failure(
+                "status-callback",
+                "; ".join(str(item.get("error") or "") for item in failed[:3]),
+            )
+        elif pushed:
+            record_channel_success("status-callback", trigger)
+    except Exception:
+        pass
+
     return {
         "message": "completed dealer orders synced",
         "scanned": len(rows),
@@ -731,6 +1244,10 @@ def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]
         "dealer_phone": _clean(_pick(item, "dealer_phone", "dealerPhone") or _pick(order, "dealer_phone", "dealerPhone")),
         "regional_manager_name": _clean(_pick(item, "regional_manager_name", "regionalManagerName") or _pick(order, "regional_manager_name", "regionalManagerName")),
         "customer_name": _clean(_pick(item, "customer_name", "customerName") or _pick(order, "customer_name", "customerName")),
+        "delivery_address": _clean(_pick(item, "delivery_address", "deliveryAddress") or _pick(order, "delivery_address", "deliveryAddress")),
+        "office_name": _clean(_pick(item, "office_name", "officeName", "officeBranch", "office_branch") or _pick(order, "office_name", "officeName", "officeBranch", "office_branch")),
+        "office_contact": _clean(_pick(item, "office_contact", "officeContact") or _pick(order, "office_contact", "officeContact")),
+        "office_phone": _clean(_pick(item, "office_phone", "officePhone") or _pick(order, "office_phone", "officePhone")),
         "contact_name": _clean(_pick(item, "contact_name", "contactName") or _pick(order, "contact_name", "contactName")),
         "contact_phone": _clean(_pick(item, "contact_phone", "contactPhone") or _pick(order, "contact_phone", "contactPhone")),
         "model": _clean(_pick(item, "model")),
@@ -775,6 +1292,7 @@ def _batch_load_existing(
     _EXISTING_FIELDS = (
         "order_no, line_no, status, approved_qty, allocated_qty, reviewed_at, reviewed_by, "
         "contract_no, v7_order_no, review_note, extra_remark, ERMQ, factory_pending, "
+        "customer_name, delivery_address, office_name, office_contact, office_phone, "
         "source, last_synced_at, sync_status, sync_error, "
         "factory_reviewed_at, factory_reviewed_by, "
         "extra_remark_reviewed_at, extra_remark_reviewed_by"
@@ -850,9 +1368,34 @@ def _prune_cloud_deleted_local_orders(conn: Any, cloud_order_nos: set[str]) -> d
     return {"orders": len(stale_order_nos), "lines": int(deleted_lines or 0)}
 
 
-def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_pages: int = 20) -> dict[str, Any]:
+def sync_cloud_dealer_orders(
+    status: str = "pending",
+    page_size: int = 100,
+    max_pages: int = 20,
+    *,
+    trigger: str = "auto",
+) -> dict[str, Any]:
     ensure_dealer_order_tables()
     orders = fetch_cloud_dealer_orders(status=status, page_size=page_size, max_pages=max_pages)
+    contract_drafts_created = 0
+    contract_drafts_failed = 0
+    # Keep the original cloud form intact for contract generation. The dealer_orders
+    # table is intentionally a line-oriented projection and does not contain all fields.
+    try:
+        from crud.local_contract_drafts import create_from_order
+        for raw_order in orders:
+            raw_status = _clean(_pick(raw_order, "status")).lower()
+            if raw_status in {"cancelled", "canceled", "completed", "complete", "rejected"}:
+                continue
+            try:
+                draft = create_from_order(raw_order)
+                if draft and draft.get("_created"):
+                    contract_drafts_created += 1
+            except Exception as exc:
+                contract_drafts_failed += 1
+                logger.warning("local contract draft creation failed order=%s: %s", _pick(raw_order, "orderNo", "order_no", "id"), exc)
+    except Exception as exc:
+        logger.warning("local contract draft integration unavailable: %s", exc)
     inserted = 0
     updated = 0
     skipped = 0
@@ -907,6 +1450,9 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                 elif extra_changed:
                     payload["factory_pending"] = 1
                     pending_order_nos.add(order_no)
+                for field in ("customer_name", "delivery_address", "office_name", "office_contact", "office_phone"):
+                    if existing.get(field) and not payload.get(field):
+                        payload[field] = existing.get(field)
                 for field in (
                     "reviewed_at",
                     "reviewed_by",
@@ -933,7 +1479,9 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                         UPDATE dealer_orders
                         SET dealer_id=:dealer_id, dealer_name=:dealer_name, dealer_phone=:dealer_phone,
                             regional_manager_name=:regional_manager_name,
-                            customer_name=:customer_name, contact_name=:contact_name, contact_phone=:contact_phone,
+                            customer_name=:customer_name, delivery_address=:delivery_address,
+                            office_name=:office_name, office_contact=:office_contact, office_phone=:office_phone,
+                            contact_name=:contact_name, contact_phone=:contact_phone,
                             model=:model, batch_no=:batch_no, eta=:eta, inventory_type=:inventory_type,
                             quantity=:quantity, approved_qty=:approved_qty, allocated_qty=:allocated_qty,
                             delivery_date=:delivery_date, remark=:remark,
@@ -971,7 +1519,8 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                         """
                         INSERT INTO dealer_orders
                         (order_no, line_no, dealer_id, dealer_name, dealer_phone, regional_manager_name,
-                         customer_name, contact_name, contact_phone, model, batch_no, eta, inventory_type,
+                         customer_name, delivery_address, office_name, office_contact, office_phone,
+                         contact_name, contact_phone, model, batch_no, eta, inventory_type,
                          quantity, approved_qty, allocated_qty, delivery_date, remark,
                          extra_remark, ERMQ, factory_pending,
                          source, last_synced_at, sync_status, sync_error,
@@ -982,7 +1531,8 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
                          reviewed_at, reviewed_by, contract_no, v7_order_no, review_note, created_at, updated_at)
                         VALUES
                         (:order_no, :line_no, :dealer_id, :dealer_name, :dealer_phone, :regional_manager_name,
-                         :customer_name, :contact_name, :contact_phone, :model, :batch_no, :eta, :inventory_type,
+                         :customer_name, :delivery_address, :office_name, :office_contact, :office_phone,
+                         :contact_name, :contact_phone, :model, :batch_no, :eta, :inventory_type,
                          :quantity, :approved_qty, :allocated_qty, :delivery_date, :remark,
                          :extra_remark, :ERMQ, :factory_pending,
                          :source, :last_synced_at, :sync_status, :sync_error,
@@ -1009,6 +1559,33 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
 
         if _clean(status).lower() in {"", "all", "*"}:
             pruned = _prune_cloud_deleted_local_orders(conn, seen_order_nos)
+            pruned["mirror_lines"] = _prune_stale_mirror_lines(conn, seen_lines, seen_order_nos)
+
+    # 订单落库后再拉云端合同附件；附件失败不能影响订单同步本身。
+    attachment_result: dict[str, Any] = {
+        "orders": 0, "scanned": 0, "synced": 0, "skipped": 0, "failed": 0, "errors": [],
+    }
+    try:
+        from crud.cloud_attachments import sync_cloud_order_attachments
+
+        unique_orders: dict[str, str] = {}
+        for raw_order in orders:
+            order_no = _clean(_pick(raw_order, "order_no", "orderNo", "id"))
+            if not order_no:
+                continue
+            unique_orders[order_no] = _clean(_pick(raw_order, "updated_at", "updatedAt"))
+        attachment_result = sync_cloud_order_attachments(
+            [{"order_no": no, "updated_at": updated} for no, updated in unique_orders.items()]
+        )
+    except Exception as exc:
+        logger.warning("cloud attachment sync unavailable: %s", exc)
+
+    try:
+        from crud.sync_channels import record_channel_success
+
+        record_channel_success("orders-pull", trigger)
+    except Exception:
+        pass
 
     return {
         "message": "cloud dealer orders synced",
@@ -1021,7 +1598,38 @@ def sync_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max_
         "factory_pending_orders": len(pending_order_nos),
         "pruned_cloud_deleted_orders": pruned["orders"],
         "pruned_cloud_deleted_lines": pruned["lines"],
+        "pruned_mirror_lines": pruned.get("mirror_lines", 0),
+        "contract_drafts_created": contract_drafts_created,
+        "contract_drafts_failed": contract_drafts_failed,
+        "attachments": attachment_result,
     }
+
+
+def _prune_stale_mirror_lines(conn: Any, seen_lines: set[tuple[str, int]], seen_order_nos: set[str]) -> int:
+    """删除云端已不再返回的 SpringBoot 镜像行（例如视图行号变化后的旧行）。"""
+    if not seen_order_nos:
+        return 0
+    rows = conn.execute(
+        text(
+            "SELECT order_no, line_no FROM dealer_orders "
+            "WHERE source = 'springboot' AND order_no IN :order_nos"
+        ).bindparams(bindparam("order_nos", expanding=True)),
+        {"order_nos": tuple(seen_order_nos)},
+    ).fetchall()
+    deleted = 0
+    for order_no, line_no in rows:
+        key = (_clean(order_no), _as_int(line_no))
+        if key in seen_lines:
+            continue
+        conn.execute(
+            text(
+                "DELETE FROM dealer_orders "
+                "WHERE source = 'springboot' AND order_no = :order_no AND line_no = :line_no"
+            ),
+            {"order_no": key[0], "line_no": key[1]},
+        )
+        deleted += 1
+    return deleted
 
 
 async def cloud_pull_worker_loop() -> None:
@@ -1035,11 +1643,17 @@ async def cloud_pull_worker_loop() -> None:
         logger.info("Cloud pull worker is disabled by ENABLE_CLOUD_PULL")
         return
 
-    interval_str = os.getenv("CLOUD_PULL_INTERVAL_SECONDS", "60").strip()
+    # Orders are time-sensitive; keep the default at the configured safety
+    # floor while allowing deployments to raise it when the cloud API is busy.
+    interval_str = (
+        os.getenv("CLOUD_PULL_INTERVAL_SECONDS")
+        or _read_dotenv_value("CLOUD_PULL_INTERVAL_SECONDS")
+        or "10"
+    ).strip()
     try:
         interval = max(10, int(interval_str))  # minimum 10 seconds to avoid overloading
     except ValueError:
-        interval = 60
+        interval = 10
 
     logger.info("Cloud pull worker started (interval = %ds)", interval)
 
@@ -1059,5 +1673,11 @@ async def cloud_pull_worker_loop() -> None:
             raise
         except Exception as exc:
             logger.error("Cloud pull worker tick failed: %s", exc)
+            try:
+                from crud.sync_channels import record_channel_failure
+
+                record_channel_failure("orders-pull", exc)
+            except Exception:
+                pass
 
         await asyncio.sleep(interval)

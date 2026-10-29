@@ -90,7 +90,8 @@ sequenceDiagram
     P->>O: 登记云端状态同步事件
     opt 审核通过并转合同
         U->>P: 预览并确认转合同
-        P->>D: 建立 factory_plan 及订单关联
+        P->>D: 按明细批次/来源分组建立合同
+        Note over P: 整单一张已规划合同，行级保留批次/来源；人工导入订单后按批次优先匹配配货
         P->>O: 登记转合同同步事件
     end
     opt 本地直接录入
@@ -102,7 +103,7 @@ sequenceDiagram
 
 合同承载生产需求；销售订单承载配货和交付；经销商订单承载外部订单及审核状态。三者有关联，但不是同一张表或同一个状态机。
 
-依据：`api/routes/dealer_orders.py`、`api/routes/planning.py`、`crud/dealer_orders.py`。
+依据：`api/routes/dealer_orders.py`、`api/routes/planning.py`、`crud/dealer_orders.py`。转合同自动选路与机台单行备注细节见《经销商订单转合同自动选路与机台单行备注》。
 
 ## 4. 预测排产与生产执行
 
@@ -220,6 +221,8 @@ sequenceDiagram
 ```
 
 代码边界：`shipping/confirm` 当前未完整强制校验“必须待发货且已有实际入库记录”。因此图中不能写成系统已经保证“未入库绝不允许发货”。库存出库、订单完成、归档和云端事件也不在同一个整体事务里。这里记录事实，不代表认可该规则；若要建立严格交付闭环，应另行补齐前置校验及失败补偿。
+
+2026-10-26 补齐：发货确认会在同一事务内把仍挂在产线（`units.status='In_Production'`）的机台单机台完工并移出产线，批次内已无在产机台时批次完工、产线状态重算；撤回发货时恢复对应卡片。前置校验（必须先入库）仍未强制。
 
 依据：`crud/inventory.py`、`api/routes/inventory.py:1251`、`crud/orders.py:477`。
 

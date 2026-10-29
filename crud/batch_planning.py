@@ -1,8 +1,8 @@
-"""Atomic contract -> selected batch -> order reservation and human review.
+"""Atomic contract -> selected batch(es) -> order reservation and human review.
 
-No inventory mirror is created until review. Confirmed batches are stable queue
-cards; predicted cards cannot be reserved because sandbox recompute replaces them.
-"""
+plan_contract 为人工单批次规划；plan_contract_designated_batches 用于在制订单转合同
+后按合同「指定批次/来源」自动做单合同多批次预占。确认前不写库存镜像；已确认批次
+是稳定队列卡片，预测卡片不能被预占（沙盘重算会替换它们）。"""
 import json
 import uuid
 from collections import Counter, defaultdict
@@ -148,6 +148,19 @@ def _sync_active_ledger(conn, uid):
          "dealer": u.get("dealer_name"), "note": u.get("order_remark")})
 
 
+def _new_order_id(conn):
+    """Use the same public order-number shape as ordinary sales orders."""
+    for _ in range(20):
+        oid = f"SO-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+        exists = conn.execute(
+            text("SELECT 1 FROM sales_orders WHERE `订单号`=:oid LIMIT 1"),
+            {"oid": oid},
+        ).first()
+        if not exists:
+            return oid
+    raise BatchPlanningError("订单号生成冲突，请稍后重试")
+
+
 def plan_contract(cid, bid, operator):
     with get_engine().begin() as conn:
         contract = _contract(conn, cid, True)
@@ -169,9 +182,10 @@ def plan_contract(cid, bid, operator):
             WHERE u.contract_no=:cid AND b.status<>'Predicted'""", {"cid": cid}, True)
         if existing:
             raise BatchPlanningError("合同已绑定其他非预测卡片，不能重复分配")
-        oid = "SO" + datetime.now().strftime("%Y%m%d%H%M%S") + uuid.uuid4().hex[:8].upper()
+        oid = _new_order_id(conn)
         code = batch[0].get("batch_code") or bid
-        metadata = {"batch_id": bid, "contract_id": cid, "unit_ids": [u["unit_id"] for u in units],
+        metadata = {"batch_id": bid, "batch_ids": [bid], "contract_id": cid,
+                    "unit_ids": [u["unit_id"] for u in units],
                     "operator": operator, "created_at": datetime.now().isoformat(), "reviewed": False}
         metadata["unit_before"] = {u["unit_id"]: {k: u.get(k) for k in
             ("customer", "dealer_name", "order_remark", "due_date")} for u in units}
@@ -205,8 +219,230 @@ def plan_contract(cid, bid, operator):
             WHERE `合同号`=:cid"""), {"oid":oid,"cid":cid,"source":json.dumps({code:len(units)},ensure_ascii=False)})
         conn.execute(text("UPDATE production_queue SET quantity_remaining=0,status='Pulled' WHERE contract_no=:cid AND status='Waiting'"), {"cid":cid})
         conn.execute(text("UPDATE rush_order_queue SET status='deleted',updated_by=:operator WHERE contract_no=:cid AND status='pending'"), {"cid":cid,"operator":operator})
+        from crud.contract_notifications import record_converted
+        record_converted(conn, {cid: contract}, oid, operator)
     _clear_caches()
     return {"order_id":oid,"status":REVIEW_STATUS,"count":len(units),"batch_code":code}
+
+
+def plan_contract_designated_batches(cid, operator):
+    """按合同行「指定批次/来源」自动规划到多个在产/已确认批次。
+
+    与 plan_contract 的区别：一张合同可以同时预占多个批次的空卡，用于「大区经理已分配
+    批次」的在制订单自动规划。所有批次都凑齐才提交；任一批次不可规划/空卡不足则整体
+    回滚，交由调用方回退为「已规划」人工配货。
+    """
+    with get_engine().begin() as conn:
+        contract = _contract(conn, cid, True)
+        if not contract:
+            raise BatchPlanningError("合同不存在")
+        orders = {str(r.get("订单号") or "").strip() for r in contract} - {""}
+        if len(orders) == 1:
+            oid = next(iter(orders))
+            order = _rows(conn, "SELECT * FROM sales_orders WHERE `订单号`=:oid", {"oid": oid})
+            meta = _source(order[0].get("指定批次/来源")).get("_batch_plan", {}) if order else {}
+            if order and meta.get("contract_id") == cid and meta.get("batch_ids"):
+                return {"order_id": oid, "status": order[0]["status"], "replayed": True}
+        _validate_contract(contract)
+
+        # 1. 按合同的「指定批次/来源」汇总每个批次、每个机型变体的需求。
+        demand_by_code: dict[str, Counter] = defaultdict(Counter)
+        for row in contract:
+            alloc = {
+                str(code).strip(): int(qty)
+                for code, qty in _source(row.get("指定批次/来源")).items()
+                if not str(code).startswith("_") and int(qty or 0) > 0
+            }
+            qty = int(row.get("排产数量") or 0)
+            if not alloc or sum(alloc.values()) != qty:
+                raise BatchPlanningError(
+                    f"{row.get('机型')} 缺少可执行的指定批次，无法自动规划"
+                )
+            key = _variant(row.get("机型"), row.get("备注"))
+            if not key[0]:
+                raise BatchPlanningError("合同机型无效，无法自动规划")
+            for code, batch_qty in alloc.items():
+                demand_by_code[code][key] += batch_qty
+
+        # 2. 逐个批次校验并选卡；任一批次失败 -> 整体回滚。
+        resolved: list[tuple[str, dict, list[dict]]] = []
+        seen_unit_ids: set[str] = set()
+        for code, demand in demand_by_code.items():
+            batch = _rows(
+                conn,
+                "SELECT * FROM batches WHERE batch_code=:code "
+                "AND status IN ('Confirmed','In_Production') ORDER BY batch_id LIMIT 1",
+                {"code": code},
+                True,
+            )
+            if not batch:
+                raise BatchPlanningError(f"批次 {code} 不可规划（已完工或不存在），不能自动预占")
+            units = select_units(_free_units(conn, batch[0]["batch_id"], True), demand)
+            if not units:
+                raise BatchPlanningError(f"批次 {code} 适配空卡不足或已被占用，不能自动预占")
+            overlap = seen_unit_ids & {str(u["unit_id"]) for u in units}
+            if overlap:
+                raise BatchPlanningError("批次选卡重复，请稍后重试")
+            seen_unit_ids |= {str(u["unit_id"]) for u in units}
+            resolved.append((code, batch[0], units))
+
+        existing = _rows(
+            conn,
+            """SELECT u.unit_id FROM units u JOIN batches b ON b.batch_id=u.batch_id
+               WHERE u.contract_no=:cid AND b.status<>'Predicted'""",
+            {"cid": cid},
+            True,
+        )
+        if existing:
+            raise BatchPlanningError("合同已绑定其他非预测卡片，不能重复自动规划")
+
+        all_units = [unit for _code, _batch, units in resolved for unit in units]
+        oid = _new_order_id(conn)
+        metadata = {
+            "contract_id": cid,
+            "operator": operator,
+            "batch_id": resolved[0][1]["batch_id"],
+            "batch_ids": [batch["batch_id"] for _code, batch, _units in resolved],
+            "batches": [
+                {
+                    "batch_id": batch["batch_id"],
+                    "batch_code": code,
+                    "unit_ids": [u["unit_id"] for u in units],
+                }
+                for code, batch, units in resolved
+            ],
+            "unit_ids": [u["unit_id"] for u in all_units],
+            "created_at": datetime.now().isoformat(),
+            "reviewed": False,
+            "unit_before": {
+                u["unit_id"]: {
+                    k: u.get(k)
+                    for k in ("customer", "dealer_name", "order_remark", "due_date")
+                }
+                for u in all_units
+            },
+            "rush_before": _rows(
+                conn,
+                "SELECT * FROM rush_order_queue WHERE contract_no=:cid AND status='pending'",
+                {"cid": cid},
+                True,
+            ),
+        }
+        plan_source = {code: len(units) for code, _batch, units in resolved}
+        plan_source["_batch_plan"] = metadata
+        demand = requirements(contract)
+        first = contract[0]
+        conn.execute(
+            text(
+                """INSERT INTO sales_orders
+                (`订单号`,`客户名`,`代理商`,`需求机型`,`需求数量`,`下单时间`,`备注`,`包装选项`,`指定批次/来源`,status)
+                VALUES (:oid,:customer,:dealer,:demand,:qty,CURRENT_TIMESTAMP,:note,'',:source,:status)"""
+            ),
+            {
+                "oid": oid,
+                "customer": first.get("客户名") or "",
+                "dealer": first.get("代理商") or "",
+                "demand": ";".join(
+                    f"{m}{'（加高）' if h else ''}×{q}" for (m, h), q in demand.items()
+                ),
+                "qty": len(all_units),
+                "note": "；".join(
+                    dict.fromkeys(str(r.get("备注") or "") for r in contract)
+                ),
+                "source": json.dumps(
+                    {k: v for k, v in plan_source.items() if k != "_batch_plan"},
+                    ensure_ascii=False,
+                ),
+                "status": REVIEW_STATUS,
+            },
+        )
+        # 记录完整的 _batch_plan 元数据（批次列表、机台、原值），供改配/撤销/二次确认使用。
+        conn.execute(
+            text("UPDATE sales_orders SET `指定批次/来源`=:source WHERE `订单号`=:oid"),
+            {"oid": oid, "source": json.dumps(plan_source, ensure_ascii=False, default=str)},
+        )
+        conn.execute(
+            text(
+                """UPDATE units SET contract_no=NULL,customer=NULL,dealer_name=NULL,
+                sales_id=NULL,order_remark=NULL,due_date=NULL,updated_at=CURRENT_TIMESTAMP
+                WHERE contract_no=:cid AND batch_id IN (SELECT batch_id FROM batches WHERE status='Predicted')"""
+            ),
+            {"cid": cid},
+        )
+        notes: dict[tuple[str, bool], list[dict]] = defaultdict(list)
+        for row in contract:
+            notes[_variant(row.get("机型"), row.get("备注"))].extend(
+                [row] * int(row.get("排产数量") or 0)
+            )
+        from api.routes.planning import _to_contract_date_text
+
+        for code, _batch, units in resolved:
+            for unit in units:
+                variant = _variant(unit["model_type"], unit.get("order_remark"))
+                if not notes.get(variant):
+                    raise BatchPlanningError(
+                        f"批次 {code} 的机台规格与合同不匹配，不能自动预占"
+                    )
+                detail = notes[variant].pop(0)
+                conn.execute(
+                    text(
+                        """UPDATE units SET contract_no=:cid,sales_id=:oid,customer=:customer,
+                        dealer_name=:dealer,order_remark=:note,due_date=:due,updated_at=CURRENT_TIMESTAMP
+                        WHERE unit_id=:uid AND TRIM(COALESCE(contract_no,''))='' AND TRIM(COALESCE(sales_id,''))=''"""
+                    ),
+                    {
+                        "cid": cid,
+                        "oid": oid,
+                        "customer": first.get("客户名") or "",
+                        "dealer": first.get("代理商") or "",
+                        "note": detail.get("备注") or "",
+                        "due": _to_contract_date_text(detail.get("要求交期")) or None,
+                        "uid": unit["unit_id"],
+                    },
+                )
+                _sync_active_ledger(conn, unit["unit_id"])
+        # 每行保留本行的实际指定批次/数量，不能把整份合同的批次映射写到每一行。
+        for row in contract:
+            row_alloc = {
+                str(code).strip(): int(qty)
+                for code, qty in _source(row.get("指定批次/来源")).items()
+                if not str(code).startswith("_") and int(qty or 0) > 0
+            }
+            conn.execute(
+                text(
+                    """UPDATE factory_plan SET `状态`='已转订单',`订单号`=:oid,`指定批次/来源`=:alloc
+                    WHERE id=:id"""
+                ),
+                {
+                    "oid": oid,
+                    "id": row.get("id"),
+                    "alloc": json.dumps(row_alloc, ensure_ascii=False),
+                },
+            )
+        conn.execute(
+            text(
+                "UPDATE production_queue SET quantity_remaining=0,status='Pulled' "
+                "WHERE contract_no=:cid AND status='Waiting'"
+            ),
+            {"cid": cid},
+        )
+        conn.execute(
+            text(
+                "UPDATE rush_order_queue SET status='deleted',updated_by=:operator "
+                "WHERE contract_no=:cid AND status='pending'"
+            ),
+            {"cid": cid, "operator": operator},
+        )
+        from crud.contract_notifications import record_converted
+
+        record_converted(conn, {cid: contract}, oid, operator)
+    _clear_caches()
+    return {
+        "order_id": oid,
+        "status": REVIEW_STATUS,
+        "count": len(all_units),
+        "batch_codes": [code for code, _batch, _units in resolved],
+    }
 
 
 def review_rows(order_id):
@@ -290,6 +526,7 @@ def reservation_info(order_id):
                 "can_confirm": not waiting and not blocked, "waiting_count": waiting,
                 "reserved_days": days, "contract_due_date": due[0] if due else None,
                 "risk": risk, "batch_code": units[0].get("batch_code"), "blocked_serials": blocked,
+                "batch_codes": list(dict.fromkeys(str(u.get("batch_code") or "") for u in units)),
                 "machine_states": machine_states}
 
 
@@ -297,9 +534,10 @@ def replacement_batches(order_id):
     with get_engine().connect() as conn:
         _, meta, contract, _ = _reservation(conn, order_id)
         demand = requirements(contract)
+        current_batch_ids = set(meta.get("batch_ids") or [meta["batch_id"]])
         groups = defaultdict(list)
         for u in _free_units(conn):
-            if u["batch_id"] != meta["batch_id"]:
+            if u["batch_id"] != meta["batch_id"] and u["batch_id"] not in current_batch_ids:
                 groups[u["batch_id"]].append(u)
         return [{"batch_id": bid, "batch_code": rows[0].get("batch_code") or bid,
                  "status": rows[0]["batch_status"], "available": len(rows), "required": sum(demand.values())}
@@ -337,6 +575,8 @@ def change_reservation(order_id, operator, batch_id=None):
         cid = meta["contract_id"]
         if batch_id == meta["batch_id"]:
             raise BatchPlanningError("请选择其他批次")
+        if batch_id and len(set(meta.get("batch_ids") or [meta["batch_id"]])) > 1:
+            raise BatchPlanningError("多批次预占不支持整体改配，请先撤销后重新规划")
         if batch_id:
             batch = _rows(conn, "SELECT * FROM batches WHERE batch_id=:bid", {"bid": batch_id}, True)
             if not batch or batch[0]["status"] not in ("Confirmed", "In_Production"):
