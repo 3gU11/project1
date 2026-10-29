@@ -740,6 +740,112 @@ def push_cloud_completed_state(
     return result
 
 
+def _snapshot_summary_id(batch_no: Any, eta: Any, model: Any, heightened: Any, original_batch_no: Any = "") -> str:
+    import hashlib
+
+    eta_text = eta.strftime("%Y-%m-%d %H:%M:%S") if isinstance(eta, datetime) else str(eta or "")
+    raw = f"{batch_no or ''}|{eta_text}|{model or ''}|{1 if int(heightened or 0) else 0}|{original_batch_no or ''}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def _normalize_completed_inbound_batches(conn: Any) -> dict[str, Any]:
+    """把「已完成批次」的待入库机台归并到虚拟「待入库」桶。
+
+    云端候选按快照批次号展示；已完成批次不能作为生产批次插入合同。这里在快照生成端
+    把「只存在 Completed 批次」的待入库行改名为 batch_no=待入库（加高也归并），
+    云端候选/可订货统计会自动把它当成待入库批次而不是已完成生产批次。
+    """
+    try:
+        if not inspect(conn).has_table("batches"):
+            return {"renamed": 0, "groups": 0}
+        codes = [
+            str(row[0] or "").strip()
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT batch_code FROM batches
+                    WHERE NULLIF(TRIM(batch_code), '') IS NOT NULL
+                    GROUP BY batch_code
+                    HAVING SUM(CASE WHEN status IN ('Confirmed', 'In_Production') THEN 1 ELSE 0 END) = 0
+                       AND SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) > 0
+                    """
+                )
+            ).fetchall()
+        ]
+        codes = [code for code in codes if code]
+        if not codes:
+            return {"renamed": 0, "groups": 0}
+        rows = conn.execute(
+            text(
+                """
+                SELECT summary_id, batch_no, original_batch_no, model, heightened,
+                       expected_inbound_time, quantity
+                FROM wechat_batch_summary
+                WHERE expected_inbound_time IS NOT NULL
+                  AND (batch_no IN :codes OR original_batch_no IN :codes)
+                """
+            ).bindparams(bindparam("codes", expanding=True)),
+            {"codes": tuple(codes)},
+        ).mappings().all()
+        if not rows:
+            return {"renamed": 0, "groups": 0}
+        groups: dict[tuple[str, int], dict[str, Any]] = {}
+        delete_ids: list[str] = []
+        for row in rows:
+            model = str(row["model"] or "").strip()
+            high = 1 if int(row["heightened"] or 0) else 0
+            if not model:
+                continue
+            eta_text = (
+                row["expected_inbound_time"].strftime("%Y-%m-%d %H:%M:%S")
+                if isinstance(row["expected_inbound_time"], datetime)
+                else str(row["expected_inbound_time"] or "")
+            )
+            group = groups.setdefault(
+                (model, high), {"quantity": 0, "eta": eta_text or None}
+            )
+            group["quantity"] += int(row["quantity"] or 0)
+            if eta_text and (not group["eta"] or eta_text < group["eta"]):
+                group["eta"] = eta_text
+            delete_ids.append(str(row["summary_id"]))
+        if delete_ids:
+            conn.execute(
+                text(
+                    "DELETE FROM wechat_batch_summary WHERE summary_id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": tuple(delete_ids)},
+            )
+        for (model, high), group in groups.items():
+            batch_no = "待入库"
+            eta = group["eta"]
+            summary_id = _snapshot_summary_id(batch_no, eta, model, high, "")
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO wechat_batch_summary
+                      (summary_id, batch_no, expected_inbound_time, model, quantity,
+                       heightened, original_batch_no, original_expected_inbound_time,
+                       `批次号`, `预计入库时间`, `机型`, `数量`)
+                    VALUES
+                      (:summary_id, :batch_no, :eta, :model, :quantity,
+                       :high, '', NULL, :batch_no, :eta, :model, :quantity)
+                    """
+                ),
+                {
+                    "summary_id": summary_id,
+                    "batch_no": batch_no,
+                    "eta": eta,
+                    "model": model,
+                    "quantity": group["quantity"],
+                    "high": high,
+                },
+            )
+        return {"renamed": len(rows), "groups": len(groups)}
+    except Exception as exc:
+        logger.warning("normalize completed inbound batches failed: %s", exc)
+        return {"renamed": 0, "groups": 0, "error": str(exc)}
+
+
 def refresh_local_wechat_batch_summary() -> dict[str, Any]:
     """Rebuild the local mini-program inventory read model from finished_goods_data."""
     with get_engine().begin() as conn:
@@ -927,12 +1033,15 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                 """
             )
         )
+        # 已完成批次不能作为生产批次分配：待入库行归并到虚拟「待入库」桶。
+        normalized = _normalize_completed_inbound_batches(conn)
         total = conn.execute(text("SELECT COUNT(*) FROM wechat_batch_summary")).scalar() or 0
     return {
         "refreshed": True,
         "rows": int(total),
         "skipped_unknown_models": int(skipped_rows),
         "skipped_unknown_samples": [row["model"] for row in skipped],
+        "normalized_completed_inbound": normalized,
     }
 
 

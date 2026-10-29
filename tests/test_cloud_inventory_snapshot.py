@@ -201,3 +201,40 @@ def test_special_heightened_units_are_stripped_from_cloud_snapshot_rows():
     assert by_id["s6"]["quantity"] == 1
     assert by_id["s8"]["quantity"] == 1
 
+
+
+def test_completed_inbound_batches_are_merged_into_waiting_inbound_bucket():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE batches (batch_code TEXT, status TEXT)"))
+        conn.execute(text("""CREATE TABLE wechat_batch_summary (
+            summary_id TEXT PRIMARY KEY, batch_no TEXT, expected_inbound_time TEXT, model TEXT,
+            quantity INTEGER, heightened INTEGER, original_batch_no TEXT,
+            original_expected_inbound_time TEXT, `批次号` TEXT, `预计入库时间` TEXT,
+            `机型` TEXT, `数量` INTEGER)"""))
+        conn.execute(text("INSERT INTO batches VALUES ('08-07','Completed')"))
+        conn.execute(text("INSERT INTO batches VALUES ('08-08加高','In_Production'),('08-08加高','Completed')"))
+        conn.execute(text("INSERT INTO batches VALUES ('09-09加高','Completed')"))
+        insert = text("""INSERT INTO wechat_batch_summary
+            (summary_id,batch_no,expected_inbound_time,model,quantity,heightened,
+             original_batch_no,original_expected_inbound_time,`批次号`,`预计入库时间`,`机型`,`数量`)
+            VALUES (:id,:batch,:eta,:model,:qty,:high,:orig,:orig_eta,:batch,:eta,:model,:qty)""")
+        conn.execute(insert, {"id":"s1","batch":"08-07","eta":"2026-10-30 00:00:00","model":"FR-7055AUTO","qty":1,"high":0,"orig":"","orig_eta":None})
+        conn.execute(insert, {"id":"s2","batch":"08-07","eta":"2026-11-01 00:00:00","model":"FR-7055AUTO","qty":1,"high":0,"orig":"","orig_eta":None})
+        conn.execute(insert, {"id":"s3","batch":"加高","eta":"2026-10-15 00:00:00","model":"FR-7055XS(PRO)","qty":2,"high":1,"orig":"08-08加高","orig_eta":"2026-10-15 00:00:00"})
+        conn.execute(insert, {"id":"s4","batch":"加高","eta":"2026-11-02 00:00:00","model":"FR-7055Y","qty":1,"high":1,"orig":"09-09加高","orig_eta":"2026-11-02 00:00:00"})
+
+        result = sync._normalize_completed_inbound_batches(conn)
+
+        rows = conn.execute(text(
+            "SELECT batch_no, original_batch_no, model, quantity, heightened FROM wechat_batch_summary ORDER BY model, heightened"
+        )).fetchall()
+
+    assert result["renamed"] == 3
+    assert result["groups"] == 2
+    # 08-07 两条已完成批次待入库行合并成一条「待入库」
+    assert ("待入库", "", "FR-7055AUTO", 2, 0) in rows
+    # 09-09加高 已完成批次 → 加高待入库
+    assert ("待入库", "", "FR-7055Y", 1, 1) in rows
+    # 08-08加高 仍有在产批次，不能误归并，保持原批次
+    assert ("加高", "08-08加高", "FR-7055XS(PRO)", 2, 1) in rows
