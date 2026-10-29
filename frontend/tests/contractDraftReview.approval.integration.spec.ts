@@ -19,10 +19,14 @@ vi.mock('../src/utils/contractPreview', () => ({
   contractPreviewHtml: vi.fn(async () => '<p>Verified contract preview</p>'),
 }))
 
-vi.mock('element-plus', () => ({
-  ElMessage: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() },
-  ElMessageBox: { confirm: vi.fn(async () => undefined), prompt: vi.fn() },
-}))
+vi.mock('element-plus', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('element-plus')>()
+  return {
+    ...actual,
+    ElMessage: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() },
+    ElMessageBox: { confirm: vi.fn(async () => undefined), prompt: vi.fn() },
+  }
+})
 
 import ContractDraftReview from '../src/components/ContractDraftReview.vue'
 

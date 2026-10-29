@@ -35,14 +35,22 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mocks.routerPush }),
 }))
 
-vi.mock('element-plus', () => ({
-  ElMessage: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() },
-  ElMessageBox: { confirm: vi.fn(), prompt: vi.fn() },
-}))
+vi.mock('element-plus', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('element-plus')>()
+  return {
+    ...actual,
+    ElMessage: { error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() },
+    ElMessageBox: { confirm: vi.fn(), prompt: vi.fn() },
+  }
+})
 
-vi.mock('@element-plus/icons-vue', () => ({
-  Loading: defineComponent({ render: () => null }),
-}))
+vi.mock('@element-plus/icons-vue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@element-plus/icons-vue')>()
+  return {
+    ...actual,
+    Loading: defineComponent({ render: () => null }),
+  }
+})
 
 vi.mock('../src/components/ContractDraftReview.vue', async () => {
   const { defineComponent, h } = await import('vue')

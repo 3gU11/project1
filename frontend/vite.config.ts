@@ -53,6 +53,12 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    server: {
+      deps: {
+        // 让 vitest 通过 Vite 转换 element-plus 的样式导入，避免 Node 直接加载 .css
+        inline: [/element-plus/],
+      },
+    },
   },
   build: {
     chunkSizeWarningLimit: 800,
