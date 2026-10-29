@@ -1018,7 +1018,17 @@ def convert_to_contract(
             _rollback_created_contracts(contract_nos)
             raise
 
-        # 6. 在制合同：按合同行的指定批次自动执行「按批次规划并配货」（支持多批次）。
+        # 6. 先回写经销商订单：自动批次规划会生成销售订单/预占机台，若先规划后回写失败，
+        #    回滚合同会留下孤立订单与机台占用，因此回写必须排在自动规划之前。
+        try:
+            mark_dealer_order_contracted(
+                order_no, contract_no="、".join(contract_nos), operator=operator
+            )
+        except Exception:
+            _rollback_created_contracts(contract_nos)
+            raise
+
+        # 7. 在制合同：按合同行的指定批次自动执行「按批次规划并配货」（支持多批次）。
         #    失败不阻塞整单，合同回退「已规划」由业务人工导入+配货。
         auto_plan: dict | None = None
         batch_plan_error = ""
@@ -1043,15 +1053,6 @@ def convert_to_contract(
                 logging.getLogger(__name__).warning(
                     "auto batch planning failed contract=%s: %s", batch_cid, exc
                 )
-
-        # 7. 回写经销商订单；现货机台仍由业务人员在订单配货手动完成
-        try:
-            mark_dealer_order_contracted(
-                order_no, contract_no="、".join(contract_nos), operator=operator
-            )
-        except Exception:
-            _rollback_created_contracts(contract_nos)
-            raise
 
         regular_batch_text = (
             f"；指定批次：{'、'.join(regular_contract['batch_nos'])}（配货时优先匹配，可改选）"
