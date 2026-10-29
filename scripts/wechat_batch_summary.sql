@@ -199,7 +199,7 @@ BEGIN
         raw.`base_model` AS `model`,
         COUNT(*) AS `quantity`,
         IF(raw.`is_high`, 1, 0) AS `heightened`,
-        IF(raw.`is_high`, COALESCE(NULLIF(raw.`source_batch_no`, ''), '库存中'), '') AS `original_batch_no`,
+        '' AS `original_batch_no`,
         CAST(NULL AS DATETIME) AS `original_expected_inbound_time`
       FROM (
         SELECT
@@ -221,7 +221,7 @@ BEGIN
           AND TRIM(COALESCE(`状态`, '')) LIKE '库存中%'
       ) raw
       WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
-      GROUP BY raw.`base_model`, raw.`is_high`, IF(raw.`is_high`, COALESCE(NULLIF(raw.`source_batch_no`, ''), '库存中'), '')
+      GROUP BY raw.`base_model`, raw.`is_high`
     ) s
     ON DUPLICATE KEY UPDATE
       `batch_no` = VALUES(`batch_no`),
@@ -306,7 +306,7 @@ BEGIN
       raw.`base_model` AS `model`,
       COUNT(*) AS `quantity`,
       IF(raw.`is_high`, 1, 0) AS `heightened`,
-      IF(raw.`is_high`, COALESCE(NULLIF(raw.`source_batch_no`, ''), '库存中'), '') AS `original_batch_no`,
+      '' AS `original_batch_no`,
       CAST(NULL AS DATETIME) AS `original_expected_inbound_time`
     FROM (
       SELECT
@@ -328,7 +328,7 @@ BEGIN
         AND TRIM(COALESCE(`状态`, '')) LIKE '库存中%'
     ) raw
     WHERE NULLIF(raw.`base_model`, '') IS NOT NULL
-    GROUP BY raw.`base_model`, raw.`is_high`, IF(raw.`is_high`, COALESCE(NULLIF(raw.`source_batch_no`, ''), '库存中'), '')
+    GROUP BY raw.`base_model`, raw.`is_high`
   ) s
   ON DUPLICATE KEY UPDATE
     `batch_no` = VALUES(`batch_no`),

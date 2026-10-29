@@ -401,20 +401,24 @@ def plan_contract_designated_batches(cid, operator):
                     },
                 )
                 _sync_active_ledger(conn, unit["unit_id"])
-        conn.execute(
-            text(
-                """UPDATE factory_plan SET `状态`='已转订单',`订单号`=:oid,`指定批次/来源`=:source
-                WHERE `合同号`=:cid"""
-            ),
-            {
-                "oid": oid,
-                "cid": cid,
-                "source": json.dumps(
-                    {code: len(units) for code, _batch, units in resolved},
-                    ensure_ascii=False,
+        # 每行保留本行的实际指定批次/数量，不能把整份合同的批次映射写到每一行。
+        for row in contract:
+            row_alloc = {
+                str(code).strip(): int(qty)
+                for code, qty in _source(row.get("指定批次/来源")).items()
+                if not str(code).startswith("_") and int(qty or 0) > 0
+            }
+            conn.execute(
+                text(
+                    """UPDATE factory_plan SET `状态`='已转订单',`订单号`=:oid,`指定批次/来源`=:alloc
+                    WHERE id=:id"""
                 ),
-            },
-        )
+                {
+                    "oid": oid,
+                    "id": row.get("id"),
+                    "alloc": json.dumps(row_alloc, ensure_ascii=False),
+                },
+            )
         conn.execute(
             text(
                 "UPDATE production_queue SET quantity_remaining=0,status='Pulled' "

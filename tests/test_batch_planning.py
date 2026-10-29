@@ -290,6 +290,10 @@ class BatchPlanningTests(unittest.TestCase):
         self.assertEqual(self.sql("SELECT COUNT(*) FROM units WHERE sales_id=:oid", oid=result["order_id"])[0][0], 2)
         statuses = self.sql("SELECT DISTINCT `状态` FROM factory_plan WHERE `合同号`='C2'")
         self.assertEqual(statuses, [("已转订单",)])
+        # 每行保留本行实际指定批次，不能把整份合同的批次映射复制到每一行。
+        row_allocs = self.sql("SELECT `指定批次/来源` FROM factory_plan WHERE `合同号`='C2' ORDER BY id")
+        self.assertEqual(json.loads(row_allocs[0][0]), {"09-01": 1})
+        self.assertEqual(json.loads(row_allocs[1][0]), {"09-02": 1})
         replay = bp.plan_contract_designated_batches("C2", "planner")
         self.assertTrue(replay["replayed"])
         self.assertEqual(self.sql("SELECT COUNT(*) FROM sales_orders")[0][0], 1)
