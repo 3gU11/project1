@@ -1,7 +1,7 @@
 <template>
   <div class="inbound">
     <h2>📥 设备入库作业</h2>
-    <div v-if="derivedPendingCount > 0" class="derived-notice" @click="activeTab = 'derived'">🔔 有 {{ derivedPendingCount }} 条重入库任务待处理，点击查看</div>
+    <div v-if="canHandleReinbound && derivedPendingCount > 0" class="derived-notice" @click="activeTab = 'derived'">🔔 有 {{ derivedPendingCount }} 条重入库任务待处理，点击查看</div>
     <el-tabs v-model="activeTab">
       <el-tab-pane label="🏭 设备扫描入库" name="machine">
         <h3 class="machine-title">设备入库登记</h3>
@@ -156,7 +156,7 @@
 
         </el-card>
       </el-tab-pane>
-      <el-tab-pane :label="`🔁 重新入库${derivedPendingCount ? `（${derivedPendingCount}）` : ''}`" name="derived">
+      <el-tab-pane v-if="canHandleReinbound" :label="`🔁 重新入库${derivedPendingCount ? `（${derivedPendingCount}）` : ''}`" name="derived">
         <el-table v-loading="derivedLoading" :data="derivedTasks" stripe border>
           <el-table-column prop="task_no" label="任务编号" min-width="230" />
           <el-table-column prop="object_id" label="机台流水号" min-width="150" />
@@ -185,8 +185,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
+import { useUserStore } from '../store/user'
 import { ElMessage } from 'element-plus'
 import { compareModels, getModelOrderList } from '../utils/modelOrder'
 import {
@@ -204,6 +205,10 @@ type MessageResponse = { message?: string }
 type InboundSlotResponse = { ok?: boolean }
 
 const layoutId = 'default'
+const userStore = useUserStore()
+const canHandleReinbound = computed(() =>
+  ['inbound', 'admin', 'boss'].includes(String(userStore.userInfo?.role || '').trim().toLowerCase())
+)
 const activeTab = ref('machine')
 const derivedTasks = ref<any[]>([])
 const derivedLoading = ref(false)
@@ -212,7 +217,28 @@ const reinboundDialogVisible = ref(false)
 const reinboundSubmitting = ref(false)
 const reinboundTask = ref<any>(null)
 const selectedReinboundSlot = ref('')
-const loadDerivedTasks = async () => { derivedLoading.value = true; try { const r = await apiGet<{data:any[]}>('/workflows/derived-tasks'); derivedTasks.value = r.data || []; derivedPendingCount.value = derivedTasks.value.length } finally { derivedLoading.value = false } }
+const loadDerivedTasks = async () => {
+  // 重入库任务在后端仅对入库员/管理员/老板开放，其他角色进入成品入库时
+  // 不要请求该接口，避免 403 被全局提示成“没有操作权限”。
+  if (!canHandleReinbound.value) {
+    derivedTasks.value = []
+    derivedPendingCount.value = 0
+    derivedLoading.value = false
+    return
+  }
+  derivedLoading.value = true
+  try {
+    const r = await apiGet<{ data: any[] }>('/workflows/derived-tasks', { silent: true })
+    derivedTasks.value = r.data || []
+    derivedPendingCount.value = derivedTasks.value.length
+  } catch {
+    // 角色被后台调整等情况下仍可能 403，此时静默降级，不影响正常入库。
+    derivedTasks.value = []
+    derivedPendingCount.value = 0
+  } finally {
+    derivedLoading.value = false
+  }
+}
 const reinboundSlotOptions = computed(() => slotButtons.value.filter((slot: any) => !slotStats.value[slot.code]?.isOverflow))
 const reinbound = (row: any) => { reinboundTask.value = row; selectedReinboundSlot.value = ''; reinboundDialogVisible.value = true }
 const confirmReinbound = async () => { const row = reinboundTask.value; const slot = selectedReinboundSlot.value; if (!row || !slot) return; reinboundSubmitting.value = true; try { const result = await apiPost<any>('/inventory/inbound-to-slot', { serial_no: row.object_id, slot_code: slot });
@@ -526,7 +552,18 @@ const confirmInboundBySlot = async (slotCode: string) => {
 }
 
 onMounted(async () => {
+  if (!canHandleReinbound.value) activeTab.value = 'machine'
   await Promise.all([fetchInventory(), loadLayout(), fetchImportStaging(), loadDerivedTasks()])
+})
+
+watch(canHandleReinbound, (allowed) => {
+  if (!allowed) {
+    activeTab.value = 'machine'
+    derivedTasks.value = []
+    derivedPendingCount.value = 0
+    return
+  }
+  void loadDerivedTasks()
 })
 </script>
 

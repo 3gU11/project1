@@ -39,6 +39,7 @@ request.interceptors.response.use(
     return response
   },
   (error) => {
+    const silent = Boolean((error.config as ApiConfig | undefined)?.silent)
     if (error.response) {
       const status = error.response.status
       if (status === 401) {
@@ -51,19 +52,22 @@ request.interceptors.response.use(
             authRedirecting = false
           })
         }
-      } else if (status === 403) {
-        ElMessage.error('没有操作权限')
-      } else {
-        ElMessage.error(getApiErrorMessage(error) || '系统错误')
+      } else if (!silent) {
+        if (status === 403) {
+          ElMessage.error('没有操作权限')
+        } else {
+          ElMessage.error(getApiErrorMessage(error) || '系统错误')
+        }
       }
-    } else {
+    } else if (!silent) {
       ElMessage.error('网络连接错误')
     }
     return Promise.reject(error)
   }
 )
 
-export type ApiConfig = AxiosRequestConfig
+/** 额外配置：silent 为 true 时请求失败不弹全局错误提示（由调用方自行处理）。 */
+export type ApiConfig = AxiosRequestConfig & { silent?: boolean }
 export const apiGet = async <T = any>(url: string, config?: ApiConfig): Promise<T> => {
   const response = await request.get<T>(url, config)
   return response.data
