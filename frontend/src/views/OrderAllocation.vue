@@ -87,14 +87,15 @@
             <template v-if="isBatchReview">
               <el-alert :title="reservationInfo?.label || '正在核查预占状态'" type="warning" :closable="false">
                 <template #default>
-                  <div>当前批次已预占 {{ reservationInfo?.reserved_days ?? '-' }} 天；合同交期：{{ reservationInfo?.contract_due_date || '未填写' }}。</div>
+                  <div>当前预占批次：{{ (reservationInfo?.batch_codes?.length ? reservationInfo.batch_codes : [reservationInfo?.batch_code]).filter(Boolean).join('、') || '-' }}；已预占 {{ reservationInfo?.reserved_days ?? '-' }} 天；合同交期：{{ reservationInfo?.contract_due_date || '未填写' }}。</div>
                   <div v-if="reservationInfo?.risk">{{ reservationInfo.risk }}</div>
-                  <div>未投产时可以改配其他批次，或撤销本次规划恢复合同需求。</div>
+                  <div v-if="(reservationInfo?.batch_codes?.length || 1) > 1">多批次预占不支持整体改配；如需调整请先撤销本次规划后重新规划。</div>
+                  <div v-else>未投产时可以改配其他批次，或撤销本次规划恢复合同需求。</div>
                 </template>
               </el-alert>
               <div class="ops">
                 <el-button type="success" :loading="saving" :disabled="!reservationInfo?.can_confirm" @click="confirmBatchReview">确认全部配货</el-button>
-                <el-button :disabled="saving" @click="openReplacement">改配批次</el-button>
+                <el-button v-if="(reservationInfo?.batch_codes?.length || 1) <= 1" :disabled="saving" @click="openReplacement">改配批次</el-button>
                 <el-button type="danger" plain :disabled="saving" @click="cancelReservation">撤销本次规划</el-button>
               </div>
               <el-table :data="allocations" border stripe max-height="460">
