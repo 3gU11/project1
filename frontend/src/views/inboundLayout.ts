@@ -7,6 +7,9 @@ export type WarehouseSlot = {
   h: number
   status?: string
   allowed_models?: string
+  slot_name?: string
+  slot_type?: string
+  customer_name?: string
 }
 
 export type SlotStat = {
@@ -18,6 +21,7 @@ export type SlotStat = {
 }
 
 export const SLOT_CAPACITY = 5
+export const CUSTOMER_WAREHOUSE_CAPACITY = 500
 export const LARGE_SLOT_CAPACITY = 15
 export const SCRAP_SLOT_CAPACITY = 5
 export const UNLIMITED_SLOT_CAPACITY = Number.POSITIVE_INFINITY
@@ -73,6 +77,9 @@ export const prioritizeOldFactorySlots = <T extends { code?: any }>(slots: T[]):
 
 export const getSlotCapacity = (code: any) => {
   const normalized = normalizeSlotCode(code)
+  if (normalized.toUpperCase() === 'DG-WH') {
+    return CUSTOMER_WAREHOUSE_CAPACITY
+  }
   if (isUnlimitedSlot(code)) {
     return UNLIMITED_SLOT_CAPACITY
   }
@@ -92,6 +99,7 @@ const requiredSlotCodes = [
   '实验室区 01',
   ...OLD_FACTORY_SLOT_CODES,
   ...EMERGENCY_BUFFER_SLOT_CODES,
+  'DG-WH',
   '报废区 01',
 ]
 

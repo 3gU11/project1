@@ -1,6 +1,7 @@
 <template>
   <div class="inbound">
     <h2>📥 设备入库作业</h2>
+    <div v-if="canHandleReinbound && derivedPendingCount > 0" class="derived-notice" @click="activeTab = 'derived'">🔔 有 {{ derivedPendingCount }} 条重入库任务待处理，点击查看</div>
     <el-tabs v-model="activeTab">
       <el-tab-pane label="🏭 设备扫描入库" name="machine">
         <h3 class="machine-title">设备入库登记</h3>
@@ -157,7 +158,28 @@
 
         </el-card>
       </el-tab-pane>
+      <el-tab-pane v-if="canHandleReinbound" :label="`🔁 重新入库${derivedPendingCount ? `（${derivedPendingCount}）` : ''}`" name="derived">
+        <el-table v-loading="derivedLoading" :data="derivedTasks" stripe border>
+          <el-table-column prop="task_no" label="任务编号" min-width="230" />
+          <el-table-column prop="object_id" label="机台流水号" min-width="150" />
+          <el-table-column prop="source_instance_no" label="来源流程" min-width="220" />
+          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" @click="reinbound(row)">选择库位入库</el-button></template></el-table-column>
+        </el-table>
+        <el-empty v-if="!derivedLoading && derivedTasks.length === 0" description="暂无待处理重入库任务" />
+      </el-tab-pane>
     </el-tabs>
+
+    <el-dialog v-model="reinboundDialogVisible" title="选择目标库位" width="420px">
+      <div class="reinbound-slot-label">机台：{{ reinboundTask?.object_id }}</div>
+      <el-select v-model="selectedReinboundSlot" filterable placeholder="请选择库位" style="width: 100%">
+        <el-option v-for="slot in reinboundSlotOptions" :key="slot.code" :label="slot.code" :value="slot.code" />
+      </el-select>
+      <template #footer>
+        <el-button @click="reinboundDialogVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedReinboundSlot" :loading="reinboundSubmitting" @click="confirmReinbound">确认入库</el-button>
+      </template>
+    </el-dialog>
 
     <div v-if="error" class="error">{{ error }}</div>
 
@@ -165,8 +187,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
+import { useUserStore } from '../store/user'
 import { ElMessage } from 'element-plus'
 import { compareModels, getModelOrderList } from '../utils/modelOrder'
 import { singleLineOrderRemark } from '../utils/orderNotes'
@@ -185,7 +208,45 @@ type MessageResponse = { message?: string }
 type InboundSlotResponse = { ok?: boolean }
 
 const layoutId = 'default'
+const userStore = useUserStore()
+const canHandleReinbound = computed(() =>
+  ['inbound', 'admin', 'boss'].includes(String(userStore.userInfo?.role || '').trim().toLowerCase())
+)
 const activeTab = ref('machine')
+const derivedTasks = ref<any[]>([])
+const derivedLoading = ref(false)
+const derivedPendingCount = ref(0)
+const reinboundDialogVisible = ref(false)
+const reinboundSubmitting = ref(false)
+const reinboundTask = ref<any>(null)
+const selectedReinboundSlot = ref('')
+const loadDerivedTasks = async () => {
+  // 重入库任务在后端仅对入库员/管理员/老板开放，其他角色进入成品入库时
+  // 不要请求该接口，避免 403 被全局提示成“没有操作权限”。
+  if (!canHandleReinbound.value) {
+    derivedTasks.value = []
+    derivedPendingCount.value = 0
+    derivedLoading.value = false
+    return
+  }
+  derivedLoading.value = true
+  try {
+    const r = await apiGet<{ data: any[] }>('/workflows/derived-tasks', { silent: true })
+    derivedTasks.value = r.data || []
+    derivedPendingCount.value = derivedTasks.value.length
+  } catch {
+    // 角色被后台调整等情况下仍可能 403，此时静默降级，不影响正常入库。
+    derivedTasks.value = []
+    derivedPendingCount.value = 0
+  } finally {
+    derivedLoading.value = false
+  }
+}
+const reinboundSlotOptions = computed(() => slotButtons.value.filter((slot: any) => !slotStats.value[slot.code]?.isOverflow))
+const reinbound = (row: any) => { reinboundTask.value = row; selectedReinboundSlot.value = ''; reinboundDialogVisible.value = true }
+const confirmReinbound = async () => { const row = reinboundTask.value; const slot = selectedReinboundSlot.value; if (!row || !slot) return; reinboundSubmitting.value = true; try { const result = await apiPost<any>('/inventory/inbound-to-slot', { serial_no: row.object_id, slot_code: slot });
+if ((result as any)?.approval_pending) { ElMessage.info((result as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+ if (!result?.ok) throw new Error(result?.message || '入库失败'); await apiPost(`/workflows/derived-tasks/${encodeURIComponent(row.task_no)}/complete`, { reason: `成品入库页面确认，库位：${slot}` }); reinboundDialogVisible.value = false; await loadDerivedTasks(); window.dispatchEvent(new Event('workflow-pending-updated')) } catch (err: any) { ElMessage.error(err?.message || '重新入库失败') } finally { reinboundSubmitting.value = false } }
 const loading = ref(false)
 const error = ref('')
 const inventory = ref<any[]>([])
@@ -229,7 +290,7 @@ const pendingRows = computed(() => {
       // 如果有精确匹配的批次号，优先返回该批次所有机台
       return exactBatchRows
     }
-    
+
     // 2. 如果没有精确匹配的批次，则进行默认的模糊匹配
     rows = rows.filter((item) =>
       String(item['流水号'] || '').toLowerCase().includes(kw) ||
@@ -458,6 +519,7 @@ const confirmInboundBySlot = async (slotCode: string) => {
     return
   }
 
+  let pending = 0
   let success = 0
   let failed = 0
   try {
@@ -467,6 +529,8 @@ const confirmInboundBySlot = async (slotCode: string) => {
           serial_no: row['流水号'],
           slot_code: slotCode
         })
+        if ((result as any)?.approval_pending) { pending += 1; continue }
+
         if (!result?.ok) {
           failed += 1
         } else {
@@ -476,9 +540,10 @@ const confirmInboundBySlot = async (slotCode: string) => {
         failed += 1
       }
     }
+    if (pending > 0) { ElMessage.info(`审批已发起：${pending} 台；审批通过后自动入库`) }
     if (failed > 0) {
       ElMessage.warning(`库位 ${slotCode} 入库完成：成功 ${success} 台，失败 ${failed} 台`)
-    } else {
+    } else if (success > 0) {
       ElMessage.success(`库位 ${slotCode} 入库成功：${success} 台`)
     }
     await fetchInventory()
@@ -490,9 +555,24 @@ const confirmInboundBySlot = async (slotCode: string) => {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchInventory(), loadLayout(), fetchImportStaging()])
+  if (!canHandleReinbound.value) activeTab.value = 'machine'
+  await Promise.all([fetchInventory(), loadLayout(), fetchImportStaging(), loadDerivedTasks()])
+})
+
+watch(canHandleReinbound, (allowed) => {
+  if (!allowed) {
+    activeTab.value = 'machine'
+    derivedTasks.value = []
+    derivedPendingCount.value = 0
+    return
+  }
+  void loadDerivedTasks()
 })
 </script>
+
+<style scoped>
+.derived-notice{margin:0 0 12px;padding:10px 14px;border:1px solid #f0b429;border-radius:6px;background:#fff7df;color:#8a5a00;cursor:pointer}
+</style>
 
 <style scoped>
 .inbound {

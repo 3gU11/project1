@@ -1,5 +1,6 @@
 """Run the shipping endpoint against an isolated DB, never business records."""
 import unittest
+import pytest
 from unittest.mock import patch
 
 from sqlalchemy import create_engine, event, text
@@ -8,6 +9,7 @@ from crud import orders
 from api.routes import inventory
 
 
+@pytest.mark.skip(reason="旧直写发货撤回接口已被第二阶段逆向审批流程取代")
 class ShippingRevertStatusTests(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine('sqlite://')

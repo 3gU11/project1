@@ -1,11 +1,14 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '../store/user'
+import { roleIn } from '../utils/roles'
 import { ElMessage } from 'element-plus'
 
 export type AppMenuItem = {
   path: string
   label: string
   permission?: string
+  /** 限定可见角色（不填=不限）；与 permission 是"与"关系 */
+  roles?: string[]
   isManagement?: boolean
 }
 
@@ -15,6 +18,7 @@ type AppRouteDef = {
   label: string
   title: string
   permission?: string
+  roles?: string[]
   isManagement?: boolean
   component: () => Promise<unknown>
 }
@@ -23,12 +27,13 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/contracts', name: 'Contracts', label: '📊 合同管理', title: '合同管理', permission: 'CONTRACT', isManagement: true, component: () => import('../views/ContractManage.vue') },
   { path: '/model-dictionary', name: 'ModelDictionary', label: '📚 机型字典', title: '机型字典', permission: 'MODEL_DICTIONARY', isManagement: true, component: () => import('../views/ModelDictionary.vue') },
   { path: '/users', name: 'Users', label: '👤 用户管理', title: '用户管理', permission: 'USER_MANAGE', isManagement: true, component: () => import('../views/UserManagement.vue') },
+  { path: '/dealer-orders', name: 'DealerOrders', label: '🧾 经销商订单审核', title: '经销商订单审核', permission: 'DEALER_ORDER_REVIEW', component: () => import('../views/DealerOrderReview.vue') },
   { path: '/sales-orders', name: 'SalesOrders', label: '📌 销售下单', title: '销售下单', permission: 'SALES_CREATE', component: () => import('../views/SalesOrder.vue') },
-  { path: '/dealer-orders', name: 'DealerOrders', label: '🧾 经销商订单审核', title: '经销商订单审核', permission: 'DEALER_ORDER_REVIEW', isManagement: true, component: () => import('../views/DealerOrderReview.vue') },
   { path: '/order-allocation', name: 'OrderAllocation', label: '📋 订单配货', title: '订单配货', permission: 'SALES_ALLOC', component: () => import('../views/OrderAllocation.vue') },
   { path: '/shipping-review', name: 'ShippingReview', label: '📗 发货复核', title: '发货复核', permission: 'SHIP_CONFIRM', component: () => import('../views/ShippingReview.vue') },
   { path: '/machine-archive', name: 'MachineArchive', label: '🔧 机台档案', title: '机台档案', permission: 'ARCHIVE', component: () => import('../views/MachineArchive.vue') },
   { path: '/machine-edit', name: 'MachineEdit', label: '🛠️ 机台编辑', title: '机台编辑', permission: 'MACHINE_EDIT', component: () => import('../views/MachineEdit.vue') },
+  { path: '/customer-finished-goods', name: 'CustomerFinishedGoods', label: '🏢 客户成品', title: '客户成品管理', permission: 'QUERY', component: () => import('../views/CustomerFinishedGoods.vue') },
   { path: '/photo-tasks', name: 'PhotoTasks', label: '📷 拍照任务', title: '拍照任务管理', permission: 'ARCHIVE', isManagement: true, component: () => import('../views/PhotoTaskManagement.vue') },
   { path: '/warehouse-dashboard', name: 'WarehouseDashboard', label: '🖥️ 库位大屏', title: '库位大屏', permission: 'WAREHOUSE_MAP', component: () => import('../views/WarehouseDashboard.vue') },
   { path: '/logs', name: 'Logs', label: '📜 交易日志', title: '交易日志', permission: 'LOG_VIEW', component: () => import('../views/LogViewer.vue') },
@@ -38,12 +43,17 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/production-kanban', name: 'ProductionKanban', label: '🏭 生产看板', title: '生产看板', permission: 'KANBAN_VIEW', isManagement: true, component: () => import('../views/sandbox/ProductionKanban.vue') },
   { path: '/prediction-sandbox', name: 'PredictionSandbox', label: '👑 预测沙盘', title: '预测沙盘', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/BossPlan.vue') },
   { path: '/reports', name: 'Reports', label: '📊 报表管理', title: '报表管理', permission: 'REPORT_VIEW', isManagement: true, component: () => import('../views/ReportManagement.vue') },
+  { path: '/workflow/models', name: 'WorkflowModels', label: '🧩 流程模型', title: '流程模型', roles: ['admin', 'boss'], isManagement: true, component: () => import('../views/workflow/WorkflowModels.vue') },
+  { path: '/workflow/instances', name: 'WorkflowInstances', label: '📝 流程实例', title: '流程实例', isManagement: true, component: () => import('../views/workflow/WorkflowInstances.vue') },
+  { path: '/workflow/tasks', name: 'WorkflowTasks', label: '✅ 流程任务', title: '流程任务', isManagement: true, component: () => import('../views/workflow/WorkflowTasks.vue') },
+  { path: '/approval-center', name: 'ApprovalCenter', label: '🛡️ 审批中心', title: '审批中心', isManagement: true, component: () => import('../views/workflow/ApprovalCenter.vue') },
 ]
 
 export const appMenus: AppMenuItem[] = appRouteDefs.filter((r) => r.name !== 'PhotoTasks').map((r) => ({
   path: r.path,
   label: r.label,
   permission: r.permission,
+  roles: r.roles,
   isManagement: r.isManagement,
 }))
 
@@ -84,15 +94,16 @@ const ensureDynamicRoutes = (permissions?: string[] | null) => {
   injectedPermissionKey = permissionKey
 }
 
-export const getAccessibleMenus = (permissions?: string[] | null) => {
+export const getAccessibleMenus = (permissions?: string[] | null, role?: string | null) => {
   const permissionSet = new Set((permissions || []).map((p) => String(p).trim()).filter(Boolean))
-  return appMenus.filter((m) => !m.permission || permissionSet.has(m.permission))
+  return appMenus.filter((m) => (!m.permission || permissionSet.has(m.permission)) && roleIn(role, m.roles))
 }
 
-export const canAccessPath = (path: string, permissions?: string[] | null) => {
+export const canAccessPath = (path: string, permissions?: string[] | null, role?: string | null) => {
   const cleanPath = String(path || '').split('?')[0].split('#')[0]
   const menu = appMenus.find((m) => m.path === cleanPath)
   if (!menu) return true
+  if (!roleIn(role, menu.roles)) return false
   if (!menu.permission) return true
   const permissionList = Array.isArray(permissions) ? permissions : []
   return permissionList.map((p) => String(p).trim()).includes(menu.permission)
@@ -179,7 +190,7 @@ router.beforeEach((to, _from, next) => {
       next({ name: 'Home' })
       return
     }
-    if (!canAccessPath(to.path, userStore.userInfo?.permissions)) {
+    if (!canAccessPath(to.path, userStore.userInfo?.permissions, userStore.userInfo?.role)) {
       ElMessage.error('没有操作权限')
       next({ name: 'Forbidden' })
       return
@@ -194,7 +205,7 @@ router.beforeEach((to, _from, next) => {
     next({ name: 'Forbidden' })
     return
   }
-  if (!canAccessPath(to.path, userStore.userInfo?.permissions)) {
+  if (!canAccessPath(to.path, userStore.userInfo?.permissions, userStore.userInfo?.role)) {
     ElMessage.error('没有操作权限')
     next({ name: 'Forbidden' })
     return

@@ -173,7 +173,7 @@
               </el-table-column>
             </el-table>
             <div class="ops">
-              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
+              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 撤回配货</el-button>
               <el-button type="success" :loading="saving" @click="completeAllocation">配货完成</el-button>
             </div>
             </template>
@@ -204,7 +204,6 @@ import { singleLineOrderRemark } from '../utils/orderNotes'
 import PageHeader from '../components/PageHeader.vue'
 import VirtualScrollList from '../components/VirtualScrollList.vue'
 type ListResponse<T = any> = { data: T[] }
-type ReleaseResponse = { message?: string; released?: number }
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 type Row = Record<string, any>
@@ -346,10 +345,9 @@ const parseDemandEntries = (order: Row | null) => {
   return entries
 }
 
-const isActiveOrder = (order: Row) => {
-  const status = String(order.status || 'active').toLowerCase()
-  return !['done', 'shipped', 'completed', 'canceled', 'deleted'].includes(status)
-}
+// 可配货与否只以后端派生的 can_allocate 为准（与接口过滤、状态标签同一口径）。
+// 前端不再用 sales_orders.status 二次判断，避免"标签说已完成、列表还在等配货"这类矛盾。
+const isActiveOrder = (order: Row) => order.can_allocate !== false
 
 const orderContainsModel = (order: Row, modelFilter: string) => {
   if (!modelFilter) return true
@@ -503,7 +501,7 @@ const confirmedRows = computed(() => {
 })
 const confirmedAllocatedTotal = computed(() => confirmedRows.value.length)
 
-const CACHE_ORDERS = 'allocation:orders'
+const CACHE_ORDERS = 'allocation:orders:v2'
 const loadData = async (force = false) => {
   loading.value = true
   try {
@@ -515,7 +513,7 @@ const loadData = async (force = false) => {
         return
       }
     }
-    const nextOrders = await apiGetAll<Row>('/planning/orders')
+    const nextOrders = await apiGetAll<Row>('/planning/orders?allocatable=1')
     orders.value = nextOrders
     cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)
     await tryAutoSelectOrderFromQuery()
@@ -721,10 +719,19 @@ const allocateSelected = async () => {
 
   saving.value = true
   try {
-    const res = await apiPost<{ batch_mismatch?: Array<{ 流水号: string; 机型: string; 批次号: string }> }>(
+    const res = await apiPost<{
+      batch_mismatch?: Array<{ 流水号: string; 机型: string; 批次号: string }>
+      approval_pending?: boolean
+      message?: string
+    }>(
       `/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocate`,
       { selected_serial_nos: selectedCandidateSerials.value },
     )
+    if (res.approval_pending) {
+      ElMessage.info(res.message || '配货审批已发起，审批通过后自动执行')
+      window.dispatchEvent(new Event('workflow-pending-updated'))
+      return
+    }
     const mismatches = res.batch_mismatch || []
     if (mismatches.length > 0) {
       const text = mismatches
@@ -752,15 +759,22 @@ const releaseSelected = async () => {
   }
   saving.value = true
   try {
-    const res = await apiPost<ReleaseResponse>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/release`, {
-      selected_serial_nos: selectedAllocatedSerials.value,
-      all: false,
+    const serials = [...selectedAllocatedSerials.value]
+    const res = await apiPost<{ data?: { instance_no?: string; status?: string }; created?: boolean }>('/workflows/reverse/instances', {
+      workflow_key: 'allocation-recall',
+      business_type: '订单配货',
+      business_id: selectedOrderId.value,
+      idempotency_key: `allocation-recall:${selectedOrderId.value}:${serials.slice().sort().join(',')}:${Date.now()}`,
+      reason: `订单 ${selectedOrderId.value} 撤回配货：${serials.join('、')}`,
+      items: serials.map((serialNo) => ({ object_type: '机台', object_id: serialNo })),
     })
-    const released = Number(res.released || 0)
-    if (released > 0) ElMessage.success(res.message || `已释放 ${released} 台机台`)
-    else ElMessage.warning(res.message || '当前没有可释放机台')
+    // 撤回配货已改为自动通过：正常情况下直接执行完，返回 待派生处理/已完成
+    const status = res.data?.status
+    if (status === '待派生处理') ElMessage.success('已撤回，机台回到待入库并已生成重入库任务')
+    else if (status === '已完成') ElMessage.success('已撤回，机台回到待入库')
+    else ElMessage.success('已提交，等待执行')
     selectedAllocatedSerials.value = []
-    await refreshCurrentOrder(released > 0 ? 'active' : undefined)
+    await refreshCurrentOrder()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '释放失败')
   } finally {
@@ -792,7 +806,24 @@ const completeAllocation = async () => {
   }
 }
 
+// 标签配色跟随后端 order_status_label，不同状态必须能一眼区分：
+// 已规划=橙（可配未配）、待配齐=红、待发货=蓝、已完成=绿、未关联合同/待规划=灰
+const ORDER_STATE_TYPES: Record<string, TagType> = {
+  已规划: 'warning',
+  待配齐: 'danger',
+  待发货: 'primary',
+  已完成: 'success',
+  待二次确认: 'warning',
+  待规划: 'info',
+  未关联合同: 'info',
+  已取消: 'info',
+  已删除: 'info',
+}
+
 const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
+  if (o.order_status_label) {
+    return { text: o.order_status_label, type: ORDER_STATE_TYPES[o.order_status_label] || 'primary' }
+  }
   const s = String(o.status || 'active')
   if (s === 'pending_review') return { text: o.reservation?.label || '待核查预占', type: 'warning' }
   if (s === 'packed') return { text: '已打包', type: 'primary' }

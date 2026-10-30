@@ -151,6 +151,46 @@ def init_mysql_tables():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
+        CREATE TABLE IF NOT EXISTS customer_machine_plans (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `serial_no` VARCHAR(100) NOT NULL,
+            `customer` VARCHAR(200) DEFAULT '',
+            `order_no` VARCHAR(100) DEFAULT '',
+            `contract_no` VARCHAR(100) DEFAULT '',
+            `plan_status` VARCHAR(50) DEFAULT '待规划',
+            `project_name` VARCHAR(300) DEFAULT '',
+            `customer_machine_no` VARCHAR(150) DEFAULT '',
+            `planned_install_date` DATE NULL,
+            `planner` VARCHAR(100) DEFAULT '',
+            `remark` TEXT,
+            `created_at` DATETIME NULL,
+            `updated_at` DATETIME NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_customer_machine_plan_serial` (`serial_no`),
+            INDEX `idx_customer_machine_plan_customer` (`customer`),
+            INDEX `idx_customer_machine_plan_status` (`plan_status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS machine_transfer_history (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `serial_no` VARCHAR(100) NOT NULL,
+            `from_location` VARCHAR(100) DEFAULT '',
+            `to_location` VARCHAR(100) DEFAULT '',
+            `from_status` VARCHAR(50) DEFAULT '',
+            `to_status` VARCHAR(50) DEFAULT '',
+            `flow_type` VARCHAR(50) DEFAULT '',
+            `order_no` VARCHAR(100) DEFAULT '',
+            `contract_no` VARCHAR(100) DEFAULT '',
+            `operator` VARCHAR(100) DEFAULT '',
+            `operate_time` DATETIME NULL,
+            `remark` TEXT,
+            PRIMARY KEY (`id`),
+            INDEX `idx_machine_transfer_serial` (`serial_no`),
+            INDEX `idx_machine_transfer_time` (`operate_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
+        """
         CREATE TABLE IF NOT EXISTS audit_log (
             `id`        INT NOT NULL AUTO_INCREMENT,
             `timestamp` DATETIME NULL,
@@ -838,7 +878,7 @@ def init_mysql_tables():
 
 
 # Schema 版本控制常量
-CURRENT_SCHEMA_VERSION = 17
+CURRENT_SCHEMA_VERSION = 18
 
 
 def ensure_finished_goods_unique_serial(conn):
@@ -1039,6 +1079,19 @@ def _ensure_free_text_columns(conn):
     _ensure_text_columns(conn, "units", ["order_remark"])
 
 
+# 逆向流程的乐观锁列。版本 18 的迁移会加，但如果库是从旧备份恢复的，
+# 版本号已经是 18、列却没了，那条迁移永远不会再跑 —— 所以每次启动都兜底校验一次。
+ROW_VERSION_TABLES = ('finished_goods_data', 'sales_orders', 'units',
+                      'customer_machine_plans', 'model_dictionary', 'shipping_history')
+
+
+def _ensure_row_version_columns(conn):
+    """补上缺失的 row_version 列，避免撤回/删除等逆向流程整片报 1054。"""
+    for table_name in ROW_VERSION_TABLES:
+        if _table_exists(conn, table_name) and not _column_exists_in_table(conn, table_name, 'row_version'):
+            conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `row_version` BIGINT NOT NULL DEFAULT 1"))
+
+
 def init_mysql_tables_v2():
     """
     优化版数据库初始化：使用 Schema 版本控制，避免每次启动全量迁移
@@ -1052,6 +1105,9 @@ def init_mysql_tables_v2():
 
         # 获取当前版本
         current_version = _get_current_schema_version(conn)
+
+        # 每次都校验一遍：库从旧备份恢复后版本号可能已经是最新，但列丢了
+        _ensure_row_version_columns(conn)
 
         # 如果已经是最新版本，跳过大部分初始化
         if current_version >= CURRENT_SCHEMA_VERSION:
@@ -1669,6 +1725,12 @@ def init_mysql_tables_v2():
             conn.execute(text("ALTER TABLE contract_notifications ADD COLUMN planned_by VARCHAR(100) NULL"))
             conn.execute(text("ALTER TABLE contract_notifications ADD COLUMN planned_at DATETIME(6) NULL"))
             _record_schema_version(conn, 17, "add planned stage to contract notifications")
+
+        if current_version < 18:
+            # Optimistic concurrency marker used by approval workflows. Existing
+            # rows start at version 1 and are advanced by business updates.
+            _ensure_row_version_columns(conn)
+            _record_schema_version(conn, 18, "add row_version for reverse workflow optimistic concurrency")
 
         return {
             "initialized": True,

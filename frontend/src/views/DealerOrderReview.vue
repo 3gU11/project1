@@ -100,7 +100,7 @@
       <el-table-column label="操作" width="300" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
-            <el-button size="small" type="success" @click.stop="openContractReview(row)">
+            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="openContractReview(row)">
               {{ reviewButtonLabel(row) }}
             </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
@@ -204,7 +204,7 @@
         <div class="note-box">{{ selectedOrder.review_note || '-' }}</div>
 
         <div class="drawer-actions">
-          <el-button @click="openContractReview(selectedOrder)">
+          <el-button :disabled="!canApprove(selectedOrder)" @click="openContractReview(selectedOrder)">
             {{ reviewButtonLabel(selectedOrder) }}
           </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
@@ -1142,7 +1142,7 @@ const submitConvert = async () => {
     const res = await apiPost<MessageResponse>(`/dealer-orders/${encodeURIComponent(convertForm.sourceOrderNo)}/convert-to-contract`, payload)
     
     if ((res as any)?.approval_pending) {
-      ElMessage.info((res as any).message + '（' + (res as any).instance_no + '）')
+      ElMessage.info((res as any).message)
       window.dispatchEvent(new Event('workflow-pending-updated'))
       return
     }

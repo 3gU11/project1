@@ -29,6 +29,7 @@ describe('request auth header', () => {
     vi.resetModules()
     pushMock.mockClear()
     logoutMock.mockClear()
+    messageErrorMock.mockClear()
   })
 
   it('adds bearer token automatically', async () => {
@@ -55,5 +56,33 @@ describe('request auth header', () => {
     expect(logoutMock).toHaveBeenCalledTimes(1)
     expect(pushMock).toHaveBeenCalledWith('/login')
     expect(messageErrorMock).toHaveBeenCalled()
+  })
+
+  it('shows the global permission toast for a 403 by default', async () => {
+    const { default: request } = await import('../src/utils/request')
+
+    const handler = request.interceptors.response.handlers?.[0]
+    await expect(
+      handler?.rejected?.({
+        config: {},
+        response: { status: 403, data: { detail: '仅入库员可以处理重入库任务' } },
+      }),
+    ).rejects.toBeTruthy()
+
+    expect(messageErrorMock).toHaveBeenCalledWith('没有操作权限')
+  })
+
+  it('skips the global toast when the request is marked silent', async () => {
+    const { default: request } = await import('../src/utils/request')
+
+    const handler = request.interceptors.response.handlers?.[0]
+    await expect(
+      handler?.rejected?.({
+        config: { silent: true },
+        response: { status: 403, data: { detail: '仅入库员可以处理重入库任务' } },
+      }),
+    ).rejects.toBeTruthy()
+
+    expect(messageErrorMock).not.toHaveBeenCalled()
   })
 })

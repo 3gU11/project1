@@ -424,6 +424,26 @@ const save = async () => {
   }
   saving.value = true
   try {
+    const nextIds = new Set(localRows.value.map((row) => Number(row.id)).filter((id) => Number.isFinite(id)))
+    const removed = baselineRows.value.filter((row) => Number.isFinite(Number(row.id)) && !nextIds.has(Number(row.id)))
+    if (removed.length) {
+      const submitted: string[] = []
+      for (const row of removed) {
+        await apiPost('/workflows/reverse/instances', {
+          workflow_key: 'model-dict-delete',
+          business_type: '机型字典',
+          business_id: String(row.id),
+          idempotency_key: `model-dict-delete:${row.id}:${Date.now()}`,
+          reason: `删除机型：${row.model_name}`,
+          items: [{ object_type: '机型字典', object_id: String(row.id) }],
+        })
+        submitted.push(row.model_name)
+      }
+      await store.loadDictionary()
+      syncLocalRowsFromStore()
+      ElMessage.success(`已提交机型删除审批：${submitted.join('、')}`)
+      return
+    }
     await store.saveDictionary(localRows.value)
     syncLocalRowsFromStore()
     ElMessage.success('机型字典已保存并生效')

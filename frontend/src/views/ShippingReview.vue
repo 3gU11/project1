@@ -70,7 +70,13 @@
                 </el-table>
                 <div class="ops">
                   <el-button type="primary" :loading="saving" @click="confirmShip">🚚 确认发货</el-button>
-                  <el-button :loading="saving" @click="revertShip">🔄 发货撤回</el-button>
+                  <el-button
+                    type="warning"
+                    :loading="recallSaving"
+                    :disabled="selectedSerials.length === 0 || saving"
+                    @click="recallAllocation"
+                  >↩ 发货撤回</el-button>
+                  <span class="empty-tip">撤回后机台回到待入库，并通知入库员重新入库。</span>
                 </div>
 
                 <div v-if="selectedRows.length > 0" class="photo-preview">
@@ -215,6 +221,7 @@
                 <div class="ops">
                   <el-button type="primary" :loading="returnSaving" @click="returnSelected('reallocate')">退回重新配货</el-button>
                   <el-button type="danger" :loading="returnSaving" @click="returnSelected('cancel_order')">退回并取消订单</el-button>
+                  <span class="ops-tip">退回需经「发货撤回」审批，通过后机台自动回到待入库。</span>
                 </div>
               </template>
             </el-card>
@@ -238,12 +245,7 @@ import VirtualScrollList from '../components/VirtualScrollList.vue'
 type Row = Record<string, any>
 type ListResponse<T = any> = { data: T[]; total?: number }
 type MessageResponse = { message?: string; warning?: string; cloud_synced?: number }
-type ReturnResponse = {
-  message?: string
-  warning?: string
-  returned?: number
-  impacted_orders?: Array<{ order_id: string; status: string }>
-}
+type ReverseFlowResponse = { data?: { instance_no?: string; status?: string } }
 type ArchiveFile = { file_name: string; is_image?: boolean; size?: number; update_time?: string }
 type PreviewPhoto = { file_name: string; objectUrl: string; size: number; update_time: string }
 type ReturnOrder = { key: string; date: string; orderId: string; customer: string; count: number }
@@ -427,7 +429,12 @@ const confirmShip = async () => {
   }
   saving.value = true
   try {
-    const res = await apiPost<MessageResponse>('/inventory/shipping/confirm', { serial_nos: selectedSerials.value })
+    const res = await apiPost<MessageResponse>('/inventory/shipping/confirm', {
+      serial_nos: selectedSerials.value,
+      expected_order_no: selectedOrderId.value,
+    })
+    if ((res as any)?.approval_pending) { ElMessage.info((res as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
+
     if (res.warning) {
       ElMessage.warning(res.warning)
     } else {
@@ -444,23 +451,48 @@ const confirmShip = async () => {
   }
 }
 
-const revertShip = async () => {
-  if (selectedSerials.value.length === 0) {
+// 待发货阶段的撤回：机台退回待入库，并派生重入库任务通知入库员。
+// 已发货的机台不在这里撤回，走「退换货处理」。
+const recallSaving = ref(false)
+const recallAllocation = async () => {
+  if (recallSaving.value) return
+  const serials = [...selectedSerials.value]
+  if (serials.length === 0) {
     ElMessage.warning('请先勾选至少 1 台机台')
     return
   }
-  saving.value = true
+  if (!selectedOrderId.value) {
+    ElMessage.warning('请先选择订单')
+    return
+  }
+  const reason = await ElMessageBox.prompt(
+    `确认撤回所选 ${serials.length} 台机台？撤回后机台回到待入库，并通知入库员重新入库。`,
+    '发货撤回',
+    { inputValidator: (v: string) => (v.trim() ? true : '请输入撤回原因') },
+  ).catch(() => null)
+  if (!reason) return
+  recallSaving.value = true
   try {
-    const res = await apiPost<MessageResponse>('/inventory/shipping/revert', { serial_nos: selectedSerials.value })
-    ElMessage.success(res.message || '撤回成功')
+    const created: any = await apiPost('/workflows/reverse/instances', {
+      workflow_key: 'allocation-recall',
+      business_type: '订单配货',
+      business_id: selectedOrderId.value,
+      idempotency_key: `allocation-recall:${selectedOrderId.value}:${serials.slice().sort().join(',')}:${Date.now()}`,
+      reason: reason.value,
+      items: serials.map((serial) => ({ object_type: '机台', object_id: serial })),
+    })
+    const status = created?.data?.status
+    if (status === '待派生处理') ElMessage.success('已撤回，机台回到待入库并已生成重入库任务')
+    else if (status === '已完成') ElMessage.success('已撤回，机台回到待入库')
+    else if (status === '已通过') ElMessage.success('流程已自动通过，等待执行')
+    else ElMessage.success('撤回审批已提交，通过后机台回到待入库并通知入库员')
+    cacheStore.remove('allocation:orders')
     selectedSerials.value = []
-    selectedRows.value = []
-    revokePreviewUrls()
     await loadPending()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '发货撤回失败')
+    ElMessage.error(getApiErrorMessage(err) || '提交发货撤回审批失败')
   } finally {
-    saving.value = false
+    recallSaving.value = false
   }
 }
 
@@ -587,12 +619,12 @@ const returnSelected = async (action: 'reallocate' | 'cancel_order') => {
   }
   const title = action === 'cancel_order' ? '退回并取消订单' : '退回重新配货'
   const message = action === 'cancel_order'
-    ? '确认退回所选机台并取消订单？机台将统一进入待入库。'
-    : '确认退回所选机台并让订单重新进入配货？机台将统一进入待入库。'
+    ? '将发起「发货撤回」审批。审批通过后机台回到待入库；取消订单需再到「销售下单」对该订单发起删除审批。'
+    : '将发起「发货撤回」审批。审批通过后机台回到待入库，并自动生成重入库任务。'
   let reason = ''
   try {
     const result = await ElMessageBox.prompt(message, title, {
-      confirmButtonText: '确认退回',
+      confirmButtonText: '提交审批',
       cancelButtonText: '取消',
       inputType: 'textarea',
       inputPlaceholder: '请输入退换原因',
@@ -606,23 +638,27 @@ const returnSelected = async (action: 'reallocate' | 'cancel_order') => {
 
   returnSaving.value = true
   try {
-    const res = await apiPost<ReturnResponse>('/inventory/shipping/return', {
-      serial_nos: selectedReturnSerials.value,
-      action,
+    const serials = [...selectedReturnSerials.value].sort()
+    const res = await apiPost<ReverseFlowResponse>('/workflows/reverse/instances', {
+      workflow_key: 'shipment-recall',
+      business_type: '机台',
+      business_id: serials[0],
+      idempotency_key: `shipment-recall:${serials.join(',')}:${Date.now()}`,
       reason,
+      items: serials.map((serial) => ({ object_type: '机台', object_id: serial })),
     })
+    const instanceNo = res.data?.instance_no || ''
+    ElMessage.success(
+      action === 'cancel_order'
+        ? `已提交发货撤回审批${instanceNo ? `（${instanceNo}）` : ''}，通过后机台回到待入库；请再到「销售下单」发起订单删除审批`
+        : `已提交发货撤回审批${instanceNo ? `（${instanceNo}）` : ''}，通过后机台回到待入库并生成重入库任务`,
+    )
     cacheStore.remove('allocation:orders')
-    if (res.warning) {
-      ElMessage.warning(res.warning)
-    } else {
-      const impacted = (res.impacted_orders || []).map((item) => `${item.order_id}:${item.status}`).join('，')
-      ElMessage.success(impacted ? `${res.message || '退回完成'}；订单状态：${impacted}` : (res.message || '退回完成'))
-    }
     selectedReturnSerials.value = []
     await loadReturnCandidates()
     await loadPending()
   } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '退换货处理失败')
+    ElMessage.error(getApiErrorMessage(err) || '提交发货撤回审批失败')
   } finally {
     returnSaving.value = false
   }
@@ -736,6 +772,11 @@ onBeforeUnmount(() => {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+  align-items: center;
+}
+.ops-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .return-filters {
   display: grid;

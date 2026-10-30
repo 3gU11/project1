@@ -129,6 +129,8 @@ describe('dealer order contract draft entry', () => {
     const review = wrapper.findComponent(ContractDraftReview)
     expect(review.props('canApproveOrder')).toBe(true)
     expect(review.props('confirmOrderApprove')).toEqual(expect.any(Function))
+    await expect((review.props('confirmOrderApprove') as () => Promise<boolean>)()).resolves.toBe(true)
+    expect(mocks.apiPost).toHaveBeenCalledWith('/dealer-orders/DEALER-ORDER-42/approve', { note: '' })
 
     const orderListCalls = mocks.apiGet.mock.calls.filter(([url]) => url === '/dealer-orders/').length
     review.vm.$emit('done')

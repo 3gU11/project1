@@ -69,7 +69,7 @@ const userRole = computed(() => userStore.userInfo?.role || '-')
 const go = (path: string) => {
   router.push(path)
 }
-const can = (path: string) => canAccessPath(path, userStore.userInfo?.permissions)
+const can = (path: string) => canAccessPath(path, userStore.userInfo?.permissions, userStore.userInfo?.role)
 
 </script>
 

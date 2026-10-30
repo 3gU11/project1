@@ -97,7 +97,7 @@
           <el-card class="role-list">
             <template #header>选择角色</template>
             <el-radio-group v-model="selectedRoleId" class="role-radio" @change="loadSelectedRolePermissions">
-              <el-radio-button v-for="role in roles" :key="role.role_id" :label="role.role_id">
+              <el-radio-button v-for="role in roles" :key="role.role_id" :value="role.role_id">
                 {{ role.role_name || role.role_id }}
               </el-radio-button>
             </el-radio-group>

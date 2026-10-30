@@ -2,6 +2,12 @@
   <div class="page">
     <van-nav-bar :title="pageTitle" fixed placeholder />
 
+    <van-tabs v-if="isInbound" v-model:active="inboundTab" sticky>
+      <van-tab title="待入库" name="inbound" />
+      <van-tab :title="derivedTabTitle" name="derived" />
+    </van-tabs>
+
+    <template v-if="!isInbound || inboundTab === 'inbound'">
     <div class="card search-card">
       <div v-if="isAfterSales && inventoryStore.lockedBatchNo" class="locked-batch-bar">
         <span>批次工作模式：<strong>{{ inventoryStore.lockedBatchNo }}</strong></span>
@@ -99,10 +105,39 @@
         <!-- 批量入库操作栏 -->
         <div v-if="selectedSerialNos.length > 0" class="action-bar">
           <div class="selected-count">已选 {{ selectedSerialNos.length }} 项</div>
-          <van-button type="primary" size="small" @click="showInboundPopup = true">批量入库</van-button>
+          <van-button type="primary" size="small" @click="openInboundPopup()">批量入库</van-button>
         </div>
       </div>
     </div>
+
+    </template>
+
+    <template v-else>
+      <!-- 重新入库（重入库任务）分区 -->
+      <div class="card">
+        <van-cell title="待重新入库" :value="String(derivedTasks.length) + ' 台'" />
+      </div>
+      <div class="card">
+        <div
+          v-for="task in derivedTasks"
+          :key="task.task_no"
+          class="derived-item"
+          @click="startReinbound(task)"
+        >
+          <div class="list-item-content">
+            <div class="row-main">
+              <span class="machine-model">{{ task.object_id }}</span>
+              <span class="status-tag">{{ task.status || '待处理' }}</span>
+            </div>
+            <div class="row-sub">
+              <span>{{ task.task_no }}</span>
+            </div>
+          </div>
+          <van-icon name="arrow" class="derived-arrow" />
+        </div>
+        <van-empty v-if="!derivedLoading && !derivedTasks.length" description="暂无待处理重入库任务" />
+      </div>
+    </template>
 
     <!-- 入库弹窗 -->
     <van-popup v-model:show="showInboundPopup" position="bottom" round style="height: 70%;">
@@ -157,12 +192,13 @@
 
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showToast, showSuccessToast, showFailToast } from 'vant'
 import { useInventoryStore } from '@/store/inventory'
 import { useUserStore } from '@/store/user'
 import { inventoryApi } from '@/api/inventory'
 import { summarizeBatchResults } from '@/utils/batchResults'
+import { workflowApi } from '@/api/workflow'
 import { useInventoryAutoRefresh } from '@/utils/useInventoryAutoRefresh'
 import { prioritizeOldFactorySlots } from '@/utils/mapper'
 
@@ -181,9 +217,19 @@ const onlyShippingReview = computed({
   set: (v) => { inventoryStore.onlyShippingReview = v }
 })
 
+const route = useRoute()
 const currentRole = computed(() => String(userStore.userInfo?.role || '').trim().toLowerCase())
 const isProd = computed(() => currentRole.value === 'prod')
 const isAfterSales = computed(() => currentRole.value === 'aftersales')
+const isInbound = computed(() => !isProd.value && !isAfterSales.value)
+
+// 成品入库页的两个分区：常规待入库 / 重入库任务
+const inboundTab = ref<'inbound' | 'derived'>('inbound')
+const derivedTasks = ref<any[]>([])
+const derivedLoading = ref(false)
+const derivedTabTitle = computed(() => derivedTasks.value.length ? `重新入库(${derivedTasks.value.length})` : '重新入库')
+const inboundContext = ref<'normal' | 'derived'>('normal')
+const reinboundTask = ref<any>(null)
 const pageTitle = computed(() => isAfterSales.value ? '拍照任务查询' : (isProd.value ? '查询管理' : '机台入库'))
 const countTitle = computed(() => (isProd.value ? '现有数量' : '待入库数量'))
 const visibleList = computed(() => {
@@ -291,13 +337,74 @@ const toggleSelection = (serialNo: string) => {
   }
 }
 
+const loadDerivedTasks = async () => {
+  if (!isInbound.value) return
+  derivedLoading.value = true
+  try {
+    const res = await workflowApi.getDerivedTasks()
+    derivedTasks.value = res.data || []
+  } catch {
+    derivedTasks.value = []
+  } finally {
+    derivedLoading.value = false
+  }
+}
+
+const openInboundPopup = () => {
+  inboundContext.value = 'normal'
+  reinboundTask.value = null
+  selectedSlotCode.value = ''
+  slotKeyword.value = ''
+  showInboundPopup.value = true
+}
+
+const startReinbound = (task: any) => {
+  if (!task?.task_no) return
+  inboundContext.value = 'derived'
+  reinboundTask.value = task
+  selectedSlotCode.value = ''
+  slotKeyword.value = ''
+  if (!inventoryStore.slots.length) void inventoryStore.loadSlots()
+  showInboundPopup.value = true
+}
+
+const confirmReinbound = async (slotCode: string) => {
+  const task = reinboundTask.value
+  if (!task) return
+  submitting.value = true
+  try {
+    const result: any = await inventoryApi.inboundToSlot({ serial_no: task.object_id, slot_code: slotCode })
+    if (result?.approval_pending) {
+      showToast(result.message || '已提交审批，通过后自动入库')
+      showInboundPopup.value = false
+      return
+    }
+    if (!result?.ok) throw new Error(result?.message || '入库失败')
+    await workflowApi.completeDerivedTask(task.task_no, `移动端重新入库，库位：${slotCode}`)
+    showSuccessToast('重新入库完成')
+    showInboundPopup.value = false
+    reinboundTask.value = null
+    inboundContext.value = 'normal'
+    await Promise.all([load(), loadDerivedTasks()])
+  } catch (error: any) {
+    showFailToast(error?.message || '重新入库失败')
+  } finally {
+    submitting.value = false
+  }
+}
+
 const confirmInbound = async (slotCode?: string) => {
   const finalSlotCode = (slotCode || selectedSlotCode.value || slotKeyword.value).trim()
   if (!finalSlotCode) {
     showToast('请通过搜索或点击下方卡片选择库位')
     return
   }
-  
+
+  if (inboundContext.value === 'derived') {
+    await confirmReinbound(finalSlotCode)
+    return
+  }
+
   submitting.value = true
   try {
     const serialNos = [...selectedSerialNos.value]
@@ -331,6 +438,8 @@ const confirmInbound = async (slotCode?: string) => {
 onMounted(async () => {
   await userStore.refreshUser()
   await load()
+  await loadDerivedTasks()
+  if (String(route.query.tab || '') === 'derived' && isInbound.value) inboundTab.value = 'derived'
 })
 watch(currentRole, (role, previousRole) => {
   if (role !== previousRole) {
@@ -354,6 +463,19 @@ useInventoryAutoRefresh(load)
 }
 .search-card {
   padding-bottom: 8px;
+}
+.derived-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f2f3f5;
+}
+.derived-item:last-child {
+  border-bottom: 0;
+}
+.derived-arrow {
+  color: #c8c9cc;
+  margin-left: 8px;
 }
 .locked-batch-bar {
   display: flex;

@@ -4,6 +4,7 @@ import base64
 import re
 import asyncio
 import hashlib
+import io
 
 import os
 import uuid
@@ -11,10 +12,12 @@ from contextlib import nullcontext
 from datetime import datetime
 import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Query, Request, BackgroundTasks
+from api.upload_guard import require_uploads_enabled
 import httpx
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 import json
+import math
 from sqlalchemy import bindparam, text
 
 from config import BASE_DIR, GO_SANDBOX_URL, GO_INTERNAL_TOKEN
@@ -35,7 +38,56 @@ from utils.heightened import is_high_text_hint, normalize_dictionary_model_name,
 from utils.order_notes import machine_remark_text, single_line_order_remark
 from database import get_engine
 
+
+def _json_safe(value):
+    """Convert pandas/numeric non-finite values before FastAPI JSON encoding."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
+from crud.workflows import forward_workflow_enabled, record_forward_instance
+
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
+
+
+class ContractGeneratePayload(BaseModel):
+    template_code: str = "dealer-contract-v1"
+    format: str = "docx"
+
+
+@router.post("/contract/{contract_id}/generate-file", dependencies=[Depends(require_permissions("CONTRACT"))])
+def generate_contract_file(contract_id: str, payload: ContractGeneratePayload, current_operator: str = Depends(get_current_operator_name)):
+    """Render the approved dealer contract template and register it as a V8 attachment."""
+    if payload.template_code != "dealer-contract-v1":
+        raise HTTPException(status_code=422, detail="模板版本不支持")
+    if payload.format.lower() != "docx":
+        raise HTTPException(status_code=422, detail="当前模板生成仅支持 DOCX；PDF 需后续配置转换器")
+    try:
+        from contract_bridge.planning_document import render_planning_contract
+        with get_engine().connect() as conn:
+            rows = pd.read_sql(text("SELECT * FROM factory_plan WHERE `合同号`=:cid ORDER BY id"), conn, params={"cid": str(contract_id)})
+        if rows.empty:
+            raise HTTPException(status_code=404, detail="合同不存在")
+        rows = rows.fillna("")
+        row = rows.iloc[0].to_dict()
+        customer = str(row.get("客户名") or "")
+        try:
+            content = render_planning_contract(contract_id, rows.to_dict('records'))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        class Generated:
+            def __init__(self, data, name): self._data, self.name, self.size = data, name, len(data)
+            def getvalue(self): return self._data
+        name = f"{contract_id}.docx"
+        ok, msg = save_contract_file(Generated(content, name), customer or contract_id, contract_id, current_operator, False)
+        if not ok: raise HTTPException(status_code=500, detail=msg)
+        return {"contract_id": contract_id, "file_name": name, "format": "docx", "status": "generated", "message": msg}
+    except HTTPException: raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"合同文件生成失败: {exc}")
 
 RUSH_AUTO_INSERT_ON_ENTRY = os.getenv("RUSH_AUTO_INSERT_ON_ENTRY", "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -2639,12 +2691,29 @@ def get_planned_model_summary():
         raise HTTPException(status_code=500, detail=f"读取已规划合同需求失败: {e}")
 
 
+def get_order_progress(order_ids, include_machines=False):
+    from crud.order_progress import load_order_progress
+    return load_order_progress(
+        order_ids,
+        lambda order: _order_required_variant_counts(str(order["订单号"]), pd.Series(order)),
+        lambda row: (_normalize_alloc_model(row.get("机型", "")), _inventory_row_high(pd.Series(row))),
+        include_machines=include_machines,
+    )
+
+
+# 订单配货页只处理"可配货"订单：已规划/待配齐/待发货/待二次确认。
+# 待规划（合同未规划或未关联合同）、已完成、已取消/已删除的订单不应出现在配货列表。
+ALLOCATABLE_ORDER_LABELS = frozenset({"已规划", "待配齐", "待发货", "待二次确认"})
+NON_ALLOCATABLE_STATUSES = ("deleted", "done", "shipped", "canceled", "cancelled", "completed")
+
+
 @router.get("/orders")
 def get_sales_orders(
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=2000),
     status: str = Query(""),
     keyword: str = Query(""),
+    allocatable: bool = Query(False),
 ):
     try:
         where_clauses = []
@@ -2655,6 +2724,16 @@ def get_sales_orders(
         if str(keyword).strip():
             where_clauses.append("(`订单号` LIKE :kw OR `客户名` LIKE :kw OR `代理商` LIKE :kw)")
             params["kw"] = f"%{str(keyword).strip()}%"
+        if allocatable:
+            where_clauses.append(
+                "COALESCE(`status`, '') NOT IN ("
+                + ", ".join(f"'{item}'" for item in NON_ALLOCATABLE_STATUSES)
+                + ")"
+            )
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM factory_plan fp WHERE "
+                "TRIM(COALESCE(fp.`订单号`, '')) = TRIM(COALESCE(sales_orders.`订单号`, '')))"
+            )
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         count_sql = f"SELECT COUNT(*) AS total FROM sales_orders{where_sql}"
@@ -2673,15 +2752,21 @@ def get_sales_orders(
             total = int(total_df.iloc[0]["total"]) if not total_df.empty else 0
             df_orders = pd.read_sql(text(data_sql), conn, params=params)
 
-        df_orders = _reconcile_completed_orders(df_orders)
         df_orders = df_orders.where(df_orders.notnull(), None)
         records = df_orders.to_dict(orient="records")
+        progress = get_order_progress([r["订单号"] for r in records])
         for record in records:
+            record.update(progress.get(str(record["订单号"]).strip(), {}))
             if record.get("status") == batch_planning.REVIEW_STATUS:
                 try:
                     record["reservation"] = batch_planning.reservation_info(record["订单号"])
                 except batch_planning.BatchPlanningError as exc:
                     record["reservation"] = {"label": "预占异常，待核查", "can_confirm": False, "risk": str(exc)}
+        for record in records:
+            record["can_allocate"] = record.get("order_status_label") in ALLOCATABLE_ORDER_LABELS
+        if allocatable:
+            records = [record for record in records if record["can_allocate"]]
+            total = len(records)
         return {"data": records, "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2754,7 +2839,8 @@ def create_sales_order_api(
         if detail_items is not None:
             _assert_models_in_dictionary([str(item.机型 or "").strip() for item in detail_items])
         df_orders = get_orders()
-        order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
+        from crud.forward_entries import stable_order_id
+        order_id = stable_order_id(f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}")
         _validate_contracts_available(contract_ids, order_id)
         new_row = {
             "订单号": order_id,
@@ -2771,7 +2857,24 @@ def create_sales_order_api(
             "delete_reason": "",
         }
         df_orders = pd.concat([df_orders, pd.DataFrame([new_row])], ignore_index=True)
-        save_orders(df_orders)
+        from crud.forward_entries import submit_entry
+        workflow_response = submit_entry('order-create', payload, current_user, request, order_id=order_id)
+        if workflow_response is not None:
+            return workflow_response
+        workflow_conn = get_engine().begin() if forward_workflow_enabled("order-create") else nullcontext(None)
+        with workflow_conn as order_conn:
+            save_orders(df_orders, conn=order_conn)
+            if order_conn is not None:
+                record_forward_instance(
+                    workflow_key="order-create",
+                    business_type="销售订单",
+                    business_id=order_id,
+                    operator=current_operator,
+                    idempotency_key=f"order-create:{order_id}",
+                    request_id=str(request.headers.get("X-Request-ID") or ""),
+                    target_state={"status": "active", "linked_contract_count": 0},
+                    conn=order_conn,
+                )
         linked_count = _link_contracts_to_order(contract_ids, order_id, operator=current_operator) if contract_ids else 0
         sync_result: dict[str, Any] = {}
         if detail_items is not None and contract_ids:
@@ -3405,6 +3508,8 @@ def update_sales_order_api(
             raise HTTPException(status_code=404, detail="订单不存在")
 
         updates = payload.model_dump(exclude_unset=True)
+        if str(updates.get('status') or '').strip().lower() == 'deleted':
+            raise HTTPException(status_code=409, detail='订单删除必须先发起逆向审批流程')
         detail_items = payload.明细 if payload.明细 is not None else None
         updates.pop("明细", None)
         existing_contract_rows_for_note: list[dict[str, Any]] = []
@@ -3434,7 +3539,7 @@ def update_sales_order_api(
                 df_orders.loc[mask, key] = pd.to_datetime(value, errors="coerce") if value else None
             else:
                 df_orders.loc[mask, key] = "" if value is None else str(value)
-        save_orders(df_orders)
+        save_orders(df_orders, only_order_ids=[order_id])
 
         sync_result: dict[str, Any] = {}
         if detail_items is not None:
@@ -3493,6 +3598,7 @@ def hard_delete_sales_order_api(
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        raise HTTPException(status_code=409, detail="订单删除必须先发起逆向审批流程")
         from crud.orders import get_orders, save_orders
         df_orders = get_orders()
         mask = df_orders["订单号"].astype(str) == str(order_id)
@@ -3538,12 +3644,12 @@ def get_order_allocations_api(order_id: str):
             raise HTTPException(status_code=422, detail="订单号不能为空")
         review = batch_planning.review_rows(order_id)
         if review is not None:
-            return {"data": review}
+            return {"data": _json_safe(review)}
         rows = _get_order_contract_machine_rows(order_id)
         # Preserve missing values as JSON nulls. Replacing nulls on the original
         # numeric dtypes casts None back to NaN, which Starlette refuses to encode.
         rows = rows.astype(object).where(pd.notna(rows), None)
-        return {"data": rows.to_dict(orient="records")}
+        return {"data": _json_safe(rows.to_dict(orient="records"))}
     except HTTPException:
         raise
     except Exception as e:
@@ -3620,7 +3726,21 @@ def allocate_order_inventory_api(
                         status_code=422,
                         detail=f"{_variant_label(key[0], key[1])} 超配：需求 {need}，本次后 {allocated}",
                     )
+        from crud.forward_entries import submit_entry
+        workflow_response = submit_entry('allocation-create', payload, current_user, request, business_id=str(order_id))
+        if workflow_response is not None:
+            return workflow_response
         allocation_result = allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
+        if forward_workflow_enabled("allocation-create"):
+            record_forward_instance(
+                workflow_key="allocation-create",
+                business_type="订单配货",
+                business_id=str(order_id),
+                operator=current_operator,
+                idempotency_key=f"allocation-create:{order_id}:{','.join(sorted(selected))}",
+                request_id=str((request.headers.get("X-Request-ID") if request else "") or ""),
+                target_state={"selected_serial_nos": sorted(selected), "allocation": allocation_result},
+            )
         stock_count = int(allocation_result.get("stock", 0))
         production_count = int(allocation_result.get("production", 0))
         mismatch_text = "、".join(
@@ -3668,10 +3788,12 @@ def complete_order_allocation_api(
             raise HTTPException(status_code=404, detail="订单不存在")
         order_idx = hit.index[0]
         current_status = str(orders_df.at[order_idx, "status"] or "active")
-        if current_status in {"ready", "allocated"}:
+        # 状态可能残留为 ready（例如配货机台已被撤回，但订单状态没回滚），
+        # 此时不能再直接返回"已完成"，必须继续校验是否真的还有已配机台。
+        if current_status in {"ready", "allocated"} and not _get_explicit_order_allocations(order_id).empty:
             if current_status == "allocated":
                 orders_df.at[order_idx, "status"] = "ready"
-                save_orders(orders_df)
+                save_orders(orders_df, only_order_ids=[order_id])
             return {"message": "配货已完成，订单待发货", "completed": True, "logged": 0, "status": "ready"}
 
         required_variants = _order_required_variant_counts(order_id, hit.iloc[0])
@@ -3701,7 +3823,7 @@ def complete_order_allocation_api(
         stock_count = int((allocated_df["货源"].astype(str) == "库存现货").sum())
         batch_mismatch = _order_batch_mismatches(order_id, allocated_df)
         orders_df.at[order_idx, "status"] = "ready"
-        save_orders(orders_df)
+        save_orders(orders_df, only_order_ids=[order_id])
         append_audit_log(
             module="订单配货",
             action_type="配货完成",
@@ -3730,6 +3852,7 @@ def release_order_inventory_api(
     current_user: dict = Depends(get_current_user_context),
 ):
     try:
+        raise HTTPException(status_code=409, detail="配货释放必须先发起逆向审批流程")
         _guard_pending_batch_review(str(order_id))
         order_id = str(order_id).strip()
         if not order_id:
@@ -3756,7 +3879,7 @@ def release_order_inventory_api(
             order_idx = hit.index[0]
             if str(orders_df.at[order_idx, "status"] or "active") in {"ready", "allocated"}:
                 orders_df.at[order_idx, "status"] = "active"
-                save_orders(orders_df)
+                save_orders(orders_df, only_order_ids=[order_id])
         append_audit_log(
             module="订单配货",
             action_type="释放",
@@ -3784,6 +3907,8 @@ def update_contract_status(
         new_status = str(payload.status or "").strip()
         if not new_status:
             raise HTTPException(status_code=422, detail="status 不能为空")
+        if new_status == "已取消":
+            raise HTTPException(status_code=409, detail="合同撤销必须先发起逆向审批流程")
         recompute_synced = False
         if new_status == "已规划":
             with get_engine().connect() as conn:
@@ -3983,7 +4108,19 @@ def _process_contracts_batch(
     created_groups: dict[str, list[dict[str, Any]]] = {}
     for row in clean_add_list:
         created_groups.setdefault(str(row["合同号"]), []).append(row)
-    save_factory_plan(df_plan, notification_rows=created_groups, notification_operator=operator)
+    workflow_enabled = forward_workflow_enabled("contract-create")
+    if workflow_enabled:
+        with get_engine().begin() as workflow_conn:
+            save_factory_plan(df_plan, notification_rows=created_groups, notification_operator=operator, conn=workflow_conn)
+            for contract_id in sorted({str(item["合同号"]) for item in clean_add_list}):
+                record_forward_instance(
+                    workflow_key="contract-create", business_type="合同", business_id=contract_id,
+                    operator=user_ctx.get("username") or operator,
+                    idempotency_key=f"contract-create:{contract_id}:{user_ctx.get('username') or operator}",
+                    target_state={"contract_no": contract_id, "save_mode": save_mode}, conn=workflow_conn,
+                )
+    else:
+        save_factory_plan(df_plan, notification_rows=created_groups, notification_operator=operator)
 
     created_statuses = {str(row.get("状态") or "") for row in clean_add_list}
     if not is_rush and background_tasks and (
@@ -4102,6 +4239,10 @@ def create_contracts_batch(
                     detail=f"合同号已存在，请刷新后重新生成: {'、'.join(existing_contract_ids)}",
                 )
 
+        from crud.forward_entries import submit_entry
+        workflow_response = submit_entry('contract-create', payload, current_user, request, business_id='、'.join(sorted(requested_contract_ids))[:120])
+        if workflow_response is not None:
+            return workflow_response
         result = _process_contracts_batch(
             add_list=add_list,
             rush_source_rows=rush_source_rows,
@@ -4111,6 +4252,11 @@ def create_contracts_batch(
             operator=current_operator,
             background_tasks=background_tasks,
         )
+
+        # 第一阶段灰度接入：默认关闭。开启后为每张成功创建的合同记录一个自动通过实例。
+        # 这里先复用现有合同保存事务之后的成功结果，后续再把合同写入和流程写入合并到同一事务。
+        request_id = str(request.headers.get("X-Request-ID") or "").strip()
+        batch_no = str(request.headers.get("X-Workflow-Batch-No") or "").strip()
 
         # 如果来自经销商订单，回写 contract_no
         dealer_order_no = str(payload.dealer_order_no or "").strip()
@@ -4257,6 +4403,7 @@ async def upload_contract_file_api(
     customer_name: str = "",
     uploader_name: str = "",
     current_operator: str = Depends(get_current_operator_name),
+    _upload_enabled: None = Depends(require_uploads_enabled),
 ):
     try:
         ok, msg = await asyncio.to_thread(
@@ -4459,7 +4606,7 @@ def save_contract_plan(
                 hit = orders_df["订单号"].astype(str) == order_id
                 if hit.any():
                     orders_df.loc[hit, "指定批次/来源"] = [all_plans] * int(hit.sum())
-                    save_orders(orders_df)
+                    save_orders(orders_df, only_order_ids=[order_id])
 
         append_audit_log(
             module="合同管理",

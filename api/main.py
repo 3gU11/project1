@@ -2,15 +2,63 @@ from pathlib import Path
 import asyncio
 import logging
 import os
+import re
+import time
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode, notifications
-from api.routes import contract_drafts
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode, notifications, workflows
 
 logger = logging.getLogger(__name__)
+from api.routes import contract_drafts
+
+
+# WebSocket 的 token 走查询参数，uvicorn 会把整条 URL 打进访问日志。
+# 这里统一脱敏，避免凭据落到日志文件里。
+_TOKEN_PATTERN = re.compile(r'(token=)[^&\s"\']+', re.IGNORECASE)
+
+
+class _RedactTokenFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str) and 'token=' in record.msg:
+                record.msg = _TOKEN_PATTERN.sub(r'\1***', record.msg)
+            if record.args:
+                if isinstance(record.args, tuple):
+                    record.args = tuple(
+                        _TOKEN_PATTERN.sub(r'\1***', item) if isinstance(item, str) else item
+                        for item in record.args
+                    )
+                elif isinstance(record.args, dict):
+                    record.args = {
+                        key: _TOKEN_PATTERN.sub(r'\1***', value) if isinstance(value, str) else value
+                        for key, value in record.args.items()
+                    }
+        except Exception:
+            pass
+        return True
+
+
+def _install_log_redaction() -> None:
+    """给 uvicorn 与根日志的 handler 都挂上脱敏过滤器（幂等）。"""
+    targets = [
+        logging.getLogger('uvicorn'),
+        logging.getLogger('uvicorn.error'),
+        logging.getLogger('uvicorn.access'),
+        logging.getLogger('fastapi'),
+    ]
+    for target in targets:
+        if not any(isinstance(item, _RedactTokenFilter) for item in target.filters):
+            target.addFilter(_RedactTokenFilter())
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if not any(isinstance(item, _RedactTokenFilter) for item in handler.filters):
+            handler.addFilter(_RedactTokenFilter())
+
+
+_install_log_redaction()
 
 app = FastAPI(
     title="V8betaVer1.0 API",
@@ -21,6 +69,7 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def on_startup():
+    _install_log_redaction()
     try:
         from contract_bridge.worker import worker_loop
         app.state.contract_bridge_task = asyncio.create_task(worker_loop())
@@ -34,11 +83,37 @@ async def on_startup():
     except Exception as e:
         logger.warning("DB migration skipped: %s", e)
     try:
+        from crud.workflows import ensure_workflow_tables, seed_phase1_models, migrate_phase1_workflow_metadata
+        ensure_workflow_tables()
+        from crud.personal_messages import ensure_message_reads
+        ensure_message_reads()
+        from crud.forward_entries import ensure_forward_receipts
+        ensure_forward_receipts()
+        seed_phase1_models()
+        migrate_phase1_workflow_metadata()
+    except Exception as e:
+        logger.warning("workflow tables not started: %s", e)
+    try:
         from crud.cloud_sync_outbox import cloud_sync_worker_loop, ensure_cloud_sync_outbox_table
         ensure_cloud_sync_outbox_table()
         app.state.cloud_sync_worker_task = asyncio.create_task(cloud_sync_worker_loop())
     except Exception as e:
         logger.warning("cloud sync worker not started: %s", e)
+    try:
+        from v8_sync.scheduler import run_startup_sync
+        app.state.v8_sync_startup_result = await run_startup_sync()
+        logging.getLogger("uvicorn.error").info(
+            "V8 sync bridge startup result=%s event_id=%s",
+            app.state.v8_sync_startup_result.get("status"),
+            app.state.v8_sync_startup_result.get("event_id", ""),
+        )
+    except Exception as e:
+        logger.warning("V8 sync bridge not started: %s", e)
+    try:
+        from v8_sync.scheduler import run_sync_loop
+        app.state.v8_sync_loop_task = asyncio.create_task(run_sync_loop())
+    except Exception as e:
+        logger.warning("V8 sync loop not started: %s", e)
     try:
         from crud.cloud_dealer_order_sync import cloud_pull_worker_loop
         app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
@@ -115,6 +190,14 @@ async def on_shutdown():
         except asyncio.CancelledError:
             pass
 
+    v8_sync_task = getattr(app.state, "v8_sync_loop_task", None)
+    if v8_sync_task:
+        v8_sync_task.cancel()
+        try:
+            await v8_sync_task
+        except asyncio.CancelledError:
+            pass
+
     watch_task = getattr(app.state, "watch_dealer_orders_task", None)
     if watch_task:
         watch_task.cancel()
@@ -142,6 +225,10 @@ async def on_shutdown():
 
 async def cloud_snapshot_heartbeat_loop() -> None:
     """按固定周期推送库存快照：即使库存无变化也刷新云端回执，满足 5 分钟同步监控。"""
+    # 与 cloud_sync_worker 保持同一开关：隔离演示（本地测试）时不发任何外发请求。
+    if os.getenv("V8_DEMO_MODE") == "1":
+        logger.info("cloud snapshot heartbeat disabled for isolated demo")
+        return
     interval = max(60, int(os.getenv("CLOUD_SNAPSHOT_INTERVAL_SECONDS", "300") or "300"))
     while True:
         try:
@@ -175,6 +262,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(workflows.router, prefix="/api/v1/workflows", tags=["Workflows"])
 app.include_router(inventory.router, prefix="/api/v1/inventory", tags=["Inventory"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(planning.router, prefix="/api/v1/planning", tags=["Planning"])
@@ -277,8 +365,18 @@ async def watch_finished_goods_db() -> None:
     logger.info("Finished goods database change monitor started")
     
     last_val = None
+    try:
+        snapshot_interval = max(30, int(os.getenv("V8_ORDERING_SNAPSHOT_INTERVAL_SECONDS", "300") or "300"))
+    except ValueError:
+        snapshot_interval = 300
+    last_snapshot_at = 0.0
     while True:
         try:
+            now = time.monotonic()
+            if now - last_snapshot_at >= snapshot_interval:
+                enqueue_wechat_batch_summary_sync("scheduled_snapshot")
+                last_snapshot_at = now
+
             with get_engine().begin() as conn:
                 table_check = conn.execute(text("SHOW TABLES LIKE 'finished_goods_data'")).fetchone()
                 if table_check:

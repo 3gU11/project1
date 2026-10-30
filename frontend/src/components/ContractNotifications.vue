@@ -1,8 +1,8 @@
 <template>
   <div class="notification-box">
-    <el-button class="bell-button" :icon="Bell" circle :aria-label="`合同消息，${unreadCount} 条未读`" title="合同消息" @click="togglePanel" />
-    <span v-if="unreadCount" class="unread-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-    <div v-if="open" class="notification-panel">
+    <el-button v-if="!embedded" class="bell-button" :icon="Bell" circle :aria-label="`合同消息，${unreadCount} 条未读`" title="合同消息" @click="togglePanel" />
+    <span v-if="unreadCount && !embedded" class="unread-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+    <div v-if="open" class="notification-panel" :class="{ embedded }">
       <div class="panel-head">
         <strong>合同消息</strong>
         <el-button text size="small" :disabled="!unreadCount || loading" @click="readAll">全部已读</el-button>
@@ -53,7 +53,7 @@
         </div>
       </div>
       <div v-if="total > pageSize" class="panel-footer">
-        <el-pagination small layout="prev, pager, next" :total="total" :page-size="pageSize" :current-page="page" @current-change="changePage" />
+        <el-pagination size="small" layout="prev, pager, next" :total="total" :page-size="pageSize" :current-page="page" @current-change="changePage" />
       </div>
     </div>
   </div>
@@ -71,8 +71,10 @@ type Message = {
   converted_snapshot: Snapshot | null; converted_by: string | null; converted_at: string | null
   order_id: string | null; latest_at: string; version: number; unread: boolean
 }
+const props = defineProps<{ embedded?: boolean }>()
+const emit = defineEmits<{ count: [value: number] }>()
 const pageSize = 20
-const open = ref(false)
+const open = ref(!!props.embedded)
 const loading = ref(false)
 const error = ref(false)
 const unreadOnly = ref(false)
@@ -94,6 +96,7 @@ async function refreshCount() {
   try {
     const result = await apiGet<{ total: number }>('/notifications/unread-count')
     unreadCount.value = result.total
+    emit('count', result.total)
     if (open.value) await loadList()
   } catch { /* The request interceptor reports the error. */ }
 }
@@ -175,4 +178,5 @@ onBeforeUnmount(() => {
 .stage-detail { border-left: 2px solid #c5d9d2; padding-left: 10px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #52606a; overflow-wrap: anywhere; }
 .stage-detail strong { color: #28313a; font-size: 13px; }
 .panel-footer { display: flex; justify-content: center; padding: 8px; border-top: 1px solid #e5e8eb; }
+.notification-panel.embedded { position: static; width: 100%; border: 0; box-shadow: none; max-height: 520px; }
 </style>
