@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 import threading
 import time
 from typing import Any, Union
@@ -12,7 +13,12 @@ from crud.users import get_user_for_login
 from crud.roles import get_role_permissions
 from crud.audit_logs import append_audit_log
 
-SECRET_KEY = "V7EX_SECRET_KEY_SUPER_SECURE"
+# 必须由部署环境提供强随机密钥；禁止回退到源码里的固定值。
+SECRET_KEY = (os.getenv("V8_JWT_SECRET") or os.getenv("JWT_SECRET") or "").strip()
+if len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "V8_JWT_SECRET (or JWT_SECRET) must be configured with at least 32 characters"
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days
 USER_CACHE_TTL_SECONDS = 5.0

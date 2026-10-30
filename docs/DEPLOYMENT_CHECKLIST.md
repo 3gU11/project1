@@ -7,17 +7,13 @@
 
 ## 一、上线前必须改（安全硬伤）
 
-### 1. JWT 密钥硬编码在源码里
+### 1. JWT 密钥必须由部署环境提供（已修复硬编码）
 
-`api/routes/auth.py:15`：
+`api/routes/auth.py` 现在读取 `V8_JWT_SECRET`（兼容 `JWT_SECRET`），并强制要求长度 ≥ 32；未配置时启动失败，不再回退到源码固定值。
 
-```python
-SECRET_KEY = "V7EX_SECRET_KEY_SUPER_SECURE"
-```
+任何拿到源码或反编译产物的人都不应能伪造账号（包括 admin）的 token；Token 有效期仍为 **30 天**，上线时建议同步缩短。
 
-任何拿到源码或反编译产物的人都能伪造任意账号（包括 admin）的 token，且 token 有效期 **30 天**。
-
-**处理**：改成读环境变量（如 `V8_JWT_SECRET`），启动时校验长度 ≥ 32；上线前让所有旧 token 失效（换密钥即可）。
+**处理**：在部署环境设置 ≥ 32 位随机 `V8_JWT_SECRET`；上线前让所有旧 token 失效（换密钥即可）。
 
 ### 2. 默认账号密码写死
 

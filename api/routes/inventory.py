@@ -805,7 +805,7 @@ def get_machine_edit_list(
 def update_inventory(
     data: List[Dict[str, Any]],
     request: Request,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("MACHINE_EDIT"))
 ):
     """
     Replace all inventory data with the provided list of dicts.
@@ -1030,7 +1030,7 @@ def machine_inline_update(
     payload: MachineInlineUpdatePayload,
     request: Request,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("MACHINE_EDIT"))
 ):
     try:
         sn = str(serial_no).strip()
@@ -1109,7 +1109,7 @@ def machine_batch_update(
     payload: MachineBatchUpdatePayload,
     request: Request,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("MACHINE_EDIT"))
 ):
     try:
         sns = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
@@ -1232,7 +1232,7 @@ def get_layout(layout_id: str):
 def save_layout(
     payload: LayoutPayload,
     request: Request,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("WAREHOUSE_MAP"))
 ):
     try:
         res = save_warehouse_layout(payload.layout_id, payload.layout_json)
@@ -1254,7 +1254,7 @@ def save_layout(
 def reset_layout(
     payload: LayoutResetPayload,
     request: Request,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("WAREHOUSE_MAP"))
 ):
     try:
         res = reset_warehouse_layout(payload.layout_id)
@@ -1278,6 +1278,8 @@ def inbound_machine_to_slot(
     request: Request,
     current_user: dict = Depends(get_current_user_context)
 ):
+    permission = "WAREHOUSE_MAP" if payload.is_transfer else "INBOUND"
+    require_permissions(permission)(current_user)
     from crud.forward_entries import submit_entry
     workflow_response = submit_entry('stock-transfer' if payload.is_transfer else 'stock-inbound', payload, current_user, request, business_id=str(payload.serial_no))
     if workflow_response is not None:
@@ -1346,7 +1348,7 @@ def get_import_staging_rows(
 def save_import_staging_rows(
     payload: ImportStagingSavePayload,
     request: Request,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("INBOUND"))
 ):
     import pandas as pd
 
@@ -1399,7 +1401,7 @@ def _auto_revoke_sandbox_batches(batch_codes: list):
 def delete_import_staging_rows(
     payload: ImportStagingDeletePayload,
     request: Request,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("INBOUND"))
 ):
     try:
         serial_nos = [str(x).strip() for x in (payload.serial_nos or []) if str(x).strip()]
@@ -1514,7 +1516,7 @@ def confirm_shipping_api(
     payload: ShippingActionPayload,
     request: Request,
     current_operator: str = Depends(get_current_operator_name),
-    current_user: dict = Depends(get_current_user_context),
+    current_user: dict = Depends(require_permissions("SHIP_CONFIRM")),
 ):
     from crud.forward_entries import submit_entry
     workflow_response = submit_entry('shipment-confirm', payload, current_user, request)
@@ -2301,7 +2303,7 @@ async def machine_archive_upload(
     label: str = Form(""), 
     files: List[UploadFile] = File(...),
     request: Request = None,
-    current_user: dict = Depends(get_current_user_context),
+    current_user: dict = Depends(require_permissions("ARCHIVE")),
     _upload_enabled: None = Depends(require_uploads_enabled),
 ):
     try:
@@ -2451,7 +2453,7 @@ def machine_archive_delete(
     serial_no: str, 
     file_name: str,
     request: Request,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("ARCHIVE"))
 ):
     try:
         sn_dir = _ensure_sn_dir(serial_no)
@@ -2482,7 +2484,7 @@ def machine_archive_batch_delete(
     serial_no: str, 
     payload: ArchiveBatchDeletePayload,
     request: Request,
-    current_user: dict = Depends(get_current_user_context)
+    current_user: dict = Depends(require_permissions("ARCHIVE"))
 ):
     try:
         names = [_safe_name(x) for x in (payload.file_names or []) if _safe_name(x)]

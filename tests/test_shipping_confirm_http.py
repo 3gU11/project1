@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.routes import inventory
+from api.routes import auth, inventory
 
 
 def test_shipping_confirm_accepts_flat_payload_without_internal_workflow(monkeypatch):
@@ -10,6 +10,10 @@ def test_shipping_confirm_accepts_flat_payload_without_internal_workflow(monkeyp
     app.dependency_overrides[inventory.get_current_user_token] = lambda: 'test-token'
     app.dependency_overrides[inventory.get_current_operator_name] = lambda: 'tester'
     app.dependency_overrides[inventory.get_current_user_context] = lambda: {'username': 'tester'}
+    app.dependency_overrides[auth.get_current_user_context] = lambda: {
+        'username': 'tester', 'role': 'Admin', 'name': 'tester'
+    }
+    monkeypatch.setattr(auth, 'get_role_permissions', lambda _role: ['SHIP_CONFIRM'])
     calls = []
 
     def confirm(payload, request, operator, user):
