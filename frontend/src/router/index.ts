@@ -44,8 +44,8 @@ const appRouteDefs: AppRouteDef[] = [
   { path: '/prediction-sandbox', name: 'PredictionSandbox', label: '👑 预测沙盘', title: '预测沙盘', permission: 'SANDBOX_VIEW', isManagement: true, component: () => import('../views/sandbox/BossPlan.vue') },
   { path: '/reports', name: 'Reports', label: '📊 报表管理', title: '报表管理', permission: 'REPORT_VIEW', isManagement: true, component: () => import('../views/ReportManagement.vue') },
   { path: '/workflow/models', name: 'WorkflowModels', label: '🧩 流程模型', title: '流程模型', roles: ['admin', 'boss'], isManagement: true, component: () => import('../views/workflow/WorkflowModels.vue') },
-  { path: '/workflow/instances', name: 'WorkflowInstances', label: '📝 流程实例', title: '流程实例', isManagement: true, component: () => import('../views/workflow/WorkflowInstances.vue') },
-  { path: '/workflow/tasks', name: 'WorkflowTasks', label: '✅ 流程任务', title: '流程任务', isManagement: true, component: () => import('../views/workflow/WorkflowTasks.vue') },
+  { path: '/workflow/instances', name: 'WorkflowInstances', label: '📝 流程实例', title: '流程实例', roles: ['admin', 'boss'], isManagement: true, component: () => import('../views/workflow/WorkflowInstances.vue') },
+  { path: '/workflow/tasks', name: 'WorkflowTasks', label: '✅ 流程任务', title: '流程任务', roles: ['admin', 'boss'], isManagement: true, component: () => import('../views/workflow/WorkflowTasks.vue') },
   { path: '/approval-center', name: 'ApprovalCenter', label: '🛡️ 审批中心', title: '审批中心', isManagement: true, component: () => import('../views/workflow/ApprovalCenter.vue') },
 ]
 

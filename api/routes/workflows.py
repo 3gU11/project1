@@ -136,14 +136,31 @@ def get_workflow_versions(workflow_key: str, _ctx: dict = Depends(require_roles(
     return {'data': list_workflow_versions(workflow_key)}
 
 
+def _is_workflow_privileged(ctx: dict) -> bool:
+    return str(ctx.get('role') or '').strip().lower() in {'admin', 'boss'}
+
+
 @router.get('/instances')
 def get_workflow_instances(
     status: str | None = Query(default=None),
     business_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
-    _ctx: dict = Depends(get_current_user_context),
+    ctx: dict = Depends(get_current_user_context),
 ):
-    return {'data': list_instances(status=status, business_id=business_id, limit=limit)}
+    data = list_instances(status=status, business_id=business_id, limit=limit)
+    if _is_workflow_privileged(ctx):
+        return {'data': data}
+    username = str(ctx.get('username') or '').strip()
+    assigned_instance_ids = {
+        str(task.get('instance_id'))
+        for task in list_tasks(assignee_id=username, limit=500)
+    }
+    visible = [
+        row for row in data
+        if str(row.get('initiator_id') or '').strip() == username
+        or str(row.get('id')) in assigned_instance_ids
+    ]
+    return {'data': visible}
 
 @router.post('/models/{workflow_key}/publish')
 def publish_model(workflow_key: str, payload: WorkflowPublishRequest, ctx: dict = Depends(require_roles('admin', 'boss'))):
@@ -197,8 +214,10 @@ def get_workflow_tasks(
     status: str | None = Query(default=None),
     assignee_id: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
-    _ctx: dict = Depends(get_current_user_context),
+    ctx: dict = Depends(get_current_user_context),
 ):
+    if not _is_workflow_privileged(ctx):
+        assignee_id = str(ctx.get('username') or '').strip()
     return {'data': list_tasks(status=status, assignee_id=assignee_id, limit=limit)}
 
 

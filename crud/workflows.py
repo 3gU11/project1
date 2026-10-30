@@ -1305,11 +1305,20 @@ def transfer_reverse_approval(instance_no: str, operator_id: str, new_assignee_i
             raise ValueError('当前用户不是待处理审批人')
         if new_assignee_id == str(row.get('initiator_id') or ''):
             raise ValueError('不能转交给流程发起人')
-        target = conn.execute(text("""SELECT username FROM users
+        target = conn.execute(text("""SELECT username, role FROM users
             WHERE TRIM(username)=:name AND LOWER(TRIM(COALESCE(status,'')))='active'"""),
-            {'name': new_assignee_id}).first()
+            {'name': new_assignee_id}).mappings().first()
         if not target:
             raise ValueError('转交对象不存在或已停用')
+        snapshot = conn.execute(text("SELECT node_snapshot FROM workflow_model_versions WHERE id=:version"),
+                                {'version': row.get('model_version_id')}).scalar()
+        _approval_nodes, approval_roles = _approval_config(snapshot)
+        allowed_roles = {str(role).strip().lower() for role in (approval_roles or []) if str(role).strip()}
+        if not allowed_roles:
+            raise ValueError('当前流程未配置可转交的审批角色')
+        target_role = str(target.get('role') or '').strip().lower()
+        if target_role not in allowed_roles:
+            raise ValueError('只能转交给流程配置的审批角色')
         conn.execute(text("UPDATE workflow_tasks SET assignee_id=:new WHERE id=:id AND status='待处理'"),
                      {'new': new_assignee_id, 'id': task['id']})
         conn.execute(text("""INSERT INTO workflow_approval_records
