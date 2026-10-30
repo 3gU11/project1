@@ -48,8 +48,15 @@ def _operator(ctx: dict) -> str:
     return str(ctx.get("name") or ctx.get("username") or "system").strip()
 
 
+@router.get("/registration-options")
+def get_registration_role_options():
+    """公开的注册角色选项，不暴露用户数量等管理信息。"""
+    rows = list_roles()
+    return {"data": [{"role_id": row["role_id"], "role_name": row["role_name"]} for row in rows]}
+
+
 @router.get("/")
-def get_roles():
+def get_roles(_ctx: dict = Depends(require_permissions("USER_MANAGE"))):
     return {"data": list_roles()}
 
 

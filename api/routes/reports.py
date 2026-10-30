@@ -10,7 +10,12 @@ from fastapi.responses import StreamingResponse
 import io
 from sqlalchemy import text
 
-from api.routes.auth import get_current_user_token, get_current_operator_name
+from api.routes.auth import (
+    get_current_user_context,
+    get_current_user_token,
+    get_current_operator_name,
+    require_permissions,
+)
 from crud.reports import (
     build_model_report_appendices,
     get_dealer_sales_summary,
@@ -66,7 +71,15 @@ def calculate_category_summary(summary_df: pd.DataFrame) -> pd.DataFrame:
     return category_summary
 
 
-router = APIRouter(dependencies=[Depends(get_current_user_token)])
+def require_report_access(ctx: dict = Depends(get_current_user_context)) -> dict:
+    """报表仅管理员/老板或拥有 REPORT_VIEW 的角色可访问。"""
+    if str(ctx.get('role') or '').strip().lower() in {'admin', 'boss'}:
+        return ctx
+    require_permissions("REPORT_VIEW")(ctx)
+    return ctx
+
+
+router = APIRouter(dependencies=[Depends(get_current_user_token), Depends(require_report_access)])
 
 
 def _generate_excel_response(

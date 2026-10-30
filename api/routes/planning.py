@@ -2707,7 +2707,7 @@ ALLOCATABLE_ORDER_LABELS = frozenset({"已规划", "待配齐", "待发货", "�
 NON_ALLOCATABLE_STATUSES = ("deleted", "done", "shipped", "canceled", "cancelled", "completed")
 
 
-@router.get("/orders")
+@router.get("/orders", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
 def get_sales_orders(
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=2000),
@@ -2772,7 +2772,7 @@ def get_sales_orders(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/orders/{order_id}/details")
+@router.get("/orders/{order_id}/details", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
 def get_sales_order_detail_api(order_id: str):
     try:
         order_id = str(order_id or "").strip()
@@ -3636,7 +3636,7 @@ def hard_delete_sales_order_api(
         raise HTTPException(status_code=500, detail=f"彻底删除订单失败: {e}")
 
 
-@router.get("/orders/{order_id}/allocations")
+@router.get("/orders/{order_id}/allocations", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
 def get_order_allocations_api(order_id: str):
     try:
         order_id = str(order_id).strip()

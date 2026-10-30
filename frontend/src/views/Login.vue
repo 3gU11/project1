@@ -115,7 +115,7 @@ const registerDraft = useReactiveFormDraft('login:register', registerForm, {
 
 const loadRoles = async () => {
   try {
-    const res = await apiGet<{ data: RoleOption[] }>('/roles/')
+    const res = await apiGet<{ data: RoleOption[] }>('/roles/registration-options')
     roles.value = res.data || []
   } catch {
     roles.value = []
