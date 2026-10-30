@@ -1232,7 +1232,7 @@ def get_layout(layout_id: str):
 def save_layout(
     payload: LayoutPayload,
     request: Request,
-    current_user: dict = Depends(require_permissions("WAREHOUSE_MAP"))
+    current_user: dict = Depends(require_permissions("MACHINE_EDIT"))
 ):
     try:
         res = save_warehouse_layout(payload.layout_id, payload.layout_json)
@@ -1254,7 +1254,7 @@ def save_layout(
 def reset_layout(
     payload: LayoutResetPayload,
     request: Request,
-    current_user: dict = Depends(require_permissions("WAREHOUSE_MAP"))
+    current_user: dict = Depends(require_permissions("MACHINE_EDIT"))
 ):
     try:
         res = reset_warehouse_layout(payload.layout_id)
