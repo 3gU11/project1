@@ -100,21 +100,6 @@ async def on_startup():
     except Exception as e:
         logger.warning("cloud sync worker not started: %s", e)
     try:
-        from v8_sync.scheduler import run_startup_sync
-        app.state.v8_sync_startup_result = await run_startup_sync()
-        logging.getLogger("uvicorn.error").info(
-            "V8 sync bridge startup result=%s event_id=%s",
-            app.state.v8_sync_startup_result.get("status"),
-            app.state.v8_sync_startup_result.get("event_id", ""),
-        )
-    except Exception as e:
-        logger.warning("V8 sync bridge not started: %s", e)
-    try:
-        from v8_sync.scheduler import run_sync_loop
-        app.state.v8_sync_loop_task = asyncio.create_task(run_sync_loop())
-    except Exception as e:
-        logger.warning("V8 sync loop not started: %s", e)
-    try:
         from crud.cloud_dealer_order_sync import cloud_pull_worker_loop
         app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
     except Exception as e:
@@ -187,14 +172,6 @@ async def on_shutdown():
         pull_task.cancel()
         try:
             await pull_task
-        except asyncio.CancelledError:
-            pass
-
-    v8_sync_task = getattr(app.state, "v8_sync_loop_task", None)
-    if v8_sync_task:
-        v8_sync_task.cancel()
-        try:
-            await v8_sync_task
         except asyncio.CancelledError:
             pass
 
