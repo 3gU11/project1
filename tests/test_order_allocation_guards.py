@@ -8,6 +8,7 @@ import pandas as pd
 from api.routes.planning import (
     complete_order_allocation_api,
     _get_order_contract_machine_rows,
+    _is_open_order_status,
     _sync_order_detail_rows_to_units_and_inventory,
     _sync_order_to_units_and_import,
     _sync_units_from_contract_edit,
@@ -16,6 +17,14 @@ from crud.orders import allocate_inventory
 
 
 class OrderAllocationGuardTests(unittest.TestCase):
+    def test_allocatable_is_driven_by_order_status_not_contract_planning_label(self):
+        # 现货合同转订单后 factory_plan 是“已转订单”且没有批次预占；
+        # 配货页必须仍按 sales_orders.status 把它视为可处理。
+        for status in ("active", "ready", "allocated", "pending_review", "packed"):
+            self.assertTrue(_is_open_order_status(status), status)
+        for status in ("done", "shipped", "completed", "canceled", "cancelled", "deleted"):
+            self.assertFalse(_is_open_order_status(status), status)
+
     def test_allocation_endpoint_returns_json_safe_nulls_for_missing_inventory_fields(self):
         from api.routes.planning import get_order_allocations_api
 

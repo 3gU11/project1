@@ -345,9 +345,13 @@ const parseDemandEntries = (order: Row | null) => {
   return entries
 }
 
-// 可配货与否只以后端派生的 can_allocate 为准（与接口过滤、状态标签同一口径）。
-// 前端不再用 sales_orders.status 二次判断，避免"标签说已完成、列表还在等配货"这类矛盾。
-const isActiveOrder = (order: Row) => order.can_allocate !== false
+// 与远程版本一致：配货页只按订单自身 status 排除已关闭订单，不再用
+// “合同是否已规划”的派生标签决定订单是否可见。否则现货合同转订单后
+// 合同状态变成“已转订单”、没有批次预占，会被误判成“待规划”而无法配货。
+const isActiveOrder = (order: Row) => {
+  const status = String(order.status || 'active').trim().toLowerCase()
+  return !['done', 'shipped', 'completed', 'canceled', 'cancelled', 'deleted'].includes(status)
+}
 
 const orderContainsModel = (order: Row, modelFilter: string) => {
   if (!modelFilter) return true
@@ -501,7 +505,7 @@ const confirmedRows = computed(() => {
 })
 const confirmedAllocatedTotal = computed(() => confirmedRows.value.length)
 
-const CACHE_ORDERS = 'allocation:orders:v2'
+const CACHE_ORDERS = 'allocation:orders:v3'
 const loadData = async (force = false) => {
   loading.value = true
   try {
@@ -513,6 +517,8 @@ const loadData = async (force = false) => {
         return
       }
     }
+    // 后端 allocatable=1 已改为与远程 isActiveOrder 相同的 status 口径，
+    // 只排除 done/shipped/completed/canceled/cancelled/deleted。
     const nextOrders = await apiGetAll<Row>('/planning/orders?allocatable=1')
     orders.value = nextOrders
     cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)
@@ -806,33 +812,17 @@ const completeAllocation = async () => {
   }
 }
 
-// 标签配色跟随后端 order_status_label，不同状态必须能一眼区分：
-// 已规划=橙（可配未配）、待配齐=红、待发货=蓝、已完成=绿、未关联合同/待规划=灰
-const ORDER_STATE_TYPES: Record<string, TagType> = {
-  已规划: 'warning',
-  待配齐: 'danger',
-  待发货: 'primary',
-  已完成: 'success',
-  待二次确认: 'warning',
-  待规划: 'info',
-  未关联合同: 'info',
-  已取消: 'info',
-  已删除: 'info',
-}
-
+// 与远程版本一致：状态标签由 sales_orders.status 决定，不再优先使用
+// order_status_label；后者会把“已转订单但未写批次预占”的现货订单显示成待规划。
 const getComputedOrderState = (o: Row): { text: string; type: TagType } => {
-  if (o.order_status_label) {
-    return { text: o.order_status_label, type: ORDER_STATE_TYPES[o.order_status_label] || 'primary' }
-  }
-  const s = String(o.status || 'active')
+  const s = String(o.status || 'active').trim().toLowerCase()
   if (s === 'pending_review') return { text: o.reservation?.label || '待核查预占', type: 'warning' }
   if (s === 'packed') return { text: '已打包', type: 'primary' }
   if (s === 'shipped') return { text: '已出库', type: 'info' }
-  if (s === 'canceled') return { text: '已取消', type: 'danger' }
-
-  if (s === 'ready' || s === 'allocated') {
-    return { text: '待发货', type: 'success' }
-  }
+  if (s === 'canceled' || s === 'cancelled') return { text: '已取消', type: 'danger' }
+  if (s === 'deleted') return { text: '已删除', type: 'info' }
+  if (s === 'done' || s === 'completed') return { text: '已完成', type: 'success' }
+  if (s === 'ready' || s === 'allocated') return { text: '待发货', type: 'success' }
   return { text: '待配齐', type: 'danger' }
 }
 

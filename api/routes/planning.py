@@ -2701,10 +2701,15 @@ def get_order_progress(order_ids, include_machines=False):
     )
 
 
-# 订单配货页只处理"可配货"订单：已规划/待配齐/待发货/待二次确认。
-# 待规划（合同未规划或未关联合同）、已完成、已取消/已删除的订单不应出现在配货列表。
-ALLOCATABLE_ORDER_LABELS = frozenset({"已规划", "待配齐", "待发货", "待二次确认"})
+# 订单配货页与远程版本保持同一口径：按订单自身 status 判断是否仍可处理，
+# 不再要求合同必须先派生为“已规划/待配齐”。否则现货合同转订单后
+# factory_plan 状态为“已转订单”且没有批次预占，会被误判为“待规划”而永久
+# 从配货页消失（见 SO-20261031-F472 问题）。
 NON_ALLOCATABLE_STATUSES = ("deleted", "done", "shipped", "canceled", "cancelled", "completed")
+
+
+def _is_open_order_status(value: object) -> bool:
+    return str(value or "").strip().lower() not in NON_ALLOCATABLE_STATUSES
 
 
 @router.get("/orders", dependencies=[Depends(require_permissions("SALES_ALLOC"))])
@@ -2725,14 +2730,11 @@ def get_sales_orders(
             where_clauses.append("(`订单号` LIKE :kw OR `客户名` LIKE :kw OR `代理商` LIKE :kw)")
             params["kw"] = f"%{str(keyword).strip()}%"
         if allocatable:
+            # 与远程前端 isActiveOrder 一致：只排除已关闭订单，不按合同规划标签过滤。
             where_clauses.append(
-                "COALESCE(`status`, '') NOT IN ("
+                "LOWER(TRIM(COALESCE(`status`, ''))) NOT IN ("
                 + ", ".join(f"'{item}'" for item in NON_ALLOCATABLE_STATUSES)
                 + ")"
-            )
-            where_clauses.append(
-                "EXISTS (SELECT 1 FROM factory_plan fp WHERE "
-                "TRIM(COALESCE(fp.`订单号`, '')) = TRIM(COALESCE(sales_orders.`订单号`, '')))"
             )
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
@@ -2763,10 +2765,7 @@ def get_sales_orders(
                 except batch_planning.BatchPlanningError as exc:
                     record["reservation"] = {"label": "预占异常，待核查", "can_confirm": False, "risk": str(exc)}
         for record in records:
-            record["can_allocate"] = record.get("order_status_label") in ALLOCATABLE_ORDER_LABELS
-        if allocatable:
-            records = [record for record in records if record["can_allocate"]]
-            total = len(records)
+            record["can_allocate"] = _is_open_order_status(record.get("status"))
         return {"data": records, "total": total, "skip": skip, "limit": limit}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
