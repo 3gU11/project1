@@ -129,11 +129,6 @@ async def _get_client() -> httpx.AsyncClient:
     global _client
     async with _client_lock:
         if _client is None or _client.is_closed:
-<<<<<<< HEAD
-            _client = httpx.AsyncClient(
-                base_url=GO_SANDBOX_URL,
-                timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
-=======
             # The Go sandbox is always reached over loopback. With trust_env
             # left at its default, httpx reads HTTP_PROXY/HTTPS_PROXY/ALL_PROXY
             # here and a malformed host proxy value raises httpx.InvalidURL
@@ -145,7 +140,6 @@ async def _get_client() -> httpx.AsyncClient:
                 base_url=GO_SANDBOX_URL,
                 timeout=httpx.Timeout(DEFAULT_TIMEOUT, connect=10.0),
                 trust_env=False,
->>>>>>> origin/main
             )
     return _client
 
@@ -187,16 +181,11 @@ async def _reset_client(failed_client: httpx.AsyncClient) -> httpx.AsyncClient:
             trust_env=False,
         )
         return _client
-<<<<<<< HEAD
-=======
-
-
 # websockets 15+ honors the host proxy configuration by default. The Go
 # sandbox websocket is a loopback connection, so a malformed system proxy must
 # not be parsed for it. Older websockets releases don't accept the `proxy`
 # keyword, so only pass it when the installed version supports it.
 _WS_CONNECT_SUPPORTS_PROXY = "proxy" in inspect.signature(websockets.connect).parameters
->>>>>>> origin/main
 
 
 async def proxy_ws(websocket: WebSocket):

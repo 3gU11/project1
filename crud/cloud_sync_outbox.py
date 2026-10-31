@@ -408,11 +408,9 @@ def _dispatch_event(event: dict[str, Any]) -> None:
     event_type = str(event.get("event_type") or "")
 
     if event_type == "repair_snapshot_sync":
-<<<<<<< HEAD
         # Snapshot upload has been retired. Consume legacy outbox rows locally
         # so they cannot trigger any outbound request.
         logger.info("Skipping retired repair snapshot sync event %s", event_id)
-=======
         from v8_sync.client import NonRetryableSyncError, upload_snapshot
         from v8_sync.config import get_config
         from v8_sync.snapshot_store import (
@@ -445,7 +443,6 @@ def _dispatch_event(event: dict[str, Any]) -> None:
                 mark_snapshot_error(snapshot_id, str(exc))
             raise
         mark_snapshot_uploaded(snapshot_id)
->>>>>>> origin/main
         return
 
     if event_type == "repair_delta_event_sync":

@@ -4,7 +4,7 @@ param(
   [string]$GoPort = '3001',
   [string]$OCRPort = '8010',
   [string]$ApiPort = '8000',
-  [string]$WebPort = '3000',
+  [string]$WebPort = '8888',
   [string]$MobilePort = '5174',
   [string]$PythonExe = ''
 )

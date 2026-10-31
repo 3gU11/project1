@@ -30,6 +30,7 @@
                   type="button"
                   class="order-item"
                   :class="{ active: selectedOrderId === String(o['订单号'] || '') }"
+                  :disabled="saving"
                   @click="selectOrder(o)"
                 >
                   <div class="order-item-head">
@@ -48,7 +49,7 @@
       </el-col>
 
       <el-col :span="15">
-        <el-card>
+        <el-card v-loading="contextLoading">
           <template #header>
             <div class="card-head">配货面板</div>
           </template>
@@ -94,7 +95,7 @@
                 </template>
               </el-alert>
               <div class="ops">
-                <el-button type="success" :loading="saving" :disabled="!reservationInfo?.can_confirm" @click="confirmBatchReview">确认全部配货</el-button>
+                <el-button type="success" :loading="saving" :disabled="contextLoading || !contextReady || !reservationInfo?.can_confirm" @click="confirmBatchReview">确认全部配货</el-button>
                 <el-button v-if="(reservationInfo?.batch_codes?.length || 1) <= 1" :disabled="saving" @click="openReplacement">改配批次</el-button>
                 <el-button type="danger" plain :disabled="saving" @click="cancelReservation">撤销本次规划</el-button>
               </div>
@@ -148,7 +149,7 @@
               </el-table-column>
             </el-table>
             <div class="ops">
-              <el-button type="primary" :loading="saving" @click="allocateSelected">复核确认配货</el-button>
+              <el-button type="primary" :loading="saving" :disabled="contextLoading || !contextReady" @click="allocateSelected">复核确认配货</el-button>
             </div>
 
             <el-divider />
@@ -173,8 +174,8 @@
               </el-table-column>
             </el-table>
             <div class="ops">
-              <el-button type="danger" :loading="saving" @click="releaseSelected">⚠️ 确认撤回</el-button>
-              <el-button type="success" :loading="saving" @click="completeAllocation">配货完成</el-button>
+              <el-button type="danger" :loading="saving" :disabled="contextLoading || !contextReady" @click="releaseSelected">⚠️ 确认撤回</el-button>
+              <el-button type="success" :loading="saving" :disabled="contextLoading || !contextReady" @click="completeAllocation">配货完成</el-button>
             </div>
             </template>
           </template>
@@ -187,17 +188,16 @@
         <el-option v-for="b in replacementOptions" :key="b.batch_id" :value="b.batch_id" :label="`${b.batch_code} · ${b.status === 'Confirmed' ? '待投产' : '在产'} · 可用 ${b.available} 台`" />
       </el-select>
       <el-empty v-if="!replacementOptions.length" description="暂无满足整份合同需求的其他批次" />
-      <template #footer><el-button :disabled="saving" @click="replacementVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!replacementId" @click="replaceReservation">确认改配</el-button></template>
+      <template #footer><el-button :disabled="saving" @click="replacementVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="contextLoading || !contextReady || !replacementId" @click="replaceReservation">确认改配</el-button></template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { apiGet, apiGetAll, apiPost, getApiErrorMessage } from '../utils/request'
-import { useCacheStore } from '../store/cache'
 import { compareModels, normalizeModelName, sortRowsByModel } from '../utils/modelOrder'
 import { hasHighHint } from '../utils/heightened'
 import { singleLineOrderRemark } from '../utils/orderNotes'
@@ -211,13 +211,14 @@ type Row = Record<string, any>
 
 const loading = ref(false)
 const saving = ref(false)
+const contextLoading = ref(false)
+const contextReady = ref(false)
 const orderKeyword = ref('')
 const orderModelFilter = ref('')
 const orders = ref<Row[]>([])
 const allocations = ref<Row[]>([])
 const orderDetailRows = ref<Array<{ model: string; high: boolean; qty: number; remark: string; batches: string }>>([])
 const orderDetailsSource = ref<'factory_plan' | 'sales_orders' | ''>('')
-const cacheStore = useCacheStore()
 const route = useRoute()
 const selectedOrderId = ref('')
 const selectedOrder = ref<Row | null>(null)
@@ -503,24 +504,23 @@ const confirmedRows = computed(() => {
 })
 const confirmedAllocatedTotal = computed(() => confirmedRows.value.length)
 
-const CACHE_ORDERS = 'allocation:orders'
-const loadData = async (force = false) => {
+const loadData = async (_force = false) => {
+  if (loading.value) return
   loading.value = true
   try {
-    if (!force) {
-      const orderCached = cacheStore.get<Row[]>(CACHE_ORDERS)
-      if (orderCached) {
-        orders.value = orderCached
-        await tryAutoSelectOrderFromQuery()
-        return
-      }
+    orders.value = await apiGetAll<Row>('/planning/orders')
+    const queryOrder = String(route.query.order_id || '').trim()
+    const oid = selectedOrderId.value || queryOrder
+    const matched = orders.value.find((order) => String(order['订单号'] || '') === oid)
+    if (matched) {
+      selectedOrder.value = matched
+      selectedOrderId.value = oid
+      await loadSelectedOrderContext(true)
+    } else if (selectedOrderId.value) {
+      selectedOrderId.value = ''
+      selectedOrder.value = null
+      await loadSelectedOrderContext()
     }
-    const nextOrders = await apiGetAll<Row>('/planning/orders')
-    orders.value = nextOrders
-    cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)
-    await tryAutoSelectOrderFromQuery()
-    refreshSelectedOrderFromList()
-    if (selectedOrderId.value) await loadSelectedOrderContext()
   } catch (err: any) {
     ElMessage.error(getApiErrorMessage(err) || '读取数据失败')
   } finally {
@@ -536,7 +536,6 @@ const updateOrderStatusLocally = (orderId: string, status: string) => {
   orders.value = nextOrders
   const matched = nextOrders.find((order) => String(order['订单号'] || '') === orderId)
   if (matched) selectedOrder.value = matched
-  cacheStore.set(CACHE_ORDERS, nextOrders, 10_000)
 }
 
 const refreshCurrentOrder = async (nextStatus?: string) => {
@@ -545,20 +544,45 @@ const refreshCurrentOrder = async (nextStatus?: string) => {
   } else {
     refreshSelectedOrderFromList()
   }
-  await loadSelectedOrderContext()
+  await loadSelectedOrderContext(true)
 }
 
-const loadOrderDetails = async () => {
+let contextVersion = 0
+let pendingContext: { oid: string; promise: Promise<void> } | null = null
+
+const loadSelectedOrderContext = (force = false): Promise<void> => {
+  const oid = selectedOrderId.value
+  if (!force && pendingContext?.oid === oid) return pendingContext.promise
+  const version = ++contextVersion
+  contextReady.value = false
   orderDetailRows.value = []
   orderDetailsSource.value = ''
-  if (!selectedOrderId.value) return
-  try {
-    const res: any = await apiGet(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/details`)
-    const source = res?.source === 'factory_plan' ? 'factory_plan' : 'sales_orders'
-    orderDetailsSource.value = source
-    if (source !== 'factory_plan') return
-    const details = Array.isArray(res.details) ? res.details : []
-    orderDetailRows.value = details
+  allocations.value = []
+  reservationInfo.value = null
+  selectedCandidateSerials.value = []
+  selectedAllocatedSerials.value = []
+  if (!oid) {
+    pendingContext = null
+    contextLoading.value = false
+    return Promise.resolve()
+  }
+  contextLoading.value = true
+  const isCurrent = () => version === contextVersion && selectedOrderId.value === oid
+  const promise = (async () => {
+    try {
+      const base = `/planning/orders/${encodeURIComponent(oid)}`
+      const [detail, allocation] = await Promise.all([
+        apiGet<Row>(`${base}/details`),
+        apiGet<ListResponse>(`${base}/allocations`),
+      ])
+      let reservation: Row | null = null
+      if (detail.order?.status === 'pending_review') {
+        reservation = await apiGet<Row>(`${base}/reservation`)
+      }
+      if (!isCurrent()) return
+      const source = detail.source === 'factory_plan' ? 'factory_plan' : 'sales_orders'
+      const details = source === 'factory_plan' && Array.isArray(detail.details) ? detail.details : []
+    const detailRows = details
       .map((item: any) => {
         const model = normalizeModelName(item?.['机型'])
         const rawRemark = String(item?.['备注'] || '')
@@ -584,62 +608,41 @@ const loadOrderDetails = async () => {
         }
       })
       .filter((item: { model: string; qty: number }) => item.model && item.qty > 0)
-  } catch {
-    orderDetailRows.value = []
-    orderDetailsSource.value = ''
-  }
-}
-
-const loadAllocations = async () => {
-  if (!selectedOrderId.value) {
-    allocations.value = []
-    return
-  }
-  try {
-    const res = await apiGet<ListResponse>(`/planning/orders/${encodeURIComponent(selectedOrderId.value)}/allocations`)
-    allocations.value = res.data || []
-  } catch (err: any) {
-    ElMessage.error(getApiErrorMessage(err) || '读取配货记录失败')
-    allocations.value = []
-  }
-}
-
-const loadSelectedOrderContext = async () => {
-  if (!selectedOrderId.value) {
-    orderDetailRows.value = []
-    orderDetailsSource.value = ''
-    allocations.value = []
-    return
-  }
-  reservationInfo.value = null
-  const oid = selectedOrderId.value
-  await Promise.all([loadOrderDetails(), loadAllocations(), (async () => {
-    if (!isBatchReview.value) return
-    try {
-      const info = await apiGet<Row>(`/planning/orders/${encodeURIComponent(oid)}/reservation`)
-      if (selectedOrderId.value !== oid) return
-      reservationInfo.value = info
-      if (selectedOrder.value) selectedOrder.value.reservation = info
-    } catch { /* keep confirmation disabled */ }
-  })()])
+      // Publish the order, demand and machines together, from the latest request only.
+      if (detail.order) {
+        const currentOrder = { ...detail.order, reservation }
+        selectedOrder.value = currentOrder
+        orders.value = orders.value.map((row) => String(row['订单号'] || '') === oid ? currentOrder : row)
+      }
+      orderDetailsSource.value = source
+      orderDetailRows.value = detailRows
+      allocations.value = allocation.data || []
+      reservationInfo.value = reservation
+      contextReady.value = true
+    } catch (err: any) {
+      if (isCurrent()) ElMessage.error(getApiErrorMessage(err) || '读取配货数据失败，请重试')
+    } finally {
+      if (isCurrent()) {
+        contextLoading.value = false
+        pendingContext = null
+      }
+    }
+  })()
+  pendingContext = { oid, promise }
+  return promise
 }
 
 const selectOrder = async (row: Row) => {
+  if (saving.value) return
   selectedOrder.value = row
   selectedOrderId.value = String(row['订单号'] || '')
-  selectedCandidateSerials.value = []
-  selectedAllocatedSerials.value = []
   await loadSelectedOrderContext()
 }
 
-const tryAutoSelectOrderFromQuery = async () => {
-  const q = String(route.query.order_id || '').trim()
-  if (!q) return
-  if (selectedOrderId.value === q) return
-  const matched = orders.value.find((o) => String(o['订单号'] || '') === q)
-  if (!matched) return
-  await selectOrder(matched)
-}
+onBeforeUnmount(() => {
+  ++contextVersion
+  pendingContext = null
+})
 
 const refreshSelectedOrderFromList = () => {
   if (!selectedOrderId.value) return
@@ -680,6 +683,7 @@ watch([orderKeyword, orderModelFilter, filteredOrders], async () => {
   } else {
     selectedOrder.value = null
     selectedOrderId.value = ''
+    await loadSelectedOrderContext()
     allocations.value = []
     orderDetailRows.value = []
     orderDetailsSource.value = ''
@@ -687,7 +691,7 @@ watch([orderKeyword, orderModelFilter, filteredOrders], async () => {
 })
 
 const allocateSelected = async () => {
-  if (!selectedOrderId.value) return
+  if (saving.value || !contextReady.value || contextLoading.value || !selectedOrderId.value) return
   if (selectedCandidateSerials.value.length === 0) {
     ElMessage.warning('请先勾选要配货的机台')
     return
@@ -745,7 +749,7 @@ const allocateSelected = async () => {
 }
 
 const releaseSelected = async () => {
-  if (!selectedOrderId.value) return
+  if (saving.value || !contextReady.value || contextLoading.value || !selectedOrderId.value) return
   if (selectedAllocatedSerials.value.length === 0) {
     ElMessage.warning('请先勾选要释放的机台')
     return
@@ -769,7 +773,7 @@ const releaseSelected = async () => {
 }
 
 const completeAllocation = async () => {
-  if (!selectedOrderId.value) return
+  if (saving.value || !contextReady.value || contextLoading.value || !selectedOrderId.value) return
   saving.value = true
   try {
     const res = await apiPost<{ message?: string; status?: string; batch_mismatch?: Array<{ 流水号: string; 机型: string; 批次号: string }> }>(

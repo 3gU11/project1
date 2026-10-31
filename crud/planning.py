@@ -63,6 +63,11 @@ def save_planning_record(order_id, model, plan_info):
 
 @lru_cache(maxsize=1)
 def get_factory_plan():
+    return get_factory_plan_fresh()
+
+
+def get_factory_plan_fresh():
+    """Read current database state without a process-local cache."""
     cols = ["合同号", "机型", "排产数量", "要求交期", "状态", "备注", "客户名", "代理商", "指定批次/来源", "订单号"]
     try:
         with get_engine().connect() as conn:

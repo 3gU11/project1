@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from typing import List, Dict, Any
 from urllib.parse import unquote
 import base64
@@ -21,11 +22,11 @@ from config import BASE_DIR, GO_SANDBOX_URL, GO_INTERNAL_TOKEN
 from core.file_manager import delete_contract_file, save_contract_file
 from crud.audit_logs import append_audit_log
 from crud.contracts import get_contract_files
-from crud.inventory import get_data, save_data
+from crud.inventory import get_data, get_data_fresh, save_data
 from crud.logs import append_log
 from crud.model_dictionary import get_enabled_model_names, is_model_enabled
-from crud.planning import align_factory_plan_models, get_factory_plan, get_factory_plan_v2, save_factory_plan
-from crud.orders import allocate_inventory, get_orders, revert_to_inbound, save_orders
+from crud.planning import align_factory_plan_models, get_factory_plan, get_factory_plan_fresh, get_factory_plan_v2, save_factory_plan
+from crud.orders import allocate_inventory, get_orders, get_orders_fresh, revert_to_inbound, save_orders
 from api.routes.auth import get_current_operator_name, get_current_user_context, get_current_user_token, require_permissions
 from crud import batch_planning
 from crud.contract_notifications import contract_rows, record_converted, record_planned
@@ -362,9 +363,10 @@ def _parse_order_demand_variant_counts(order_row: pd.Series) -> dict[tuple[str, 
     return {}
 
 
-def _order_required_variant_counts(order_id: str, order_row: pd.Series | None = None) -> dict[tuple[str, bool], int]:
+def _order_required_variant_counts(order_id: str, order_row: pd.Series | None = None, conn=None) -> dict[tuple[str, bool], int]:
     order_id = str(order_id or "").strip()
-    plan_df = get_factory_plan()
+    plan_df = (pd.read_sql(text("SELECT * FROM factory_plan WHERE `订单号`=:oid"), conn,
+                           params={"oid": order_id}) if conn is not None else get_factory_plan_fresh())
     contract_rows = plan_df[plan_df["订单号"].astype(str).str.strip() == order_id].copy() if not plan_df.empty else pd.DataFrame()
     counts: dict[tuple[str, bool], int] = {}
     if not contract_rows.empty:
@@ -383,7 +385,7 @@ def _order_required_variant_counts(order_id: str, order_row: pd.Series | None = 
         return counts
 
     if order_row is None:
-        orders_df = get_orders()
+        orders_df = get_orders_fresh()
         hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id] if not orders_df.empty else pd.DataFrame()
         order_row = hit.iloc[0] if not hit.empty else None
     if order_row is None:
@@ -2270,9 +2272,9 @@ def _validate_contracts_available(contract_ids: list[str], order_id: str) -> Non
 
 def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
     order_id = str(order_id).strip()
-    plan_df = get_factory_plan()
+    plan_df = get_factory_plan_fresh()
     contract_rows = plan_df[plan_df["订单号"].astype(str).str.strip() == order_id].copy() if not plan_df.empty else pd.DataFrame()
-    orders_df = get_orders()
+    orders_df = get_orders_fresh()
     order_match = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id] if not orders_df.empty else pd.DataFrame()
     order_row = order_match.iloc[0] if not order_match.empty else None
     order_detail_context = order_row.to_dict() if hasattr(order_row, "to_dict") else {}
@@ -2283,7 +2285,7 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
         if str(x).strip()
     })
 
-    inv_df = get_data()
+    inv_df = get_data_fresh()
     if inv_df.empty:
         inv_df = pd.DataFrame(columns=["流水号", "合同号", "占用订单号", "状态", "机型"])
     for col in ["流水号", "合同号", "占用订单号", "状态", "机型", "批次号", "客户", "代理商", "合同备注"]:
@@ -2489,9 +2491,9 @@ def _get_order_contract_machine_rows(order_id: str) -> pd.DataFrame:
     return rows
 
 
-def _get_explicit_order_allocations(order_id: str) -> pd.DataFrame:
+def _get_explicit_order_allocations(order_id: str, conn=None) -> pd.DataFrame:
     order_id = str(order_id or "").strip()
-    with get_engine().connect() as conn:
+    with (nullcontext(conn) if conn is not None else get_engine().connect()) as conn:
         production = conn.execute(text("""
             SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no) AS `流水号`,
                    u.model_type AS `机型`, COALESCE(u.sales_id, '') AS `占用订单号`,
@@ -2694,7 +2696,7 @@ def get_sales_order_detail_api(order_id: str):
         order_id = str(order_id or "").strip()
         if not order_id:
             raise HTTPException(status_code=422, detail="订单号不能为空")
-        orders_df = get_orders()
+        orders_df = get_orders_fresh()
         hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
         if hit.empty:
             raise HTTPException(status_code=404, detail="订单不存在")
@@ -2754,7 +2756,7 @@ def create_sales_order_api(
         _assert_models_in_dictionary(_extract_models_from_demand_text(demand_text))
         if detail_items is not None:
             _assert_models_in_dictionary([str(item.机型 or "").strip() for item in detail_items])
-        df_orders = get_orders()
+        df_orders = get_orders_fresh()
         order_id = f"SO-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
         _validate_contracts_available(contract_ids, order_id)
         new_row = {
@@ -3565,7 +3567,7 @@ def allocate_order_inventory_api(
         if not selected:
             raise HTTPException(status_code=422, detail="请先选择要配货的机台")
 
-        orders_df = get_orders()
+        orders_df = get_orders_fresh()
         hit = orders_df[orders_df["订单号"].astype(str) == str(order_id)]
         if hit.empty:
             raise HTTPException(status_code=404, detail="订单不存在")
@@ -3604,25 +3606,30 @@ def allocate_order_inventory_api(
                 if str(row.get("_batch_match") or "") == "其他批次"
             ]
 
-        required_variants = _order_required_variant_counts(str(order_id), first)
-        if required_variants:
-            current_rows = _get_explicit_order_allocations(str(order_id))
+        def validate_selection(conn, locked_rows):
+            # The order row and selected machines are already locked by allocate_inventory.
+            current_order = conn.execute(text("SELECT * FROM sales_orders WHERE `订单号`=:oid"),
+                                         {"oid": str(order_id)}).mappings().first()
+            required_variants = _order_required_variant_counts(str(order_id), dict(current_order), conn=conn)
+            if not required_variants:
+                raise ValueError("订单没有有效需求，不能配货")
+            current_rows = _get_explicit_order_allocations(str(order_id), conn=conn)
+            selected_live = pd.DataFrame([{
+                "流水号": row["serial_no"], "机型": row["model_type"],
+                "合同备注": row["order_remark"], "批次号": row.get("batch_code", ""),
+            } for row in locked_rows])
+            combined = pd.concat([current_rows, selected_live], ignore_index=True).drop_duplicates(subset=["流水号"], keep="first")
             variant_counts: dict[tuple[str, bool], int] = {}
-            combined = pd.concat([current_rows, selected_rows], ignore_index=True).drop_duplicates(subset=["流水号"], keep="first")
             for _, row in combined.iterrows():
-                model = _normalize_alloc_model(row.get("机型", ""))
-                if not model:
-                    continue
-                key = (model, _inventory_row_high(row))
+                key = (_normalize_alloc_model(row.get("机型", "")), _inventory_row_high(row))
                 variant_counts[key] = variant_counts.get(key, 0) + 1
             for key, allocated in variant_counts.items():
                 need = required_variants.get(key, 0)
                 if allocated > need:
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"{_variant_label(key[0], key[1])} 超配：需求 {need}，本次后 {allocated}",
-                    )
-        allocation_result = allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator)
+                    raise ValueError(f"{_variant_label(key[0], key[1])} 超配：需求 {need}，本次后 {allocated}")
+
+        allocation_result = allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator,
+                                               validate_selection=validate_selection)
         stock_count = int(allocation_result.get("stock", 0))
         production_count = int(allocation_result.get("production", 0))
         mismatch_text = "、".join(
@@ -3664,7 +3671,7 @@ def complete_order_allocation_api(
         if not order_id:
             raise HTTPException(status_code=422, detail="订单号不能为空")
 
-        orders_df = get_orders()
+        orders_df = get_orders_fresh()
         hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
         if hit.empty:
             raise HTTPException(status_code=404, detail="订单不存在")
@@ -3752,7 +3759,7 @@ def release_order_inventory_api(
                 raise HTTPException(status_code=422, detail="所选机台不属于当前订单或已不可释放")
 
         revert_to_inbound(target_sns, reason=f"订单配货释放-{order_id}", operator=current_operator)
-        orders_df = get_orders()
+        orders_df = get_orders_fresh()
         hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id]
         if not hit.empty:
             order_idx = hit.index[0]
@@ -3883,11 +3890,11 @@ def link_contract_to_order(
             raise HTTPException(status_code=422, detail="订单号不能为空")
 
         # 验证订单号是否存在
-        orders_df = get_orders()
+        orders_df = get_orders_fresh()
         if orders_df.empty or order_id not in orders_df["订单号"].values:
             raise HTTPException(status_code=404, detail=f"订单号 {order_id} 不存在")
 
-        df_plan = get_factory_plan()
+        df_plan = get_factory_plan_fresh()
         mask = df_plan["合同号"].astype(str) == str(contract_id)
         if not mask.any():
             raise HTTPException(status_code=404, detail="合同不存在")

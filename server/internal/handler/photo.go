@@ -457,13 +457,10 @@ func (h *PhotoHandler) InitMachinePhotoTasks(c *gin.Context) {
 		return
 	}
 	tx := h.db.Begin()
-<<<<<<< HEAD
 	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
 		return
 	}
-=======
->>>>>>> origin/main
 	createdBy := strings.TrimSpace(c.GetString("username"))
 	if runes := []rune(createdBy); len(runes) > 64 {
 		createdBy = string(runes[:64])
@@ -946,7 +943,6 @@ VALUES (?, ?, ?, ?, ?, 1, 'manual_review', ?)`,
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-<<<<<<< HEAD
 	// A single mobile capture fans the same QR value out to every OCR task.
 	// Only the first task writes the audit row so one scan produces one log.
 	var earlierTasks int64
@@ -956,9 +952,7 @@ VALUES (?, ?, ?, ?, ?, 1, 'manual_review', ?)`,
 		Count(&earlierTasks).Error; err == nil && earlierTasks == 0 {
 		h.appendQRScanOperationLog(c, task, value)
 	}
-=======
 	h.writeOperationLog(c, "二维码识别", task.SerialNo, task.PositionCode, fmt.Sprintf("机台流水号：%s，拍照项：%s，识别结果：%s", task.SerialNo, task.PositionCode, value))
->>>>>>> origin/main
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"status":  "manual_review",

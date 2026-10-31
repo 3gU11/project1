@@ -240,6 +240,11 @@ def _normalize_import_df(df):
 
 @lru_cache(maxsize=1)
 def get_data():
+    return get_data_fresh()
+
+
+def get_data_fresh():
+    """Read current database state without a process-local cache."""
     try:
         with get_engine().connect() as conn:
             df = pd.read_sql("SELECT * FROM finished_goods_data", conn)
@@ -441,7 +446,6 @@ def save_data_v2(df):
 
 
 def archive_shipped_data(df_shipped):
-<<<<<<< HEAD
     try:
         current_month = datetime.now().strftime("%Y_%m")
         df_shipped = df_shipped.copy()
@@ -471,7 +475,6 @@ def archive_shipped_data(df_shipped):
         df_shipped.fillna("").to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
     except (OperationalError, Exception) as e:
         print(f"archive_shipped_data error: {e}")
-=======
     """归档发货复核记录到 shipping_history。
 
     注意：DATETIME 列必须保持 NaT/None（to_sql 会写 NULL），不能填空字符串，
@@ -505,7 +508,6 @@ def archive_shipped_data(df_shipped):
         df_shipped[text_cols] = df_shipped[text_cols].fillna("")
     df_shipped.to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
     logger.info("archive_shipped_data 归档 %s 行", len(df_shipped))
->>>>>>> origin/main
 
 
 def get_import_staging():
