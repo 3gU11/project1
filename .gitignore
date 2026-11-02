@@ -16,6 +16,12 @@ server/.env
 *.err.log
 test-results/
 tmp-playwright-output/
+# 本地跑 vue-tsc / 前端测试时生成的临时缓存目录
+frontend/.tmp-tsc/
+frontend/.tmp-vitest/
+.tmp-smoke/
+.tmp-e2e/
+.tmp-wf/
 .fullstack.pids.json
 backups/
 artifacts/
