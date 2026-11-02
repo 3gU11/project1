@@ -8,6 +8,7 @@ import pandas as pd
 from sqlalchemy import text
 from database import get_engine
 from crud.inbound_history import ensure_inbound_history_table
+from crud.inventory import shipped_machine_sql
 from typing import Dict, Any
 
 
@@ -619,6 +620,29 @@ def get_order_report_data(
     return df
 
 
+# 出货报表口径：
+# - 归档表(shipping_history)没有库位字段，但归档时统一写成「已出库」，直接按状态判断；
+# - 已退回的发货（shipping_return_history 记录晚于发货时间）不计入报表；
+# - 当前表(finished_goods_data)只补尚未归档的机台，避免与归档重复计数。
+RETURNED_SHIPMENT_SQL = """
+                NOT EXISTS (
+                    SELECT 1 FROM shipping_return_history r
+                    WHERE TRIM(COALESCE(r.`原订单号`, '')) COLLATE utf8mb4_0900_ai_ci
+                          = TRIM(COALESCE(sh.`占用订单号`, '')) COLLATE utf8mb4_0900_ai_ci
+                      AND TRIM(COALESCE(r.`流水号`, '')) COLLATE utf8mb4_0900_ai_ci
+                          = TRIM(COALESCE(sh.`流水号`, '')) COLLATE utf8mb4_0900_ai_ci
+                      AND r.`操作时间` > COALESCE(sh.`shipping_time`, sh.`更新时间`)
+                )"""
+
+UNARCHIVED_SHIPMENT_SQL = """
+                NOT EXISTS (
+                    SELECT 1 FROM shipping_history sh2
+                    WHERE TRIM(COALESCE(sh2.`流水号`, '')) COLLATE utf8mb4_0900_ai_ci
+                          = TRIM(COALESCE(fg.`流水号`, '')) COLLATE utf8mb4_0900_ai_ci
+                      AND sh2.`更新时间` >= fg.`更新时间`
+                )"""
+
+
 def get_shipment_report_data(
     start_date: str | None = None,
     end_date: str | None = None,
@@ -632,7 +656,7 @@ def get_shipment_report_data(
     """
     with get_engine().connect() as conn:
         # Detail query - individual shipment records
-        detail_sql = text("""
+        detail_sql = text(f"""
             SELECT
                 DATE_FORMAT(COALESCE(sh.`shipping_time`, sh.`更新时间`), '%Y-%m-%d') COLLATE utf8mb4_0900_ai_ci AS `出货日期`,
                 sh.`流水号` COLLATE utf8mb4_0900_ai_ci AS `流水号`,
@@ -651,7 +675,8 @@ def get_shipment_report_data(
             ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
                 WHERE (:start_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) >= :start_date)
                 AND (:end_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) < DATE_ADD(:end_date, INTERVAL 1 DAY))
-                AND sh.`状态` = '已出库'
+                AND sh.`状态` IN ('已出库', '已发货')
+                AND {RETURNED_SHIPMENT_SQL}
                 AND (:customer = '' OR sh.`客户` = :customer)
                 AND (:dealer = '' OR sh.`代理商` = :dealer)
                 AND (:model_type = '' OR sh.`机型` = :model_type)
@@ -676,7 +701,8 @@ def get_shipment_report_data(
             ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = fg.`占用订单号` COLLATE utf8mb4_0900_ai_ci
             WHERE (:start_date IS NULL OR fg.`更新时间` >= :start_date)
                 AND (:end_date IS NULL OR fg.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
-                AND fg.`状态` = '已出库'
+                AND {shipped_machine_sql('fg')}
+                AND {UNARCHIVED_SHIPMENT_SQL}
                 AND (:customer = '' OR fg.`客户` = :customer)
                 AND (:dealer = '' OR fg.`代理商` = :dealer)
                 AND (:model_type = '' OR fg.`机型` = :model_type)
@@ -697,7 +723,7 @@ def get_shipment_report_data(
         )
 
         # Summary query - grouped by date, customer, dealer, model, order
-        summary_sql = text("""
+        summary_sql = text(f"""
             SELECT
                 `出货日期`,
                 `客户`,
@@ -725,7 +751,8 @@ def get_shipment_report_data(
                 ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = sh.`占用订单号` COLLATE utf8mb4_0900_ai_ci
                 WHERE (:start_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) >= :start_date)
                     AND (:end_date IS NULL OR COALESCE(sh.`shipping_time`, sh.`更新时间`) < DATE_ADD(:end_date, INTERVAL 1 DAY))
-                    AND sh.`状态` = '已出库'
+                    AND sh.`状态` IN ('已出库', '已发货')
+                    AND {RETURNED_SHIPMENT_SQL}
                     AND (:customer = '' OR sh.`客户` = :customer)
                     AND (:dealer = '' OR sh.`代理商` = :dealer)
                     AND (:model_type = '' OR sh.`机型` = :model_type)
@@ -749,7 +776,8 @@ def get_shipment_report_data(
                 ) fp ON fp.`订单号` COLLATE utf8mb4_0900_ai_ci = fg.`占用订单号` COLLATE utf8mb4_0900_ai_ci
                 WHERE (:start_date IS NULL OR fg.`更新时间` >= :start_date)
                     AND (:end_date IS NULL OR fg.`更新时间` < DATE_ADD(:end_date, INTERVAL 1 DAY))
-                    AND fg.`状态` = '已出库'
+                    AND {shipped_machine_sql('fg')}
+                    AND {UNARCHIVED_SHIPMENT_SQL}
                     AND (:customer = '' OR fg.`客户` = :customer)
                     AND (:dealer = '' OR fg.`代理商` = :dealer)
                     AND (:model_type = '' OR fg.`机型` = :model_type)
