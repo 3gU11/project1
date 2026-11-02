@@ -62,14 +62,14 @@
     </section>
     <el-empty v-if="filteredGroups.length === 0" description="没有匹配的流程模型" />
 
-    <el-dialog v-model="designer.visible" :title="`编辑流程：${designer.model?.name || ''}`" width="92%" top="4vh" destroy-on-close>
+    <el-dialog v-model="designer.visible" :title="`编辑流程：${designer.model?.name || ''}`" width="92%" top="4vh" destroy-on-close :close-on-press-escape="false">
       <div class="designer">
         <aside class="node-palette">
           <strong>节点</strong>
           <div v-for="type in nodeTypes" :key="type.type" class="palette-node" draggable="true" @dragstart="startDrag(type, $event)">
             <span class="node-icon">{{ type.icon }}</span>{{ type.label }}
           </div>
-          <p class="palette-tip">拖动节点到画布后，可直接按住节点拖到任意位置。点击节点只编辑属性；连线请先点工具栏「连线」，再依次点击起点和终点。</p>
+          <p class="palette-tip">拖动节点到画布后，可直接按住节点拖到任意位置。点击节点只编辑属性；连线请先点工具栏「连线」，之后依次点击节点即可一路连下去。</p>
         </aside>
         <section class="designer-canvas">
           <div class="canvas-toolbar">
@@ -88,8 +88,8 @@
             <span class="canvas-stat">{{ designer.draft.nodes.length }} 个节点 · {{ designer.draft.edges.length }} 条连线</span>
           </div>
           <div v-if="!preview && linkMode" class="link-hint" :class="{ active: !!linkSourceId }">
-            <span v-if="linkSourceId">已选起点「{{ nodeLabel(linkSourceId) }}」，点击目标节点完成连线（点空白或按 Esc 取消）</span>
-            <span v-else>连线模式：先点击起点节点，再点击目标节点</span>
+            <span v-if="linkSourceId">已选起点「{{ nodeLabel(linkSourceId) }}」，点击目标节点连线；连完会自动以终点为新起点，可一路连到底（点空白或按 Esc 结束）</span>
+            <span v-else>连线模式：点击起点节点，之后依次点击下一个节点即可连续连线</span>
             <el-button link size="small" @click="toggleLinkMode">退出连线</el-button>
           </div>
           <div ref="viewportRef" class="canvas-viewport" @dragover="onDragOver" @drop="onDrop" @dragleave="onDragLeave" @wheel="onWheel">
@@ -108,6 +108,7 @@
                   class="flow-node"
                   :class="{ selected: designer.selectedId === node.id, 'link-source': linkMode && linkSourceId === node.id, 'link-target': linkMode && !!linkSourceId && linkSourceId !== node.id }"
                   :style="{ left: `${node.x}px`, top: `${node.y}px` }"
+                  :title="node.label"
                   @mousedown.stop="onNodeMouseDown(node, $event)"
                   @click.stop="onNodeClick(node)"
                 >
@@ -126,7 +127,7 @@
             <el-button plain size="small" :type="linkMode && linkSourceId === selectedNode.id ? 'primary' : 'default'" @click="startLinkFromSelected">从此节点开始连线</el-button>
             <el-button type="danger" plain size="small" @click="removeNode(selectedNode.id)">删除节点</el-button>
           </template><el-empty v-else description="选择节点后编辑" :image-size="70" />
-          <div class="edge-help"><template v-if="!preview"><b>创建连线</b><p>点工具栏「连线」进入连线模式，依次点击起点和终点；条件节点的两条出口会自动标记为「是」「否」。</p></template><b v-else>流程连线</b><el-tag v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`" :closable="!preview" @close="!preview && removeEdge(edge)">{{ nodeLabel(edge.source) }} → {{ nodeLabel(edge.target) }}<template v-if="edge.sourceType === 'condition'">（{{ edge.branch || '未设置' }}）</template></el-tag></div>
+          <div class="edge-help"><template v-if="!preview"><b>创建连线</b><p>点工具栏「连线」进入连线模式，依次点击节点即可连续连线（连完自动接着下一个）；条件节点的两条出口会自动标记为「是」「否」。</p></template><b v-else>流程连线</b><el-tag v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`" :closable="!preview" @close="!preview && removeEdge(edge)">{{ nodeLabel(edge.source) }} → {{ nodeLabel(edge.target) }}<template v-if="edge.sourceType === 'condition'">（{{ edge.branch || '未设置' }}）</template></el-tag></div>
         </aside>
       </div>
       <template #footer><el-button @click="designer.visible=false">取消</el-button><el-button @click="saveDraft">保存草稿</el-button><el-button type="primary" @click="publishDraft">发布新版本</el-button></template>
@@ -150,7 +151,7 @@
           <div class="board-scale-box" :style="{ width: `${historyBoardW * historyZoom}px`, height: `${historyBoardH * historyZoom}px` }">
             <div class="canvas-board preview history-board" :style="{ width: `${historyBoardW}px`, height: `${historyBoardH}px`, transform: `scale(${historyZoom})` }">
               <svg class="flow-edges" aria-hidden="true"><defs><marker id="history-flow-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#64748b" /></marker></defs><path v-for="edge in historySnapshot.edges" :key="`${edge.source}-${edge.target}`" :d="edgePathOf(historySnapshot, edge)" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#history-flow-arrow)" /></svg>
-              <div v-for="node in historySnapshot.nodes" :key="node.id" class="flow-node" :style="{ left: `${node.x}px`, top: `${node.y}px` }"><span class="node-icon">{{ iconFor(node.type) }}</span><b>{{ node.label }}</b><small>{{ node.type }}</small></div>
+              <div v-for="node in historySnapshot.nodes" :key="node.id" class="flow-node" :style="{ left: `${node.x}px`, top: `${node.y}px` }" :title="node.label"><span class="node-icon">{{ iconFor(node.type) }}</span><b>{{ node.label }}</b><small>{{ node.type }}</small></div>
               <div v-if="historySnapshot.nodes.length === 0" class="canvas-empty">该版本没有流程图数据</div>
             </div>
           </div>
@@ -208,7 +209,7 @@ const canEdit = computed(() => ['admin', 'boss'].includes(String(userStore.userI
 const selectedNode = computed(() => designer.value.draft.nodes.find(node => node.id === designer.value.selectedId))
 
 /* ---------------- 画布几何：节点尺寸、可拖范围、自动扩展与缩放 ---------------- */
-const NODE_W = 110
+const NODE_W = 120
 const NODE_H = 58
 const BOARD_MIN_W = 760
 const BOARD_MIN_H = 510
@@ -237,27 +238,44 @@ const boardH = computed(() => {
 const historyBoardW = computed(() => Math.round(clamp(Math.max(BOARD_MIN_W, Math.max(0, ...historySnapshot.value.nodes.map(node => node.x + NODE_W)) + BOARD_PAD_X), BOARD_MIN_W, BOARD_MAX_W)))
 const historyBoardH = computed(() => Math.round(clamp(Math.max(BOARD_MIN_H, Math.max(0, ...historySnapshot.value.nodes.map(node => node.y + NODE_H)) + BOARD_PAD_Y), BOARD_MIN_H, BOARD_MAX_H)))
 
-// 连线走贝塞尔：目标在右侧时从源右端出、目标左端入；目标在左侧时反向绕行，避免直线交叉。
-const edgePathOf = (snapshotValue: { nodes: FlowNode[]; edges: FlowEdge[] }, edge: FlowEdge) => {
+// 连线统一走直线：按两个节点的相对位置自动选最近的边中点作为起止点，
+// 既保证是直线，又避免线从节点身上穿过去。
+const edgeEndpoints = (snapshotValue: { nodes: FlowNode[]; edges: FlowEdge[] }, edge: FlowEdge) => {
   const source = snapshotValue.nodes.find(node => node.id === edge.source)
   const target = snapshotValue.nodes.find(node => node.id === edge.target)
-  if (!source || !target) return ''
-  const forward = target.x >= source.x + NODE_W / 2
-  const sx = forward ? source.x + NODE_W : source.x
-  const tx = forward ? target.x : target.x + NODE_W
-  const sy = source.y + NODE_H / 2
-  const ty = target.y + NODE_H / 2
-  const dx = Math.max(50, Math.abs(tx - sx) / 2)
-  const c1 = forward ? sx + dx : sx - dx
-  const c2 = forward ? tx - dx : tx + dx
-  return `M${sx},${sy} C${c1},${sy} ${c2},${ty} ${tx},${ty}`
+  if (!source || !target) return null
+  const sourceCx = source.x + NODE_W / 2
+  const sourceCy = source.y + NODE_H / 2
+  const targetCx = target.x + NODE_W / 2
+  const targetCy = target.y + NODE_H / 2
+  const dx = targetCx - sourceCx
+  const dy = targetCy - sourceCy
+  // 水平距离占主导就从左右两侧中点连，否则从上下两侧中点连
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const rightward = dx >= 0
+    return {
+      x1: rightward ? source.x + NODE_W : source.x,
+      y1: sourceCy,
+      x2: rightward ? target.x : target.x + NODE_W,
+      y2: targetCy,
+    }
+  }
+  const downward = dy >= 0
+  return {
+    x1: sourceCx,
+    y1: downward ? source.y + NODE_H : source.y,
+    x2: targetCx,
+    y2: downward ? target.y : target.y + NODE_H,
+  }
+}
+const edgePathOf = (snapshotValue: { nodes: FlowNode[]; edges: FlowEdge[] }, edge: FlowEdge) => {
+  const points = edgeEndpoints(snapshotValue, edge)
+  return points ? `M${points.x1},${points.y1} L${points.x2},${points.y2}` : ''
 }
 const edgePath = (edge: FlowEdge) => edgePathOf(designer.value.draft, edge)
 const edgeMidPoint = (edge: FlowEdge) => {
-  const source = nodeById(edge.source)
-  const target = nodeById(edge.target)
-  if (!source || !target) return { x: 0, y: 0 }
-  return { x: (source.x + NODE_W + target.x) / 2, y: (source.y + target.y) / 2 + NODE_H / 2 }
+  const points = edgeEndpoints(designer.value.draft, edge)
+  return points ? { x: (points.x1 + points.x2) / 2, y: (points.y1 + points.y2) / 2 } : { x: 0, y: 0 }
 }
 const edgeBranchLabel = (edge: FlowEdge) => {
   if (edge.sourceType !== 'condition' && nodeById(edge.source)?.type !== 'condition') return ''
@@ -362,17 +380,17 @@ const onBoardClick = () => {
   if (linkSourceId.value) { linkSourceId.value = null; return }
   if (!linkMode.value) designer.value.selectedId = null
 }
-const createEdge = (sourceId: string, targetId: string) => {
-  if (sourceId === targetId) return
+const createEdge = (sourceId: string, targetId: string): boolean => {
+  if (sourceId === targetId) return false
   if (designer.value.draft.edges.some(edge => edge.source === sourceId && edge.target === targetId)) {
     ElMessage.warning('这两个节点之间已经有一条连线')
-    return
+    return false
   }
   const source = nodeById(sourceId)
   const outgoing = designer.value.draft.edges.filter(edge => edge.source === sourceId)
   if (source?.type !== 'condition' && outgoing.length) {
     ElMessage.warning(`「${source?.label || sourceId}」已经有一条后续连线，请先删除原有连线`)
-    return
+    return false
   }
   record()
   const edge: FlowEdge = { source: sourceId, target: targetId }
@@ -383,6 +401,7 @@ const createEdge = (sourceId: string, targetId: string) => {
   }
   designer.value.draft.edges.push(edge)
   ElMessage.success(`已连线：${nodeLabel(sourceId)} → ${nodeLabel(targetId)}${edge.branch ? `（${edge.branch === 'true' ? '是' : '否'}）` : ''}`)
+  return true
 }
 const onNodeClick = (node: FlowNode) => {
   if (suppressClick) return
@@ -392,8 +411,14 @@ const onNodeClick = (node: FlowNode) => {
   if (linkSourceId.value === node.id) { linkSourceId.value = null; return }
   const sourceId = linkSourceId.value
   createEdge(sourceId, node.id)
-  // 条件节点需要两条出口，连完一条保留起点方便继续连；其它节点连完即复位
-  if (nodeById(sourceId)?.type !== 'condition') linkSourceId.value = null
+  if (nodeById(sourceId)?.type === 'condition') {
+    // 条件节点要连"是/否"两条：连满两条后把终点作为新起点继续往下连
+    const used = designer.value.draft.edges.filter(edge => edge.source === sourceId).length
+    linkSourceId.value = used >= 2 ? node.id : sourceId
+  } else {
+    // 链式连线：连完一条自动以终点为新起点，可以从头一路连到尾
+    linkSourceId.value = node.id
+  }
   designer.value.selectedId = node.id
 }
 
@@ -659,8 +684,11 @@ const onKeydown = (event: KeyboardEvent) => {
   const target = event.target as HTMLElement | null
   if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
   if (event.key === 'Escape') {
-    if (linkSourceId.value) { linkSourceId.value = null; return }
-    if (linkMode.value) { linkMode.value = false; return }
+    // 编辑中的 Esc 只用于退出连线/取消选中，不关闭对话框，避免误触丢失改动
+    event.preventDefault()
+    if (linkMode.value) { linkMode.value = false; linkSourceId.value = null; return }
+    if (designer.value.selectedId) { designer.value.selectedId = null }
+    return
   }
   if ((event.key === 'Delete' || event.key === 'Backspace') && !preview.value && designer.value.selectedId) {
     event.preventDefault()
@@ -826,4 +854,10 @@ const openHistory = async (row: Model) => {
 .history-viewport{height:62vh;border:1px solid #dbe3ee;border-radius:4px}
 .history-board{min-width:0}
 .node-properties{max-height:calc(86vh - 190px);overflow-y:auto}
+
+/* 节点固定尺寸：高度随文字行数变化会让连线端点歪掉，这里统一为 58px 并用网格排版 */
+.flow-node{width:120px;display:grid;grid-template-columns:18px 1fr;grid-template-rows:18px 13px;column-gap:5px;row-gap:2px;align-content:center;height:58px;padding:6px 8px;box-sizing:border-box;overflow:hidden}
+.flow-node>.node-icon{grid-area:1/1;width:18px;height:18px;margin:0;font-size:10px}
+.flow-node>b{grid-area:1/2;font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flow-node>small{grid-area:2/2;font-size:10px;line-height:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
