@@ -324,6 +324,12 @@ def submit_reverse_instance(payload: ReverseCreateRequest,
                 execution_result = {**execution_result, 'notification_delivery_pending': True}
             row = {**row, **execution_result}
         return {'data': row, 'created': created}
+    except HTTPException as exc:
+        # 参数/业务校验类错误必须原样返回 4xx，不能被下面的兜底包成 500，
+        # 否则前端只会看到“服务器错误”，拿不到“请先勾选机台”这类可操作提示。
+        if auto_execution_started:
+            mark_execution_failure(row['instance_no'], ctx.get('username', ''), str(exc.detail))
+        raise
     except ValueError as exc:
         if auto_execution_started:
             mark_execution_failure(row['instance_no'], ctx.get('username', ''), str(exc))
