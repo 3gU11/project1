@@ -4,26 +4,51 @@ from database import get_engine
 
 
 SOURCE = """
-SELECT CONCAT('task:',t.id,':',t.status) message_key, '待审批' title,
- CONCAT('请审批', COALESCE(NULLIF(TRIM(i.business_type),''),'流程'), '：', i.business_id) content,
+SELECT CONCAT('task:',t.id,':',t.status) message_key,
+ CONCAT('待审批 · ', COALESCE(m.name, i.workflow_key)) title,
+ CONCAT(COALESCE(NULLIF(TRIM(i.business_type),''),'事项'), ' ', i.business_id, ' 等待你审批') content,
  t.assigned_at event_at, '/approval-center' target
  FROM workflow_tasks t JOIN workflow_instances i ON i.id=t.instance_id
+ LEFT JOIN workflow_models m ON m.workflow_key=i.workflow_key
  WHERE t.assignee_id=:username AND t.status='待处理' AND i.status='审批中'
 UNION ALL
-SELECT CONCAT('instance:',id,':',status), '流程进度',
- CONCAT(COALESCE(NULLIF(TRIM(business_type),''),'流程'), ' ', business_id, ' ', status),
- COALESCE(completed_at,created_at), '/approval-center'
- FROM workflow_instances WHERE initiator_id=:username
+-- 发起人只看关键节点：审批通过 / 拒绝 / 完成 / 失败。
+-- 1) 审批中、待派生处理属于过程态，不推；
+-- 2) 正向流程（下单、配货、发货）成功是当场可见的，只在失败时提醒；
+-- 3) 逆向流程（撤回、删单、取消）才推完整结果。
+SELECT CONCAT('instance:',i.id,':',i.status) message_key,
+ CONCAT(CASE i.status WHEN '已通过' THEN '审批已通过' WHEN '已拒绝' THEN '审批被拒绝'
+                      WHEN '已完成' THEN '流程已完成' WHEN '执行异常' THEN '执行失败'
+                      ELSE i.status END, ' · ', COALESCE(m.name, i.workflow_key)) title,
+ CONCAT(COALESCE(NULLIF(TRIM(i.business_type),''),'事项'), ' ', i.business_id,
+        CASE i.status
+          WHEN '已通过' THEN ' 审批通过，正在执行'
+          WHEN '已拒绝' THEN ' 审批未通过'
+          WHEN '执行异常' THEN ' 处理失败，请联系管理员'
+          WHEN '已完成' THEN CASE WHEN EXISTS (SELECT 1 FROM workflow_derived_tasks d WHERE d.instance_id=i.id)
+                                  THEN ' 重入库已完成，流程结束' ELSE ' 处理完毕' END
+          ELSE '' END) content,
+ COALESCE(i.completed_at,i.created_at) event_at, '/approval-center' target
+ FROM workflow_instances i
+ LEFT JOIN workflow_models m ON m.workflow_key=i.workflow_key
+ WHERE i.initiator_id=:username
+   AND (i.status='执行异常'
+        OR (COALESCE(m.direction,'正向')='逆向' AND i.status IN ('已通过','已拒绝','已完成')))
 UNION ALL
-SELECT CONCAT('derived:',id,':',status), CONCAT('待', task_type),
- CASE WHEN task_type='重入库' THEN CONCAT('请将机台 ', object_id, ' 重新入库')
-      ELSE CONCAT('请处理', task_type, '：', object_id) END,
- COALESCE(completed_at,created_at), '/inbound'
- FROM workflow_derived_tasks WHERE assignee_id=:username AND status='待处理'
+SELECT CONCAT('derived:',d.id,':',d.status) message_key,
+ CONCAT(CASE WHEN d.task_type='重入库' THEN '待重入库' ELSE CONCAT('待', d.task_type) END,
+        CASE WHEN m.name IS NULL THEN '' ELSE CONCAT(' · ', m.name) END) title,
+ CASE WHEN d.task_type='重入库' THEN CONCAT('机台 ', d.object_id, ' 需要重新入库')
+      ELSE CONCAT('请处理', d.task_type, '：', d.object_id) END content,
+ COALESCE(d.completed_at,d.created_at) event_at, '/inbound' target
+ FROM workflow_derived_tasks d
+ LEFT JOIN workflow_instances i ON i.id=d.instance_id
+ LEFT JOIN workflow_models m ON m.workflow_key=i.workflow_key
+ WHERE d.assignee_id=:username AND d.status='待处理'
 UNION ALL
-SELECT CONCAT('notice:',id),title,content,created_at,''
- FROM workflow_notifications WHERE recipient_id=:username
-   AND notification_type <> '重入库'  -- 重入库已由派生任务条目承载，避免同一条消息出现两次
+SELECT CONCAT('notice:',n.id), n.title, n.content, n.created_at, ''
+ FROM workflow_notifications n WHERE n.recipient_id=:username
+   AND n.notification_type <> '重入库'  -- 重入库已由派生任务条目承载，避免同一条消息出现两次
 """
 
 

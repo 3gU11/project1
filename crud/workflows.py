@@ -594,6 +594,7 @@ def create_reinbound_tasks(conn, instance: dict, operator_id: str = '', force: b
             FROM finished_goods_data WHERE TRIM(COALESCE(`{column}`,''))=TRIM(:business_id)
               AND TRIM(COALESCE(`状态`,''))='待入库'"""), {'business_id': instance.get('business_id')}).mappings().all()
     created = []
+    reinbound_title = f"待重入库 · {_workflow_display_name(conn, instance.get('workflow_key'))}"
     assignee = conn.execute(text("""SELECT username FROM users
         WHERE LOWER(TRIM(CONVERT(role USING utf8mb4))) COLLATE utf8mb4_general_ci='inbound'
           AND LOWER(TRIM(CONVERT(COALESCE(status,'') USING utf8mb4))) COLLATE utf8mb4_general_ci='active'
@@ -619,9 +620,9 @@ def create_reinbound_tasks(conn, instance: dict, operator_id: str = '', force: b
         conn.execute(text("UPDATE workflow_derived_tasks SET assignee_id=:assignee WHERE task_no=:task_no AND (assignee_id IS NULL OR assignee_id='')"), {'assignee': assignee, 'task_no': task_no})
         conn.execute(text("""INSERT INTO workflow_notifications
             (recipient_id,notification_type,reference_no,title,content)
-            VALUES (:recipient,'重入库','%s','待重新入库',:content)
+            VALUES (:recipient,'重入库','%s',:title,:content)
             ON DUPLICATE KEY UPDATE reference_no=VALUES(reference_no)""" % task_no), {
-            'recipient': assignee, 'content': f'请将机台 {item["object_id"]} 重新入库'})
+            'recipient': assignee, 'title': reinbound_title, 'content': f'机台 {item["object_id"]} 需要重新入库'})
         created.append({'task_no': task_no, 'object_id': str(item['object_id']).strip(), 'assignee_id': assignee, 'status': '待处理'})
     return created
 
@@ -800,16 +801,37 @@ def _role_recipients(conn, roles):
     return [str(row[0]) for row in rows]
 
 
+def _workflow_display_name(conn, workflow_key):
+    """流程的中文名（如 shipment-recall → 发货撤回），取不到时退回 key。"""
+    key = str(workflow_key or '').strip()
+    if not key:
+        return '流程'
+    try:
+        row = conn.execute(text('SELECT name FROM workflow_models WHERE workflow_key=:k LIMIT 1'), {'k': key}).mappings().first()
+    except Exception:
+        return key
+    return str(row['name']).strip() if row and str(row.get('name') or '').strip() else key
+
+
 def _emit_model_notification(conn, instance, node, recipients):
     reference = f"{instance['instance_no']}:{node.get('id')}"
+    name = _workflow_display_name(conn, instance.get('workflow_key'))
+    content = f"{str(instance.get('business_type') or '事项').strip()} {instance['business_id']} 已完成处理"
     for recipient in recipients:
+        # 该用户已经被派了本实例的待办（如重入库），他收到的是"需要你处理"而不是"已处理完成"，
+        # 这里不再重复推一条，避免同一个动作给同一个人发两条相反语义的消息。
+        pending = conn.execute(text("""SELECT COUNT(*) FROM workflow_derived_tasks
+            WHERE instance_id=:instance AND assignee_id=:recipient AND status='待处理'"""),
+            {'instance': instance['id'], 'recipient': recipient}).scalar()
+        if pending:
+            continue
         conn.execute(text("""INSERT INTO workflow_notifications
             (recipient_id,notification_type,reference_no,title,content)
             VALUES (:recipient,'流程通知',:reference,:title,:content)
             ON DUPLICATE KEY UPDATE reference_no=VALUES(reference_no)"""), {
             'recipient': recipient, 'reference': reference,
-            'title': '待处理',
-            'content': f"请处理{str(instance.get('business_type') or '').strip() or '流程'}：{instance['business_id']}",
+            'title': f"处理完成 · {name}",
+            'content': content,
         })
 
 
