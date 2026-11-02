@@ -415,10 +415,15 @@ def _parse_order_demand_variant_counts(order_row: pd.Series) -> dict[tuple[str, 
     return {}
 
 
-def _order_required_variant_counts(order_id: str, order_row: pd.Series | None = None, conn=None) -> dict[tuple[str, bool], int]:
+def _order_required_variant_counts(order_id: str, order_row: pd.Series | None = None, conn=None,
+                                   plan_df: pd.DataFrame | None = None,
+                                   orders_df: pd.DataFrame | None = None) -> dict[tuple[str, bool], int]:
     order_id = str(order_id or "").strip()
-    plan_df = (pd.read_sql(text("SELECT * FROM factory_plan WHERE `订单号`=:oid"), conn,
-                           params={"oid": order_id}) if conn is not None else get_factory_plan_fresh())
+    if conn is not None:
+        plan_df = pd.read_sql(text("SELECT * FROM factory_plan WHERE `订单号`=:oid"), conn,
+                              params={"oid": order_id})
+    elif plan_df is None:
+        plan_df = get_factory_plan_fresh()
     contract_rows = plan_df[plan_df["订单号"].astype(str).str.strip() == order_id].copy() if not plan_df.empty else pd.DataFrame()
     counts: dict[tuple[str, bool], int] = {}
     if not contract_rows.empty:
@@ -437,7 +442,8 @@ def _order_required_variant_counts(order_id: str, order_row: pd.Series | None = 
         return counts
 
     if order_row is None:
-        orders_df = get_orders_fresh()
+        if orders_df is None:
+            orders_df = get_orders_fresh()
         hit = orders_df[orders_df["订单号"].astype(str).str.strip() == order_id] if not orders_df.empty else pd.DataFrame()
         order_row = hit.iloc[0] if not hit.empty else None
     if order_row is None:
@@ -2696,9 +2702,23 @@ def get_planned_model_summary():
 
 def get_order_progress(order_ids, include_machines=False):
     from crud.order_progress import load_order_progress
+    # 订单/客户仓页面一次会传上千个订单号，而 load_order_progress 是逐单调 demand 的。
+    # 这里先取一次快照复用，避免每单都全表读 factory_plan/sales_orders
+    # （1000+ 单时会跑成十几秒，页面看起来像卡死）。
+    plan_snapshot = get_factory_plan_fresh()
+    orders_snapshot = get_orders_fresh()
+
+    def demand_for_order(order):
+        return _order_required_variant_counts(
+            str(order["订单号"]),
+            pd.Series(order),
+            plan_df=plan_snapshot,
+            orders_df=orders_snapshot,
+        )
+
     return load_order_progress(
         order_ids,
-        lambda order: _order_required_variant_counts(str(order["订单号"]), pd.Series(order)),
+        demand_for_order,
         lambda row: (_normalize_alloc_model(row.get("机型", "")), _inventory_row_high(pd.Series(row))),
         include_machines=include_machines,
     )
