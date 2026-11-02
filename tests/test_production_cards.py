@@ -181,6 +181,9 @@ class ConfirmShippingProductionCardTests(unittest.TestCase):
                 "current_batch_id TEXT, updated_at TEXT)",
                 "CREATE TABLE production_history_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "unit_id TEXT, status TEXT, completed_at TEXT, updated_at TEXT)",
+                # 确认发货会校验占用订单仍然有效（crud.inventory_guards.require_inventory_order）
+                "CREATE TABLE sales_orders (`订单号` TEXT PRIMARY KEY, status TEXT)",
+                "INSERT INTO sales_orders VALUES ('SO-TEST','ready')",
                 "INSERT INTO batches VALUES ('B1',3,'In_Production','L1','2026-07-21')",
                 "INSERT INTO production_lines VALUES ('L1','Busy','B1','2026-07-21')",
                 "INSERT INTO units VALUES "

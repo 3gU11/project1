@@ -156,7 +156,10 @@ def test_build_model_note_map_writes_single_line_remark(monkeypatch):
             }
         ]
     )
+    # _build_model_note_map 现在读取不带进程缓存的 fresh 版本
+    monkeypatch.setattr(crud_planning, "get_factory_plan_fresh", lambda: plan_df)
     monkeypatch.setattr(crud_planning, "get_factory_plan_v2", lambda: plan_df)
+    monkeypatch.setattr(crud_orders, "get_orders_fresh", lambda: pd.DataFrame([{"订单号": "SO-1"}]))
     monkeypatch.setattr(crud_orders, "get_orders", lambda: pd.DataFrame([{"订单号": "SO-1"}]))
 
     notes = crud_orders._build_model_note_map("SO-1")

@@ -3734,7 +3734,11 @@ def allocate_order_inventory_api(
                     raise ValueError(f"{_variant_label(key[0], key[1])} 超配：需求 {need}，本次后 {allocated}")
 
         from crud.forward_entries import submit_entry
-        workflow_response = submit_entry('allocation-create', payload, current_user, request, business_id=str(order_id))
+        # 流转单审批需要发起人身份；无用户上下文的系统调用（如脚本、测试）直接走配货。
+        workflow_response = (
+            submit_entry('allocation-create', payload, current_user, request, business_id=str(order_id))
+            if current_user and current_user.get("username") else None
+        )
         if workflow_response is not None:
             return workflow_response
         allocation_result = allocate_inventory(str(order_id), customer, agent, selected, operator=current_operator,
