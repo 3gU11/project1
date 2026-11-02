@@ -1098,6 +1098,18 @@ def _ensure_row_version_columns(conn):
             conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `row_version` BIGINT NOT NULL DEFAULT 1"))
 
 
+# 发货业务时间 shipping_time：只在建表语句里加过，已有库的 schema_version 已是最新，
+# 那条 ALTER 不会再执行 —— 结果发货退货候选与出货报表整片报 1054。启动兜底校验一次。
+SHIPPING_TIME_TABLES = ('finished_goods_data', 'shipping_history')
+
+
+def _ensure_shipping_time_columns(conn):
+    """补上缺失的 shipping_time 列，发货时间与更新时间解耦后需要它。"""
+    for table_name in SHIPPING_TIME_TABLES:
+        if _table_exists(conn, table_name) and not _column_exists_in_table(conn, table_name, 'shipping_time'):
+            conn.execute(text(f"ALTER TABLE `{table_name}` ADD COLUMN `shipping_time` DATETIME NULL"))
+
+
 def init_mysql_tables_v2():
     """
     优化版数据库初始化：使用 Schema 版本控制，避免每次启动全量迁移
@@ -1114,6 +1126,7 @@ def init_mysql_tables_v2():
 
         # 每次都校验一遍：库从旧备份恢复后版本号可能已经是最新，但列丢了
         _ensure_row_version_columns(conn)
+        _ensure_shipping_time_columns(conn)
 
         # 如果已经是最新版本，跳过大部分初始化
         if current_version >= CURRENT_SCHEMA_VERSION:
