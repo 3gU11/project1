@@ -25,6 +25,7 @@ export const CUSTOMER_WAREHOUSE_CAPACITY = 500
 export const LARGE_SLOT_CAPACITY = 15
 export const SCRAP_SLOT_CAPACITY = 5
 export const UNLIMITED_SLOT_CAPACITY = Number.POSITIVE_INFINITY
+export const SPECIAL_CAPACITY_SLOT_CODES: Record<string, number> = { '一楼二车间小机': 100 }
 export const OLD_FACTORY_SLOT_CODES = [
   '老厂一车间400',
   '老厂一车间600',
@@ -80,6 +81,8 @@ export const getSlotCapacity = (code: any) => {
   if (normalized.toUpperCase() === 'DG-WH') {
     return CUSTOMER_WAREHOUSE_CAPACITY
   }
+  const specialCode = Object.keys(SPECIAL_CAPACITY_SLOT_CODES).find((key) => normalizeSlotCode(key) === normalized)
+  if (specialCode) return SPECIAL_CAPACITY_SLOT_CODES[specialCode]
   if (isUnlimitedSlot(code)) {
     return UNLIMITED_SLOT_CAPACITY
   }
@@ -100,6 +103,7 @@ const requiredSlotCodes = [
   ...OLD_FACTORY_SLOT_CODES,
   ...EMERGENCY_BUFFER_SLOT_CODES,
   'DG-WH',
+  '一楼二车间小机',
   '报废区 01',
 ]
 

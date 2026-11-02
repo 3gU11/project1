@@ -37,6 +37,15 @@ func ensureSchema(db *gorm.DB) error {
 	if err := addColumnIfMissing(db, "batches", "expected_inbound_date", "ALTER TABLE batches ADD COLUMN expected_inbound_date DATE NULL AFTER due_date_end"); err != nil {
 		return err
 	}
+	if err := addColumnIfMissing(db, "batches", "major_category", "ALTER TABLE batches ADD COLUMN major_category VARCHAR(32) NULL AFTER model_type"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "batches", "base_capacity", "ALTER TABLE batches ADD COLUMN base_capacity INT NULL AFTER capacity"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "batches", "capacity_override", "ALTER TABLE batches ADD COLUMN capacity_override INT NULL AFTER base_capacity"); err != nil {
+		return err
+	}
 	if err := addColumnIfMissing(db, "units", "dealer_name", "ALTER TABLE units ADD COLUMN dealer_name VARCHAR(255) NULL AFTER dealer_id"); err != nil {
 		return err
 	}

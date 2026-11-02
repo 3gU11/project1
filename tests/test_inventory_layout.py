@@ -24,6 +24,12 @@ def _slot(code: str, index: int = 0) -> dict:
 
 
 class InventoryLayoutTests(unittest.TestCase):
+    def test_first_floor_second_workshop_small_machine_has_capacity_100(self):
+        code = "一楼二车间小机"
+
+        self.assertIn(code, REQUIRED_SLOT_CODES)
+        self.assertEqual(get_slot_capacity(code), 100)
+
     def test_old_factory_fourth_workshop_first_floor_500_is_required_and_unlimited(self):
         code = "老厂四车间一楼500"
 

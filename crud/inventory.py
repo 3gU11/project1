@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 from database import get_engine, ensure_finished_goods_unique_serial
 from crud.cloud_sync_outbox import enqueue_wechat_batch_summary_sync
 from crud.inbound_history import notify_inbound_completion, record_inbound_history
+from crud.inventory_guards import require_inventory_order
 from utils.cache import fetch_data_with_cache
 from utils.heightened import is_high_text_hint, split_heightened_model_name
 from utils.local_cache import ttl_cache
@@ -24,6 +25,7 @@ CUSTOMER_WAREHOUSE_MAX_CAPACITY = 500
 LARGE_WAREHOUSE_MAX_CAPACITY = 15
 SCRAP_WAREHOUSE_MAX_CAPACITY = 5
 UNLIMITED_WAREHOUSE_CAPACITY = float("inf")
+SPECIAL_CAPACITY_SLOT_CODES = {"一楼二车间小机": 100}
 OLD_FACTORY_SLOT_CODES = (
     "老厂一车间400",
     "老厂一车间600",
@@ -48,6 +50,7 @@ REQUIRED_SLOT_CODES = tuple(
     + list(OLD_FACTORY_SLOT_CODES)
     + list(EMERGENCY_BUFFER_SLOT_CODES)
     + ["DG-WH"]
+    + ["一楼二车间小机"]
     + ["报废区01"]
 )
 
@@ -100,6 +103,9 @@ def get_slot_capacity(slot_code):
     normalized = _normalize_slot_code(slot_code)
     if normalized.upper() == "DG-WH":
         return CUSTOMER_WAREHOUSE_MAX_CAPACITY
+    for code, capacity in SPECIAL_CAPACITY_SLOT_CODES.items():
+        if _normalize_slot_code(code) == normalized:
+            return capacity
     if is_unlimited_slot(slot_code):
         return UNLIMITED_WAREHOUSE_CAPACITY
     if any(normalized.startswith(prefix) for prefix in ("大机型区域", "闲置区", "实验室区")):
@@ -262,6 +268,11 @@ def _normalize_import_df(df):
 
 @lru_cache(maxsize=1)
 def get_data():
+    return get_data_fresh()
+
+
+def get_data_fresh():
+    """Read current database state without a process-local cache."""
     try:
         with get_engine().connect() as conn:
             df = pd.read_sql("SELECT * FROM finished_goods_data", conn)
@@ -463,6 +474,35 @@ def save_data_v2(df):
 
 
 def archive_shipped_data(df_shipped):
+    try:
+        current_month = datetime.now().strftime("%Y_%m")
+        df_shipped = df_shipped.copy()
+        df_shipped['archive_month'] = current_month
+        # Keep the irreversible business event separate from the mutable inventory timestamp.
+        if 'shipping_time' not in df_shipped.columns:
+            df_shipped['shipping_time'] = datetime.now()
+        for dt_col in ["预计入库时间", "更新时间"]:
+            if dt_col in df_shipped.columns:
+                df_shipped[dt_col] = pd.to_datetime(df_shipped[dt_col], errors="coerce")
+        engine = get_engine()
+        with engine.begin() as conn:
+            if not _has_column(conn, "shipping_history", "合同备注"):
+                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同备注` TEXT AFTER `代理商`"))
+            if not _has_column(conn, "shipping_history", "合同号"):
+                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT ''"))
+            if not _has_column(conn, "shipping_history", "shipping_time"):
+                conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `shipping_time` DATETIME NULL AFTER `更新时间`"))
+            target_cols = [
+                row[0] for row in conn.execute(text(
+                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() "
+                    "AND TABLE_NAME = 'shipping_history'"
+                )).fetchall()
+            ]
+        df_shipped = df_shipped[[col for col in target_cols if col in df_shipped.columns]]
+        df_shipped.fillna("").to_sql('shipping_history', engine, if_exists='append', index=False, method='multi', chunksize=500)
+    except (OperationalError, Exception) as e:
+        print(f"archive_shipped_data error: {e}")
     """归档发货复核记录到 shipping_history。
 
     注意：DATETIME 列必须保持 NaT/None（to_sql 会写 NULL），不能填空字符串，
@@ -769,12 +809,9 @@ def inbound_to_slot(serial_no, slot_code, is_transfer=False, operator=""):
         if not is_transfer and current_status.startswith("库存中"):
             trans.rollback()
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
-        from crud.batch_planning import pending_review_order
-        review_order = pending_review_order(conn, serial_no, occupied_order_id)
-        if review_order:
-            occupied_order_id = review_order
-            conn.execute(text("UPDATE finished_goods_data SET `占用订单号`=:oid WHERE `流水号`=:sn"), {"oid": review_order, "sn": serial_no})
-        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id and not review_order else f"库存中（{slot_code}）")
+        if occupied_order_id and not scrap_slot:
+            require_inventory_order(conn, occupied_order_id)
+        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
         conn.execute(
             text(
                 "UPDATE finished_goods_data "
@@ -895,12 +932,9 @@ def inbound_to_slot_v2(serial_no, slot_code, is_transfer=False, operator=""):
             return {"ok": False, "code": "E_ALREADY_INBOUND", "message": "机台已入库"}
 
         # 更新入库（保持不变）
-        from crud.batch_planning import pending_review_order
-        review_order = pending_review_order(conn, serial_no, occupied_order_id)
-        if review_order:
-            occupied_order_id = review_order
-            conn.execute(text("UPDATE finished_goods_data SET `占用订单号`=:oid WHERE `流水号`=:sn"), {"oid": review_order, "sn": serial_no})
-        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id and not review_order else f"库存中（{slot_code}）")
+        if occupied_order_id and not scrap_slot:
+            require_inventory_order(conn, occupied_order_id)
+        status_after = "报废" if scrap_slot else ("待发货" if occupied_order_id else f"库存中（{slot_code}）")
         conn.execute(
             text(
                 "UPDATE finished_goods_data "

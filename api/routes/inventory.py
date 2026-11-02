@@ -46,6 +46,7 @@ from api.websockets.manager import manager
 from database import get_engine
 from crud.inventory_scope import inventory_relationship_join_sql, joined_pending_scope_sql
 from crud.workflows import forward_workflow_enabled, record_forward_instance
+from crud.inventory_guards import validate_shipping_rows
 
 
 router = APIRouter(dependencies=[Depends(get_current_user_token)])
@@ -1610,6 +1611,10 @@ def confirm_shipping(
                 current_status = conn.execute(text("SELECT status FROM sales_orders WHERE `订单号`=:oid FOR UPDATE"), {"oid": payload.expected_order_no}).scalar()
                 if current_status not in {"ready", "allocated", "packed"}:
                     raise HTTPException(status_code=409, detail="订单已不满足确认发货条件，请重新预览")
+            try:
+                validate_shipping_rows(conn, hit_rows, sns)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             scrapped_sns = [
                 str(row.get("流水号", "") or "").strip()
                 for row in hit_rows
@@ -1728,6 +1733,7 @@ def confirm_shipping(
         shipped_rows = hit.copy()
         shipped_rows["状态"] = "已出库"
         shipped_rows["更新时间"] = now_text
+        shipped_rows["shipping_time"] = datetime.now()
 
         if impacted_order_ids:
             orders_df = get_orders()
@@ -1909,7 +1915,7 @@ def get_shipping_return_candidates(
             )
             params["kw"] = f"%{kw}%"
         if date_filter:
-            where_clauses.append("DATE(COALESCE(sh.`更新时间`, fg.`更新时间`)) = :date_filter")
+            where_clauses.append("DATE(COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`)) = :date_filter")
             params["date_filter"] = date_filter
         where_sql = " AND ".join(where_clauses)
         with get_engine().connect() as conn:
@@ -1929,19 +1935,19 @@ def get_shipping_return_candidates(
                         fg.`合同备注`,
                         fg.`Location_Code`,
                         fg.`合同号`,
-                        DATE_FORMAT(COALESCE(sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d') AS `发货日期`,
-                        DATE_FORMAT(COALESCE(sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d %H:%i') AS `发货时间`
+                        DATE_FORMAT(COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d') AS `发货日期`,
+                        DATE_FORMAT(COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`), '%Y-%m-%d %H:%i') AS `发货时间`
                     FROM finished_goods_data fg
                     LEFT JOIN (
-                        SELECT `流水号`, MAX(`更新时间`) AS `更新时间`
+                        SELECT `流水号`, MAX(COALESCE(`shipping_time`, `更新时间`)) AS `shipping_time`, MAX(`更新时间`) AS `更新时间`
                         FROM shipping_history
                         GROUP BY `流水号`
                     ) sh ON sh.`流水号` COLLATE utf8mb4_general_ci = fg.`流水号` COLLATE utf8mb4_general_ci
                     WHERE {where_sql}
                 """
-                order_by = "COALESCE(sh.`更新时间`, fg.`更新时间`) DESC, fg.`流水号` ASC"
+                order_by = "COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`) DESC, fg.`流水号` ASC"
             else:
-                where_sql_no_history = where_sql.replace("COALESCE(sh.`更新时间`, fg.`更新时间`)", "fg.`更新时间`")
+                where_sql_no_history = where_sql.replace("COALESCE(sh.`shipping_time`, sh.`更新时间`, fg.`更新时间`)", "fg.`更新时间`")
                 base_sql = f"""
                     SELECT
                         fg.`批次号`,

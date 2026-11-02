@@ -1,16 +1,45 @@
 ﻿{
+<<<<<<< HEAD
+    "root":  "F:\\V8\\project1",
+    "startedAt":  "2026-10-14T09:14:20.5912827+08:00",
+=======
     "root":  "D:\\CURSORpj\\V8BetaV1.1",
     "startedAt":  "2026-09-23T14:42:54.2704975+08:00",
+>>>>>>> origin/main
     "ports":  {
                   "go":  "3001",
                   "ocr":  "8010",
                   "api":  "8000",
+<<<<<<< HEAD
+                  "web":  "8888",
+                  "mobile":  null
+=======
                   "web":  "3000",
                   "mobile":  "5174"
+>>>>>>> origin/main
               },
     "processes":  [
                       {
                           "name":  "OCR service",
+<<<<<<< HEAD
+                          "pid":  24452,
+                          "createdAt":  "2026-10-14T09:14:24.6531410+08:00"
+                      },
+                      {
+                          "name":  "Go backend",
+                          "pid":  21704,
+                          "createdAt":  "2026-10-14T09:14:25.3977830+08:00"
+                      },
+                      {
+                          "name":  "FastAPI",
+                          "pid":  30064,
+                          "createdAt":  "2026-10-14T09:14:26.4954630+08:00"
+                      },
+                      {
+                          "name":  "frontend",
+                          "pid":  16524,
+                          "createdAt":  "2026-10-14T09:14:46.5605830+08:00"
+=======
                           "pid":  16596,
                           "createdAt":  "2026-09-23T14:43:05.7231010+08:00"
                       },
@@ -33,6 +62,7 @@
                           "name":  "mobile frontend",
                           "pid":  15964,
                           "createdAt":  "2026-09-23T14:43:18.0222900+08:00"
+>>>>>>> origin/main
                       }
                   ]
 }

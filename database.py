@@ -258,6 +258,7 @@ def init_mysql_tables():
             `状态`          VARCHAR(50)  DEFAULT '',
             `预计入库时间`  DATETIME NULL,
             `更新时间`      DATETIME NULL,
+            `shipping_time` DATETIME NULL,
             `占用订单号`    VARCHAR(100) DEFAULT '',
             `客户`          VARCHAR(200) DEFAULT '',
             `代理商`        VARCHAR(200) DEFAULT '',
@@ -566,8 +567,11 @@ def init_mysql_tables():
         conn.execute(text("UPDATE factory_plan SET `订单号`=NULL WHERE `订单号`=''"))
         conn.execute(text(
             "UPDATE finished_goods_data fg LEFT JOIN sales_orders so ON fg.`占用订单号`=so.`订单号` "
-            "SET fg.`占用订单号`=NULL WHERE fg.`占用订单号` IS NOT NULL AND so.`订单号` IS NULL"
+            "SET fg.`占用订单号`=NULL WHERE fg.`占用订单号` IS NOT NULL AND so.`订单号` IS NULL "
+            "AND TRIM(COALESCE(fg.`状态`, '')) <> '待发货'"
         ))
+        # Pending shipments need an explicit, audited release with physical-stock
+        # evidence. Startup must not silently erase their dangling order reference.
         conn.execute(text(
             "UPDATE factory_plan fp LEFT JOIN sales_orders so ON fp.`订单号`=so.`订单号` "
             "SET fp.`订单号`=NULL WHERE fp.`订单号` IS NOT NULL AND so.`订单号` IS NULL"
@@ -858,6 +862,8 @@ def init_mysql_tables():
             conn.execute(text("ALTER TABLE finished_goods_data ADD COLUMN `合同号` VARCHAR(100) DEFAULT '' AFTER `Location_Code`"))
         if not _column_exists("shipping_history", "合同号"):
             conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `合同号` VARCHAR(100) DEFAULT '' AFTER `合同备注`"))
+        if not _column_exists("shipping_history", "shipping_time"):
+            conn.execute(text("ALTER TABLE shipping_history ADD COLUMN `shipping_time` DATETIME NULL AFTER `更新时间`"))
 
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for uid, info in DEFAULT_USERS.items():

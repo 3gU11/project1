@@ -57,6 +57,11 @@ def _normalize_source_json(value):
 
 @lru_cache(maxsize=1)
 def get_orders():
+    return get_orders_fresh()
+
+
+def get_orders_fresh():
+    """Read current database state without a process-local cache."""
     try:
         with get_engine().connect() as conn:
             df = pd.read_sql("SELECT * FROM sales_orders", conn)
@@ -277,10 +282,11 @@ def create_sales_order(customer, agent, model_data, note, pack_option="", delive
     return order_id
 
 
-def _build_model_note_map(order_id):
+def _build_model_note_map(order_id, conn=None):
     """根据订单号从 factory_plan 构建逐台机型备注需求。"""
-    from crud.planning import get_factory_plan_v2
-    plan_df = get_factory_plan_v2()
+    from crud.planning import get_factory_plan_fresh
+    plan_df = (pd.read_sql(text("SELECT * FROM factory_plan WHERE `订单号`=:oid"), conn,
+                           params={"oid": str(order_id)}) if conn is not None else get_factory_plan_fresh())
     if plan_df.empty:
         return []
     matched = plan_df[plan_df['订单号'].astype(str).str.strip() == str(order_id).strip()]
@@ -288,7 +294,8 @@ def _build_model_note_map(order_id):
         return []
     order_context = {}
     try:
-        orders = get_orders()
+        orders = (pd.read_sql(text("SELECT * FROM sales_orders WHERE `订单号`=:oid"), conn,
+                              params={"oid": str(order_id)}) if conn is not None else get_orders_fresh())
         order_hit = orders[orders['订单号'].astype(str).str.strip() == str(order_id).strip()]
         if not order_hit.empty:
             order_context = order_hit.iloc[0].to_dict()
@@ -340,14 +347,14 @@ def _find_model_note(model_note_map, model, row_note=""):
     return ""
 
 
-def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
+def allocate_inventory(order_id, customer, agent, selected_sns, operator=None, validate_selection=None):
     order_id = str(order_id or "").strip()
     serial_nos = list(dict.fromkeys(str(sn).strip() for sn in (selected_sns or []) if str(sn).strip()))
     if not serial_nos:
         return {"stock": 0, "production": 0}
+    if not order_id:
+        raise ValueError("配货必须指定有效订单")
 
-    model_note_map = _build_model_note_map(order_id)
-    remaining_note_counts = _remaining_model_note_counts(model_note_map)
     contract_candidates: dict[str, set[str]] = {}
     order_contract_ids: set[str] = set()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -356,6 +363,10 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
 
     try:
         with get_engine().begin() as conn:
+            from crud.inventory_guards import require_inventory_order
+            require_inventory_order(conn, order_id)
+            model_note_map = _build_model_note_map(order_id, conn=conn)
+            remaining_note_counts = _remaining_model_note_counts(model_note_map)
             queued = conn.execute(text("""
                 SELECT COALESCE(NULLIF(u.serial_no, ''), u.forecast_serial_no)
                 FROM units u JOIN batches b ON b.batch_id=u.batch_id
@@ -418,6 +429,9 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
             if missing:
                 raise ValueError(f"机台不存在: {', '.join(missing[:10])}")
 
+            if validate_selection is not None:
+                validate_selection(conn, [unit_by_sn.get(sn) or stock_by_sn[sn] for sn in serial_nos])
+
             for sn in serial_nos:
                 source_row = unit_by_sn.get(sn) or stock_by_sn.get(sn) or {}
                 model = str(source_row.get("model_type") or "").strip()
@@ -475,8 +489,8 @@ def allocate_inventory(order_id, customer, agent, selected_sns, operator=None):
                 row = stock_by_sn[sn]
                 status = str(row.get("status") or "").strip()
                 occupied = str(row.get("sales_id") or "").strip()
-                if not status.startswith("库存中"):
-                    raise ValueError(f"机台 {sn} 不是可用库存现货（当前状态：{status or '空'}）")
+                if not status.startswith("库存中") and status != "待入库":
+                    raise ValueError(f"机台 {sn} 不是可用库存或待入库机台（当前状态：{status or '空'}）")
                 if occupied not in ("", order_id):
                     raise ValueError(f"库存机台 {sn} 已被订单 {occupied} 占用")
                 conn.execute(text("""

@@ -181,8 +181,6 @@ async def _reset_client(failed_client: httpx.AsyncClient) -> httpx.AsyncClient:
             trust_env=False,
         )
         return _client
-
-
 # websockets 15+ honors the host proxy configuration by default. The Go
 # sandbox websocket is a loopback connection, so a malformed system proxy must
 # not be parsed for it. Older websockets releases don't accept the `proxy`

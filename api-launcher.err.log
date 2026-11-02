@@ -1,4 +1,8 @@
+<<<<<<< HEAD
+INFO:     Started server process [30276]
+=======
 INFO:     Started server process [28392]
+>>>>>>> origin/main
 INFO:     Waiting for application startup.
 cloud fetch status=pending failed: WECHAT_CLOUD_API_BASE is not configured
 cloud fetch status=approved failed: WECHAT_CLOUD_API_BASE is not configured
@@ -10,6 +14,24 @@ cloud fetch status=rejected failed: WECHAT_CLOUD_API_BASE is not configured
 cloud fetch status=cancelled failed: WECHAT_CLOUD_API_BASE is not configured
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+<<<<<<< HEAD
+INFO:     ('127.0.0.1', 57060) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57063) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 60101) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65165) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65186) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65189) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65193) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+=======
 cloud sync event failed: v8-outbox-wechat_batch_summary_sync-c56fd797818449ee963c13ef63dd9e44 WECHAT_CLOUD_API_BASE is not configured
 cloud sync event failed: v8-outbox-wechat_batch_summary_sync-9ef948fa045f40acbf0e4912b6b23aff WECHAT_CLOUD_API_BASE is not configured
 cloud sync event failed: v8-outbox-wechat_batch_summary_sync-6c496a95305249179993bb63dbfdd031 WECHAT_CLOUD_API_BASE is not configured
@@ -108,11 +130,1003 @@ cloud fetch status=cancelled failed: WECHAT_CLOUD_API_BASE is not configured
 INFO:     ('127.0.0.1', 61920) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI1ODI0ODEsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.QX4y2OG-jACZs9aZVprtnAjBBrVB0CZ4zFVXRk8SJKg" [accepted]
 INFO:     connection open
 INFO:     ('127.0.0.1', 49683) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI1ODI0ODEsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.QX4y2OG-jACZs9aZVprtnAjBBrVB0CZ4zFVXRk8SJKg" [accepted]
+>>>>>>> origin/main
 INFO:     connection open
 INFO:     connection closed
 INFO:     connection closed
 INFO:     connection closed
 INFO:     connection closed
+<<<<<<< HEAD
+INFO:     ('127.0.0.1', 65198) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65213) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65216) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65218) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 52384) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 52399) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52405) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52407) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 52422) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIzNzM0MTUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.82Utcm-Hx-nyfNoK8dNKzSAt92-2hWtyQsr4wscloXU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52429) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDUyNzIsInN1YiI6Ilx1NmQ0Ylx1OGJkNVx1NTUyZVx1NTQwZSIsIm5hbWUiOiJcdTZkNGJcdThiZDVcdTU1MmVcdTU0MGUiLCJyb2xlIjoiQWZ0ZXJTYWxlcyJ9.zXQVj6xAx_t9125lqypKCjxk0suehqA3obeOdjEZG1I" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57502) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDUyNzIsInN1YiI6Ilx1NmQ0Ylx1OGJkNVx1NTUyZVx1NTQwZSIsIm5hbWUiOiJcdTZkNGJcdThiZDVcdTU1MmVcdTU0MGUiLCJyb2xlIjoiQWZ0ZXJTYWxlcyJ9.zXQVj6xAx_t9125lqypKCjxk0suehqA3obeOdjEZG1I" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57881) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 57884) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56685) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMTk3NzksInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.Z1LRoMjTBbp8i7lMc-zTKCP36X1MLgfMqTHynEoDLic" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     ('127.0.0.1', 62781) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 60904) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65416) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     ('127.0.0.1', 58376) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 63801) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62090) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 62094) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 62983) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMxODkwNTAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.lpzPn5HhWQDEx7bTkj2FXO4zQa-GPXATFvzrFkRfaXo" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55365) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65353) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 64825) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53257) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61147) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55935) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 60349) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53017) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53029) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54666) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52936) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50535) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 50366) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57808) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64647) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50362) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62622) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51043) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50775) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIwMzEzMjUsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.L2fA2z56ag3PHSD8AxiRLsNYO-gCohqM47tE6iThzgY" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61912) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56835) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55442) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65052) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51855) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61232) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57062) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59731) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58129) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61707) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61726) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65307) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53984) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 57218) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 57234) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63090) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI1NTkxMzcsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.yxfR9ypLXTdHyN4kbpvALZKTsYqQTwm1rH-BYhIjkK4" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 57436) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53051) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 62561) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56133) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50367) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63512) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 49993) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65037) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65041) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65049) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65081) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50526) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53989) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57988) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63261) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54829) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 49992) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMxODkwNTAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.lpzPn5HhWQDEx7bTkj2FXO4zQa-GPXATFvzrFkRfaXo" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 63777) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56230) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56234) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56244) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55027) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63267) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 60767) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65257) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53044) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53047) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53101) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54418) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55175) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53539) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55951) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55952) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61713) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 61717) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58953) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 58973) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51122) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54798) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54126) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54128) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 49997) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64752) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53992) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMxODkwNTAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.lpzPn5HhWQDEx7bTkj2FXO4zQa-GPXATFvzrFkRfaXo" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50364) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMTk3NzksInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.Z1LRoMjTBbp8i7lMc-zTKCP36X1MLgfMqTHynEoDLic" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53804) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMTk3NzksInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.Z1LRoMjTBbp8i7lMc-zTKCP36X1MLgfMqTHynEoDLic" [accepted]
+INFO:     connection open
+INFO:     connection closed
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56230) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56235) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56246) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 59835) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55259) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56779) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56783) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55066) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56862) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55130) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59815) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMxODkwNTAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.lpzPn5HhWQDEx7bTkj2FXO4zQa-GPXATFvzrFkRfaXo" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56869) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56885) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56299) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51559) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54483) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMxODkwNTAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.lpzPn5HhWQDEx7bTkj2FXO4zQa-GPXATFvzrFkRfaXo" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 61004) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59731) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59732) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 60844) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMxODkwNTAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.lpzPn5HhWQDEx7bTkj2FXO4zQa-GPXATFvzrFkRfaXo" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55323) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMTk3NzksInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.Z1LRoMjTBbp8i7lMc-zTKCP36X1MLgfMqTHynEoDLic" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62938) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53430) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53431) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTM3ODA3MzksInN1YiI6InpodXhpYW95aSIsIm5hbWUiOiJcdTY3MzFcdTViNWRcdTRlMDAiLCJyb2xlIjoiQWRtaW4ifQ.javM2msRqt37yu5noP2B8T_FSDVbUgbVLYDBS5rgQbM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64678) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52175) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 49992) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 61329) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58480) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 59377) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55019) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52088) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 60885) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57417) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58516) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53648) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59956) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58039) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53134) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65367) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50364) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61894) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61923) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58007) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 63524) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61176) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50876) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56180) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64361) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65468) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50492) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 62894) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54915) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53926) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53910) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50772) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50974) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52283) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63101) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63944) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 51027) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62500) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53127) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55340) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59539) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 59555) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63365) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55157) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63365) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63794) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62148) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 62164) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56762) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55825) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMDkyNzksInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.JEqyOFyQlNTnQfYUlQTlKpYIauSTSQrJVJCznOYsZzs" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61631) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDEzMzAsInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.2jmkVSSI9zoOfoOj2nPIYxtlXVmCd8517R3RF1WcGIQ" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 61885) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54318) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51235) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTIxMTA0OTAsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.UPvaMpZXC3ps4j5q6NDN53-6UotxtlJBIqEdb2wJMgM" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51980) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55000) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56793) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58282) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64854) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61943) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54129) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 50471) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57811) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50569) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58473) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDUyNzIsInN1YiI6Ilx1NmQ0Ylx1OGJkNVx1NTUyZVx1NTQwZSIsIm5hbWUiOiJcdTZkNGJcdThiZDVcdTU1MmVcdTU0MGUiLCJyb2xlIjoiQWZ0ZXJTYWxlcyJ9.zXQVj6xAx_t9125lqypKCjxk0suehqA3obeOdjEZG1I" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63506) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDUyNzIsInN1YiI6Ilx1NmQ0Ylx1OGJkNVx1NTUyZVx1NTQwZSIsIm5hbWUiOiJcdTZkNGJcdThiZDVcdTU1MmVcdTU0MGUiLCJyb2xlIjoiQWZ0ZXJTYWxlcyJ9.zXQVj6xAx_t9125lqypKCjxk0suehqA3obeOdjEZG1I" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 65318) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65235) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDUyNzIsInN1YiI6Ilx1NmQ0Ylx1OGJkNVx1NTUyZVx1NTQwZSIsIm5hbWUiOiJcdTZkNGJcdThiZDVcdTU1MmVcdTU0MGUiLCJyb2xlIjoiQWZ0ZXJTYWxlcyJ9.zXQVj6xAx_t9125lqypKCjxk0suehqA3obeOdjEZG1I" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59470) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDUyNzIsInN1YiI6Ilx1NmQ0Ylx1OGJkNVx1NTUyZVx1NTQwZSIsIm5hbWUiOiJcdTZkNGJcdThiZDVcdTU1MmVcdTU0MGUiLCJyb2xlIjoiQWZ0ZXJTYWxlcyJ9.zXQVj6xAx_t9125lqypKCjxk0suehqA3obeOdjEZG1I" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55925) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55931) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55943) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55972) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+cloud fetch status=approved failed: [Errno 11001] getaddrinfo failed
+cloud fetch status=contracted failed: [Errno 11001] getaddrinfo failed
+cloud fetch status=partial_allocated failed: [Errno 11001] getaddrinfo failed
+cloud fetch status=allocated failed: [Errno 11001] getaddrinfo failed
+cloud fetch status=completed failed: [Errno 11001] getaddrinfo failed
+cloud fetch status=rejected failed: [Errno 11001] getaddrinfo failed
+cloud fetch status=pending failed: [Errno 11001] getaddrinfo failed
+cloud fetch status=cancelled failed: [Errno 11001] getaddrinfo failed
+INFO:     ('127.0.0.1', 63737) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDEzMzAsInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.2jmkVSSI9zoOfoOj2nPIYxtlXVmCd8517R3RF1WcGIQ" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 63121) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51588) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62187) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54849) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56026) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56044) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 62717) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58465) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64174) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53809) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53776) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53781) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 61863) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56936) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53094) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55089) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55400) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55406) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53620) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61132) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56840) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51064) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 51080) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50479) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50497) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 52840) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56696) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 52740) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61453) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51887) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDEzMzAsInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.2jmkVSSI9zoOfoOj2nPIYxtlXVmCd8517R3RF1WcGIQ" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 49995) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54922) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50935) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64692) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53021) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53037) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56035) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56041) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 56047) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 57800) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53265) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 53299) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62869) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61969) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63653) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63172) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 51687) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61440) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 57522) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50365) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 55345) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDE4MTksInN1YiI6IjE4MzQwMjg4MTgwIiwibmFtZSI6Ilx1ODI3ZVx1ODI3M1x1NzljYiIsInJvbGUiOiJBZnRlclNhbGVzIn0.7IS2FXHlc9pIBMU4O4RPmjhijgwJv2Rj16EMiGwCKfU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50364) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 57426) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59013) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62441) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51866) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 49683) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 49688) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection closed
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63340) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59418) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 59419) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 59625) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64436) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50499) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56725) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 60216) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53264) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64301) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 64317) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 49310) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58349) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 56199) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMxMTUsInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.hd6w23BqTR9VyBH0lxtb-YfCVcEJ8hWureGanQPDdyU" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 53464) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59784) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61900) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54597) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 54599) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 64895) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62375) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQwMjE1NTMsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.6ooyzplo04jpWMhikDd3iRlv__AUEMdiXbHHzmmJ4xo" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     ('127.0.0.1', 62714) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMTk3NzksInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.Z1LRoMjTBbp8i7lMc-zTKCP36X1MLgfMqTHynEoDLic" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 51108) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65202) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQwMjE1NTMsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.6ooyzplo04jpWMhikDd3iRlv__AUEMdiXbHHzmmJ4xo" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 58723) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 62669) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50561) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzUxMDgsInN1YiI6IjE4NTM4MzA4MDMzIiwibmFtZSI6Ilx1OTY0OFx1NTcwNlx1NmQwMSIsInJvbGUiOiJBZnRlclNhbGVzIn0.cEZC36Aco0EhnDRb2vRh2VOBWmjZdbTStJveUZGlmug" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 63346) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection closed
+INFO:     connection open
+INFO:     ('127.0.0.1', 63362) - "WebSocket /api/v1/sandbox/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMDQxMjIsInN1YiI6ImppYm9jaGFuZyIsIm5hbWUiOiJcdTY3MzFcdTViYjgiLCJyb2xlIjoiQWRtaW4ifQ.EVYimHHdf-PpPXk1Kfh_qqxKv-hSAcrOzcTTavfuZrI" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61298) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54545) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI5ODMwMDEsInN1YiI6ImJvc3MiLCJuYW1lIjoiXHU4MDAxXHU2NzdmIiwicm9sZSI6IkJvc3MifQ.G9sPkRKVajke6aGf1PkOzri1I7_NNIiQQoOAyV3KEeA" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 59444) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 59455) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 59371) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyMzMzNjQsInN1YiI6IjE5Mzc0MDI3MTEzIiwibmFtZSI6Ilx1Njc0ZSIsInJvbGUiOiJBZnRlclNhbGVzIn0.qUlwZxVDI7jtNrh90O5K90G7z7ZnZ9yHxbKDU_-ii2U" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     ('127.0.0.1', 61769) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTE5NzI3NjAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.xheuaLq6wUIMQ_F1d7TEumZDjjM-VF_RwiWrzkmlQSg" 403
+INFO:     connection rejected (403 Forbidden)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 54415) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3NDU4MTYsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.oMjQytVPLq-GHUUxpOi1PAS7_XaVXPiHvbrnFaUfsk8" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 55434) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDEzMzAsInN1YiI6IjAxNSIsIm5hbWUiOiJcdTY3MzFcdTg4ZDVcdTczYjIiLCJyb2xlIjoiU2FsZXMifQ.2jmkVSSI9zoOfoOj2nPIYxtlXVmCd8517R3RF1WcGIQ" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 51731) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQxMTk3NzksInN1YiI6InpoYWliaW4iLCJuYW1lIjoiXHU3ZmRmXHU3OThmXHU2Nzk3Iiwicm9sZSI6IkluYm91bmQifQ.Z1LRoMjTBbp8i7lMc-zTKCP36X1MLgfMqTHynEoDLic" [accepted]
+INFO:     connection open
+Failed to reconcile production batches after inbound: 'ascii' codec can't encode characters in position 0-2: ordinal not in range(128)
+INFO:     connection closed
+INFO:     ('127.0.0.1', 65480) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3MDI1MzcsInN1YiI6IjAxMSIsIm5hbWUiOiJcdTY3NjhcdTc0MzQiLCJyb2xlIjoiU2FsZXMifQ.blG90qaG92--Q3yfaZN4VkfZKatZXsAsorGc_MqDKrw" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 49211) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3NDU4MTYsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.oMjQytVPLq-GHUUxpOi1PAS7_XaVXPiHvbrnFaUfsk8" [accepted]
+INFO:     connection open
+INFO:     ('127.0.0.1', 64523) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTMyNDUyNzIsInN1YiI6Ilx1NmQ0Ylx1OGJkNVx1NTUyZVx1NTQwZSIsIm5hbWUiOiJcdTZkNGJcdThiZDVcdTU1MmVcdTU0MGUiLCJyb2xlIjoiQWZ0ZXJTYWxlcyJ9.zXQVj6xAx_t9125lqypKCjxk0suehqA3obeOdjEZG1I" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     ('127.0.0.1', 50957) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTQ3ODk0MTMsInN1YiI6ImluYm91bmQiLCJuYW1lIjoiXHU1MTY1XHU1ZTkzXHU1NDU4Iiwicm9sZSI6IkluYm91bmQifQ.-3dhqnqj3iUA5dSbtY7EEg4rQTMd7-IXBfxyEid3CE0" [accepted]
+INFO:     connection open
+INFO:     connection closed
+=======
 INFO:     ('127.0.0.1', 60317) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI1ODI0ODEsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.QX4y2OG-jACZs9aZVprtnAjBBrVB0CZ4zFVXRk8SJKg" [accepted]
 INFO:     connection open
 INFO:     ('127.0.0.1', 49770) - "WebSocket /api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3OTI3MzgxMjAsInN1YiI6ImFkbWluIiwibmFtZSI6Ilx1N2NmYlx1N2VkZlx1N2JhMVx1NzQwNlx1NTQ1OCIsInJvbGUiOiJBZG1pbiJ9.LEuw6bTEYiHfiUP07na6EWPeTFg7dvg98ZnH9V4ADz0" [accepted]
@@ -3361,3 +4375,4 @@ cloud fetch status=allocated failed: WECHAT_CLOUD_API_BASE is not configured
 cloud fetch status=completed failed: WECHAT_CLOUD_API_BASE is not configured
 cloud fetch status=rejected failed: WECHAT_CLOUD_API_BASE is not configured
 cloud fetch status=cancelled failed: WECHAT_CLOUD_API_BASE is not configured
+>>>>>>> origin/main

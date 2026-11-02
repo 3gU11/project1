@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { mapLayoutSlots, prioritizeOldFactorySlots } from '../../frontend-mobile/src/utils/mapper'
+import {
+  isAfterSalesMachineVisible,
+  mapLayoutSlots,
+  mapMachine,
+  prioritizeOldFactorySlots,
+} from '../../frontend-mobile/src/utils/mapper'
 import { summarizeBatchResults } from '../../frontend-mobile/src/utils/batchResults'
 import { isInventorySyncMessage } from '../../frontend-mobile/src/utils/inventorySync'
 
@@ -77,5 +82,22 @@ describe('mobile inventory synchronization', () => {
     expect(isInventorySyncMessage({ type: 'INVENTORY_UPDATE' })).toBe(true)
     expect(isInventorySyncMessage({ type: 'WAREHOUSE_LAYOUT_UPDATE' })).toBe(true)
     expect(isInventorySyncMessage({ event: 'dealer_orders_changed' })).toBe(false)
+  })
+})
+
+describe('mobile aftersales machine visibility', () => {
+  it('keeps pending inbound machines visible', () => {
+    const machine = mapMachine({ '流水号': 'SN-1', '状态': '待入库' })
+    expect(isAfterSalesMachineVisible(machine)).toBe(true)
+  })
+
+  it('keeps production machines allocated online visible even when status changes', () => {
+    const machine = mapMachine({ '流水号': 'SN-2', '状态': '待发货' })
+    expect(isAfterSalesMachineVisible(machine)).toBe(true)
+  })
+
+  it('hides in-stock machines already finished with photo tasks', () => {
+    const machine = mapMachine({ '流水号': 'SN-3', '状态': '库存中（一楼二车间小机）' })
+    expect(isAfterSalesMachineVisible(machine)).toBe(false)
   })
 })

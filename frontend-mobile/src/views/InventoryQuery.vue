@@ -200,7 +200,7 @@ import { inventoryApi } from '@/api/inventory'
 import { summarizeBatchResults } from '@/utils/batchResults'
 import { workflowApi } from '@/api/workflow'
 import { useInventoryAutoRefresh } from '@/utils/useInventoryAutoRefresh'
-import { prioritizeOldFactorySlots } from '@/utils/mapper'
+import { isAfterSalesMachineVisible, prioritizeOldFactorySlots } from '@/utils/mapper'
 
 const router = useRouter()
 const inventoryStore = useInventoryStore()
@@ -231,12 +231,16 @@ const derivedTabTitle = computed(() => derivedTasks.value.length ? `重新入库
 const inboundContext = ref<'normal' | 'derived'>('normal')
 const reinboundTask = ref<any>(null)
 const pageTitle = computed(() => isAfterSales.value ? '拍照任务查询' : (isProd.value ? '查询管理' : '机台入库'))
-const countTitle = computed(() => (isProd.value ? '现有数量' : '待入库数量'))
+const countTitle = computed(() => {
+  if (isAfterSales.value) return '待拍机台数量'
+  return isProd.value ? '现有数量' : '待入库数量'
+})
 const visibleList = computed(() => {
   let list = inventoryStore.list
   if (isAfterSales.value) {
     // 售后扫码任务只处理尚未入库的机台；已入库记录不应继续占用待处理数量。
-    list = list.filter((item) => item.status.includes('待入库'))
+    // 线上已配货的机台状态会变成待发货，也要保留在拍照列表中。
+    list = list.filter((item) => isAfterSalesMachineVisible(item))
     return list
   }
   if (isProd.value) {
