@@ -127,7 +127,7 @@
             <el-button plain size="small" :type="linkMode && linkSourceId === selectedNode.id ? 'primary' : 'default'" @click="startLinkFromSelected">从此节点开始连线</el-button>
             <el-button type="danger" plain size="small" @click="removeNode(selectedNode.id)">删除节点</el-button>
           </template><el-empty v-else description="选择节点后编辑" :image-size="70" />
-          <div class="edge-help"><template v-if="!preview"><b>创建连线</b><p>点工具栏「连线」进入连线模式，依次点击节点即可连续连线（连完自动接着下一个）；条件节点的两条出口会自动标记为「是」「否」。</p></template><b v-else>流程连线</b><el-tag v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`" :closable="!preview" @close="!preview && removeEdge(edge)">{{ nodeLabel(edge.source) }} → {{ nodeLabel(edge.target) }}<template v-if="edge.sourceType === 'condition'">（{{ edge.branch || '未设置' }}）</template></el-tag></div>
+          <div class="edge-help"><template v-if="!preview"><b>创建连线</b><p>点工具栏「连线」进入连线模式，依次点击节点即可连续连线（连完自动接着下一个）；条件节点的两条出口会自动标记为「是」「否」。</p></template><b v-else>流程连线</b><el-tag v-for="edge in orderedEdges" :key="`${edge.source}-${edge.target}`" :closable="!preview" @close="!preview && removeEdge(edge)">{{ nodeLabel(edge.source) }} → {{ nodeLabel(edge.target) }}<template v-if="edge.sourceType === 'condition'">（{{ edge.branch || '未设置' }}）</template></el-tag></div>
         </aside>
       </div>
       <template #footer><el-button @click="designer.visible=false">取消</el-button><el-button @click="saveDraft">保存草稿</el-button><el-button type="primary" @click="publishDraft">发布新版本</el-button></template>
@@ -281,6 +281,43 @@ const edgeBranchLabel = (edge: FlowEdge) => {
   if (edge.sourceType !== 'condition' && nodeById(edge.source)?.type !== 'condition') return ''
   return edge.branch === 'false' ? '否' : '是'
 }
+// 连线按流程走向排序（从发起节点广度优先），而不是"谁最后建的排最后"。
+// 删除中间节点后重建连线时，顺序才不会错乱；保存时也按这个顺序落库。
+const orderedEdges = computed(() => {
+  const { nodes, edges } = designer.value.draft
+  if (edges.length < 2) return edges
+  const byId = new Map(nodes.map(node => [node.id, node]))
+  const outgoing = new Map<string, FlowEdge[]>()
+  for (const edge of edges) {
+    const list = outgoing.get(edge.source) || []
+    list.push(edge)
+    outgoing.set(edge.source, list)
+  }
+  const branchRank = (edge: FlowEdge) => (edge.branch === 'true' ? 0 : edge.branch === 'false' ? 1 : 0)
+  for (const list of outgoing.values()) {
+    list.sort((a, b) => {
+      const diff = branchRank(a) - branchRank(b)
+      if (diff !== 0) return diff
+      return (byId.get(a.target)?.y ?? 0) - (byId.get(b.target)?.y ?? 0)
+    })
+  }
+  const ordered: FlowEdge[] = []
+  const seenEdge = new Set<FlowEdge>()
+  const seenNode = new Set<string>()
+  const start = nodes.find(node => node.type === 'start')
+  const queue: string[] = start ? [start.id] : nodes.map(node => node.id)
+  if (start) seenNode.add(start.id)
+  while (queue.length) {
+    const id = queue.shift() as string
+    for (const edge of outgoing.get(id) || []) {
+      if (!seenEdge.has(edge)) { ordered.push(edge); seenEdge.add(edge) }
+      if (!seenNode.has(edge.target)) { seenNode.add(edge.target); queue.push(edge.target) }
+    }
+  }
+  // 不可达的连线（孤立节点上的）追加在末尾，避免丢失
+  for (const edge of edges) if (!seenEdge.has(edge)) ordered.push(edge)
+  return ordered
+})
 
 /* ---------------- 缩放与自适应 ---------------- */
 const zoomIn = () => { zoom.value = round2(clamp(zoom.value + 0.1, ZOOM_MIN, ZOOM_MAX)) }
@@ -634,6 +671,8 @@ const validateDraft = () => {
   } catch (error) { return error instanceof Error ? error.message : '流程图无效' }
   return ''
 }
+// 落库前按流程顺序整理连线，避免删除重建后边数组顺序混乱
+const orderedSnapshot = () => ({ nodes: designer.value.draft.nodes, edges: orderedEdges.value })
 const undo = () => { const previous = designer.value.history.pop(); if (!previous) return; designer.value.future.push(snapshot()); designer.value.draft = JSON.parse(previous) }
 const redo = () => { const next = designer.value.future.pop(); if (!next) return; designer.value.history.push(snapshot()); designer.value.draft = JSON.parse(next) }
 const loadModels = async () => {
@@ -749,8 +788,8 @@ const editModel = (row: Model, viewDraft = false) => {
     : [{ source: 'start', target: 'end' }]
   designer.value = { visible: true, model: row, selectedId: null, draft: { nodes, edges }, history: [], future: [] }; preview.value = true
 }
-const saveDraft = async () => { const error = validateDraft(); if (error) { ElMessage.error(error); return }; if (!designer.value.model) return; try { await apiPost(`/workflows/models/${encodeURIComponent(designer.value.model.key)}/draft`, { snapshot: designer.value.draft }); ElMessage.success('流程草稿已保存'); designer.value.visible = false; await loadModels() } catch { /* request interceptor displays the server error */ } }
-const publishDraft = async () => { const error = validateDraft(); if (error) { ElMessage.error(error); return }; if (!designer.value.model) return; try { await apiPost<{ data: { version: number } }>(`/workflows/models/${encodeURIComponent(designer.value.model.key)}/publish`, { snapshot: designer.value.draft }); ElMessage.success('流程新版本已发布并生效'); designer.value.visible = false; await loadModels() } catch { /* request interceptor displays the server error */ } }
+const saveDraft = async () => { const error = validateDraft(); if (error) { ElMessage.error(error); return }; if (!designer.value.model) return; try { await apiPost(`/workflows/models/${encodeURIComponent(designer.value.model.key)}/draft`, { snapshot: orderedSnapshot() }); ElMessage.success('流程草稿已保存'); designer.value.visible = false; await loadModels() } catch { /* request interceptor displays the server error */ } }
+const publishDraft = async () => { const error = validateDraft(); if (error) { ElMessage.error(error); return }; if (!designer.value.model) return; try { await apiPost<{ data: { version: number } }>(`/workflows/models/${encodeURIComponent(designer.value.model.key)}/publish`, { snapshot: orderedSnapshot() }); ElMessage.success('流程新版本已发布并生效'); designer.value.visible = false; await loadModels() } catch { /* request interceptor displays the server error */ } }
 const copyModel = async (row: Model) => {
   try {
     const res = await apiPost<{ data: { workflow_key: string; name: string } }>(`/workflows/models/${encodeURIComponent(row.key)}/duplicate`)
