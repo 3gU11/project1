@@ -85,6 +85,18 @@ def ensure_cloud_sync_outbox_table() -> None:
     _outbox_table_ensured = True
 
 
+def cloud_bridge_enabled() -> bool:
+    """本机是否允许访问生产云端桥。
+
+    CLOUD_SYNC_ENABLED=false 或 V8_DEMO_MODE=1 时整体停用：不再排队、不再外发，
+    避免本地实例与生产环境互相覆盖数据。恢复时改回配置并重启后端即可。
+    """
+    if os.getenv("V8_DEMO_MODE", "").strip() == "1":
+        return False
+    flag = os.getenv("CLOUD_SYNC_ENABLED", "true").strip().lower()
+    return flag not in {"0", "false", "no", "off"}
+
+
 def enqueue_cloud_sync_event(
     event_type: str,
     biz_key: str,
@@ -93,6 +105,13 @@ def enqueue_cloud_sync_event(
 ) -> str:
     if event_type not in SYNC_EVENT_TYPES:
         raise ValueError(f"unsupported cloud sync event_type: {event_type}")
+    if not cloud_bridge_enabled():
+        logger.info(
+            "cloud bridge disabled, skip enqueue: event_type=%s biz_key=%s",
+            event_type,
+            biz_key,
+        )
+        return f"{event_type}-disabled"
     ensure_cloud_sync_outbox_table()
     eid = (event_id or f"v8-outbox-{event_type}-{uuid.uuid4().hex}").strip()
     payload_json = json.dumps(payload or {}, ensure_ascii=False, default=_json_default)

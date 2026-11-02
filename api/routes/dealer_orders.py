@@ -37,6 +37,7 @@ from crud.cloud_dealer_order_sync import (
     sync_wechat_batch_summary_to_cloud,
 )
 from crud.cloud_sync_outbox import (
+    cloud_bridge_enabled,
     get_cloud_sync_event_status,
     get_cloud_sync_status,
     process_due_cloud_sync_events,
@@ -107,6 +108,22 @@ def _operator(ctx: dict) -> str:
     return str(ctx.get("name") or ctx.get("username") or "system").strip()
 
 
+def _bridge_disabled_message() -> str | None:
+    """本地停用云端桥时返回原因；用于拦截所有手动同步入口。"""
+    if cloud_bridge_enabled():
+        return None
+    return (
+        "本机已停用云端桥（CLOUD_SYNC_ENABLED=false 或 V8_DEMO_MODE=1），"
+        "不会访问生产环境；如需恢复同步请修改 .env 并重启后端"
+    )
+
+
+def _reject_if_bridge_disabled() -> None:
+    message = _bridge_disabled_message()
+    if message:
+        raise HTTPException(status_code=409, detail=message)
+
+
 # 云端没有行备注时会把「订单备注」复制到每一行明细；加高只能看明细自己的
 # inventory_type/机型，用备注判断会把整单所有机型误标成加高。
 HEIGHTENED_INVENTORY_TYPES = frozenset({"heightened", "heighten", "high", "tall"})
@@ -171,6 +188,7 @@ def sync_order_attachments(
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
     """立即从云端拉取该订单的合同附件；日常由拉单 worker 自动完成。"""
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_cloud_order_attachments([{"order_no": order_no, "updated_at": ""}])
@@ -226,6 +244,7 @@ def sync_cloud_orders(
     request: Request,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_cloud_dealer_orders(
@@ -258,6 +277,7 @@ def sync_wechat_batch_summary(
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
     """立即推送一次库存/机型快照（与 5 分钟心跳、库存变化触发共用同一实现）。"""
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_wechat_batch_summary_to_cloud(trigger="manual")
@@ -291,6 +311,7 @@ def cloud_sync_status(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVI
 
 @router.post("/cloud-sync-retry")
 def cloud_sync_retry(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    _reject_if_bridge_disabled()
     try:
         queued = retry_failed_cloud_sync_events()
         processed = process_due_cloud_sync_events(limit=20)
@@ -305,6 +326,7 @@ def sync_completed_cloud_orders(
     request: Request,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_completed_dealer_orders_to_cloud(limit=payload.limit, trigger="manual")
@@ -342,6 +364,7 @@ def sync_machine_snapshot(
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
     """立即生成并上传一次机台快照（日常由 v8_sync 每日调度自动完成）。"""
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         from v8_sync.scheduler import run_daily
@@ -509,6 +532,9 @@ def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ct
 def _sync_cloud_attachments_for_order(order_no: str) -> dict[str, Any]:
     """转合同后把云端上传的合同附件拉取到本地合同目录；失败只记日志。"""
     import logging
+
+    if not cloud_bridge_enabled():
+        return {}
 
     try:
         return sync_cloud_order_attachments([{"order_no": order_no, "updated_at": ""}])
