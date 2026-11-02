@@ -55,6 +55,11 @@ REQUIRED_SLOT_CODES = tuple(
 )
 
 CUSTOMER_WAREHOUSE_SLOT_TYPE = "customer_warehouse"
+# 「东莞仓」在数据里有三种写法，历史上各处判定各写一套，导致同一批机台
+# 在不同页面被算成"已发货"或"未发货"。以下三个常量/SQL 片段是唯一口径。
+CUSTOMER_WAREHOUSE_LOCATIONS = ("DG-WH", "DONGGUAN", "东莞仓库")
+SHIPPED_MACHINE_STATUSES = ("已发货", "已出库")
+
 
 def is_customer_warehouse_slot(slot_code: str, slots=None) -> bool:
     code = canonical_slot_code(slot_code)
@@ -66,6 +71,38 @@ def is_customer_warehouse_slot(slot_code: str, slots=None) -> bool:
             if str(slot.get("customer_name") or slot.get("customer") or "").strip() == "东莞":
                 return True
     return code.upper() in {"DG-WH", "DONGGUAN", "东莞仓库"}
+
+
+def is_shipped_machine(row) -> bool:
+    """机台是否算「已发货」。
+
+    口径：状态为已发货/已出库，或者状态是库存中但落在客户仓
+    （东莞客户的「已发货」就是发到东莞仓，进仓即视为已交付）。
+    """
+    data = row or {}
+    status = str(data.get("状态") or "").strip()
+    if status in SHIPPED_MACHINE_STATUSES:
+        return True
+    if status.startswith("库存中"):
+        return is_customer_warehouse_slot(str(data.get("Location_Code") or "").strip())
+    return False
+
+
+def customer_warehouse_location_sql(column: str) -> str:
+    """生成「库位是客户仓」的 SQL 片段（库位三写法统一在这里）。"""
+    codes = ", ".join(f"'{code}'" for code in CUSTOMER_WAREHOUSE_LOCATIONS)
+    return f"TRIM(COALESCE({column}, '')) IN ({codes})"
+
+
+def shipped_machine_sql(alias: str = "") -> str:
+    """生成「机台已发货」的 SQL 片段，与 is_shipped_machine 保持同一口径。"""
+    prefix = f"{alias}." if alias else ""
+    status = f"TRIM(COALESCE({prefix}`状态`, ''))"
+    location = f"{prefix}`Location_Code`"
+    codes = ", ".join(f"'{code}'" for code in CUSTOMER_WAREHOUSE_LOCATIONS)
+    return (f"({status} IN ('已发货', '已出库') "
+            f"OR ({status} LIKE '库存中%' AND TRIM(COALESCE({location}, '')) IN ({codes})))")
+
 
 def slot_counts_as_actual_inventory(slot_code: str, slots=None) -> bool:
     return not is_customer_warehouse_slot(slot_code, slots)

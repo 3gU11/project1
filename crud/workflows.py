@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import text, bindparam
 from database import get_engine
+from crud.inventory import is_shipped_machine, shipped_machine_sql
 
 
 def ensure_workflow_tables() -> None:
@@ -823,7 +824,7 @@ def _condition_value(conn, instance, field):
         column = '占用订单号' if instance.get('workflow_key') == 'order-delete' else '合同号'
         count = conn.execute(text(f"""SELECT COUNT(*) FROM finished_goods_data
             WHERE TRIM(COALESCE(`{column}`,''))=:id
-              AND TRIM(COALESCE(`状态`, '')) IN ('已出库','已发货','库存中（DG-WH）')"""), {'id': str(instance['business_id'])}).scalar()
+              AND {shipped_machine_sql()}"""), {'id': str(instance['business_id'])}).scalar()
         return int(count or 0)
     if field in {'item_count', 'object_count'}:
         count = conn.execute(text('SELECT COUNT(*) FROM workflow_instance_items WHERE instance_id=:id'), {'id': instance['id']}).scalar()
@@ -1433,7 +1434,7 @@ def execute_allocation_recall(instance_no: str, worker_id: str):
             raise ValueError(f'机台当前状态已变化，不能撤回配货: {", ".join(invalid[:10])}')
         for sn in serials:
             _assert_lease_alive(conn, lease)
-            changed = conn.execute(text("""UPDATE finished_goods_data
+            changed = conn.execute(text(f"""UPDATE finished_goods_data
                 SET `状态`='待入库', `占用订单号`='', `合同号`='', `客户`='', `代理商`='',
                     `更新时间`=CURRENT_TIMESTAMP, `row_version`=`row_version`+1
                 WHERE TRIM(`流水号`)=:sn AND `状态`='待发货' AND `row_version`=:version"""), {'sn': sn, 'version': by_sn[sn].get('row_version') or 1})
@@ -1495,10 +1496,7 @@ def execute_allocation_recall(instance_no: str, worker_id: str):
 
 
 def _shipment_recall_eligible(machine):
-    status = str(machine.get('状态') or '').strip()
-    location = str(machine.get('Location_Code') or '').strip()
-    return status in {'已出库', '已发货'} or (
-        status.startswith('库存中') and location in {'DG-WH', 'DONGGUAN', '东莞仓库'})
+    return is_shipped_machine(machine)
 
 
 def execute_shipment_recall(instance_no: str, worker_id: str):
@@ -1538,9 +1536,9 @@ def execute_shipment_recall(instance_no: str, worker_id: str):
         order_ids = sorted({str(r.get('占用订单号') or '').strip() for r in rows if str(r.get('占用订单号') or '').strip()})
         for sn in serials:
             _assert_lease_alive(conn, lease)
-            changed = conn.execute(text("""UPDATE finished_goods_data
+            changed = conn.execute(text(f"""UPDATE finished_goods_data
                 SET `状态`='待入库', `Location_Code`='', `占用订单号`='', `客户`='', `代理商`='', `合同号`='', `更新时间`=CURRENT_TIMESTAMP, `row_version`=`row_version`+1
-                WHERE TRIM(`流水号`)=:sn AND (`状态` IN ('已出库','已发货') OR (TRIM(`状态`) LIKE '库存中%' AND TRIM(COALESCE(`Location_Code`,'')) IN ('DG-WH','DONGGUAN','东莞仓库'))) AND `row_version`=:version"""), {'sn': sn, 'version': by_sn[sn].get('row_version') or 1})
+                WHERE TRIM(`流水号`)=:sn AND {shipped_machine_sql()} AND `row_version`=:version"""), {'sn': sn, 'version': by_sn[sn].get('row_version') or 1})
             if changed.rowcount != 1:
                 raise ValueError(f'机台 {sn} 状态并发变化，整单回滚')
             conn.execute(text("UPDATE shipping_history SET `状态`='已撤回', `更新时间`=CURRENT_TIMESTAMP WHERE TRIM(`流水号`)=:sn AND `状态` NOT IN ('已撤回')"), {'sn': sn})
@@ -1599,7 +1597,7 @@ def create_and_execute_shipment_recall(instance_no: str, worker_id: str):
             column = '占用订单号' if parent['workflow_key'] == 'order-delete' else '合同号'
             shipped = conn.execute(text(f"""SELECT `流水号` FROM finished_goods_data
                 WHERE TRIM(COALESCE(`{column}`,''))=:business_id
-                  AND TRIM(COALESCE(`状态`,'')) IN ('已出库','已发货','库存中（DG-WH）')
+                  AND {shipped_machine_sql()}
                 ORDER BY `流水号`"""), {'business_id': str(parent['business_id']).strip()}).mappings().all()
             serials = [str(row['流水号']).strip() for row in shipped]
         if not serials:
@@ -1658,15 +1656,14 @@ def execute_customer_finished_recall(instance_no: str, worker_id: str):
         if len(by_sn) != len(set(serials)):
             raise ValueError('部分客户成品不存在，整单不执行')
         _validate_machine_snapshots(items, by_sn)
-        invalid = [sn for sn in serials if str(by_sn[sn].get('状态') or '').strip() not in ('已发货', '已出库') and not (
-            str(by_sn[sn].get('状态') or '').strip().startswith('库存中') and str(by_sn[sn].get('Location_Code') or '').strip() in {'DG-WH', 'DONGGUAN', '东莞仓库'})]
+        invalid = [sn for sn in serials if not is_shipped_machine(by_sn[sn])]
         if invalid:
             raise ValueError(f'客户成品当前不可撤回: {", ".join(invalid[:10])}')
         for sn in serials:
             _assert_lease_alive(conn, lease)
-            changed = conn.execute(text("""UPDATE finished_goods_data SET `状态`='待入库', `Location_Code`='',
+            changed = conn.execute(text(f"""UPDATE finished_goods_data SET `状态`='待入库', `Location_Code`='',
                 `占用订单号`='', `客户`='', `代理商`='', `合同号`='', `更新时间`=CURRENT_TIMESTAMP, `row_version`=`row_version`+1
-                WHERE TRIM(`流水号`)=:sn AND (`状态` IN ('已发货','已出库') OR (TRIM(`状态`) LIKE '库存中%' AND TRIM(COALESCE(`Location_Code`,'')) IN ('DG-WH','DONGGUAN','东莞仓库'))) AND `row_version`=:version"""), {'sn': sn, 'version': by_sn[sn].get('row_version') or 1})
+                WHERE TRIM(`流水号`)=:sn AND {shipped_machine_sql()} AND `row_version`=:version"""), {'sn': sn, 'version': by_sn[sn].get('row_version') or 1})
             if changed.rowcount != 1:
                 raise ValueError(f'客户成品 {sn} 状态并发变化，整单回滚')
             conn.execute(text("UPDATE customer_machine_plans SET plan_status='未核销', updated_at=CURRENT_TIMESTAMP WHERE TRIM(serial_no)=:sn"), {'sn': sn})
@@ -1936,8 +1933,8 @@ def execute_order_delete(instance_no: str, worker_id: str):
                 raise
             except Exception:
                 pass
-        shipped = conn.execute(text("""SELECT COUNT(*) FROM finished_goods_data
-            WHERE TRIM(`占用订单号`)=:oid AND TRIM(COALESCE(`状态`,'')) IN ('已出库','已发货','库存中（DG-WH）')"""), {'oid': order_id}).scalar()
+        shipped = conn.execute(text(f"""SELECT COUNT(*) FROM finished_goods_data
+            WHERE TRIM(`占用订单号`)=:oid AND {shipped_machine_sql()}"""), {'oid': order_id}).scalar()
         if int(shipped or 0) > 0:
             raise ValueError('订单存在已发货机台，不能删除')
         reinbound_object_ids = [str(row[0]).strip() for row in conn.execute(text("""SELECT `流水号`
@@ -2068,8 +2065,8 @@ def execute_contract_cancel(instance_no: str, worker_id: str):
         if int(plan_count or 0) == 0 and any(int(downstream.get(key) or 0) for key in ('order_count', 'machine_count', 'rush_count', 'queue_count')):
             raise ValueError('未规划合同存在订单、机台或排产关联，不能直接自动取消')
         # Shipped goods are immutable; cancel only unshipped planning/inventory links.
-        shipped = conn.execute(text("""SELECT COUNT(*) FROM finished_goods_data
-            WHERE TRIM(`合同号`)=:cid AND TRIM(COALESCE(`状态`,'')) IN ('已出库','已发货','库存中（DG-WH）')"""), {'cid': contract_no}).scalar()
+        shipped = conn.execute(text(f"""SELECT COUNT(*) FROM finished_goods_data
+            WHERE TRIM(`合同号`)=:cid AND {shipped_machine_sql()}"""), {'cid': contract_no}).scalar()
         if int(shipped or 0) > 0:
             raise ValueError('合同存在已发货机台，不能撤销')
         conn.execute(text("""UPDATE finished_goods_data SET `合同号`='', `占用订单号`='', `客户`='', `代理商`='',

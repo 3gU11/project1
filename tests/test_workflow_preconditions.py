@@ -212,3 +212,35 @@ def test_abandon_only_applies_to_failed_instances(monkeypatch):
     with pytest.raises(ValueError) as error:
         wf_crud.transition_reverse_instance("WF-TEST-1", "abandon", "boss", "清理", operator_role="boss")
     assert "不能执行该操作" in str(error.value)
+
+
+# --- 东莞仓 / 已发货 判定口径统一 -------------------------------------------
+
+def test_is_shipped_machine_covers_all_shipped_states():
+    from crud.inventory import is_shipped_machine
+
+    assert is_shipped_machine({"状态": "已出库"}) is True
+    assert is_shipped_machine({"状态": "已发货"}) is True
+    assert is_shipped_machine({"状态": "库存中（DG-WH）", "Location_Code": "DG-WH"}) is True
+    assert is_shipped_machine({"状态": "库存中（DONGGUAN）", "Location_Code": "DONGGUAN"}) is True
+    assert is_shipped_machine({"状态": "库存中（A01）", "Location_Code": "A01"}) is False
+    assert is_shipped_machine({"状态": "待发货", "Location_Code": "A01"}) is False
+    assert is_shipped_machine({}) is False
+
+
+def test_shipped_machine_sql_matches_python_predicate():
+    from crud.inventory import CUSTOMER_WAREHOUSE_LOCATIONS, shipped_machine_sql
+
+    fragment = shipped_machine_sql("fg")
+    assert "fg.`状态`" in fragment and "fg.`Location_Code`" in fragment
+    for code in CUSTOMER_WAREHOUSE_LOCATIONS:
+        assert code in fragment
+    assert "已发货" in fragment and "已出库" in fragment
+
+
+def test_customer_warehouse_location_sql_uses_all_three_codes():
+    from crud.inventory import CUSTOMER_WAREHOUSE_LOCATIONS, customer_warehouse_location_sql
+
+    fragment = customer_warehouse_location_sql("fg.`Location_Code`")
+    for code in CUSTOMER_WAREHOUSE_LOCATIONS:
+        assert code in fragment

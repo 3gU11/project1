@@ -10,7 +10,7 @@ from api.routes.workflows import ReverseCreateRequest, router
 def shipment_engine(monkeypatch):
     engine = create_engine('sqlite://')
     with engine.begin() as conn:
-        conn.execute(text('CREATE TABLE finished_goods_data (`流水号` TEXT, `状态` TEXT, `合同号` TEXT, `占用订单号` TEXT)'))
+        conn.execute(text('CREATE TABLE finished_goods_data (`流水号` TEXT, `状态` TEXT, `合同号` TEXT, `占用订单号` TEXT, `Location_Code` TEXT)'))
     monkeypatch.setattr(workflow_routes, 'get_engine', lambda: engine)
     yield engine
     engine.dispose()
@@ -21,8 +21,11 @@ def shipment_engine(monkeypatch):
 @pytest.mark.parametrize('role', ['Boss', 'sales'])
 def test_shipped_business_is_blocked_before_workflow_creation(monkeypatch, shipment_engine, workflow_key, status, role):
     with shipment_engine.begin() as conn:
-        conn.execute(text('INSERT INTO finished_goods_data VALUES (:sn,:status,:id,:id)'),
-                     {'sn': 'SN-SHIPPED', 'status': status, 'id': 'BUSINESS-1'})
+        # 东莞仓的判定口径是「状态=库存中 且 库位属于客户仓」，夹具要带上库位列
+        location = 'DG-WH' if status.startswith('库存中') else ''
+        conn.execute(text('INSERT INTO finished_goods_data (`流水号`,`状态`,`合同号`,`占用订单号`,`Location_Code`) '
+                          'VALUES (:sn,:status,:id,:id,:loc)'),
+                     {'sn': 'SN-SHIPPED', 'status': status, 'id': 'BUSINESS-1', 'loc': location})
     monkeypatch.setattr(workflow_routes, 'create_reverse_instance', lambda **kwargs: pytest.fail('must not create approval'))
     with pytest.raises(HTTPException) as error:
         workflow_routes.submit_reverse_instance(ReverseCreateRequest(

@@ -24,15 +24,20 @@ from crud.audit_logs import append_audit_log, append_operation_logs
 from crud.dealer_orders import sync_dealer_order_statuses_by_sales_orders
 from crud.cloud_sync_outbox import enqueue_cloud_sync_event, enqueue_wechat_batch_summary_sync
 from crud.inventory import (
+    CUSTOMER_WAREHOUSE_LOCATIONS,
     INVENTORY_COLS,
     append_import_staging,
+    customer_warehouse_location_sql,
     delete_import_staging_by_serials,
     get_import_staging,
     get_warehouse_layout,
+    is_customer_warehouse_slot,
+    is_shipped_machine,
     reset_warehouse_layout,
     save_import_staging,
     save_warehouse_layout,
     archive_shipped_data,
+    shipped_machine_sql,
 )
 from utils.cache_adapter import cache
 from utils.model_compatibility import normalize_model_family, production_group_for_family
@@ -454,9 +459,9 @@ def get_inventory(
         params: Dict[str, Any] = {"skip": skip, "limit": limit}
 
         if exclude_shipped:
-            where_clauses.append("COALESCE(`状态`, '') <> '已出库'")
+            where_clauses.append(f"NOT {shipped_machine_sql()}")
         if actual_only:
-            where_clauses.append("COALESCE(`Location_Code`, '') NOT IN ('DG-WH', 'DONGGUAN', '东莞仓库')")
+            where_clauses.append(f"NOT {customer_warehouse_location_sql('`Location_Code`')}")
 
         if str(status).strip():
             where_clauses.append("`状态` = :status")
@@ -535,7 +540,7 @@ def get_customer_finished_goods(
     skip: int = Query(0, ge=0),
     machine_status: str = Query(""),
 ):
-    clauses = ["(fg.`客户` LIKE :customer OR so.`客户名` LIKE :customer OR fg.`Location_Code`='DG-WH')"]
+    clauses = [f"(fg.`客户` LIKE :customer OR so.`客户名` LIKE :customer OR {customer_warehouse_location_sql('fg.`Location_Code`')})"]
     params = {"customer": f"%{customer.strip()}%", "limit": limit, "skip": skip}
     if keyword.strip():
         clauses.append("(fg.`流水号` LIKE :keyword OR fg.`机型` LIKE :keyword OR fg.`占用订单号` LIKE :keyword OR fg.`合同号` LIKE :keyword)")
@@ -618,12 +623,15 @@ def _customer_order_action_preview(payload):
         order = dict(raw)
         oid = str(order["订单号"]).strip()
         picks = [r for r in selected if str(r["占用订单号"]).strip() == oid]
-        if not all("东莞" in str(order.get("客户名") or "") or "东莞" in str(r.get("客户") or "") or r.get("Location_Code") == "DG-WH" for r in picks):
+        if not all("东莞" in str(order.get("客户名") or "") or "东莞" in str(r.get("客户") or "")
+                   or is_customer_warehouse_slot(str(r.get("Location_Code") or "")) for r in picks):
             raise HTTPException(status_code=422, detail="只能操作东莞客户机台的原销售订单")
         status = str(order.get("status") or "active").strip()
         pending = [dict(r) for r in all_stock if str(r.get("占用订单号") or "").strip() == oid and str(r.get("状态") or "").strip() == "待发货"]
         allocation = _get_explicit_order_allocations(oid)
-        shipped = [dict(r) for r in all_stock if str(r.get("占用订单号") or "").strip() == oid and (str(r.get("状态") or "").strip() == "已出库" or (str(r.get("状态") or "").startswith("库存中") and str(r.get("Location_Code") or "") == "DG-WH"))]
+        # 「已发货」统一走 is_shipped_machine：状态已发货/已出库，或库存中且在客户仓。
+        shipped = [dict(r) for r in all_stock
+                   if str(r.get("占用订单号") or "").strip() == oid and is_shipped_machine(r)]
         serials = sorted({str(r["流水号"]).strip() for r in pending}) if payload.action == "mark_shipped" else sorted({str(r["流水号"]).strip() for r in shipped})
         reason = ""
         if payload.action == "mark_shipped" and (status in {"done", "deleted", "canceled", "cancelled", "pending_review"} or progress.get(oid, {}).get("order_status_label") == "已完成"):
@@ -1777,7 +1785,7 @@ def confirm_shipping(
             shipped_counts: dict[str, int] = {}
             shipped_count_stmt = text(
                 "SELECT COUNT(*) FROM finished_goods_data "
-                "WHERE (`状态`='已出库' OR (`状态` LIKE '库存中%' AND `Location_Code`='DG-WH')) "
+                f"WHERE {shipped_machine_sql()} "
                 "AND TRIM(COALESCE(`占用订单号`, '')) = :order_id"
             )
             with get_engine().connect() as conn:
@@ -1933,11 +1941,7 @@ def get_shipping_return_candidates(
         # Dongguan customer-warehouse shipments remain inventory records in
         # DG-WH, but they are still shipped machines and must be eligible for
         # the same return workflow as ordinary 已出库 machines.
-        where_clauses = [
-            "(TRIM(COALESCE(fg.`状态`, '')) = '已出库' OR "
-            "(TRIM(COALESCE(fg.`状态`, '')) LIKE '库存中%' "
-            "AND TRIM(COALESCE(fg.`Location_Code`, '')) IN ('DG-WH', 'DONGGUAN', '东莞仓库')))"
-        ]
+        where_clauses = [shipped_machine_sql("fg")]
         params: Dict[str, Any] = {}
         if kw:
             where_clauses.append(
@@ -2081,14 +2085,7 @@ def return_shipped_machines(
             invalid_rows = [
                 str(row.get("流水号") or "").strip()
                 for row in rows
-                if not (
-                    str(row.get("状态") or "").strip() == "已出库"
-                    or (
-                        str(row.get("状态") or "").strip().startswith("库存中")
-                        and str(row.get("Location_Code") or "").strip()
-                        in {"DG-WH", "DONGGUAN", "东莞仓库"}
-                    )
-                )
+                if not is_shipped_machine(row)
             ]
             if invalid_rows:
                 raise HTTPException(status_code=422, detail=f"仅允许退回已出库机台: {', '.join(invalid_rows[:10])}")
@@ -2107,13 +2104,11 @@ def return_shipped_machines(
             if action == "cancel_order" and impacted_order_ids:
                 order_id = next(iter(impacted_order_ids))
                 all_shipped_for_order = conn.execute(
-                    text("""
+                    text(f"""
                         SELECT `流水号`
                         FROM finished_goods_data
                         WHERE TRIM(COALESCE(`占用订单号`, '')) = :order_id
-                          AND (TRIM(COALESCE(`状态`, '')) = '已出库'
-                               OR (TRIM(COALESCE(`状态`, '')) LIKE '库存中%'
-                                   AND TRIM(COALESCE(`Location_Code`, '')) IN ('DG-WH', 'DONGGUAN', '东莞仓库')))
+                          AND {shipped_machine_sql()}
                     """),
                     {"order_id": order_id},
                 ).fetchall()

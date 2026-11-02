@@ -272,8 +272,7 @@ def complete_derived_task_route(task_no: str, payload: DerivedTaskCompleteReques
         raise HTTPException(status_code=409, detail=str(exc))
 
 
-CUSTOMER_WAREHOUSE_LOCATIONS = ('DG-WH', 'DONGGUAN', '东莞仓库')
-SHIPPED_MACHINE_STATES = ('已发货', '已出库')
+from crud.inventory import CUSTOMER_WAREHOUSE_LOCATIONS, is_shipped_machine, shipped_machine_sql
 
 
 def _assert_reverse_precondition(payload: ReverseCreateRequest) -> None:
@@ -303,16 +302,7 @@ def _assert_reverse_precondition(payload: ReverseCreateRequest) -> None:
         missing = [sn for sn in serials if sn not in by_sn]
         if missing:
             raise ValueError(f'客户成品不存在: {", ".join(missing[:10])}')
-        invalid = []
-        for sn in serials:
-            row = by_sn[sn]
-            status = str(row.get('状态') or '').strip()
-            location = str(row.get('Location_Code') or '').strip()
-            if status in SHIPPED_MACHINE_STATES:
-                continue
-            if status.startswith('库存中') and location in CUSTOMER_WAREHOUSE_LOCATIONS:
-                continue
-            invalid.append(sn)
+        invalid = [sn for sn in serials if not is_shipped_machine(by_sn[sn])]
         if invalid:
             raise ValueError(f'客户成品当前不可撤回: {", ".join(invalid[:10])}')
 
@@ -337,7 +327,7 @@ def submit_reverse_instance(payload: ReverseCreateRequest,
                 shipped_rows = conn.execute(text(f"""SELECT `流水号`, `状态`
                     FROM finished_goods_data
                     WHERE TRIM(COALESCE(`{column}`,''))=:order_id
-                      AND TRIM(COALESCE(`状态`,'')) IN ('已出库','已发货','库存中（DG-WH）')
+                      AND {shipped_machine_sql()}
                     ORDER BY `流水号`"""), {'order_id': str(payload.business_id).strip()}).mappings().all()
             if shipped_rows:
                 details = '、'.join(f"{row['流水号']}（{row['状态']}）" for row in shipped_rows[:10])
