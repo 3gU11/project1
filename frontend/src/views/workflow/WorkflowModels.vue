@@ -66,28 +66,67 @@
       <div class="designer">
         <aside class="node-palette">
           <strong>节点</strong>
-          <div v-for="type in nodeTypes" :key="type.type" class="palette-node" draggable="true" @dragstart="startDrag(type)">
+          <div v-for="type in nodeTypes" :key="type.type" class="palette-node" draggable="true" @dragstart="startDrag(type, $event)">
             <span class="node-icon">{{ type.icon }}</span>{{ type.label }}
           </div>
-          <p class="palette-tip">拖动节点到画布，点击节点编辑属性。连线通过选择前后两个节点创建。</p>
+          <p class="palette-tip">拖动节点到画布后，可直接按住节点拖到任意位置。点击节点只编辑属性；连线请先点工具栏「连线」，再依次点击起点和终点。</p>
         </aside>
-        <section class="designer-canvas" @dragover.prevent="!preview && $event.preventDefault()" @drop="!preview && dropNode($event)">
-          <div class="canvas-toolbar"><el-button v-if="preview && canEdit" size="small" type="primary" @click="enterEditMode">编辑</el-button><el-button v-else-if="!preview" size="small" @click="enterPreviewMode">预览</el-button><el-button v-if="!preview" size="small" @click="undo">撤销</el-button><el-button v-if="!preview" size="small" @click="redo">重做</el-button><span>{{ designer.draft.nodes.length }} 个节点 · {{ designer.draft.edges.length }} 条连线</span></div>
-          <div class="canvas-board" :class="{ preview }">
-            <svg class="flow-edges" aria-hidden="true"><defs><marker id="flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#64748b" /></marker></defs><line v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`" :x1="(designer.draft.nodes.find(n => n.id === edge.source)?.x || 0) + 110" :y1="(designer.draft.nodes.find(n => n.id === edge.source)?.y || 0) + 29" :x2="designer.draft.nodes.find(n => n.id === edge.target)?.x || 0" :y2="(designer.draft.nodes.find(n => n.id === edge.target)?.y || 0) + 29" stroke="#64748b" stroke-width="2" marker-end="url(#flow-arrow)" /></svg>
-            <div v-for="node in designer.draft.nodes" :key="node.id" class="flow-node" :class="{ selected: designer.selectedId === node.id }" :style="{ left: `${node.x}px`, top: `${node.y}px` }" @click.stop="selectNode(node.id)" @dblclick.stop="!preview && removeNode(node.id)">
-              <span class="node-icon">{{ iconFor(node.type) }}</span><b>{{ node.label }}</b><small>{{ node.type }}</small>
+        <section class="designer-canvas">
+          <div class="canvas-toolbar">
+            <el-button v-if="preview && canEdit" size="small" type="primary" @click="enterEditMode">编辑</el-button>
+            <template v-else-if="!preview">
+              <el-button size="small" @click="enterPreviewMode">预览</el-button>
+              <el-button size="small" :type="linkMode ? 'primary' : 'default'" @click="toggleLinkMode">连线</el-button>
+              <el-button size="small" :disabled="!designer.history.length" @click="undo">撤销</el-button>
+              <el-button size="small" :disabled="!designer.future.length" @click="redo">重做</el-button>
+            </template>
+            <span class="toolbar-divider"></span>
+            <el-button size="small" text @click="zoomOut">−</el-button>
+            <el-button size="small" text class="zoom-value" @click="resetZoom">{{ Math.round(zoom * 100) }}%</el-button>
+            <el-button size="small" text @click="zoomIn">+</el-button>
+            <el-button size="small" text @click="fitToView">适应画布</el-button>
+            <span class="canvas-stat">{{ designer.draft.nodes.length }} 个节点 · {{ designer.draft.edges.length }} 条连线</span>
+          </div>
+          <div v-if="!preview && linkMode" class="link-hint" :class="{ active: !!linkSourceId }">
+            <span v-if="linkSourceId">已选起点「{{ nodeLabel(linkSourceId) }}」，点击目标节点完成连线（点空白或按 Esc 取消）</span>
+            <span v-else>连线模式：先点击起点节点，再点击目标节点</span>
+            <el-button link size="small" @click="toggleLinkMode">退出连线</el-button>
+          </div>
+          <div ref="viewportRef" class="canvas-viewport" @dragover="onDragOver" @drop="onDrop" @dragleave="onDragLeave" @wheel="onWheel">
+            <div class="board-scale-box" :style="{ width: `${boardW * zoom}px`, height: `${boardH * zoom}px` }">
+              <div ref="boardRef" class="canvas-board" :class="{ preview, 'link-mode': linkMode && !preview, 'drag-over': dragOver }" :style="{ width: `${boardW}px`, height: `${boardH}px`, transform: `scale(${zoom})` }" @click.self="onBoardClick">
+                <svg class="flow-edges" aria-hidden="true">
+                  <defs><marker id="flow-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#64748b" /></marker></defs>
+                  <g v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`">
+                    <path :d="edgePath(edge)" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#flow-arrow)" />
+                    <text v-if="edgeBranchLabel(edge)" :x="edgeMidPoint(edge).x" :y="edgeMidPoint(edge).y - 8" class="edge-label" text-anchor="middle">{{ edgeBranchLabel(edge) }}</text>
+                  </g>
+                </svg>
+                <div
+                  v-for="node in designer.draft.nodes"
+                  :key="node.id"
+                  class="flow-node"
+                  :class="{ selected: designer.selectedId === node.id, 'link-source': linkMode && linkSourceId === node.id, 'link-target': linkMode && !!linkSourceId && linkSourceId !== node.id }"
+                  :style="{ left: `${node.x}px`, top: `${node.y}px` }"
+                  @mousedown.stop="onNodeMouseDown(node, $event)"
+                  @click.stop="onNodeClick(node)"
+                >
+                  <span class="node-icon">{{ iconFor(node.type) }}</span><b>{{ node.label }}</b><small>{{ node.type }}</small>
+                  <span v-if="linkMode && !preview" class="node-port"></span>
+                </div>
+                <div v-if="designer.draft.nodes.length === 0" class="canvas-empty">从左侧拖入节点开始设计</div>
+              </div>
             </div>
-            <div v-if="designer.draft.nodes.length === 0" class="canvas-empty">从左侧拖入节点开始设计</div>
           </div>
         </section>
         <aside class="node-properties" :class="{ 'preview-properties': preview }">
           <strong>节点属性</strong>
           <template v-if="selectedNode">
             <el-form label-position="top" size="small"><el-form-item label="节点名称"><el-input v-model="selectedNode.label" /></el-form-item><el-form-item label="节点类型"><el-input :model-value="selectedNode.type" disabled /></el-form-item><el-form-item v-if="selectedNode.type === 'approval'" label="审批角色"><el-select v-model="selectedNode.approvalRoles" multiple collapse-tags placeholder="选择审批角色" style="width:100%"><el-option v-for="role in workflowRoles" :key="role.role_id" :label="role.role_name || role.role_id" :value="role.role_id" /></el-select><small class="field-help">审批时按模型保存的角色自动生成任务，不在业务操作时临时选择人员。</small></el-form-item><el-form-item v-if="selectedNode.type === 'notify'" label="通知角色"><el-select v-model="selectedNode.notifyRoles" multiple collapse-tags collapse-tags-tooltip placeholder="选择接收通知的角色" style="width:100%"><el-option v-for="role in workflowRoles" :key="role.role_id" :label="role.role_name || role.role_id" :value="role.role_id" /></el-select><small class="field-help">仅在流程模型中配置角色，运行时自动通知该角色的用户。</small></el-form-item><el-form-item v-if="selectedNode.type === 'condition'" label="条件表达式"><el-select v-model="selectedNode.conditionField" placeholder="选择业务字段" style="width:100%"><el-option v-for="field in conditionFields" :key="field.value" :label="field.label" :value="field.value"/></el-select><el-select v-model="selectedNode.conditionOperator" placeholder="比较符" style="width:100%;margin-top:6px"><el-option v-for="op in conditionOperators" :key="op.value" :label="op.label" :value="op.value"/></el-select><el-input-number v-model="selectedNode.conditionValue" :min="0" :precision="0" controls-position="right" style="width:100%;margin-top:6px"/><small class="field-help">条件节点的两条连线会自动标记为 true 和 false。</small></el-form-item><el-form-item v-if="selectedNode.type === 'execute'" label="业务动作"><el-select v-model="selectedNode.action" placeholder="选择已注册动作" style="width:100%"><el-option v-for="action in actionOptions" :key="action.value" :label="action.label" :value="action.value"/></el-select></el-form-item></el-form>
+            <el-button plain size="small" :type="linkMode && linkSourceId === selectedNode.id ? 'primary' : 'default'" @click="startLinkFromSelected">从此节点开始连线</el-button>
             <el-button type="danger" plain size="small" @click="removeNode(selectedNode.id)">删除节点</el-button>
           </template><el-empty v-else description="选择节点后编辑" :image-size="70" />
-          <div class="edge-help"><template v-if="!preview"><b>创建连线</b><p>依次点击两个节点即可创建连线；条件节点的每条线需标记结果。</p></template><b v-else>流程连线</b><el-tag v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`" :closable="!preview" @close="!preview && removeEdge(edge)">{{ nodeLabel(edge.source) }} → {{ nodeLabel(edge.target) }}<template v-if="edge.sourceType === 'condition'">（{{ edge.branch || '未设置' }}）</template></el-tag></div>
+          <div class="edge-help"><template v-if="!preview"><b>创建连线</b><p>点工具栏「连线」进入连线模式，依次点击起点和终点；条件节点的两条出口会自动标记为「是」「否」。</p></template><b v-else>流程连线</b><el-tag v-for="edge in designer.draft.edges" :key="`${edge.source}-${edge.target}`" :closable="!preview" @close="!preview && removeEdge(edge)">{{ nodeLabel(edge.source) }} → {{ nodeLabel(edge.target) }}<template v-if="edge.sourceType === 'condition'">（{{ edge.branch || '未设置' }}）</template></el-tag></div>
         </aside>
       </div>
       <template #footer><el-button @click="designer.visible=false">取消</el-button><el-button @click="saveDraft">保存草稿</el-button><el-button type="primary" @click="publishDraft">发布新版本</el-button></template>
@@ -99,12 +138,22 @@
           <el-option v-for="version in historyVersions" :key="version.version_no" :label="`v${version.version_no}.0${version.status === '草稿' ? '（草稿）' : ''}`" :value="version.version_no" />
         </el-select>
         <span v-if="selectedHistoryVersion" class="history-meta">{{ selectedHistoryVersion.status }} · {{ selectedHistoryVersion.published_at || '未发布' }}<template v-if="selectedHistoryVersion.published_by"> · {{ selectedHistoryVersion.published_by }}</template></span>
+        <span class="history-zoom">
+          <el-button size="small" text @click="historyZoomOut">−</el-button>
+          <span class="zoom-value">{{ Math.round(historyZoom * 100) }}%</span>
+          <el-button size="small" text @click="historyZoomIn">+</el-button>
+          <el-button size="small" text @click="fitHistory">适应画布</el-button>
+        </span>
       </div>
       <div class="history-board-wrap">
-        <div class="canvas-board preview history-board">
-          <svg class="flow-edges" aria-hidden="true"><defs><marker id="history-flow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#64748b" /></marker></defs><line v-for="edge in historySnapshot.edges" :key="`${edge.source}-${edge.target}`" :x1="(historySnapshot.nodes.find(n => n.id === edge.source)?.x || 0) + 110" :y1="(historySnapshot.nodes.find(n => n.id === edge.source)?.y || 0) + 29" :x2="historySnapshot.nodes.find(n => n.id === edge.target)?.x || 0" :y2="(historySnapshot.nodes.find(n => n.id === edge.target)?.y || 0) + 29" stroke="#64748b" stroke-width="2" marker-end="url(#history-flow-arrow)" /></svg>
-          <div v-for="node in historySnapshot.nodes" :key="node.id" class="flow-node" :style="{ left: `${node.x}px`, top: `${node.y}px` }"><span class="node-icon">{{ iconFor(node.type) }}</span><b>{{ node.label }}</b><small>{{ node.type }}</small></div>
-          <div v-if="historySnapshot.nodes.length === 0" class="canvas-empty">该版本没有流程图数据</div>
+        <div class="canvas-viewport history-viewport" ref="historyViewportRef">
+          <div class="board-scale-box" :style="{ width: `${historyBoardW * historyZoom}px`, height: `${historyBoardH * historyZoom}px` }">
+            <div class="canvas-board preview history-board" :style="{ width: `${historyBoardW}px`, height: `${historyBoardH}px`, transform: `scale(${historyZoom})` }">
+              <svg class="flow-edges" aria-hidden="true"><defs><marker id="history-flow-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#64748b" /></marker></defs><path v-for="edge in historySnapshot.edges" :key="`${edge.source}-${edge.target}`" :d="edgePathOf(historySnapshot, edge)" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#history-flow-arrow)" /></svg>
+              <div v-for="node in historySnapshot.nodes" :key="node.id" class="flow-node" :style="{ left: `${node.x}px`, top: `${node.y}px` }"><span class="node-icon">{{ iconFor(node.type) }}</span><b>{{ node.label }}</b><small>{{ node.type }}</small></div>
+              <div v-if="historySnapshot.nodes.length === 0" class="canvas-empty">该版本没有流程图数据</div>
+            </div>
+          </div>
         </div>
       </div>
       <template #footer><el-button @click="historyVisible = false">关闭</el-button></template>
@@ -113,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiDelete, apiGet, apiPost, getApiErrorMessage } from '../../utils/request'
 import { useUserStore } from '../../store/user'
@@ -135,6 +184,16 @@ const loading = ref(false)
 const nodeTypes = [{ type: 'start', label: '发起', icon: '▶' }, { type: 'approval', label: '审批', icon: '✓' }, { type: 'execute', label: '自动执行', icon: '⚙' }, { type: 'condition', label: '条件分支', icon: '?' }, { type: 'notify', label: '通知', icon: '!' }, { type: 'end', label: '结束', icon: '■' }]
 const designer = ref<{ visible: boolean; model: Model | null; selectedId: string | null; draft: { nodes: FlowNode[]; edges: FlowEdge[] }; history: string[]; future: string[] }>({ visible: false, model: null, selectedId: null, draft: { nodes: [], edges: [] }, history: [], future: [] })
 const preview = ref(false)
+// 画布交互状态：拖动、显式连线模式、缩放
+const viewportRef = ref<HTMLElement | null>(null)
+const boardRef = ref<HTMLElement | null>(null)
+const historyViewportRef = ref<HTMLElement | null>(null)
+const zoom = ref(1)
+const historyZoom = ref(1)
+const linkMode = ref(false)
+const linkSourceId = ref<string | null>(null)
+const dragType = ref('')
+const dragOver = ref(false)
 const historyVisible = ref(false)
 const historyModel = ref<Model | null>(null)
 const historyVersions = ref<any[]>([])
@@ -147,6 +206,237 @@ const workflowRoles = ref<any[]>([])
 const pendingCount = ref(0)
 const canEdit = computed(() => ['admin', 'boss'].includes(String(userStore.userInfo?.role || '').toLowerCase()))
 const selectedNode = computed(() => designer.value.draft.nodes.find(node => node.id === designer.value.selectedId))
+
+/* ---------------- 画布几何：节点尺寸、可拖范围、自动扩展与缩放 ---------------- */
+const NODE_W = 110
+const NODE_H = 58
+const BOARD_MIN_W = 760
+const BOARD_MIN_H = 510
+const BOARD_PAD_X = 180
+const BOARD_PAD_Y = 140
+// 画布逻辑上限，避免拖动时画布无限增长
+const BOARD_MAX_W = 4200
+const BOARD_MAX_H = 3000
+const ZOOM_MIN = 0.3
+const ZOOM_MAX = 1.8
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max))
+const round2 = (value: number) => Math.round(value * 100) / 100
+const nodeById = (id: string) => designer.value.draft.nodes.find(node => node.id === id)
+
+const boardW = computed(() => {
+  const nodes = designer.value.draft.nodes
+  const maxX = nodes.length ? Math.max(...nodes.map(node => node.x + NODE_W)) : 0
+  return Math.round(clamp(Math.max(BOARD_MIN_W, maxX + BOARD_PAD_X), BOARD_MIN_W, BOARD_MAX_W))
+})
+const boardH = computed(() => {
+  const nodes = designer.value.draft.nodes
+  const maxY = nodes.length ? Math.max(...nodes.map(node => node.y + NODE_H)) : 0
+  return Math.round(clamp(Math.max(BOARD_MIN_H, maxY + BOARD_PAD_Y), BOARD_MIN_H, BOARD_MAX_H))
+})
+const historyBoardW = computed(() => Math.round(clamp(Math.max(BOARD_MIN_W, Math.max(0, ...historySnapshot.value.nodes.map(node => node.x + NODE_W)) + BOARD_PAD_X), BOARD_MIN_W, BOARD_MAX_W)))
+const historyBoardH = computed(() => Math.round(clamp(Math.max(BOARD_MIN_H, Math.max(0, ...historySnapshot.value.nodes.map(node => node.y + NODE_H)) + BOARD_PAD_Y), BOARD_MIN_H, BOARD_MAX_H)))
+
+// 连线走贝塞尔：目标在右侧时从源右端出、目标左端入；目标在左侧时反向绕行，避免直线交叉。
+const edgePathOf = (snapshotValue: { nodes: FlowNode[]; edges: FlowEdge[] }, edge: FlowEdge) => {
+  const source = snapshotValue.nodes.find(node => node.id === edge.source)
+  const target = snapshotValue.nodes.find(node => node.id === edge.target)
+  if (!source || !target) return ''
+  const forward = target.x >= source.x + NODE_W / 2
+  const sx = forward ? source.x + NODE_W : source.x
+  const tx = forward ? target.x : target.x + NODE_W
+  const sy = source.y + NODE_H / 2
+  const ty = target.y + NODE_H / 2
+  const dx = Math.max(50, Math.abs(tx - sx) / 2)
+  const c1 = forward ? sx + dx : sx - dx
+  const c2 = forward ? tx - dx : tx + dx
+  return `M${sx},${sy} C${c1},${sy} ${c2},${ty} ${tx},${ty}`
+}
+const edgePath = (edge: FlowEdge) => edgePathOf(designer.value.draft, edge)
+const edgeMidPoint = (edge: FlowEdge) => {
+  const source = nodeById(edge.source)
+  const target = nodeById(edge.target)
+  if (!source || !target) return { x: 0, y: 0 }
+  return { x: (source.x + NODE_W + target.x) / 2, y: (source.y + target.y) / 2 + NODE_H / 2 }
+}
+const edgeBranchLabel = (edge: FlowEdge) => {
+  if (edge.sourceType !== 'condition' && nodeById(edge.source)?.type !== 'condition') return ''
+  return edge.branch === 'false' ? '否' : '是'
+}
+
+/* ---------------- 缩放与自适应 ---------------- */
+const zoomIn = () => { zoom.value = round2(clamp(zoom.value + 0.1, ZOOM_MIN, ZOOM_MAX)) }
+const zoomOut = () => { zoom.value = round2(clamp(zoom.value - 0.1, ZOOM_MIN, ZOOM_MAX)) }
+const resetZoom = () => { zoom.value = 1 }
+const fitToView = () => {
+  const viewport = viewportRef.value
+  if (!viewport) return
+  // 按整张画布（含右侧留白）计算，保证缩放后不需要滚动就能看全
+  const pad = 12
+  const scale = Math.min(
+    (viewport.clientWidth - pad * 2) / Math.max(1, boardW.value),
+    (viewport.clientHeight - pad * 2) / Math.max(1, boardH.value),
+    1.15,
+  )
+  zoom.value = round2(clamp(scale, ZOOM_MIN, ZOOM_MAX))
+  nextTick(() => {
+    viewport.scrollLeft = 0
+    viewport.scrollTop = 0
+  })
+}
+const fitHistory = () => {
+  const viewport = historyViewportRef.value
+  if (!viewport) return
+  const pad = 12
+  const scale = Math.min(
+    (viewport.clientWidth - pad * 2) / Math.max(1, historyBoardW.value),
+    (viewport.clientHeight - pad * 2) / Math.max(1, historyBoardH.value),
+    1.15,
+  )
+  historyZoom.value = round2(clamp(scale, ZOOM_MIN, ZOOM_MAX))
+  nextTick(() => {
+    viewport.scrollLeft = 0
+    viewport.scrollTop = 0
+  })
+}
+const historyZoomIn = () => { historyZoom.value = round2(clamp(historyZoom.value + 0.1, ZOOM_MIN, ZOOM_MAX)) }
+const historyZoomOut = () => { historyZoom.value = round2(clamp(historyZoom.value - 0.1, ZOOM_MIN, ZOOM_MAX)) }
+
+/* ---------------- 节点拖动 ---------------- */
+type DragState = { id: string; startX: number; startY: number; originX: number; originY: number; moved: boolean }
+let dragState: DragState | null = null
+let dragHistorySnapshot = ''
+let suppressClick = false
+
+const onNodeMouseDown = (node: FlowNode, event: MouseEvent) => {
+  if (preview.value || event.button !== 0) return
+  event.preventDefault()
+  dragState = { id: node.id, startX: event.clientX, startY: event.clientY, originX: node.x, originY: node.y, moved: false }
+  dragHistorySnapshot = snapshot()
+  window.addEventListener('mousemove', onNodeMouseMove)
+  window.addEventListener('mouseup', onNodeMouseUp)
+}
+const onNodeMouseMove = (event: MouseEvent) => {
+  if (!dragState) return
+  const dx = (event.clientX - dragState.startX) / zoom.value
+  const dy = (event.clientY - dragState.startY) / zoom.value
+  if (!dragState.moved && Math.hypot(dx, dy) < 3) return
+  if (!dragState.moved) {
+    dragState.moved = true
+    // 拖动过程中抑制 click，避免松手时误触选中/连线
+    suppressClick = true
+  }
+  const node = nodeById(dragState.id)
+  if (!node) return
+  node.x = clamp(Math.round(dragState.originX + dx), 0, BOARD_MAX_W - NODE_W)
+  node.y = clamp(Math.round(dragState.originY + dy), 0, BOARD_MAX_H - NODE_H)
+}
+const onNodeMouseUp = () => {
+  const state = dragState
+  window.removeEventListener('mousemove', onNodeMouseMove)
+  window.removeEventListener('mouseup', onNodeMouseUp)
+  dragState = null
+  if (state?.moved && dragHistorySnapshot) {
+    // 只在拖动结束时压一次历史，避免每个 mousemove 都进撤销栈
+    designer.value.history.push(dragHistorySnapshot)
+    designer.value.future = []
+    // 拖完顺手选中，方便接着调属性
+    designer.value.selectedId = state.id
+  }
+  dragHistorySnapshot = ''
+  window.setTimeout(() => { suppressClick = false }, 0)
+}
+
+/* ---------------- 节点点击 / 连线模式 ---------------- */
+const toggleLinkMode = () => {
+  linkMode.value = !linkMode.value
+  linkSourceId.value = null
+  if (linkMode.value) designer.value.selectedId = null
+}
+const startLinkFromSelected = () => {
+  if (!designer.value.selectedId) { ElMessage.warning('请先选中一个节点作为连线起点'); return }
+  linkMode.value = true
+  linkSourceId.value = designer.value.selectedId
+}
+const onBoardClick = () => {
+  if (linkSourceId.value) { linkSourceId.value = null; return }
+  if (!linkMode.value) designer.value.selectedId = null
+}
+const createEdge = (sourceId: string, targetId: string) => {
+  if (sourceId === targetId) return
+  if (designer.value.draft.edges.some(edge => edge.source === sourceId && edge.target === targetId)) {
+    ElMessage.warning('这两个节点之间已经有一条连线')
+    return
+  }
+  const source = nodeById(sourceId)
+  const outgoing = designer.value.draft.edges.filter(edge => edge.source === sourceId)
+  if (source?.type !== 'condition' && outgoing.length) {
+    ElMessage.warning(`「${source?.label || sourceId}」已经有一条后续连线，请先删除原有连线`)
+    return
+  }
+  record()
+  const edge: FlowEdge = { source: sourceId, target: targetId }
+  if (source?.type === 'condition') {
+    edge.sourceType = 'condition'
+    edge.branch = outgoing.some(item => item.branch === 'true') ? 'false' : 'true'
+    source.branches = { ...(source.branches || {}), [edge.branch]: targetId }
+  }
+  designer.value.draft.edges.push(edge)
+  ElMessage.success(`已连线：${nodeLabel(sourceId)} → ${nodeLabel(targetId)}${edge.branch ? `（${edge.branch === 'true' ? '是' : '否'}）` : ''}`)
+}
+const onNodeClick = (node: FlowNode) => {
+  if (suppressClick) return
+  if (preview.value) { designer.value.selectedId = node.id; return }
+  if (!linkMode.value) { designer.value.selectedId = node.id; return }
+  if (!linkSourceId.value) { linkSourceId.value = node.id; designer.value.selectedId = node.id; return }
+  if (linkSourceId.value === node.id) { linkSourceId.value = null; return }
+  const sourceId = linkSourceId.value
+  createEdge(sourceId, node.id)
+  // 条件节点需要两条出口，连完一条保留起点方便继续连；其它节点连完即复位
+  if (nodeById(sourceId)?.type !== 'condition') linkSourceId.value = null
+  designer.value.selectedId = node.id
+}
+
+/* ---------------- 拖入节点 ---------------- */
+const onDragOver = (event: DragEvent) => {
+  if (preview.value) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  dragOver.value = true
+}
+const onDragLeave = (event: DragEvent) => {
+  // 移到子元素上也会触发 dragleave，这里过滤掉避免高亮闪烁
+  const related = event.relatedTarget as Node | null
+  if (related && (event.currentTarget as HTMLElement).contains(related)) return
+  dragOver.value = false
+}
+const onDrop = (event: DragEvent) => {
+  dragOver.value = false
+  if (preview.value) return
+  // 兼容未触发 dragstart 记录的情况（部分浏览器）
+  if (!dragType.value && event.dataTransfer) dragType.value = event.dataTransfer.getData('text/plain')
+  dropNode(event)
+}
+const scrollNodeIntoView = (x: number, y: number) => {
+  const viewport = viewportRef.value
+  if (!viewport) return
+  const left = x * zoom.value
+  const top = y * zoom.value
+  const margin = 80
+  if (left < viewport.scrollLeft || left > viewport.scrollLeft + viewport.clientWidth - NODE_W - margin) {
+    viewport.scrollLeft = Math.max(0, left - margin)
+  }
+  if (top < viewport.scrollTop || top > viewport.scrollTop + viewport.clientHeight - NODE_H - margin) {
+    viewport.scrollTop = Math.max(0, top - margin)
+  }
+}
+// Ctrl + 滚轮缩放，普通滚轮仍用于滚动查看
+const onWheel = (event: WheelEvent) => {
+  if (!event.ctrlKey) return
+  event.preventDefault()
+  if (event.deltaY < 0) zoomIn()
+  else zoomOut()
+}
 // 动作清单由后端 catalog 下发，这里只保留中文标签。
 // 后端 WORKFLOW_ACTIONS 新增动作时，前端无需改动即可出现在下拉框（无标签时回退显示动作名）。
 const actionLabels: Record<string, string> = {
@@ -208,11 +498,45 @@ const iconFor = (type: string) => nodeTypes.find(item => item.type === type)?.ic
 const nodeLabel = (id: string) => designer.value.draft.nodes.find(node => node.id === id)?.label || nodeTypes.find(item => item.type === id.split('-')[0])?.label || id
 const snapshot = () => JSON.stringify(designer.value.draft)
 const record = () => { designer.value.history.push(snapshot()); designer.value.future = [] }
-const startDrag = (type: any) => { designer.value.selectedId = type.type }
-const dropNode = (event: DragEvent) => { const type = nodeTypes.find(item => item.type === designer.value.selectedId) || nodeTypes[0]; record(); const rect = (event.currentTarget as HTMLElement).querySelector('.canvas-board')!.getBoundingClientRect(); const id = `${type.type}-${Date.now()}`; designer.value.draft.nodes.push({ id, type: type.type, label: type.label, x: Math.max(12, event.clientX - rect.left - 55), y: Math.max(48, event.clientY - rect.top - 24) }); designer.value.selectedId = id }
-const selectNode = (id: string) => { if (preview.value) { designer.value.selectedId = id; return }; if (designer.value.selectedId && designer.value.selectedId !== id) { const source = designer.value.draft.nodes.find(node => node.id === designer.value.selectedId); const edge: FlowEdge = { source: designer.value.selectedId, target: id }; if (source?.type === 'condition') { edge.sourceType = 'condition'; edge.branch = designer.value.draft.edges.some(item => item.source === source.id && item.branch === 'true') ? 'false' : 'true' } if (!designer.value.draft.edges.some(item => item.source === edge.source && item.target === edge.target)) { record(); designer.value.draft.edges.push(edge) } } designer.value.selectedId = id }
-const enterEditMode = () => { designer.value.selectedId = null; preview.value = false }
-const enterPreviewMode = () => { designer.value.selectedId = null; preview.value = true }
+const startDrag = (type: any, event?: DragEvent) => {
+  dragType.value = String(type?.type || '')
+  if (event?.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'copy'
+    // 不写数据时 Firefox 不会触发 drop
+    event.dataTransfer.setData('text/plain', dragType.value)
+  }
+}
+const dropNode = (event: DragEvent) => {
+  const type = nodeTypes.find(item => item.type === dragType.value)
+  dragType.value = ''
+  if (!type) return
+  const board = boardRef.value
+  if (!board) return
+  event.preventDefault()
+  const rect = board.getBoundingClientRect()
+  // board 带 transform: scale()，除以 zoom 才能换算成逻辑坐标
+  const x = clamp(Math.round((event.clientX - rect.left) / zoom.value - NODE_W / 2), 0, BOARD_MAX_W - NODE_W)
+  const y = clamp(Math.round((event.clientY - rect.top) / zoom.value - NODE_H / 2), 0, BOARD_MAX_H - NODE_H)
+  record()
+  const id = `${type.type}-${Date.now()}`
+  designer.value.draft.nodes.push({ id, type: type.type, label: type.label, x, y })
+  designer.value.selectedId = id
+  nextTick(() => scrollNodeIntoView(x, y))
+}
+const enterEditMode = () => {
+  designer.value.selectedId = null
+  preview.value = false
+  linkMode.value = false
+  linkSourceId.value = null
+  nextTick(fitToView)
+}
+const enterPreviewMode = () => {
+  designer.value.selectedId = null
+  preview.value = true
+  linkMode.value = false
+  linkSourceId.value = null
+  nextTick(fitToView)
+}
 const removeNode = (id: string) => { record(); designer.value.draft.nodes = designer.value.draft.nodes.filter(node => node.id !== id); designer.value.draft.edges = designer.value.draft.edges.filter(edge => edge.source !== id && edge.target !== id); designer.value.selectedId = null }
 const removeEdge = (edge: FlowEdge) => { record(); designer.value.draft.edges = designer.value.draft.edges.filter(item => item !== edge) }
 const validateDraft = () => {
@@ -322,6 +646,36 @@ onMounted(loadModels)
 onMounted(loadPendingCount)
 onMounted(async () => { if (!canEdit.value) return; try { const options = await apiGet<{users:any[]; roles:any[]}>('/workflows/configuration-options'); approvers.value = options.users || []; workflowRoles.value = options.roles || [] } catch {} })
 
+// 打开设计器、切换预览/编辑后都自动适配画布，避免历史坐标把节点甩到可视区外
+watch(() => designer.value.visible, async (visible) => {
+  if (!visible) return
+  await nextTick()
+  window.setTimeout(fitToView, 80)
+})
+watch(preview, async () => { await nextTick(); window.setTimeout(fitToView, 60) })
+
+const onKeydown = (event: KeyboardEvent) => {
+  if (!designer.value.visible) return
+  const target = event.target as HTMLElement | null
+  if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+  if (event.key === 'Escape') {
+    if (linkSourceId.value) { linkSourceId.value = null; return }
+    if (linkMode.value) { linkMode.value = false; return }
+  }
+  if ((event.key === 'Delete' || event.key === 'Backspace') && !preview.value && designer.value.selectedId) {
+    event.preventDefault()
+    removeNode(designer.value.selectedId)
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onMounted(() => window.addEventListener('blur', onNodeMouseUp))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('blur', onNodeMouseUp)
+  window.removeEventListener('mousemove', onNodeMouseMove)
+  window.removeEventListener('mouseup', onNodeMouseUp)
+})
+
 const categories = ['合同流程', '订单流程', '发货流程', '库存流程', '配货流程', '客户成品流程', '基础资料流程', '数据清理流程']
 const filteredGroups = computed(() => categories.map(category => ({ title: category, items: models.value.filter(item => item.category === category && (!direction.value || item.direction === direction.value) && (!mode.value || item.mode === mode.value) && (!keyword.value || `${item.name}${item.key}${item.object}`.toLowerCase().includes(keyword.value.toLowerCase()))) })).filter(group => group.items.length))
 const isExpanded = (title: string) => expanded.value.has(title)
@@ -426,7 +780,7 @@ const parseHistorySnapshot = (value: any): { nodes: FlowNode[]; edges: FlowEdge[
   if (!value) return { nodes: [], edges: [] }
   try { const parsed = typeof value === 'string' ? JSON.parse(value) : value; return { nodes: Array.isArray(parsed?.nodes) ? parsed.nodes : [], edges: Array.isArray(parsed?.edges) ? parsed.edges : [] } } catch { return { nodes: [], edges: [] } }
 }
-const selectHistoryVersion = () => { const version = selectedHistoryVersion.value; historySnapshot.value = parseHistorySnapshot(version?.node_snapshot) }
+const selectHistoryVersion = () => { const version = selectedHistoryVersion.value; historySnapshot.value = parseHistorySnapshot(version?.node_snapshot); nextTick(fitHistory) }
 const openHistory = async (row: Model) => {
   try {
     const response = await apiGet<{ data: any[] }>(`/workflows/models/${encodeURIComponent(row.key)}/versions`)
@@ -435,6 +789,8 @@ const openHistory = async (row: Model) => {
     historyVersion.value = historyVersions.value[0]?.version_no ?? null
     historySnapshot.value = parseHistorySnapshot(historyVersions.value[0]?.node_snapshot)
     historyVisible.value = true
+    await nextTick()
+    window.setTimeout(fitHistory, 80)
   } catch { /* request interceptor displays the server error */ }
 }
 </script>
@@ -443,5 +799,31 @@ const openHistory = async (row: Model) => {
 .workflow-page{padding:28px;max-width:1500px}.page-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}h1{margin:0 0 8px;font-size:24px;color:#1f2937}.workflow-badge{vertical-align:top;margin-left:8px}.intro{margin:0;color:#64748b}.toolbar{display:flex;gap:12px;margin-bottom:20px}.search-input{width:320px}.filter-select{width:160px}.model-group{margin-bottom:18px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden}.group-head{display:flex;justify-content:space-between;align-items:center;width:100%;padding:14px 18px;border:0;background:#f8fafc;color:#1f2937;cursor:pointer;text-align:left}.group-head:hover{background:#f1f5f9}.group-title{display:flex;align-items:center;gap:8px}.group-count{font-size:13px;color:#94a3b8}.chevron{display:inline-block;font-size:22px;line-height:12px;transform:rotate(0deg);transition:transform .15s}.chevron.expanded{transform:rotate(90deg)}.table-wrap{border-top:1px solid #e5e7eb}.approval-mode{color:#d97706}.auto-mode{color:#059669}.version{display:block;color:#94a3b8;font-size:12px;margin-top:2px}.designer{display:grid;grid-template-columns:170px 1fr 240px;gap:12px;min-height:560px}.node-palette,.node-properties{border:1px solid #e5e7eb;padding:14px;background:#f8fafc}.palette-node{padding:10px;margin-top:8px;background:#fff;border:1px solid #dbe3ee;border-radius:6px;cursor:grab}.node-icon{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;margin-right:7px;border-radius:50%;background:#e0ecff;color:#2563eb}.palette-tip,.edge-help{font-size:12px;color:#64748b;line-height:1.6}.designer-canvas{border:1px solid #dbe3ee;overflow:auto}.canvas-toolbar{height:42px;padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12px}.canvas-board{position:relative;min-width:760px;height:510px;background-color:#fff;background-image:radial-gradient(#d7dee8 1px,transparent 1px);background-size:18px 18px}.canvas-board.preview{background-color:#f8fafc}.flow-node{position:absolute;width:110px;min-height:58px;padding:8px;border:2px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;box-shadow:0 2px 6px #00000012}.flow-node.selected{border-color:#2563eb;box-shadow:0 0 0 2px #93c5fd}.flow-node b,.flow-node small{display:block}.flow-node small{color:#64748b;font-size:11px}.canvas-empty{padding:220px;text-align:center;color:#94a3b8}.node-properties{background:#fff}.edge-help{margin-top:18px}.edge-help .el-tag{margin:3px}
 @media (max-width:900px){.workflow-page{padding:16px}.toolbar{flex-wrap:wrap}.search-input{width:100%}.filter-select{flex:1;min-width:140px}.table-wrap{overflow-x:auto}}
  .flow-edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}.flow-node{z-index:1}.canvas-board.preview .flow-node{cursor:default}.preview-properties{pointer-events:none;opacity:.75}.field-help{display:block;color:#64748b;font-size:11px;line-height:1.5}
-.history-toolbar{display:flex;align-items:center;gap:14px;margin-bottom:12px}.history-meta{color:#64748b;font-size:13px}.history-board-wrap{border:1px solid #dbe3ee;overflow:auto}.history-board{min-width:900px}
+.history-toolbar{display:flex;align-items:center;gap:14px;margin-bottom:12px}.history-meta{color:#64748b;font-size:13px}.history-board-wrap{border:0;overflow:visible}.history-board{min-width:0}
+
+/* --- 画布交互：节点拖动 / 显式连线模式 / 缩放自适应 --- */
+.designer-canvas{display:flex;flex-direction:column;overflow:hidden;height:calc(86vh - 190px);min-height:520px}
+.canvas-toolbar{flex:0 0 auto;flex-wrap:wrap;height:auto;min-height:42px}
+.toolbar-divider{width:1px;height:16px;background:#e2e8f0;margin:0 4px}
+.canvas-stat{margin-left:auto;color:#94a3b8;white-space:nowrap}
+.zoom-value{min-width:54px;font-variant-numeric:tabular-nums}
+.link-hint{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:7px 12px;background:#eff6ff;border-bottom:1px solid #bfdbfe;color:#1d4ed8;font-size:12px}
+.link-hint.active{background:#fef3c7;border-bottom-color:#fcd34d;color:#b45309}
+.link-hint .el-button{margin-left:auto}
+.canvas-viewport{position:relative;flex:1 1 auto;overflow:auto;background:#f1f5f9}
+.board-scale-box{position:relative}
+.canvas-board{position:relative;min-width:0;height:auto;transform-origin:0 0}
+.canvas-board.drag-over{box-shadow:inset 0 0 0 2px #93c5fd}
+.canvas-board.link-mode{cursor:crosshair}
+.flow-node{cursor:grab;user-select:none;touch-action:none}
+.flow-node:active{cursor:grabbing}
+.canvas-board.preview .flow-node{cursor:default}
+.flow-node.link-source{border-color:#f59e0b;box-shadow:0 0 0 3px #fde68a}
+.flow-node.link-target:hover{border-color:#2563eb;box-shadow:0 0 0 3px #bfdbfe}
+.node-port{position:absolute;right:-7px;top:50%;width:12px;height:12px;margin-top:-6px;border:2px solid #f59e0b;border-radius:50%;background:#fff;pointer-events:none}
+.edge-label{font-size:11px;fill:#475569;stroke:#fff;stroke-width:3px;paint-order:stroke}
+.canvas-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0}
+.history-viewport{height:62vh;border:1px solid #dbe3ee;border-radius:4px}
+.history-board{min-width:0}
+.node-properties{max-height:calc(86vh - 190px);overflow-y:auto}
 </style>
