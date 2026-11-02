@@ -27,10 +27,21 @@ function Resolve-CommandSource([string]$name) {
   if ($cmd -and $cmd.Source) { return $cmd.Source }
   return $null
 }
+function Test-PythonExe([string]$path) {
+  if (-not $path -or -not (Test-Path -LiteralPath $path)) { return $false }
+  try {
+    & $path -c "import sys" *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    return $false
+  }
+}
 function Resolve-PythonExe([string]$requested, [string]$repoRoot) {
   if (-not [string]::IsNullOrWhiteSpace($requested)) {
-    if (Test-Path -LiteralPath $requested) { return (Resolve-Path -LiteralPath $requested).Path }
-    Fail "Python not found: $requested" 1
+    if (-not (Test-Path -LiteralPath $requested)) { Fail "Python not found: $requested" 1 }
+    $resolved = (Resolve-Path -LiteralPath $requested).Path
+    if (Test-PythonExe $resolved) { return $resolved }
+    Fail "Python is not usable (missing pyvenv.cfg or broken install): $resolved" 1
   }
 
   foreach ($candidate in @(
@@ -38,12 +49,16 @@ function Resolve-PythonExe([string]$requested, [string]$repoRoot) {
     (Join-Path $repoRoot '.venv\Scripts\python.exe'),
     (Join-Path $repoRoot 'venv\Scripts\python.exe')
   )) {
-    if (Test-Path -LiteralPath $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
+    if (-not (Test-Path -LiteralPath $candidate)) { continue }
+    if (Test-PythonExe $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
+    # 目录残缺的虚拟环境（缺 pyvenv.cfg）会让 python 直接退出，跳过而不是让后续服务全部起不来
+    Log "Skipping unusable interpreter: $candidate"
   }
 
-  $python = Resolve-CommandSource 'python.exe'
-  if (-not $python) { $python = Resolve-CommandSource 'python' }
-  if ($python) { return $python }
+  foreach ($name in @('python.exe', 'python')) {
+    $python = Resolve-CommandSource $name
+    if ($python -and (Test-PythonExe $python)) { return $python }
+  }
 
   Fail 'Python not found. Install Python, create .venv, or pass -PythonExe <path>.' 1
 }
