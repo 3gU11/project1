@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from database import get_engine
 
 from api.routes.auth import get_current_user_context, require_roles
@@ -75,7 +75,7 @@ class WorkflowActionRequest(BaseModel):
 
 
 class CloseStaleRequest(BaseModel):
-    max_age_hours: int = Field(default=24, ge=1, le=24 * 90)
+    max_age_hours: int = Field(default=24, ge=0, le=24 * 90)
     dry_run: bool = True
     reason: str = ''
 
@@ -272,6 +272,51 @@ def complete_derived_task_route(task_no: str, payload: DerivedTaskCompleteReques
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+CUSTOMER_WAREHOUSE_LOCATIONS = ('DG-WH', 'DONGGUAN', '东莞仓库')
+SHIPPED_MACHINE_STATES = ('已发货', '已出库')
+
+
+def _assert_reverse_precondition(payload: ReverseCreateRequest) -> None:
+    """把注定失败的提交挡在"建实例"之前。
+
+    这些校验原先只在执行器里做：一旦失败，实例就停在"执行异常"，
+    冲突校验会把同一业务对象的后续流程全部拒绝，用户既撤不回也删不掉。
+    """
+    key = payload.workflow_key
+    items = payload.items or []
+
+    if key == 'allocation-recall':
+        # 执行器只认"机台"明细；传成订单会必然失败，且明细创建后无法修正。
+        if not items or any(str(item.object_type).strip() != '机台' for item in items):
+            raise ValueError('撤回配货需要按机台发起：请选择要撤回的机台，不能只传订单')
+        return
+
+    if key == 'customer-finished-recall':
+        serials = sorted({str(item.object_id).strip() for item in items if str(item.object_id).strip()})
+        if not serials:
+            raise ValueError('客户成品撤回流程缺少有效机台明细')
+        with get_engine().connect() as conn:
+            rows = conn.execute(text("""SELECT `流水号`,`状态`,`Location_Code`
+                FROM finished_goods_data WHERE TRIM(`流水号`) IN :sns
+                """).bindparams(bindparam('sns', expanding=True)), {'sns': serials}).mappings().all()
+        by_sn = {str(row['流水号']).strip(): row for row in rows}
+        missing = [sn for sn in serials if sn not in by_sn]
+        if missing:
+            raise ValueError(f'客户成品不存在: {", ".join(missing[:10])}')
+        invalid = []
+        for sn in serials:
+            row = by_sn[sn]
+            status = str(row.get('状态') or '').strip()
+            location = str(row.get('Location_Code') or '').strip()
+            if status in SHIPPED_MACHINE_STATES:
+                continue
+            if status.startswith('库存中') and location in CUSTOMER_WAREHOUSE_LOCATIONS:
+                continue
+            invalid.append(sn)
+        if invalid:
+            raise ValueError(f'客户成品当前不可撤回: {", ".join(invalid[:10])}')
+
+
 @router.post('/reverse/instances')
 def submit_reverse_instance(payload: ReverseCreateRequest,
                             ctx: dict = Depends(get_current_user_context)):
@@ -298,6 +343,8 @@ def submit_reverse_instance(payload: ReverseCreateRequest,
                 details = '、'.join(f"{row['流水号']}（{row['状态']}）" for row in shipped_rows[:10])
                 suffix = '等' if len(shipped_rows) > 10 else ''
                 raise ValueError(f'存在已出库/已发货机台，不能发起{operation}：{details}{suffix}')
+        # 其余可预判的前置校验（撤回配货明细、客户成品状态）同样在建实例之前完成。
+        _assert_reverse_precondition(payload)
         row, created = create_reverse_instance(
             workflow_key=payload.workflow_key,
             execution_data=payload.execution_data,
@@ -404,6 +451,21 @@ def withdraw_workflow(instance_no: str, payload: WorkflowActionRequest,
                       ctx: dict = Depends(get_current_user_context)):
     try:
         return {'data': transition_reverse_instance(instance_no, 'withdraw', ctx['username'],
+                                                    payload.reason, operator_role=ctx.get('role', ''))}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post('/instances/{instance_no}/abandon')
+def abandon_workflow(instance_no: str, payload: WorkflowActionRequest,
+                     ctx: dict = Depends(require_roles('admin', 'boss'))):
+    """作废执行失败的实例，释放被它锁住的业务对象。
+
+    执行异常/永久失败待处理 的实例没有别的出口（withdraw 只认审批中），
+    而冲突校验会把同一业务对象的后续流程全部拒绝，最终只能改库。
+    """
+    try:
+        return {'data': transition_reverse_instance(instance_no, 'abandon', ctx['username'],
                                                     payload.reason, operator_role=ctx.get('role', ''))}
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

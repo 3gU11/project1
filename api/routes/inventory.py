@@ -1273,6 +1273,28 @@ def reset_layout(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _assert_slot_has_room(serial_no: str, slot_code: str) -> None:
+    """目标库位已满时直接拒绝，避免"先建流程实例、再在执行期失败"。
+
+    判定口径与 crud.inventory.inbound_to_slot 保持一致：
+    不限容量库位跳过、报废区只数报废机台、其余只数"库存中"。
+    """
+    from crud.inventory import get_slot_capacity, is_scrap_slot, is_unlimited_slot
+
+    if is_unlimited_slot(slot_code):
+        return
+    capacity = get_slot_capacity(slot_code)
+    if capacity == float("inf"):
+        return
+    status_clause = "`状态`='报废'" if is_scrap_slot(slot_code) else "`状态` LIKE '库存中%'"
+    with get_engine().connect() as conn:
+        occupied = conn.execute(text(f"""SELECT COUNT(*) FROM finished_goods_data
+            WHERE `Location_Code`=:slot AND {status_clause} AND TRIM(`流水号`)<>:sn"""),
+            {"slot": slot_code, "sn": serial_no}).scalar() or 0
+    if int(occupied) >= int(capacity):
+        raise HTTPException(status_code=422, detail=f"库位 {slot_code} 已满载")
+
+
 @router.post("/inbound-to-slot")
 def inbound_machine_to_slot(
     payload: InboundSlotPayload,
@@ -1281,6 +1303,15 @@ def inbound_machine_to_slot(
 ):
     permission = "WAREHOUSE_MAP" if payload.is_transfer else "INBOUND"
     require_permissions(permission)(current_user)
+    # 前置校验：机台/库位为空、目标库位已满都属于"注定失败"的提交，
+    # 不该先建流程实例（失败后实例停在执行异常，会锁死该机台的后续流程）。
+    serial_no = str(payload.serial_no or "").strip()
+    slot_code = str(payload.slot_code or "").strip()
+    if not serial_no:
+        raise HTTPException(status_code=422, detail="请先选择机台")
+    if not slot_code:
+        raise HTTPException(status_code=422, detail="请先选择目标库位")
+    _assert_slot_has_room(serial_no, slot_code)
     from crud.forward_entries import submit_entry
     workflow_response = submit_entry('stock-transfer' if payload.is_transfer else 'stock-inbound', payload, current_user, request, business_id=str(payload.serial_no))
     if workflow_response is not None:
@@ -1519,6 +1550,11 @@ def confirm_shipping_api(
     current_operator: str = Depends(get_current_operator_name),
     current_user: dict = Depends(require_permissions("SHIP_CONFIRM")),
 ):
+    # 先做最小校验再建流程实例：空机台列表会生成一条 business_id 为随机 BATCH 号的
+    # shipment-confirm 实例，失败后停在"执行异常"，既清不掉也污染实例列表。
+    serials = sorted({str(sn).strip() for sn in (payload.serial_nos or []) if str(sn).strip()})
+    if not serials:
+        raise HTTPException(status_code=422, detail="请先勾选至少 1 台机台")
     from crud.forward_entries import submit_entry
     workflow_response = submit_entry('shipment-confirm', payload, current_user, request)
     if workflow_response is not None:

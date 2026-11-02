@@ -1218,7 +1218,12 @@ def transition_reverse_instance(instance_no: str, action: str, operator_id: str,
                                 operator_role: str = ''):
     ensure_workflow_tables()
     allowed = {'approve': ('审批中', '已通过', '通过'), 'reject': ('审批中', '已拒绝', '拒绝'),
-               'withdraw': ('审批中', '已撤回', '撤回')}
+               'withdraw': ('审批中', '已撤回', '撤回'),
+               # 执行失败/卡死的实例原先没有任何出口：withdraw 只认"审批中"，
+               # close-stale 又有最短 1 小时的等待，结果同一业务对象的后续流程
+               # 被冲突校验永久拒绝，只能改库。作废动作只改流程状态、释放对象锁，
+               # 不触碰任何业务数据，且必须由管理角色带原因执行。
+               'abandon': ('执行异常', '已作废', '作废')}
     if action not in allowed:
         raise ValueError('不支持的流程操作')
     before, after, result = allowed[action]
@@ -1236,10 +1241,15 @@ def transition_reverse_instance(instance_no: str, action: str, operator_id: str,
             privileged = str(operator_role or '').strip().lower() in {'admin', 'boss'}
             if str(row.get('initiator_id') or '') != str(operator_id) and not privileged:
                 raise ValueError('只有流程发起人或管理员可以撤回')
+        if action == 'abandon':
+            if str(operator_role or '').strip().lower() not in {'admin', 'boss'}:
+                raise ValueError('只有管理员可以作废异常流程')
+            if not str(reason or '').strip():
+                raise ValueError('作废流程必须填写原因')
         task = conn.execute(text("""SELECT * FROM workflow_tasks WHERE instance_id=:id
             AND status='待处理' AND assignee_id=:operator
             ORDER BY id LIMIT 1 FOR UPDATE"""), {'id': row['id'], 'operator': operator_id}).mappings().first()
-        if not task and action != 'withdraw':
+        if not task and action not in ('withdraw', 'abandon'):
             raise ValueError('当前用户不是待处理审批人')
         conn.execute(text("""UPDATE workflow_instances SET status=:after,
             result=:result, completed_at=CASE WHEN :terminal=1 THEN CURRENT_TIMESTAMP ELSE completed_at END
@@ -1249,8 +1259,8 @@ def transition_reverse_instance(instance_no: str, action: str, operator_id: str,
             conn.execute(text("""UPDATE workflow_tasks SET status='已结束',decision=:decision,
                 completed_at=CURRENT_TIMESTAMP WHERE id=:id AND status='待处理'"""),
                 {'decision': result, 'id': task['id']})
-        elif action == 'withdraw':
-            # 撤回人不是审批人时，审批任务不会命中上面的分支；
+        elif action in ('withdraw', 'abandon'):
+            # 撤回/作废人不是审批人时，审批任务不会命中上面的分支；
             # 必须把该实例的待办全部结束，否则审批人的待办数永远清不掉。
             conn.execute(text("""UPDATE workflow_tasks SET status='已结束',decision=:decision,
                 completed_at=CURRENT_TIMESTAMP WHERE instance_id=:id AND status='待处理'"""),
@@ -1265,9 +1275,13 @@ def transition_reverse_instance(instance_no: str, action: str, operator_id: str,
             VALUES (:id,:action,:operator,:before,:after,:detail)"""), {
             'id': row['id'], 'action': action, 'operator': operator_id,
             'before': before, 'after': after, 'detail': _json({'reason': reason})})
-        if action in ('reject', 'withdraw'):
+        if action in ('reject', 'withdraw', 'abandon'):
             conn.execute(text("""UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP
                 WHERE instance_id=:id AND lock_status='占用中'"""), {'id': row['id']})
+        if action == 'abandon':
+            # 明细标记为已作废，避免后续排查时把它当成"仍在执行"的流程。
+            conn.execute(text("""UPDATE workflow_instance_items SET execution_result='已作废'
+                WHERE instance_id=:id AND (execution_result IS NULL OR execution_result='')"""), {'id': row['id']})
         graph_result = None
         if action == 'approve':
             model = conn.execute(text("SELECT node_snapshot FROM workflow_model_versions WHERE id=:id"), {'id': row['model_version_id']}).mappings().first()
@@ -1722,7 +1736,9 @@ def close_stale_reverse_instances(max_age_hours: int = 24, operator_id: str = 's
     关闭动作不触碰任何业务数据，只改流程状态、释放锁、结束待办任务并留审计。
     """
     ensure_workflow_tables()
-    hours = max(1, int(max_age_hours or 24))
+    # 下限放开到 0：失败实例刚产生时也要能立刻清理，
+    # 否则用户只能等满 1 小时（或被永久卡住）。
+    hours = max(0, int(24 if max_age_hours is None else max_age_hours))
     close_reason = (reason or f'审批通过后超过 {hours} 小时未执行，系统自动关闭并释放业务对象').strip()
     with get_engine().begin() as conn:
         rows = conn.execute(text("""SELECT i.id,i.instance_no,i.workflow_key,i.business_type,i.business_id,
