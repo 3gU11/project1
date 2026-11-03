@@ -27,13 +27,13 @@ BASE_TEMPLATE = Path(__file__).with_name("dealer-contract-v1.docx")
 DEFAULT_OUTPUT = Path(__file__).with_name("dealer-order-form-v2.docx")
 
 # 红框固定值（纸质合同上预先印好的内容）
-FIXED_SUPPLIER = "昆山瑞钧机械科技有限公司"
+FIXED_SUPPLIER = "苏州瑞钧智能科技有限公司"
 FIXED_BRAND = "瑞钧"
 FIXED_UNIT = "台"
 FIXED_SUPPLIER_SIGNATURE = {
     "单位名称": f"单位名称：{FIXED_SUPPLIER}",
-    "开户银行": "开户银行：中国工商银行昆山北门分理处",
-    "帐": "帐　　号：1102 2320 0900 0027 757",
+    "开户银行": "开户银行：中国农业银行股份有限公司常熟沙家浜支行",
+    "帐": "帐　　号：10521201040014767",
     # 供方栏宽度放不下电话与传真同一行，拆成两行避免号码被折断
     "电话": "电话：0512-57175508\n传真：0512-57175608",
 }
