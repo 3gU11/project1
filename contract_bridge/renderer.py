@@ -60,6 +60,11 @@ def _repack(package: ZipFile, root, output: BytesIO) -> bytes:
     return output.getvalue()
 
 
+def order_form_template_hash() -> str:
+    """当前订货合同模板的摘要，用于判断库里的旧预览是不是换模板前生成的。"""
+    return hashlib.sha256(ORDER_FORM_TEMPLATE.read_bytes()).hexdigest()
+
+
 def render_order_form(fields: dict[str, str], template: Path = ORDER_FORM_TEMPLATE) -> tuple[bytes, str]:
     """Fill the 订货合同 form by replacing {{field}} placeholders.
 

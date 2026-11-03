@@ -371,6 +371,28 @@ class LocalContractDraftTests(unittest.TestCase):
         # prepare 已把规整后的字段落库，之后不会再判为过期
         self.assertEqual('preview_ready', drafts.get(row['id'])['state'])
 
+    def test_preview_is_regenerated_after_template_change(self):
+        """合同模板本身改过（如供方银行信息）时，换模板前生成的旧预览要作废重生成。"""
+        row = drafts.create_from_order({'orderNo': 'ORD-M6', 'dealerName': '经销商甲',
+                                        'customerName': '客户甲',
+                                        'items': [{'model': 'FH-300C', 'quantity': 1}]})
+        prepared = drafts.prepare(row['id'])
+        self.assertEqual('preview_ready', prepared['state'])
+        self.assertIsNotNone(prepared['preview_hash'])
+
+        # 模拟这次换模板之前生成的预览：字段没变，只有模板摘要对不上
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE v8_contract_drafts SET template_hash=:hash WHERE id=:id"),
+                         {'hash': 'b' * 64, 'id': row['id']})
+
+        refreshed = drafts.get(row['id'])
+        self.assertEqual('submitted', refreshed['state'])
+        self.assertIsNone(refreshed['preview_hash'])
+
+        # 重新生成后模板摘要落库，不会再被判为过期
+        self.assertEqual('preview_ready', drafts.prepare(row['id'])['state'])
+        self.assertEqual('preview_ready', drafts.get(row['id'])['state'])
+
     def test_manual_item_quantity_edit_is_not_overwritten(self):
         """审批人改过明细数量时，不按快照重排明细行。"""
         items = [
