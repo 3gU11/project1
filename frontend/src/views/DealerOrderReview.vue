@@ -359,7 +359,7 @@
               size="small"
               :loading="channelActionLoading === scope.row.manual_action"
               @click="runChannelAction(scope.row.manual_action)"
-            >立即同步</el-button>
+            >{{ scope.row.manual_action === 'reconcile-order-status' ? '立即对账' : '立即同步' }}</el-button>
             <span v-else class="channel-desc">自动触发</span>
           </template>
         </el-table-column>
@@ -908,6 +908,26 @@ const syncMachineSnapshot = async () => {
   }
 }
 
+const reconcileOrderStatus = async () => {
+  try {
+    const res = await apiPost<{ scanned?: number; enqueued?: number; window_days?: number }>(
+      '/dealer-orders/reconcile-order-status',
+      {},
+      { timeout: 60_000 },
+    )
+    const scanned = res?.scanned ?? 0
+    const enqueued = res?.enqueued ?? 0
+    if (enqueued > 0) {
+      ElMessage.success(`对账完成：扫描 ${scanned} 单，补发 ${enqueued} 单并已立即推送`)
+    } else {
+      ElMessage.success(`对账完成：扫描 ${scanned} 单，云端状态均已一致`)
+    }
+    if (channelsDialogVisible.value) void loadSyncChannels()
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '订单状态对账失败')
+  }
+}
+
 let channelsTimer: any = null
 
 const loadSyncChannels = async () => {
@@ -945,6 +965,7 @@ const runChannelAction = async (action: string) => {
     if (action === 'pull-orders') await syncCloudOrders()
     else if (action === 'push-inventory') await syncCloudInventory()
     else if (action === 'push-machines') await syncMachineSnapshot()
+    else if (action === 'reconcile-order-status') await reconcileOrderStatus()
   } finally {
     channelActionLoading.value = ''
     if (channelsDialogVisible.value) void loadSyncChannels()

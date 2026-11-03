@@ -76,7 +76,7 @@ CHANNELS: tuple[dict[str, Any], ...] = (
             "dealer_order_cancelled",
             "dealer_order_completed",
         ),
-        "manual_action": None,
+        "manual_action": "reconcile-order-status",
         "description": "订单状态变更时即时回传；按设定周期对账补发遗漏事件",
     },
 )

@@ -80,6 +80,8 @@ class ChannelDefinitionTests(unittest.TestCase):
         self.assertEqual(600, channel["interval_seconds"])
         self.assertEqual("CLOUD_STATUS_RECONCILE_INTERVAL_SECONDS", channel["interval_env"])
         self.assertIn("对账", channel["description"])
+        # 同步通道「立即对账」按钮依赖 manual_action 非空。
+        self.assertEqual("reconcile-order-status", channel["manual_action"])
 
 
 

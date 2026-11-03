@@ -46,6 +46,7 @@ from crud.cloud_sync_outbox import (
 from crud.sync_channels import (
     get_sync_channels_status,
     record_channel_failure,
+    record_channel_success,
 )
 
 router = APIRouter(dependencies=[Depends(require_permissions("DEALER_ORDER_REVIEW"))])
@@ -356,6 +357,47 @@ def sync_channels(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")
         return get_sync_channels_status()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"读取同步通道状态失败: {exc}")
+
+
+@router.post("/reconcile-order-status")
+def reconcile_order_status(
+    request: Request,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    """立即执行一次订单状态回传对账（同步通道「立即对账」按钮）。
+
+    把「本地状态已领先、但最近一次成功回传仍是旧状态」的订单重新入队，
+    并立即处理已排队事件；用于状态漂移/事件丢失时人工兜底。
+    """
+    _reject_if_bridge_disabled()
+    operator = _operator(ctx)
+    try:
+        from crud.cloud_sync_outbox import (
+            reconcile_dealer_order_statuses,
+            reconcile_limit,
+            reconcile_window_days,
+        )
+
+        summary = reconcile_dealer_order_statuses(
+            reconcile_limit(), trigger="manual", window_days=reconcile_window_days()
+        )
+        processed = process_due_cloud_sync_events(limit=20) if summary.get("enqueued") else {}
+        append_audit_log(
+            module="经销商订单",
+            action_type="订单状态对账",
+            biz_type="订单",
+            content=(
+                f"手动触发订单状态回传对账：扫描 {summary.get('scanned')} 单，"
+                f"补发 {summary.get('enqueued')} 单（窗口 {summary.get('window_days')} 天）"
+            ),
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        record_channel_success("status-callback", "manual")
+        return {**summary, "processed": processed}
+    except Exception as exc:
+        record_channel_failure("status-callback", exc)
+        raise HTTPException(status_code=500, detail=f"订单状态对账失败: {exc}")
 
 
 @router.post("/sync-machine-snapshot")
