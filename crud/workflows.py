@@ -457,17 +457,26 @@ def list_instances(status: str | None = None, business_id: str | None = None, li
     return [dict(row) for row in rows], total
 
 
-def list_tasks(status: str | None = None, assignee_id: str | None = None, limit: int = 100):
+def list_tasks(status: str | None = None, assignee_id: str | None = None, limit: int = 100,
+               skip: int = 0):
+    """分页查询流程任务，返回 (当页数据, 满足条件的总数)。"""
     ensure_workflow_tables()
-    clauses, params = [], {'limit': max(1, min(int(limit), 500))}
+    clauses, params = [], {}
     if status:
         clauses.append('status=:status'); params['status'] = status
     if assignee_id:
         clauses.append('assignee_id=:assignee_id'); params['assignee_id'] = assignee_id
     where = (' WHERE ' + ' AND '.join(clauses)) if clauses else ''
+    page_params = dict(params)
+    page_params['limit'] = max(1, min(int(limit), 500))
+    page_params['skip'] = max(0, int(skip))
     with get_engine().begin() as conn:
-        rows = conn.execute(text(f'SELECT * FROM workflow_tasks{where} ORDER BY id DESC LIMIT :limit'), params).mappings().all()
-    return [dict(row) for row in rows]
+        total = int(conn.execute(text(f'SELECT COUNT(*) FROM workflow_tasks{where}'), params).scalar() or 0)
+        rows = conn.execute(
+            text(f'SELECT * FROM workflow_tasks{where} ORDER BY id DESC LIMIT :limit OFFSET :skip'),
+            page_params,
+        ).mappings().all()
+    return [dict(row) for row in rows], total
 
 
 def list_derived_tasks(status: str | None = None, assignee_id: str | None = None, limit: int = 100):

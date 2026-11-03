@@ -79,3 +79,53 @@ def test_route_returns_total_alongside_page_rows(workflow_engine):
     )
     assert body['total'] == 4
     assert len(body['data']) == 4
+
+
+def _seed_tasks(engine, total=25, alice_until=12):
+    with engine.begin() as conn:
+        conn.execute(text('DELETE FROM workflow_tasks'))
+        for index in range(1, total + 1):
+            conn.execute(
+                text('INSERT INTO workflow_tasks (id, instance_id, assignee_id) VALUES (:id, :iid, :assignee)'),
+                {'id': index, 'iid': index, 'assignee': 'alice' if index <= alice_until else 'bob'},
+            )
+
+
+def test_task_page_returns_exact_slice_with_total(workflow_engine):
+    _seed_tasks(workflow_engine)
+
+    rows, total = workflow_crud.list_tasks(limit=10, skip=0)
+    assert total == 25
+    assert len(rows) == 10
+    assert [row['id'] for row in rows] == list(range(25, 15, -1))
+
+    rows, total = workflow_crud.list_tasks(limit=10, skip=20)
+    assert total == 25
+    assert [row['id'] for row in rows] == [5, 4, 3, 2, 1]
+
+    rows, total = workflow_crud.list_tasks(limit=10, skip=30)
+    assert total == 25
+    assert rows == []
+
+    rows, total = workflow_crud.list_tasks(limit=10, skip=0, assignee_id='alice')
+    assert total == 12
+    assert all(row['assignee_id'] == 'alice' for row in rows)
+
+
+def test_task_route_pages_and_restricts_non_admin(workflow_engine):
+    _seed_tasks(workflow_engine)
+
+    body = workflow_routes.get_workflow_tasks(
+        status=None, assignee_id=None, skip=10, limit=10,
+        ctx={'username': 'admin', 'role': 'boss'},
+    )
+    assert body['total'] == 25
+    assert [row['id'] for row in body['data']] == list(range(15, 5, -1))
+
+    # 非管理员即使传了别人的账号，也只能看到分派给自己的任务。
+    body = workflow_routes.get_workflow_tasks(
+        status=None, assignee_id='bob', skip=0, limit=10,
+        ctx={'username': 'alice', 'role': 'sales'},
+    )
+    assert body['total'] == 12
+    assert all(row['assignee_id'] == 'alice' for row in body['data'])

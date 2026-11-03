@@ -208,12 +208,15 @@ def enable_model(workflow_key: str, ctx: dict = Depends(require_roles('admin', '
 def get_workflow_tasks(
     status: str | None = Query(default=None),
     assignee_id: str | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     ctx: dict = Depends(get_current_user_context),
 ):
     if not _is_workflow_privileged(ctx):
-        assignee_id = str(ctx.get('username') or '').strip()
-    return {'data': list_tasks(status=status, assignee_id=assignee_id, limit=limit)}
+        # 非管理员只能看分派给自己的任务；无用户名时使用不会命中的占位值。
+        assignee_id = str(ctx.get('username') or '').strip() or '__workflow_no_user__'
+    data, total = list_tasks(status=status, assignee_id=assignee_id, limit=limit, skip=skip)
+    return {'data': data, 'total': total}
 
 
 @router.get('/my-pending-count')
