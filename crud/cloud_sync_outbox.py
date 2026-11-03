@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -33,6 +33,13 @@ POLL_INTERVAL_SECONDS = 5
 # 「最近一次成功回传的目标状态」，本地更靠后就重新入队补发。
 RECONCILE_INTERVAL_SECONDS = 600
 RECONCILE_INTERVAL_ENV = "CLOUD_STATUS_RECONCILE_INTERVAL_SECONDS"
+# 对账扫描范围：非终态订单一律扫描；终态订单只回看最近 N 天，避免每次全表扫。
+RECONCILE_WINDOW_DAYS = 7
+RECONCILE_WINDOW_DAYS_ENV = "CLOUD_STATUS_RECONCILE_WINDOW_DAYS"
+# 单次对账最多扫描的订单数（防止大库一次对账过久）。
+RECONCILE_LIMIT = 500
+RECONCILE_LIMIT_ENV = "CLOUD_STATUS_RECONCILE_LIMIT"
+_RECONCILE_TERMINAL_STATUSES = ("completed", "complete", "cancelled", "rejected", "regional_rejected")
 # 已有这些状态的事件时不再补发：退避重试、处理中或等待人工重放的事件会自己收尾。
 _RECONCILE_ACTIVE_STATUSES = ("pending", "processing", "failed", "rejected")
 
@@ -511,7 +518,12 @@ def _event_payload(row: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def reconcile_dealer_order_statuses(limit: int = 200, *, trigger: str = "auto") -> dict[str, Any]:
+def reconcile_dealer_order_statuses(
+    limit: int | None = None,
+    *,
+    trigger: str = "auto",
+    window_days: int | None = None,
+) -> dict[str, Any]:
     """对账补发：补回「本地状态已推进、但最近一次成功回传仍是旧状态」的订单。
 
     事件驱动通道只在状态变化时发送一次；如果那次发送因为通道拥塞、进程异常或
@@ -519,30 +531,52 @@ def reconcile_dealer_order_statuses(limit: int = 200, *, trigger: str = "auto") 
     逐单比较本地聚合状态与 cloud_sync_outbox 里最近一次 synced 事件的目标状态，
     本地更靠后就重新入队一条当前状态的 dealer_order_* 事件。
 
+    扫描范围（2026-11-03 增强）：
+    - 非终态订单（pending/approved/contracted/partial_allocated/allocated 等）全部扫描，
+      不因为单据很旧而漏掉；
+    - 终态订单（completed/cancelled/rejected/regional_rejected）只回看最近 `window_days` 天，
+      避免每次全表扫描；
+    - 单次最多扫描 `limit` 单，按最近更新时间倒序。
+
     为避免和正常重试/人工重放打架：
     - 同一订单已有 pending / processing / failed / rejected 事件时不补发；
     - 从未回传过的订单（历史云端单）不主动回推；
     - 最近一次成功回传的目标状态已经不低于本地状态时不补发。
     """
-    summary: dict[str, Any] = {"trigger": trigger, "scanned": 0, "enqueued": 0, "skipped": 0, "events": []}
+    days = max(1, int(window_days if window_days is not None else reconcile_window_days()))
+    batch = min(max(1, int(limit if limit is not None else reconcile_limit())), 2000)
+    summary: dict[str, Any] = {
+        "trigger": trigger,
+        "scanned": 0,
+        "enqueued": 0,
+        "skipped": 0,
+        "window_days": days,
+        "limit": batch,
+        "events": [],
+    }
     if not cloud_bridge_enabled():
         summary["skipped_reason"] = "cloud bridge disabled"
         return summary
     ensure_cloud_sync_outbox_table()
-    batch = min(max(1, int(limit or 200)), 1000)
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    terminal_placeholders = ", ".join(":terminal_%d" % index for index in range(len(_RECONCILE_TERMINAL_STATUSES)))
+    terminal_params = {f"terminal_{index}": value for index, value in enumerate(_RECONCILE_TERMINAL_STATUSES)}
     with get_engine().connect() as conn:
         candidate_rows = conn.execute(
             text(
-                """
+                f"""
                 SELECT order_no
                 FROM dealer_orders
                 WHERE COALESCE(TRIM(order_no), '') <> ''
                 GROUP BY order_no
+                HAVING SUM(CASE WHEN LOWER(TRIM(COALESCE(status, ''))) IN ({terminal_placeholders})
+                                THEN 0 ELSE 1 END) > 0
+                    OR MAX(updated_at) >= :cutoff
                 ORDER BY MAX(updated_at) DESC, order_no
                 LIMIT :limit
                 """
             ),
-            {"limit": batch},
+            {"cutoff": cutoff, "limit": batch, **terminal_params},
         ).mappings().all()
     order_nos = [str(row["order_no"] or "").strip() for row in candidate_rows]
     order_nos = [order_no for order_no in order_nos if order_no]
@@ -613,6 +647,24 @@ def reconcile_interval_seconds() -> int:
     return max(60, value)
 
 
+def reconcile_window_days() -> int:
+    raw = os.getenv(RECONCILE_WINDOW_DAYS_ENV, "").strip()
+    try:
+        value = int(raw) if raw else RECONCILE_WINDOW_DAYS
+    except (TypeError, ValueError):
+        value = RECONCILE_WINDOW_DAYS
+    return max(1, value)
+
+
+def reconcile_limit() -> int:
+    raw = os.getenv(RECONCILE_LIMIT_ENV, "").strip()
+    try:
+        value = int(raw) if raw else RECONCILE_LIMIT
+    except (TypeError, ValueError):
+        value = RECONCILE_LIMIT
+    return min(max(1, value), 2000)
+
+
 async def cloud_status_reconcile_loop() -> None:
     """周期对账订单状态回传；云端桥停用（演示/隔离）时不启动。
 
@@ -625,10 +677,25 @@ async def cloud_status_reconcile_loop() -> None:
     ensure_cloud_sync_outbox_table()
     from crud.sync_channels import record_channel_failure, record_channel_success
 
-    logger.info("cloud status reconcile worker started (interval=%ss)", reconcile_interval_seconds())
+    logger.info(
+        "cloud status reconcile worker started (interval=%ss, window=%sd, limit=%s)",
+        reconcile_interval_seconds(),
+        reconcile_window_days(),
+        reconcile_limit(),
+    )
     while True:
         try:
-            await asyncio.to_thread(reconcile_dealer_order_statuses, 200)
+            summary = await asyncio.to_thread(
+                reconcile_dealer_order_statuses,
+                reconcile_limit(),
+                window_days=reconcile_window_days(),
+            )
+            if summary.get("enqueued"):
+                logger.info(
+                    "cloud status reconcile tick: scanned=%s enqueued=%s",
+                    summary.get("scanned"),
+                    summary.get("enqueued"),
+                )
             record_channel_success("status-callback", "reconcile")
         except asyncio.CancelledError:
             raise

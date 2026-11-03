@@ -249,3 +249,44 @@ def test_retry_failed_cloud_sync_events_also_requeues_rejected(monkeypatch):
             ).mappings()
         }
     assert rows == {"e1": "pending", "e2": "pending", "e3": "synced"}
+
+
+def test_reconcile_scans_active_orders_even_when_old(monkeypatch):
+    """非终态订单一律扫描：很旧但仍未完成的单不能因为排序窗口被漏掉。"""
+    _engine, calls = _setup(
+        monkeypatch,
+        [{"order_no": "DO-OLD-ACTIVE", "status": "approved", "updated_at": "2026-01-01 10:00:00"}],
+        [],
+    )
+
+    summary = outbox.reconcile_dealer_order_statuses()
+
+    assert summary["scanned"] == 1
+    assert calls == []
+
+
+def test_reconcile_skips_old_terminal_orders_outside_window(monkeypatch):
+    _engine, calls = _setup(
+        monkeypatch,
+        [{"order_no": "DO-OLD-DONE", "status": "completed", "updated_at": "2026-01-01 10:00:00"}],
+        [],
+    )
+
+    summary = outbox.reconcile_dealer_order_statuses()
+
+    assert summary["scanned"] == 0
+    assert calls == []
+
+
+def test_reconcile_window_can_cover_old_terminal_orders(monkeypatch):
+    _engine, calls = _setup(
+        monkeypatch,
+        [{"order_no": "DO-OLD-DONE", "status": "completed", "updated_at": "2026-01-01 10:00:00"}],
+        [],
+    )
+
+    summary = outbox.reconcile_dealer_order_statuses(window_days=3650)
+
+    assert summary["scanned"] == 1
+    assert summary["window_days"] == 3650
+    assert calls == []
