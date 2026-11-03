@@ -58,6 +58,30 @@ class ChannelStateTests(unittest.TestCase):
             compute_channel_state(interval_seconds=None, last_success_at=now, failed=1, now=now)["state"],
         )
 
+    def test_periodic_channel_exposes_failed_pending_over_heartbeat(self):
+        # 对账心跳周期存在时，积压失败/待发送仍必须优先展示，不能被“心跳正常”掩盖。
+        now = datetime(2026, 10, 28, 12, 0, 0)
+        failed = compute_channel_state(
+            interval_seconds=600, last_success_at=now - timedelta(seconds=60), failed=1, now=now
+        )
+        self.assertEqual("failed", failed["state"])
+        self.assertEqual("2026-10-28 12:09:00", failed["expected_next_at"])
+        pending = compute_channel_state(
+            interval_seconds=600, last_success_at=now - timedelta(seconds=60), pending=2, now=now
+        )
+        self.assertEqual("pending", pending["state"])
+
+
+class ChannelDefinitionTests(unittest.TestCase):
+    def test_status_callback_declares_reconcile_cadence(self):
+        from crud.sync_channels import CHANNELS
+
+        channel = next(item for item in CHANNELS if item["key"] == "status-callback")
+        self.assertEqual(600, channel["interval_seconds"])
+        self.assertEqual("CLOUD_STATUS_RECONCILE_INTERVAL_SECONDS", channel["interval_env"])
+        self.assertIn("对账", channel["description"])
+
+
 
 class EventChannelMappingTests(unittest.TestCase):
     def test_event_types_map_to_expected_channels(self):

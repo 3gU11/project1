@@ -614,19 +614,27 @@ def reconcile_interval_seconds() -> int:
 
 
 async def cloud_status_reconcile_loop() -> None:
-    """周期对账订单状态回传；云端桥停用（演示/隔离）时不启动。"""
+    """周期对账订单状态回传；云端桥停用（演示/隔离）时不启动。
+
+    每次对账运行同时作为 status-callback 通道的周期心跳写入 sync_channel_state，
+    让「同步通道」页面能展示设定周期/预计下次，而不是只显示「事件驱动」。
+    """
     if os.getenv("V8_DEMO_MODE", "").strip() == "1" or not cloud_bridge_enabled():
         logger.info("cloud status reconcile disabled")
         return
     ensure_cloud_sync_outbox_table()
+    from crud.sync_channels import record_channel_failure, record_channel_success
+
     logger.info("cloud status reconcile worker started (interval=%ss)", reconcile_interval_seconds())
     while True:
         try:
             await asyncio.to_thread(reconcile_dealer_order_statuses, 200)
+            record_channel_success("status-callback", "reconcile")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning("cloud status reconcile tick failed: %s", exc)
+            record_channel_failure("status-callback", exc)
         await asyncio.sleep(reconcile_interval_seconds())
 
 
