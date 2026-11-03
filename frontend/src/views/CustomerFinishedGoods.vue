@@ -225,11 +225,12 @@ const uploadScope = ref<"order" | "machine">("machine");
 const machineStatus = ref("");
 const machineStatuses = ref<string[]>([]);
 const machinePage = ref(1);
-const machinePageSize = 50;
+// 每页最多显示 10 条，翻页由后端 skip/limit 分页完成。
+const machinePageSize = 10;
 const machineTotal = ref(0);
 const machineError = ref("");
 let machineRequest = 0;
-const load = async () => {
+const load = async (): Promise<void> => {
   const requestId = ++machineRequest;
   loading.value = true;
   machineError.value = "";
@@ -252,6 +253,13 @@ const load = async () => {
     rows.value = response.data || [];
     machineTotal.value = response.total || 0;
     machineStatuses.value = response.statuses || [];
+    // 批量处理或筛选后数据可能变少，当前页超出末页时自动退回末页。
+    const lastPage = Math.max(1, Math.ceil(machineTotal.value / machinePageSize));
+    if (machinePage.value > lastPage) {
+      machinePage.value = lastPage;
+      void load();
+      return;
+    }
   } catch (error) {
     if (requestId !== machineRequest) return;
     rows.value = [];

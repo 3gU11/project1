@@ -144,23 +144,18 @@ def _is_workflow_privileged(ctx: dict) -> bool:
 def get_workflow_instances(
     status: str | None = Query(default=None),
     business_id: str | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     ctx: dict = Depends(get_current_user_context),
 ):
-    data = list_instances(status=status, business_id=business_id, limit=limit)
-    if _is_workflow_privileged(ctx):
-        return {'data': data}
-    username = str(ctx.get('username') or '').strip()
-    assigned_instance_ids = {
-        str(task.get('instance_id'))
-        for task in list_tasks(assignee_id=username, limit=500)
-    }
-    visible = [
-        row for row in data
-        if str(row.get('initiator_id') or '').strip() == username
-        or str(row.get('id')) in assigned_instance_ids
-    ]
-    return {'data': visible}
+    # 权限过滤下沉到 SQL，保证分页总数与实际可见数据一致；无用户名时使用不会命中的占位值。
+    visible_to = None
+    if not _is_workflow_privileged(ctx):
+        visible_to = str(ctx.get('username') or '').strip() or '__workflow_no_user__'
+    data, total = list_instances(
+        status=status, business_id=business_id, limit=limit, skip=skip, visible_to=visible_to,
+    )
+    return {'data': data, 'total': total}
 
 @router.post('/models/{workflow_key}/publish')
 def publish_model(workflow_key: str, payload: WorkflowPublishRequest, ctx: dict = Depends(require_roles('admin', 'boss'))):

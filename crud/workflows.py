@@ -415,9 +415,15 @@ def list_workflow_versions(workflow_key: str):
     return result
 
 
-def list_instances(status: str | None = None, business_id: str | None = None, limit: int = 100):
+def list_instances(status: str | None = None, business_id: str | None = None, limit: int = 100,
+                   skip: int = 0, visible_to: str | None = None):
+    """分页查询流程实例，返回 (当页数据, 满足条件的总数)。
+
+    visible_to 用于非管理员视角：只返回本人发起或存在本人待办任务的实例，
+    过滤条件直接写在 SQL 中，保证分页总数与可见数据一致。
+    """
     ensure_workflow_tables()
-    clauses, params = [], {'limit': max(1, min(int(limit), 500))}
+    clauses, params = [], {}
     if status:
         # The UI exposes business-friendly groups while the table stores the
         # concrete lifecycle status for each execution stage.
@@ -434,10 +440,21 @@ def list_instances(status: str | None = None, business_id: str | None = None, li
             clauses.append('status=:status'); params['status'] = status
     if business_id:
         clauses.append('business_id LIKE :business_id'); params['business_id'] = f'%{business_id.strip()}%'
+    if visible_to is not None:
+        clauses.append('''(initiator_id=:visible_user OR id IN (
+            SELECT instance_id FROM workflow_tasks WHERE assignee_id=:visible_user))''')
+        params['visible_user'] = visible_to
     where = (' WHERE ' + ' AND '.join(clauses)) if clauses else ''
+    page_params = dict(params)
+    page_params['limit'] = max(1, min(int(limit), 500))
+    page_params['skip'] = max(0, int(skip))
     with get_engine().begin() as conn:
-        rows = conn.execute(text(f'SELECT * FROM workflow_instances{where} ORDER BY id DESC LIMIT :limit'), params).mappings().all()
-    return [dict(row) for row in rows]
+        total = int(conn.execute(text(f'SELECT COUNT(*) FROM workflow_instances{where}'), params).scalar() or 0)
+        rows = conn.execute(
+            text(f'SELECT * FROM workflow_instances{where} ORDER BY id DESC LIMIT :limit OFFSET :skip'),
+            page_params,
+        ).mappings().all()
+    return [dict(row) for row in rows], total
 
 
 def list_tasks(status: str | None = None, assignee_id: str | None = None, limit: int = 100):
