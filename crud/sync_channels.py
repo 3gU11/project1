@@ -76,7 +76,7 @@ CHANNELS: tuple[dict[str, Any], ...] = (
             "dealer_order_completed",
         ),
         "manual_action": None,
-        "description": "订单状态变更时事件驱动回传",
+        "description": "订单状态变更时事件驱动回传，定时对账补发",
     },
 )
 
@@ -255,7 +255,7 @@ def _count_events(event_types: tuple[str, ...]) -> tuple[int, int]:
                     """
                     SELECT
                       SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) AS pending,
-                      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+                      SUM(CASE WHEN status IN ('failed', 'rejected') THEN 1 ELSE 0 END) AS failed
                     FROM cloud_sync_outbox
                     WHERE event_type IN :event_types
                     """

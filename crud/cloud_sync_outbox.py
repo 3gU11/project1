@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -26,6 +27,14 @@ SYNC_EVENT_TYPES = {
 }
 
 POLL_INTERVAL_SECONDS = 5
+
+# 订单状态回传对账（兜底）：事件驱动通道没有周期心跳，事件一旦静默丢失，
+# 只能等下一次状态变化才会再发。对账任务按固定周期比较「本地聚合状态」与
+# 「最近一次成功回传的目标状态」，本地更靠后就重新入队补发。
+RECONCILE_INTERVAL_SECONDS = 600
+RECONCILE_INTERVAL_ENV = "CLOUD_STATUS_RECONCILE_INTERVAL_SECONDS"
+# 已有这些状态的事件时不再补发：退避重试、处理中或等待人工重放的事件会自己收尾。
+_RECONCILE_ACTIVE_STATUSES = ("pending", "processing", "failed", "rejected")
 
 
 def _json_default(value: Any) -> str:
@@ -410,6 +419,217 @@ def _load_local_order_aggregate_status(order_no: str) -> str:
     return _aggregate_status(items)
 
 
+# ---------------------------------------------------------------------------
+# 订单状态回传对账：把丢失/未生成的回传事件补回来
+# ---------------------------------------------------------------------------
+def _join_contract_nos(items: list[dict[str, Any]]) -> str:
+    values: list[str] = []
+    for item in items:
+        for part in re.split(r"[、，,/／;；\s]+", str(item.get("contract_no") or "")):
+            part = part.strip()
+            if part and part not in values:
+                values.append(part)
+    return "、".join(values)
+
+
+def _join_v7_order_nos(items: list[dict[str, Any]]) -> str:
+    values: list[str] = []
+    for item in items:
+        for part in re.split(r"[、，,/／;；\s]+", str(item.get("v7_order_no") or "")):
+            part = part.strip()
+            if part and part not in values:
+                values.append(part)
+    return ",".join(values)
+
+
+def _reconcile_event_for(
+    order_no: str, status: str, items: list[dict[str, Any]]
+) -> tuple[str, dict[str, Any]] | tuple[None, None]:
+    """按本地聚合状态构造补发事件；pending 等不需要回写的状态返回空。"""
+    contract_no = _join_contract_nos(items)
+    if status in {"approved", "rejected"}:
+        return "dealer_order_reviewed", {
+            "order_no": order_no,
+            "status": status,
+            "reviewer": "system",
+            "note": "V8 状态对账补发",
+        }
+    if status == "contracted":
+        return "dealer_order_contracted", {
+            "order_no": order_no,
+            "contract_no": contract_no,
+            "operator": "system",
+            "v7_order_no": "",
+        }
+    if status in {"partial_allocated", "allocated"}:
+        return "dealer_order_allocated", {
+            "order_no": order_no,
+            "contract_no": contract_no,
+            "operator": "system",
+            "v7_order_no": _join_v7_order_nos(items),
+            "status": status,
+        }
+    if status in {"completed", "complete"}:
+        return "dealer_order_completed", {
+            "order_no": order_no,
+            "contract_no": contract_no,
+            "operator": "system",
+            "v7_order_no": _join_v7_order_nos(items),
+        }
+    if status == "cancelled":
+        # 聚合出 cancelled 说明所有行都已取消，整单取消不需要再带行号。
+        return "dealer_order_cancelled", {
+            "order_no": order_no,
+            "contract_no": contract_no,
+            "operator": "system",
+            "note": "V8 状态对账补发",
+        }
+    return None, None
+
+
+def _recent_order_events(conn: Any, order_no: str, limit: int = 5) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        text(
+            """
+            SELECT event_type, status, payload_json
+            FROM cloud_sync_outbox
+            WHERE biz_key=:order_no AND event_type LIKE 'dealer_order_%'
+            ORDER BY id DESC
+            LIMIT :limit
+            """
+        ),
+        {"order_no": order_no, "limit": max(1, int(limit or 1))},
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _event_payload(row: dict[str, Any]) -> dict[str, Any]:
+    try:
+        payload = json.loads(row.get("payload_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def reconcile_dealer_order_statuses(limit: int = 200, *, trigger: str = "auto") -> dict[str, Any]:
+    """对账补发：补回「本地状态已推进、但最近一次成功回传仍是旧状态」的订单。
+
+    事件驱动通道只在状态变化时发送一次；如果那次发送因为通道拥塞、进程异常或
+    事件被静默丢弃，云端会一直停在旧状态，直到下一次状态变化。对账任务周期性地
+    逐单比较本地聚合状态与 cloud_sync_outbox 里最近一次 synced 事件的目标状态，
+    本地更靠后就重新入队一条当前状态的 dealer_order_* 事件。
+
+    为避免和正常重试/人工重放打架：
+    - 同一订单已有 pending / processing / failed / rejected 事件时不补发；
+    - 从未回传过的订单（历史云端单）不主动回推；
+    - 最近一次成功回传的目标状态已经不低于本地状态时不补发。
+    """
+    summary: dict[str, Any] = {"trigger": trigger, "scanned": 0, "enqueued": 0, "skipped": 0, "events": []}
+    if not cloud_bridge_enabled():
+        summary["skipped_reason"] = "cloud bridge disabled"
+        return summary
+    ensure_cloud_sync_outbox_table()
+    batch = min(max(1, int(limit or 200)), 1000)
+    with get_engine().connect() as conn:
+        candidate_rows = conn.execute(
+            text(
+                """
+                SELECT order_no
+                FROM dealer_orders
+                WHERE COALESCE(TRIM(order_no), '') <> ''
+                GROUP BY order_no
+                ORDER BY MAX(updated_at) DESC, order_no
+                LIMIT :limit
+                """
+            ),
+            {"limit": batch},
+        ).mappings().all()
+    order_nos = [str(row["order_no"] or "").strip() for row in candidate_rows]
+    order_nos = [order_no for order_no in order_nos if order_no]
+    from crud.dealer_orders import _aggregate_status
+
+    for order_no in order_nos:
+        summary["scanned"] += 1
+        with get_engine().begin() as conn:
+            items = [
+                dict(row)
+                for row in conn.execute(
+                    text("SELECT * FROM dealer_orders WHERE order_no=:order_no ORDER BY line_no, id"),
+                    {"order_no": order_no},
+                ).mappings().all()
+            ]
+            if not items:
+                summary["skipped"] += 1
+                continue
+            status = str(_aggregate_status(items) or "").strip()
+            event_type, payload = _reconcile_event_for(order_no, status, items)
+            if not event_type:
+                summary["skipped"] += 1
+                continue
+            events = _recent_order_events(conn, order_no)
+            # 没有回传历史：这张单是云端拉下来的，本地状态不代表需要回写，避免全量反向推送。
+            if not events:
+                summary["skipped"] += 1
+                continue
+            if any(str(event.get("status") or "") in _RECONCILE_ACTIVE_STATUSES for event in events):
+                summary["skipped"] += 1
+                continue
+            latest = events[0]
+            if str(latest.get("status") or "") != "synced":
+                summary["skipped"] += 1
+                continue
+            last_status = _event_intended_status(
+                str(latest.get("event_type") or ""), _event_payload(latest)
+            )
+            if _order_status_rank(last_status) >= _order_status_rank(status):
+                summary["skipped"] += 1
+                continue
+            event_id = f"v8-outbox-reconcile-{event_type}-{uuid.uuid4().hex}"
+            insert_cloud_sync_event(
+                conn,
+                event_id,
+                event_type,
+                order_no,
+                json.dumps(payload, ensure_ascii=False, default=_json_default),
+            )
+        summary["enqueued"] += 1
+        summary["events"].append({"order_no": order_no, "event_type": event_type, "status": status})
+        logger.info(
+            "cloud status reconcile enqueued %s for order=%s local=%s last_synced=%s",
+            event_type,
+            order_no,
+            status,
+            last_status or "(none)",
+        )
+    return summary
+
+
+def reconcile_interval_seconds() -> int:
+    raw = os.getenv(RECONCILE_INTERVAL_ENV, "").strip()
+    try:
+        value = int(raw) if raw else RECONCILE_INTERVAL_SECONDS
+    except (TypeError, ValueError):
+        value = RECONCILE_INTERVAL_SECONDS
+    return max(60, value)
+
+
+async def cloud_status_reconcile_loop() -> None:
+    """周期对账订单状态回传；云端桥停用（演示/隔离）时不启动。"""
+    if os.getenv("V8_DEMO_MODE", "").strip() == "1" or not cloud_bridge_enabled():
+        logger.info("cloud status reconcile disabled")
+        return
+    ensure_cloud_sync_outbox_table()
+    logger.info("cloud status reconcile worker started (interval=%ss)", reconcile_interval_seconds())
+    while True:
+        try:
+            await asyncio.to_thread(reconcile_dealer_order_statuses, 200)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("cloud status reconcile tick failed: %s", exc)
+        await asyncio.sleep(reconcile_interval_seconds())
+
+
 def _dispatch_event(event: dict[str, Any]) -> None:
     from crud.cloud_dealer_order_sync import (
         fetch_local_wechat_batch_summary,
@@ -552,13 +772,19 @@ def _dispatch_event(event: dict[str, Any]) -> None:
         return
 
     if event_type == "dealer_order_completed":
-        push_cloud_completed_state(
+        result = push_cloud_completed_state(
             order_no,
             contract_no=str(payload.get("contract_no") or ""),
             operator=str(payload.get("operator") or "system"),
             v7_order_no=str(payload.get("v7_order_no") or ""),
             idempotency_key_prefix=event_id,
         )
+        if isinstance(result, dict) and result.get("skipped"):
+            # 云端读接口临时失败/订单暂时读不到时不能当成成功，否则事件会被记成
+            # synced 永远不再补发；抛可重试异常交给 outbox 退避重试。
+            raise RuntimeError(
+                f"completed sync skipped: {result.get('reason') or 'cloud order not found'}"
+            )
         return
 
     if event_type == "wechat_batch_summary_sync":
@@ -578,13 +804,18 @@ def get_cloud_sync_status(limit: int = 5) -> dict[str, Any]:
             conn.execute(text("SELECT COUNT(*) FROM cloud_sync_outbox WHERE status IN ('pending', 'processing')")).scalar()
             or 0
         )
-        failed = int(conn.execute(text("SELECT COUNT(*) FROM cloud_sync_outbox WHERE status='failed'")).scalar() or 0)
+        failed = int(
+            conn.execute(
+                text("SELECT COUNT(*) FROM cloud_sync_outbox WHERE status IN ('failed', 'rejected')")
+            ).scalar()
+            or 0
+        )
         rows = conn.execute(
             text(
                 """
                 SELECT id, event_id, event_type, biz_key, status, retry_count, last_error, next_retry_at, updated_at
                 FROM cloud_sync_outbox
-                WHERE status='failed'
+                WHERE status IN ('failed', 'rejected')
                 ORDER BY updated_at DESC, id DESC
                 LIMIT :limit
                 """
@@ -629,6 +860,11 @@ def get_cloud_sync_event_status(event_id: str) -> dict[str, Any] | None:
 
 
 def retry_failed_cloud_sync_events() -> dict[str, Any]:
+    """把手动重放范围内的失败事件重新排队。
+
+    自动重试只覆盖 failed（退避重试中）；rejected 是 401/403/422 等不可重试错误
+    留下的记录，修好配置或数据后也应能一键重放，所以这里一起重置。
+    """
     ensure_cloud_sync_outbox_table()
     with get_engine().begin() as conn:
         count = conn.execute(
@@ -636,7 +872,7 @@ def retry_failed_cloud_sync_events() -> dict[str, Any]:
                 """
                 UPDATE cloud_sync_outbox
                 SET status='pending', next_retry_at=NULL, last_error=NULL
-                WHERE status='failed'
+                WHERE status IN ('failed', 'rejected')
                 """
             )
         ).rowcount

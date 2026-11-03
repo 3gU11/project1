@@ -102,6 +102,11 @@ async def on_startup():
         except Exception as e:
             logger.warning("cloud sync worker not started: %s", e)
         try:
+            from crud.cloud_sync_outbox import cloud_status_reconcile_loop
+            app.state.cloud_status_reconcile_task = asyncio.create_task(cloud_status_reconcile_loop())
+        except Exception as e:
+            logger.warning("cloud status reconcile worker not started: %s", e)
+        try:
             from crud.cloud_dealer_order_sync import cloud_pull_worker_loop
             app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
         except Exception as e:
@@ -160,6 +165,14 @@ async def on_shutdown():
         task.cancel()
         try:
             await task
+        except asyncio.CancelledError:
+            pass
+
+    reconcile_task = getattr(app.state, "cloud_status_reconcile_task", None)
+    if reconcile_task:
+        reconcile_task.cancel()
+        try:
+            await reconcile_task
         except asyncio.CancelledError:
             pass
 
