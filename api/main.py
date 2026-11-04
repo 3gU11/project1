@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode, notifications, workflows
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, repair_machine_components, qr_decode, notifications, workflows
 
 logger = logging.getLogger(__name__)
 from api.routes import contract_drafts
@@ -273,6 +273,7 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(repair_identity.router, prefix="/api/v1/repair-identity", tags=["RepairIdentity"])
 app.include_router(repair_catalog.router, prefix="/api/v1/repair-model-components", tags=["RepairCatalog"])
 app.include_router(repair_component_replacements.router, prefix="/api/v1/repair-component-replacements", tags=["RepairComponentReplacement"])
+app.include_router(repair_machine_components.router, prefix="/api/v1/repair-machine-components", tags=["RepairMachineComponents"])
 app.include_router(qr_decode.router, prefix="/internal/qr", tags=["InternalQR"])
 
 # Register sandbox WS directly on app (bypasses router-level HTTP dependencies)
