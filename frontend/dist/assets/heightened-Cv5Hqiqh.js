@@ -1,0 +1,1 @@
+const n=/\[(?:总|备注|附加|改数)\][^\[]*/g,s=new RegExp("(?<!\\S)加高(?!\\S)"),o=(...e)=>{for(const r of e){const t=String(r??"");if(t.replace(n," ").includes("加高")||s.test(t))return!0}return!1};export{o as h};
