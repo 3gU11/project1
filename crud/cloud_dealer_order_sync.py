@@ -740,6 +740,60 @@ def push_cloud_completed_state(
     return result
 
 
+def reconcile_local_dealer_order_statuses_to_cloud(limit: int = 200, *, trigger: str = "timer") -> dict[str, Any]:
+    """Periodically reconcile local terminal/review states back to the cloud.
+
+    The outbox remains the fast path; this pass repairs missed or stuck events.
+    """
+    ensure_dealer_order_tables()
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT order_no, status, MAX(reviewed_by) AS reviewer,
+                       MAX(review_note) AS note, MAX(contract_no) AS contract_no,
+                       MAX(v7_order_no) AS v7_order_no
+                FROM dealer_orders
+                WHERE status IN ('pending','approved','rejected','contracted',
+                                 'partial_allocated','allocated','completed','complete')
+                GROUP BY order_no, status
+                ORDER BY MAX(updated_at) DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": min(max(1, int(limit or 200)), 1000)},
+        ).mappings().all()
+    pushed = 0
+    skipped = 0
+    failed: list[dict[str, Any]] = []
+    for row in rows:
+        order_no = _clean(row.get("order_no"))
+        status = _clean(row.get("status"))
+        try:
+            cloud = find_cloud_dealer_order(order_no)
+            if not cloud:
+                skipped += 1
+                continue
+            cloud_statuses = {_normalize_status(item.get("status") or cloud.get("status")) for item in _iter_cloud_items(cloud)}
+            target = "completed" if status == "complete" else status
+            if cloud_statuses == {target}:
+                skipped += 1
+                continue
+            key = f"v8-reconcile-{order_no}-{target}"
+            if target in {"pending", "approved", "rejected"}:
+                result = push_cloud_review(order_no, target, reviewer=_clean(row.get("reviewer")) or "system", note=_clean(row.get("note")), idempotency_key=key)
+            elif target == "contracted":
+                result = push_cloud_contract(order_no, _clean(row.get("contract_no")), operator=_clean(row.get("reviewer")) or "system", v7_order_no=_clean(row.get("v7_order_no")), idempotency_key=key)
+            elif target in {"partial_allocated", "allocated"}:
+                result = push_cloud_allocate(order_no, contract_no=_clean(row.get("contract_no")), operator=_clean(row.get("reviewer")) or "system", v7_order_no=_clean(row.get("v7_order_no")), status=target, idempotency_key=key)
+            else:
+                result = push_cloud_completed_state(order_no, contract_no=_clean(row.get("contract_no")), operator=_clean(row.get("reviewer")) or "system", v7_order_no=_clean(row.get("v7_order_no")), idempotency_key_prefix=key)
+            pushed += 1
+        except Exception as exc:
+            failed.append({"order_no": order_no, "status": status, "error": str(exc)})
+    return {"message": "dealer order status reconciled", "trigger": trigger, "scanned": len(rows), "pushed": pushed, "skipped": skipped, "failed": failed}
+
+
 def _snapshot_summary_id(batch_no: Any, eta: Any, model: Any, heightened: Any, original_batch_no: Any = "") -> str:
     import hashlib
 
