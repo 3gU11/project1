@@ -106,6 +106,10 @@ async def on_startup():
             app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
         except Exception as e:
             logger.warning("cloud pull worker not started: %s", e)
+        try:
+            app.state.dealer_order_reconcile_task = asyncio.create_task(dealer_order_reconcile_loop())
+        except Exception as e:
+            logger.warning("dealer order reconcile worker not started: %s", e)
     else:
         logger.info("cloud sync workers disabled by CLOUD_SYNC_ENABLED")
     try:
@@ -179,6 +183,14 @@ async def on_shutdown():
         except asyncio.CancelledError:
             pass
 
+    reconcile_task = getattr(app.state, "dealer_order_reconcile_task", None)
+    if reconcile_task:
+        reconcile_task.cancel()
+        try:
+            await reconcile_task
+        except asyncio.CancelledError:
+            pass
+
     watch_task = getattr(app.state, "watch_dealer_orders_task", None)
     if watch_task:
         watch_task.cancel()
@@ -225,6 +237,21 @@ async def cloud_snapshot_heartbeat_loop() -> None:
                 record_channel_failure("factory-snapshot", exc)
             except Exception:
                 pass
+        await asyncio.sleep(interval)
+
+
+async def dealer_order_reconcile_loop() -> None:
+    """Repair missed dealer-order status callbacks on a bounded interval."""
+    interval = max(30, int(os.getenv("DEALER_ORDER_RECONCILE_INTERVAL_SECONDS", "60") or "60"))
+    while True:
+        try:
+            from crud.cloud_dealer_order_sync import reconcile_local_dealer_order_statuses_to_cloud
+            result = await asyncio.to_thread(reconcile_local_dealer_order_statuses_to_cloud, 200, trigger="timer")
+            logger.info("dealer order status reconcile: scanned=%s pushed=%s failed=%s", result.get("scanned"), result.get("pushed"), len(result.get("failed") or []))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("dealer order status reconcile failed: %s", exc)
         await asyncio.sleep(interval)
 
 
