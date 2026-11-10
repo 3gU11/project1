@@ -589,30 +589,32 @@ def get_customer_finished_goods(
         if str(record.get("状态") or "").strip() == "待发货" and order_progress.get("order_status_label") != "待发货":
             continue
         visible_records.append(record)
-    # 订单级「东莞回传订货合同」状态：一订单一合同，挂订单总合同槽；客户成品列表直接展示。
-    from api.routes.customer_contracts import _ensure_order_contract_returns_table
-    _ensure_order_contract_returns_table()
-    order_ids = sorted({
-        str(record.get("占用订单号") or "").strip()
+    # 交付信息上传（待处理）：V8 操作人员手动选机台处理后，所选机台显示交付信息已上传。
+    from api.routes.delivery_info_uploads import ensure_delivery_info_tables
+    ensure_delivery_info_tables()
+    machine_serials = sorted({
+        str(record.get("流水号") or "").strip()
         for record in visible_records
-        if str(record.get("占用订单号") or "").strip()
+        if str(record.get("流水号") or "").strip()
     })
-    return_contracts: dict[str, Any] = {}
-    if order_ids:
+    delivery_info_map: dict[str, Any] = {}
+    if machine_serials:
         with get_engine().connect() as conn:
             rows = conn.execute(
-                text("SELECT * FROM order_contract_returns WHERE order_no IN :order_ids")
-                .bindparams(bindparam("order_ids", expanding=True)),
-                {"order_ids": order_ids},
+                text(
+                    "SELECT m.`serial_no`, u.`file_name`, u.`uploaded_at` "
+                    "FROM delivery_info_upload_machines m JOIN delivery_info_uploads u ON u.id = m.upload_id "
+                    "WHERE m.`serial_no` IN :serials"
+                ).bindparams(bindparam("serials", expanding=True)),
+                {"serials": machine_serials},
             ).mappings().all()
-        return_contracts = {str(row["order_no"]): dict(row) for row in rows}
+        delivery_info_map = {str(row["serial_no"]): dict(row) for row in rows}
     for record in visible_records:
-        oid = str(record.get("占用订单号") or "").strip()
-        returned = return_contracts.get(oid)
-        record["return_contract_uploaded"] = bool(returned and str(returned.get("file_name") or "").strip())
-        record["return_contract_file_name"] = str(returned.get("file_name") or "") if returned else ""
-        record["return_contract_no"] = str(returned.get("contract_no") or "") if returned else ""
-        record["return_contract_uploaded_at"] = returned.get("uploaded_at") if returned else None
+        serial = str(record.get("流水号") or "").strip()
+        info = delivery_info_map.get(serial)
+        record["delivery_info_uploaded"] = bool(info)
+        record["delivery_info_file_name"] = str(info.get("file_name") or "") if info else ""
+        record["delivery_info_uploaded_at"] = info.get("uploaded_at") if info else None
     total = len(visible_records)
     page = visible_records[skip:skip + limit]
     return {"data": page, "total": total, "statuses": statuses, "skip": skip, "limit": limit}
