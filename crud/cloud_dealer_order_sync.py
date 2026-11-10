@@ -1302,12 +1302,18 @@ def sync_completed_dealer_orders_to_cloud(limit: int = 200, *, trigger: str = "a
 def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]:
     status = _normalize_status(_pick(item, "status") or _pick(order, "status"))
     quantity = max(1, _as_int(_pick(item, "quantity"), 1))
-    extra_remark = _clean(
+    # 多明细订单的订单级 remark/extra_remark 是整单汇总值（云端桥接时等于首行明细值），
+    # 回退到每一行会把首行备注写进其它明细；只有单明细/旧接口无明细订单才允许订单级兜底。
+    allow_order_note_fallback = len(_iter_cloud_items(order)) <= 1
+    item_extra_remark = _clean(
         _pick(item, "factory_remark", "factoryRemark")
         or _pick(item, "extra_remark", "extraRemark")
-        or _pick(order, "factory_remark", "factoryRemark")
+    )
+    order_extra_remark = _clean(
+        _pick(order, "factory_remark", "factoryRemark")
         or _pick(order, "extra_remark", "extraRemark")
     )
+    extra_remark = item_extra_remark or (order_extra_remark if allow_order_note_fallback else "")
     ermq = max(0, _as_int(_pick(item, "ERMQ", "ermq"), 0))
     if extra_remark and ermq <= 0:
         ermq = quantity
@@ -1333,7 +1339,7 @@ def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]
         "approved_qty": max(0, _as_int(_pick(item, "approved_qty", "approvedQty"), 0)),
         "allocated_qty": max(0, _as_int(_pick(item, "allocated_qty", "allocatedQty"), 0)),
         "delivery_date": _clean(_pick(item, "delivery_date", "deliveryDate") or _pick(order, "delivery_date", "deliveryDate")),
-        "remark": _clean(_pick(item, "remark") or _pick(order, "remark")),
+        "remark": _clean(_pick(item, "remark") or (_pick(order, "remark") if allow_order_note_fallback else "")),
         "extra_remark": extra_remark,
         "ERMQ": ermq,
         "factory_pending": 1 if _as_int(_pick(item, "factory_pending", "factoryPending", default=_pick(order, "factory_pending", "factoryPending")), 0) else 0,

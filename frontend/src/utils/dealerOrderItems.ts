@@ -88,6 +88,25 @@ export const isHeightenedDealerOrderLine = (item?: DealerOrderLineLike | null) =
 }
 
 /**
+ * 列表行展示的原备注/附加备注。
+ *
+ * 多明细订单的订单级 remark / extra_remark 是整单汇总值（云端桥接按首行明细
+ * Object.assign 生成，等于首行值）；把它回退到每一行会让某一行的备注串到所有行。
+ * 所以多明细（lineCount > 1）只取行级字段；单明细/无明细才允许订单级兜底，兼容旧接口。
+ */
+export const resolveDealerOrderRowNotes = (
+  lineCount: number,
+  item?: DealerOrderLineLike | null,
+  order?: DealerOrderLineLike | null,
+): { remark: string; extra_remark: string } => {
+  const multiLine = Number(lineCount || 0) > 1
+  return {
+    remark: item?.remark || (multiLine ? '' : order?.remark) || '',
+    extra_remark: item?.extra_remark || (multiLine ? '' : order?.extra_remark) || '',
+  }
+}
+
+/**
  * 把经销商订单（含多条明细行）展开成转合同表单行。
  * 订单没有明细时退化成单行（兼容旧接口/测试数据），此时直接读订单自身的字段。
  */

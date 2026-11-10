@@ -387,7 +387,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ContractDraftReview from '../components/ContractDraftReview.vue'
 import { apiGet, apiPost, getApiErrorMessage } from '../utils/request'
 import { isModelInDictionary } from '../utils/modelOrder'
-import { normalizeDealerOrderItems, convertLinePathLabel, isPreorderLine, type ConvertItemRow } from '../utils/dealerOrderItems'
+import { normalizeDealerOrderItems, resolveDealerOrderRowNotes, convertLinePathLabel, isPreorderLine, type ConvertItemRow } from '../utils/dealerOrderItems'
 import { useModelDictionaryStore } from '../store/modelDictionary'
 import { hasText, isPositiveInteger } from '../utils/formRules'
 import { buildCloudAttachmentNotice, type CloudAttachmentSyncSummary } from '../utils/cloudAttachmentNotice'
@@ -560,21 +560,25 @@ const rowPriority = (row: DealerOrder) => {
 const tableRows = computed<DealerOrderTableRow[]>(() => {
   const rows = orders.value.flatMap((order) => {
     const items = order.items?.length ? order.items : [order]
-    return items.map((item, index) => ({
-      ...order,
-      ...item,
-      remark: item.remark || order.remark || '',
-      extra_remark: item.extra_remark || order.extra_remark || '',
-      factory_remark: item.factory_remark || item.extra_remark || order.factory_remark || order.extra_remark || '',
-      ERMQ: Number(item.ERMQ ?? order.ERMQ ?? 0),
-      factory_pending: Number(item.factory_pending ?? order.factory_pending ?? 0),
-      review_note: item.review_note || order.review_note || '',
-      regional_review_note: item.regional_review_note || order.regional_review_note || '',
-      items: order.items?.length ? order.items : [order],
-      line_count: order.line_count,
-      _order: order,
-      _row_key: `${order.order_no}-${item.line_no || index + 1}`,
-    }))
+    return items.map((item, index) => {
+      const rowNotes = resolveDealerOrderRowNotes(items.length, item, order)
+      return {
+        ...order,
+        ...item,
+        // 多明细订单只展示行级备注；订单级汇总值只在单明细/无明细时兜底，避免备注串行。
+        remark: rowNotes.remark,
+        extra_remark: rowNotes.extra_remark,
+        factory_remark: item.factory_remark || item.extra_remark || order.factory_remark || order.extra_remark || '',
+        ERMQ: Number(item.ERMQ ?? order.ERMQ ?? 0),
+        factory_pending: Number(item.factory_pending ?? order.factory_pending ?? 0),
+        review_note: item.review_note || order.review_note || '',
+        regional_review_note: item.regional_review_note || order.regional_review_note || '',
+        items: order.items?.length ? order.items : [order],
+        line_count: order.line_count,
+        _order: order,
+        _row_key: `${order.order_no}-${item.line_no || index + 1}`,
+      }
+    })
   })
   rows.sort((a, b) => {
     const priorityDiff = rowPriority(a) - rowPriority(b)
