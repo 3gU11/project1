@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, repair_machine_components, qr_decode, notifications, workflows
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, repair_machine_components, qr_decode, notifications, workflows, customer_contracts
 
 logger = logging.getLogger(__name__)
 from api.routes import contract_drafts
@@ -302,6 +302,8 @@ app.include_router(repair_catalog.router, prefix="/api/v1/repair-model-component
 app.include_router(repair_component_replacements.router, prefix="/api/v1/repair-component-replacements", tags=["RepairComponentReplacement"])
 app.include_router(repair_machine_components.router, prefix="/api/v1/repair-machine-components", tags=["RepairMachineComponents"])
 app.include_router(qr_decode.router, prefix="/internal/qr", tags=["InternalQR"])
+# 售后小程序 → 客户成品管理：东莞出货合同推送（HMAC 签名，不走用户登录态）。
+app.include_router(customer_contracts.router, prefix="/api/v8", tags=["CustomerContracts"])
 
 # Register sandbox WS directly on app (bypasses router-level HTTP dependencies)
 app.websocket("/api/v1/sandbox/ws")(sandbox.proxy_ws)
