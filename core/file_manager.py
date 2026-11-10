@@ -39,8 +39,8 @@ def save_contract_file(uploaded_file, customer_name, contract_id, uploader_name,
     max_size = 50 * 1024 * 1024
     fname = getattr(uploaded_file, "name", None) or getattr(uploaded_file, "filename", None) or "upload.bin"
     ext = os.path.splitext(fname)[1].lower()
-    if ext not in ['.pdf', '.doc', '.docx', '.jpg', '.jpeg']:
-        return False, "不支持的文件格式 (仅限 PDF, Word, JPG)"
+    if ext not in ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png']:
+        return False, "不支持的文件格式 (仅限 PDF, Word, JPG, PNG)"
 
     safe_cust = re.sub(r'[\/*?:"<>|]', "", str(customer_name)).strip() or "Unknown"
     if contract_id:

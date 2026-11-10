@@ -57,7 +57,16 @@
       /><el-table-column prop="占用订单号" label="订单号" /><el-table-column
         prop="合同号"
         label="合同号"
-      /><el-table-column prop="Location_Code" label="库位" /><el-table-column
+      /><el-table-column label="回传合同" min-width="150">
+        <template #default="{ row }"
+          ><el-tag :type="row.return_contract_uploaded ? 'success' : 'info'">{{
+            row.return_contract_uploaded ? "已回传" : "未回传"
+          }}</el-tag>
+          <div v-if="row.return_contract_file_name" class="contract-return-file">
+            {{ row.return_contract_file_name }}
+          </div>
+        </template>
+      </el-table-column><el-table-column prop="Location_Code" label="库位" /><el-table-column
         label="订单状态"
         min-width="130"
       >
@@ -509,6 +518,7 @@ onMounted(load);
   border-bottom: 1px solid #eee;
 }
 .contract-info { margin-bottom: 16px; }
+.contract-return-file { margin-top: 4px; color: #909399; font-size: 12px; word-break: break-all; }
 .contract-section-title { margin: 16px 0 8px; font-size: 14px; }
 .upload-scope { width: 180px; margin: 12px 0 4px; }
 </style>
