@@ -145,6 +145,9 @@ class CustomerContractPushTests(unittest.TestCase):
             data={
                 "client_upload_id": client_upload_id,
                 "customer_name": "东莞市锦宏精密五金制造有限公司",
+                "buyer_name": "东莞市锦宏精密五金制造有限公司",
+                "buyer_address": "东莞市大塘路与西三横路交叉口正东方向37米左右",
+                "machine_nos": "9608306/202610",
                 "contract_no": "HT-001",
                 "uploader_name": "售后小程序-交付信息上传",
             },
@@ -171,6 +174,8 @@ class CustomerContractPushTests(unittest.TestCase):
         kwargs = store_mock.call_args.kwargs
         self.assertEqual("DI-1", kwargs["client_upload_id"])
         self.assertNotIn("order_no", kwargs)
+        self.assertEqual("9608306/202610", kwargs["machine_nos"])
+        self.assertIn("东莞市大塘路", kwargs["buyer_address"])
         self.assertNotIn("serial_no", kwargs)
 
     def test_delivery_info_upload_rejects_bad_signature(self):
@@ -201,3 +206,4 @@ class CustomerContractPushTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

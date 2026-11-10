@@ -58,6 +58,9 @@ def ensure_delivery_info_tables() -> None:
                 `file_path` VARCHAR(512) NOT NULL,
                 `file_hash` CHAR(64) DEFAULT '',
                 `customer` VARCHAR(200) DEFAULT '',
+                `buyer_name` VARCHAR(200) DEFAULT '',
+                `buyer_address` VARCHAR(500) DEFAULT '',
+                `machine_nos` TEXT,
                 `contract_no` VARCHAR(100) DEFAULT '',
                 `uploader` VARCHAR(100) DEFAULT '',
                 `uploaded_at` DATETIME(3) NULL,
@@ -82,6 +85,24 @@ def ensure_delivery_info_tables() -> None:
                 KEY `idx_diu_machine_serial` (`serial_no`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """))
+    _ensure_delivery_info_columns()
+
+
+def _ensure_delivery_info_columns() -> None:
+    """老库已建表时补齐回传合同有效字段（购货单位/地址/机台号）。"""
+    from sqlalchemy import inspect
+
+    engine = get_engine()
+    columns = {str(col.get("name")) for col in inspect(engine).get_columns("delivery_info_uploads")}
+    additions = {
+        "buyer_name": "VARCHAR(200) DEFAULT ''",
+        "buyer_address": "VARCHAR(500) DEFAULT ''",
+        "machine_nos": "TEXT",
+    }
+    with engine.begin() as conn:
+        for name, ddl in additions.items():
+            if name not in columns:
+                conn.execute(text(f"ALTER TABLE delivery_info_uploads ADD COLUMN `{name}` {ddl}"))
 
 
 def store_pending_delivery_info(
@@ -90,6 +111,9 @@ def store_pending_delivery_info(
     file_name: str,
     content: bytes,
     customer: str = "",
+    buyer_name: str = "",
+    buyer_address: str = "",
+    machine_nos: str = "",
     contract_no: str = "",
     uploader: str = "",
 ) -> dict:
@@ -118,9 +142,9 @@ def store_pending_delivery_info(
             text("""
                 INSERT INTO delivery_info_uploads
                     (`client_upload_id`, `file_name`, `file_path`, `file_hash`, `customer`,
-                     `contract_no`, `uploader`, `uploaded_at`, `status`)
+                     `buyer_name`, `buyer_address`, `machine_nos`, `contract_no`, `uploader`, `uploaded_at`, `status`)
                 VALUES (:client_upload_id, :file_name, :file_path, :file_hash, :customer,
-                        :contract_no, :uploader, :uploaded_at, 'pending')
+                        :buyer_name, :buyer_address, :machine_nos, :contract_no, :uploader, :uploaded_at, 'pending')
             """),
             {
                 "client_upload_id": _clean(client_upload_id),
@@ -128,6 +152,9 @@ def store_pending_delivery_info(
                 "file_path": rel_path,
                 "file_hash": file_hash,
                 "customer": _clean(customer)[:200],
+                "buyer_name": _clean(buyer_name)[:200],
+                "buyer_address": _clean(buyer_address)[:500],
+                "machine_nos": _clean(machine_nos)[:2000],
                 "contract_no": _clean(contract_no)[:100],
                 "uploader": _clean(uploader)[:100] or "售后小程序-交付信息上传",
                 "uploaded_at": uploaded_at,

@@ -242,9 +242,10 @@
         max-height="420"
       >
         <el-table-column prop="id" label="#" width="70" />
-        <el-table-column prop="file_name" label="附件" min-width="180" />
-        <el-table-column prop="customer" label="客户" min-width="140" />
-        <el-table-column prop="contract_no" label="合同号" width="130" />
+        <el-table-column prop="file_name" label="附件" min-width="160" />
+        <el-table-column prop="buyer_name" label="购货单位" min-width="160" />
+        <el-table-column prop="buyer_address" label="购货单位地址" min-width="200" />
+        <el-table-column prop="machine_nos" label="合同机台号" min-width="150" />
         <el-table-column prop="uploader" label="上传人" width="110" />
         <el-table-column prop="uploaded_at" label="上传时间" width="170" />
         <el-table-column label="操作" width="170">
@@ -264,8 +265,9 @@
     <el-dialog v-model="processVisible" title="处理交付信息：手动选择机台" width="980px">
       <el-descriptions v-if="processUpload" :column="3" border size="small" class="contract-info">
         <el-descriptions-item label="附件">{{ processUpload.file_name }}</el-descriptions-item>
-        <el-descriptions-item label="客户">{{ processUpload.customer || "—" }}</el-descriptions-item>
-        <el-descriptions-item label="合同号">{{ processUpload.contract_no || "—" }}</el-descriptions-item>
+        <el-descriptions-item label="购货单位">{{ processUpload.buyer_name || "—" }}</el-descriptions-item>
+        <el-descriptions-item label="合同机台号">{{ processUpload.machine_nos || "—" }}</el-descriptions-item>
+        <el-descriptions-item label="地址" :span="3">{{ processUpload.buyer_address || "—" }}</el-descriptions-item>
       </el-descriptions>
       <el-alert
         title="合同附件只含机台编号与客户信息，请核对附件后手动勾选机台。所选机台必须属于同一个销售订单；处理只关联合同，不自动确认出货。"
@@ -640,9 +642,13 @@ const openProcessUpload = (row: any) => {
   processUpload.value = row;
   processVisible.value = true;
   processBusy.value = false;
-  machineKeyword.value = "";
+  const firstMachineNo = String(row.machine_nos || "")
+    .split(/[、,，\s/]+/)
+    .find((item) => item.trim());
+  machineKeyword.value = firstMachineNo ? firstMachineNo.trim() : "";
   machineCandidates.value = [];
   selectedMachines.value = [];
+  if (machineKeyword.value) void searchProcessMachines();
 };
 const searchProcessMachines = async () => {
   machineSearching.value = true;

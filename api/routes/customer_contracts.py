@@ -240,6 +240,9 @@ async def push_customer_contract(
 async def push_delivery_info_upload(
     client_upload_id: str = Form(...),
     customer_name: str = Form(""),
+    buyer_name: str = Form(""),
+    buyer_address: str = Form(""),
+    machine_nos: str = Form(""),
     contract_no: str = Form(""),
     uploader_name: str = Form("售后小程序-交付信息上传"),
     file: UploadFile = File(...),
@@ -271,6 +274,9 @@ async def push_delivery_info_upload(
         file_name=file_name,
         content=content,
         customer=customer_name,
+        buyer_name=buyer_name,
+        buyer_address=buyer_address,
+        machine_nos=machine_nos,
         contract_no=contract_no,
         uploader=uploader_name,
     )
@@ -280,5 +286,8 @@ async def push_delivery_info_upload(
         "fileName": saved["fileName"],
         "status": "pending",
         "customerName": _clean(customer_name),
+        "buyerName": _clean(buyer_name),
+        "buyerAddress": _clean(buyer_address),
+        "machineNos": _clean(machine_nos),
         "contractNo": _clean(contract_no),
     }
