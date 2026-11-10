@@ -57,10 +57,10 @@
       /><el-table-column prop="占用订单号" label="订单号" /><el-table-column
         prop="合同号"
         label="合同号"
-      /><el-table-column label="回传合同" min-width="150">
+      /><el-table-column label="交付信息" min-width="150">
         <template #default="{ row }"
           ><el-tag :type="row.return_contract_uploaded ? 'success' : 'info'">{{
-            row.return_contract_uploaded ? "已回传" : "未回传"
+            row.return_contract_uploaded ? "已上传" : "未上传"
           }}</el-tag>
           <div v-if="row.return_contract_file_name" class="contract-return-file">
             {{ row.return_contract_file_name }}
@@ -186,6 +186,18 @@
         <el-descriptions-item label="原销售订单">{{ contractRow["占用订单号"] || "—" }}</el-descriptions-item>
         <el-descriptions-item label="当前状态">{{ contractRow["状态"] || "—" }}</el-descriptions-item>
       </el-descriptions>
+      <el-alert
+        v-if="mode === 'contract' && contractRow"
+        :title="
+          contractRow.return_contract_uploaded
+            ? `交付信息：已上传${contractRow.return_contract_file_name ? '（' + contractRow.return_contract_file_name + '）' : ''}`
+            : '交付信息：未上传（东莞回传订货合同）'
+        "
+        :type="contractRow.return_contract_uploaded ? 'success' : 'warning'"
+        :closable="false"
+        show-icon
+        class="delivery-info-alert"
+      />
       <template v-if="mode === 'contract'">
         <h3 class="contract-section-title">工厂发往东莞仓库总合同</h3>
         <div v-for="f in orderFiles" :key="`order-${f.file_name}`" class="file">{{ f.file_name }}</div>
@@ -518,6 +530,7 @@ onMounted(load);
   border-bottom: 1px solid #eee;
 }
 .contract-info { margin-bottom: 16px; }
+.delivery-info-alert { margin-bottom: 16px; }
 .contract-return-file { margin-top: 4px; color: #909399; font-size: 12px; word-break: break-all; }
 .contract-section-title { margin: 16px 0 8px; font-size: 14px; }
 .upload-scope { width: 180px; margin: 12px 0 4px; }
