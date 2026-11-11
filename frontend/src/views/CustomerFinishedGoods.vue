@@ -228,7 +228,7 @@
 
     <el-dialog v-model="pendingUploadsVisible" title="交付信息上传（待处理）" width="980px">
       <el-alert
-        title="合同只含机台编号与客户信息。请查看附件后，点「处理」手动选择机台；系统只把合同关联到所选机台，不自动发货。"
+        title="小程序只上传附件。请打开附件预览，根据合同填写购货单位/地址/机台号，并手动选择机台；系统只把合同关联到所选机台，不自动发货。"
         type="info"
         :closable="false"
         show-icon
@@ -242,15 +242,13 @@
         max-height="420"
       >
         <el-table-column prop="id" label="#" width="70" />
-        <el-table-column prop="file_name" label="附件" min-width="160" />
-        <el-table-column prop="buyer_name" label="购货单位" min-width="160" />
-        <el-table-column prop="buyer_address" label="购货单位地址" min-width="200" />
-        <el-table-column prop="machine_nos" label="合同机台号" min-width="150" />
-        <el-table-column prop="uploader" label="上传人" width="110" />
+        <el-table-column prop="file_name" label="附件" min-width="220" />
+        <el-table-column prop="uploader" label="上传人" width="130" />
         <el-table-column prop="uploaded_at" label="上传时间" width="170" />
-        <el-table-column label="操作" width="170">
+        <el-table-column label="操作" width="220">
           <template #default="{ row }">
-            <el-button link @click="downloadPendingUpload(row)">查看附件</el-button>
+            <el-button link @click="previewPendingUpload(row)">预览附件</el-button>
+            <el-button link @click="downloadPendingUpload(row)">下载</el-button>
             <el-button link type="primary" @click="openProcessUpload(row)">处理</el-button>
           </template>
         </el-table-column>
@@ -262,15 +260,28 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="processVisible" title="处理交付信息：手动选择机台" width="980px">
-      <el-descriptions v-if="processUpload" :column="3" border size="small" class="contract-info">
+    <el-dialog v-model="processVisible" title="处理交付信息：查看合同、填写信息并选择机台" width="980px">
+      <el-descriptions v-if="processUpload" :column="2" border size="small" class="contract-info">
         <el-descriptions-item label="附件">{{ processUpload.file_name }}</el-descriptions-item>
-        <el-descriptions-item label="购货单位">{{ processUpload.buyer_name || "—" }}</el-descriptions-item>
-        <el-descriptions-item label="合同机台号">{{ processUpload.machine_nos || "—" }}</el-descriptions-item>
-        <el-descriptions-item label="地址" :span="3">{{ processUpload.buyer_address || "—" }}</el-descriptions-item>
+        <el-descriptions-item label="上传人">{{ processUpload.uploader || "—" }}</el-descriptions-item>
       </el-descriptions>
+      <div class="toolbar process-search">
+        <el-button @click="previewPendingUpload(processUpload)">打开附件预览</el-button>
+        <el-button @click="downloadPendingUpload(processUpload)">下载附件</el-button>
+      </div>
+      <el-form label-width="110px" class="action-form">
+        <el-form-item label="购货单位">
+          <el-input v-model="processBuyerName" placeholder="根据合同预览填写购货单位名称" />
+        </el-form-item>
+        <el-form-item label="购货单位地址">
+          <el-input v-model="processBuyerAddress" placeholder="根据合同预览填写地址" />
+        </el-form-item>
+        <el-form-item label="合同机台号">
+          <el-input v-model="processMachineNos" placeholder="根据合同预览填写机台号，多个用逗号分隔" />
+        </el-form-item>
+      </el-form>
       <el-alert
-        title="合同附件只含机台编号与客户信息，请核对附件后手动勾选机台。所选机台必须属于同一个销售订单；处理只关联合同，不自动确认出货。"
+        title="请核对附件后手动勾选机台。所选机台必须属于同一个销售订单；处理只关联合同，不自动确认出货。"
         type="warning"
         :closable="false"
         show-icon
@@ -312,12 +323,22 @@
         >
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="previewVisible"
+      :title="`预览：${previewFileName}`"
+      width="900px"
+      @closed="closePreview"
+    >
+      <iframe v-if="isPreviewPdf" :src="previewUrl" class="delivery-info-preview" />
+      <img v-else :src="previewUrl" class="delivery-info-preview-image" />
+    </el-dialog>
   </div>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { apiDownloadBlob, apiGet, apiPost, getApiErrorMessage } from "../utils/request";
+import { apiDownloadBlob, apiGet, apiGetBlobUrl, apiPost, getApiErrorMessage } from "../utils/request";
 const keyword = ref(""),
   rows = ref<any[]>([]),
   selected = ref<any[]>([]),
@@ -351,6 +372,15 @@ const machineKeyword = ref("");
 const machineSearching = ref(false);
 const machineCandidates = ref<any[]>([]);
 const selectedMachines = ref<any[]>([]);
+// 附件在线预览（操作人员对照合同填写信息、选择机台）。
+const previewVisible = ref(false);
+const previewUrl = ref("");
+const previewFileName = ref("");
+const isPreviewPdf = computed(() => /\.pdf$/i.test(previewFileName.value));
+// 处理时由操作人员根据合同预览填写。
+const processBuyerName = ref("");
+const processBuyerAddress = ref("");
+const processMachineNos = ref("");
 const load = async () => {
   const requestId = ++machineRequest;
   loading.value = true;
@@ -630,6 +660,26 @@ const downloadPendingUpload = async (row: any) => {
     ElMessage.error(getApiErrorMessage(error) || "附件下载失败");
   }
 };
+/** 在线预览合同附件：操作人员对照合同填写购货单位/地址/机台号。 */
+const previewPendingUpload = async (row: any) => {
+  try {
+    if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
+    previewUrl.value = await apiGetBlobUrl(
+      `/inventory/delivery-info-uploads/${row.id}/file`,
+    );
+    previewFileName.value = row.file_name || "交付信息附件";
+    previewVisible.value = true;
+  } catch (error) {
+    ElMessage.error(getApiErrorMessage(error) || "附件预览失败");
+  }
+};
+const closePreview = () => {
+  previewVisible.value = false;
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value);
+    previewUrl.value = "";
+  }
+};
 const clearProcessSelection = () => {
   processUpload.value = null;
   processVisible.value = false;
@@ -637,18 +687,23 @@ const clearProcessSelection = () => {
   machineKeyword.value = "";
   machineCandidates.value = [];
   selectedMachines.value = [];
+  processBuyerName.value = "";
+  processBuyerAddress.value = "";
+  processMachineNos.value = "";
 };
 const openProcessUpload = (row: any) => {
   processUpload.value = row;
   processVisible.value = true;
   processBusy.value = false;
-  const firstMachineNo = String(row.machine_nos || "")
+  processBuyerName.value = String(row.buyer_name || "");
+  processBuyerAddress.value = String(row.buyer_address || "");
+  processMachineNos.value = String(row.machine_nos || "");
+  const firstMachineNo = processMachineNos.value
     .split(/[、,，\s/]+/)
     .find((item) => item.trim());
   machineKeyword.value = firstMachineNo ? firstMachineNo.trim() : "";
   machineCandidates.value = [];
   selectedMachines.value = [];
-  if (machineKeyword.value) void searchProcessMachines();
 };
 const searchProcessMachines = async () => {
   machineSearching.value = true;
@@ -681,6 +736,9 @@ const confirmProcessUpload = async () => {
   try {
     await apiPost(`/inventory/delivery-info-uploads/${processUpload.value.id}/process`, {
       serial_nos: selectedMachines.value.map((row) => String(row["流水号"] || "").trim()),
+      buyer_name: processBuyerName.value.trim(),
+      buyer_address: processBuyerAddress.value.trim(),
+      machine_nos: processMachineNos.value.trim(),
     });
     ElMessage.success("交付信息已处理，合同已关联到所选机台");
     clearProcessSelection();
@@ -725,6 +783,17 @@ onMounted(() => {
 .contract-info { margin-bottom: 16px; }
 .delivery-info-alert { margin-bottom: 16px; }
 .process-search { margin-top: 14px; }
+.delivery-info-preview {
+  width: 100%;
+  height: 70vh;
+  border: 0;
+}
+.delivery-info-preview-image {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
 .contract-return-file { margin-top: 4px; color: #909399; font-size: 12px; word-break: break-all; }
 .contract-section-title { margin: 16px 0 8px; font-size: 14px; }
 .upload-scope { width: 180px; margin: 12px 0 4px; }

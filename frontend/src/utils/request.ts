@@ -145,4 +145,14 @@ export const apiDownloadBlobPost = async (url: string, data: any, fileName: stri
 }
 
 
+/**
+ * 获取文件的 Blob URL（用于页面内预览 PDF/图片），复用 axios 拦截器自动携带 token。
+ * 调用方使用完毕后需 URL.revokeObjectURL。
+ */
+export const apiGetBlobUrl = async (url: string, timeout = 120000): Promise<string> => {
+  const response = await request.get(url, { responseType: 'blob', timeout })
+  const contentType = String(response.headers?.['content-type'] || '')
+  return window.URL.createObjectURL(new Blob([response.data], { type: contentType }))
+}
+
 export default request

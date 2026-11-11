@@ -218,6 +218,10 @@ def download_delivery_info_file(
 
 class ProcessDeliveryInfoPayload(BaseModel):
     serial_nos: list[str] = Field(min_length=1, max_length=500)
+    # 操作人员对照附件预览填写（小程序上传时不再要求填写）。
+    buyer_name: str = ""
+    buyer_address: str = ""
+    machine_nos: str = ""
 
 
 @router.post("/delivery-info-uploads/{upload_id}/process")
@@ -295,13 +299,19 @@ def process_delivery_info_upload(
             text("""
                 UPDATE delivery_info_uploads
                 SET status='processed', processed_by=:operator, processed_at=:now,
-                    processed_note=:note
+                    processed_note=:note,
+                    buyer_name=COALESCE(NULLIF(:buyer_name, ''), buyer_name),
+                    buyer_address=COALESCE(NULLIF(:buyer_address, ''), buyer_address),
+                    machine_nos=COALESCE(NULLIF(:machine_nos, ''), machine_nos)
                 WHERE id=:id
             """),
             {
                 "operator": operator,
                 "now": now,
                 "note": f"关联订单 {order_no}，机台：{', '.join(serials)}",
+                "buyer_name": _clean(payload.buyer_name)[:200],
+                "buyer_address": _clean(payload.buyer_address)[:500],
+                "machine_nos": _clean(payload.machine_nos)[:2000],
                 "id": upload_id,
             },
         )
