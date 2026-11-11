@@ -242,7 +242,8 @@
         max-height="420"
       >
         <el-table-column prop="id" label="#" width="70" />
-        <el-table-column prop="file_name" label="附件" min-width="220" />
+        <el-table-column prop="file_name" label="附件" min-width="200" />
+        <el-table-column prop="machine_nos" label="识别/合同机台号" min-width="170" />
         <el-table-column prop="uploader" label="上传人" width="130" />
         <el-table-column prop="uploaded_at" label="上传时间" width="170" />
         <el-table-column label="操作" width="220">
