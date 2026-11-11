@@ -25,6 +25,7 @@ from sqlalchemy import bindparam, text
 from api.routes.auth import get_current_user_context, require_permissions
 from config import BASE_DIR
 from crud.audit_logs import append_audit_log
+from crud.delivery_info_recognition import recognize_delivery_info_upload
 from database import get_engine
 
 router = APIRouter()
@@ -161,7 +162,13 @@ def store_pending_delivery_info(
             },
         )
         upload_id = result.lastrowid
-    return {"uploadId": str(upload_id), "fileName": safe_name, "status": "pending"}
+    return {
+        "uploadId": str(upload_id),
+        "fileName": safe_name,
+        "status": "pending",
+        # 供上传入口在保存后直接识别（不依赖再次查库）。
+        "filePath": rel_path,
+    }
 
 
 def _upload_row(upload_id: int) -> dict:
@@ -316,3 +323,42 @@ def process_delivery_info_upload(
         "contractId": contract_id,
         "serialNos": serials,
     }
+
+
+@router.post("/delivery-info-uploads/{upload_id}/recognize")
+def recognize_delivery_info_upload_endpoint(
+    upload_id: int,
+    current_user: dict = Depends(require_permissions("QUERY")),
+):
+    """重新识别交付信息附件的东莞机台号并回填 machine_nos。
+
+    - 待处理（pending）记录：识别成功且得到机台号时回填；
+    - 已处理（processed）记录：只返回识别结果，不回填（避免改动已归档合同关联）；
+    - 附件缺失、OCR 未启动、PDF 损坏等只返回 warnings，不报错。
+    """
+    row = _upload_row(upload_id)
+    try:
+        recognized = recognize_delivery_info_upload(upload_id)
+    except Exception as exc:  # 识别本身已容错，这里只兜底极端情况
+        recognized = {
+            "machine_nos": [],
+            "raw_numbers": [],
+            "machines": [],
+            "method": "",
+            "warnings": [f"识别失败：{exc}"],
+            "machine_nos_text": "",
+            "persisted": False,
+        }
+    data = {
+        "uploadId": str(upload_id),
+        "fileName": _clean(row.get("file_name")),
+        "status": _clean(row.get("status")),
+        "machine_nos": recognized.get("machine_nos") or [],
+        "machineNos": _clean(recognized.get("machine_nos_text")),
+        "raw_numbers": recognized.get("raw_numbers") or [],
+        "machines": recognized.get("machines") or [],
+        "method": _clean(recognized.get("method")),
+        "warnings": recognized.get("warnings") or [],
+        "persisted": bool(recognized.get("persisted")),
+    }
+    return {"data": data}

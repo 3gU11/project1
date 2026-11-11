@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import logging
 import os
 import time
 from datetime import datetime
@@ -20,9 +21,11 @@ from sqlalchemy import text
 
 from api.routes.delivery_info_uploads import store_pending_delivery_info
 from core.file_manager import save_contract_file
+from crud.delivery_info_recognition import recognize_delivery_info_upload
 from database import get_engine
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 MAX_CONTRACT_BYTES = 10 * 1024 * 1024
 DEFAULT_KEY_ID = "aftercare-bridge-20260929"
@@ -236,6 +239,37 @@ async def push_customer_contract(
     }
 
 
+def _empty_recognition(warning: str = "") -> dict:
+    return {
+        "text": "",
+        "method": "",
+        "machine_nos": [],
+        "raw_numbers": [],
+        "machines": [],
+        "candidates": [],
+        "warnings": [warning] if warning else [],
+        "machine_nos_text": "",
+        "persisted": False,
+    }
+
+
+async def _auto_recognize_delivery_info(saved: dict) -> dict:
+    """保存待处理记录后自动识别合同机台号；任何失败只 warning，不影响上传成功。"""
+    upload_id = _clean(saved.get("uploadId"))
+    file_path = _clean(saved.get("filePath"))
+    if not upload_id or not file_path:
+        return _empty_recognition("未获得保存后的文件路径，已跳过自动识别")
+    try:
+        return await asyncio.to_thread(
+            recognize_delivery_info_upload,
+            int(upload_id),
+            file_path=file_path,
+        )
+    except Exception as exc:  # 识别已在 crud 层容错，这里兜底
+        logger.warning("交付信息上传 #%s 自动识别失败：%s", upload_id, exc)
+        return _empty_recognition(f"自动识别失败：{exc}")
+
+
 @router.post("/delivery-info-uploads")
 async def push_delivery_info_upload(
     client_upload_id: str = Form(...),
@@ -280,6 +314,12 @@ async def push_delivery_info_upload(
         contract_no=contract_no,
         uploader=uploader_name,
     )
+    # 小程序未传机台号时，保存后自动识别合同附件里的东莞机台号并回填。
+    final_machine_nos = _clean(machine_nos)
+    recognition = None
+    if not final_machine_nos:
+        recognition = await _auto_recognize_delivery_info(saved)
+        final_machine_nos = _clean(recognition.get("machine_nos_text")) or final_machine_nos
     return {
         "ok": True,
         "uploadId": saved["uploadId"],
@@ -288,6 +328,7 @@ async def push_delivery_info_upload(
         "customerName": _clean(customer_name),
         "buyerName": _clean(buyer_name),
         "buyerAddress": _clean(buyer_address),
-        "machineNos": _clean(machine_nos),
+        "machineNos": final_machine_nos,
         "contractNo": _clean(contract_no),
+        "recognition": recognition,
     }
