@@ -24,6 +24,8 @@ def test_bridge_form_fields_are_mapped_to_review_columns():
             "model": "FR-400G",
             "quantity": 1,
             "deliveryDate": "2026-11-25",
+            "settlementTerms": "月结30天",
+            "specialRequirements": "加急：先出2台，其余月底前",
         },
         {"orderNo": "ADDR-TEST-001"},
     )
@@ -34,3 +36,5 @@ def test_bridge_form_fields_are_mapped_to_review_columns():
     assert payload["office_phone"] == "13900000000"
     assert payload["dealer_phone"] == "13800138000"
     assert payload["delivery_date"] == "2026-11-25"
+    assert payload["settlement_terms"] == "月结30天"
+    assert payload["special_requirements"] == "加急：先出2台，其余月底前"

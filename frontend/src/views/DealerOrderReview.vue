@@ -144,6 +144,8 @@
           <span>办事处联系方式</span><strong>{{ selectedOrder.office_phone || '-' }}</strong>
           <span>联系人</span><strong>{{ selectedOrder.contact_name || '-' }}</strong>
           <span>电话</span><strong>{{ selectedOrder.contact_phone || '-' }}</strong>
+          <span>结算方式及期限</span><strong>{{ selectedOrder.settlement_terms || '-' }}</strong>
+          <span>其他特殊要求</span><strong>{{ selectedOrder.special_requirements || '-' }}</strong>
           <span>当前状态</span><strong>{{ statusMeta(selectedOrder).text }}</strong>
           <span>总数量</span><strong>{{ selectedOrder.quantity }}</strong>
           <span>已配货</span><strong>{{ selectedOrder.allocated_qty ?? 0 }}</strong>
@@ -409,6 +411,8 @@ type DealerOrder = {
   office_phone?: string
   contact_name?: string
   contact_phone?: string
+  settlement_terms?: string
+  special_requirements?: string
   model: string
   batch_no?: string
   expected_inbound_time?: string

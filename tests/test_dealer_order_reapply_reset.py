@@ -36,6 +36,8 @@ _DEALER_ORDER_COLUMNS = [
     "approved_qty",
     "allocated_qty",
     "delivery_date",
+    "settlement_terms",
+    "special_requirements",
     "remark",
     "extra_remark",
     "ERMQ",

@@ -1339,6 +1339,14 @@ def _line_payload(item: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]
         "approved_qty": max(0, _as_int(_pick(item, "approved_qty", "approvedQty"), 0)),
         "allocated_qty": max(0, _as_int(_pick(item, "allocated_qty", "allocatedQty"), 0)),
         "delivery_date": _clean(_pick(item, "delivery_date", "deliveryDate") or _pick(order, "delivery_date", "deliveryDate")),
+        "settlement_terms": _clean(
+            _pick(item, "settlement_terms", "settlementTerms", "settlementMethodAndTerm", "settlement_method_and_term")
+            or _pick(order, "settlement_terms", "settlementTerms", "settlementMethodAndTerm", "settlement_method_and_term")
+        ),
+        "special_requirements": _clean(
+            _pick(item, "special_requirements", "specialRequirements")
+            or _pick(order, "special_requirements", "specialRequirements")
+        ),
         "remark": _clean(_pick(item, "remark") or (_pick(order, "remark") if allow_order_note_fallback else "")),
         "extra_remark": extra_remark,
         "ERMQ": ermq,
@@ -1374,6 +1382,7 @@ def _batch_load_existing(
         "order_no, line_no, status, approved_qty, allocated_qty, reviewed_at, reviewed_by, "
         "contract_no, v7_order_no, review_note, extra_remark, ERMQ, factory_pending, "
         "customer_name, delivery_address, office_name, office_contact, office_phone, "
+        "settlement_terms, special_requirements, "
         "source, last_synced_at, sync_status, sync_error, "
         "factory_reviewed_at, factory_reviewed_by, "
         "extra_remark_reviewed_at, extra_remark_reviewed_by"
@@ -1584,6 +1593,7 @@ def sync_cloud_dealer_orders(
                             regional_manager_name=:regional_manager_name,
                             customer_name=:customer_name, delivery_address=:delivery_address,
                             office_name=:office_name, office_contact=:office_contact, office_phone=:office_phone,
+                            settlement_terms=:settlement_terms, special_requirements=:special_requirements,
                             contact_name=:contact_name, contact_phone=:contact_phone,
                             model=:model, batch_no=:batch_no, eta=:eta, inventory_type=:inventory_type,
                             quantity=:quantity, approved_qty=:approved_qty, allocated_qty=:allocated_qty,
@@ -1623,6 +1633,7 @@ def sync_cloud_dealer_orders(
                         INSERT INTO dealer_orders
                         (order_no, line_no, dealer_id, dealer_name, dealer_phone, regional_manager_name,
                          customer_name, delivery_address, office_name, office_contact, office_phone,
+                         settlement_terms, special_requirements,
                          contact_name, contact_phone, model, batch_no, eta, inventory_type,
                          quantity, approved_qty, allocated_qty, delivery_date, remark,
                          extra_remark, ERMQ, factory_pending,
@@ -1635,6 +1646,7 @@ def sync_cloud_dealer_orders(
                         VALUES
                         (:order_no, :line_no, :dealer_id, :dealer_name, :dealer_phone, :regional_manager_name,
                          :customer_name, :delivery_address, :office_name, :office_contact, :office_phone,
+                         :settlement_terms, :special_requirements,
                          :contact_name, :contact_phone, :model, :batch_no, :eta, :inventory_type,
                          :quantity, :approved_qty, :allocated_qty, :delivery_date, :remark,
                          :extra_remark, :ERMQ, :factory_pending,
