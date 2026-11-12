@@ -97,7 +97,7 @@
       <el-table-column prop="remark" label="原备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="extra_remark" label="附加备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="ERMQ" label="需改数量" width="80" align="center" />
-      <el-table-column label="操作" width="300" align="center" fixed="right">
+      <el-table-column label="操作" width="360" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
             <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="openContractReview(row)">
@@ -112,6 +112,17 @@
               @click.stop="openConvertDialog(row._order || row)"
             >
               转合同
+            </el-button>
+            <el-button
+              size="small"
+              type="danger"
+              plain
+              :loading="cancelPreviewLoading"
+              :disabled="!canCancelDealerOrder(row)"
+              :title="canCancelDealerOrder(row) ? '' : '仅已通过 / 已转合同 / 部分配货 / 已配货且无待审核新备注的订单可取消'"
+              @click.stop="openCancelDialog(row._order || row)"
+            >
+              取消订单
             </el-button>
           </div>
         </template>
@@ -216,6 +227,14 @@
             :title="canConvertDealerOrder(selectedOrder) ? '' : '请先审核通过后再转合同'"
             @click="openConvertDialog(selectedOrder)"
           >转合同</el-button>
+          <el-button
+            type="danger"
+            plain
+            :loading="cancelPreviewLoading"
+            :disabled="!canCancelDealerOrder(selectedOrder)"
+            :title="canCancelDealerOrder(selectedOrder) ? '' : '仅已通过 / 已转合同 / 部分配货 / 已配货且无待审核新备注的订单可取消'"
+            @click="openCancelDialog(selectedOrder)"
+          >取消订单</el-button>
         </div>
       </template>
     </el-drawer>
@@ -316,6 +335,59 @@
       <template #footer>
         <el-button @click="convertDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="convertSaving" @click="submitConvert()">确认转合同</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="cancelDialogVisible"
+      title="取消经销商订单"
+      width="640px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!cancelSubmitting"
+    >
+      <el-empty v-if="!cancelPreview" description="暂无可取消信息" />
+      <template v-else>
+        <div class="detail-grid cancel-grid">
+          <span>订单号</span><strong>{{ cancelPreview.order_no }}</strong>
+          <span>当前状态</span><strong>{{ statusMeta(cancelPreview.status).text }}</strong>
+          <span>合同号</span><strong>{{ cancelListText(cancelPreview.contracts) }}</strong>
+          <span>销售订单</span><strong>{{ cancelListText(cancelPreview.sales_orders) }}</strong>
+          <span>待释放机台</span>
+          <strong>
+            库存现货 {{ cancelPreview.machines?.stock ?? 0 }} 台 / 在产预占 {{ cancelPreview.machines?.production ?? 0 }} 台 /
+            合计 {{ cancelPreview.machines?.total ?? 0 }} 台
+          </strong>
+          <span>机台流水号</span>
+          <div>
+            <div class="cancel-serial-summary">{{ cancelSerialsSummary }}</div>
+            <el-collapse v-if="cancelSerialRows.length > 10" class="cancel-serial-collapse">
+              <el-collapse-item title="查看全部流水号" name="serials">
+                <div class="cancel-serial-list">{{ cancelSerialRows.join('、') }}</div>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </div>
+        <div v-if="cancelPreview.warnings?.length" class="cancel-warnings">
+          <div v-for="(item, idx) in cancelPreview.warnings" :key="idx">⚠ {{ item }}</div>
+        </div>
+        <div class="cancel-danger-hint">
+          取消后会释放未出库配货、取消合同与销售订单，并把小程序订单置为已取消（已出库机台不会自动回滚）。
+        </div>
+        <div class="ops-label cancel-reason-label">取消原因</div>
+        <el-input
+          v-model="cancelReason"
+          type="textarea"
+          :rows="3"
+          maxlength="200"
+          show-word-limit
+          placeholder="选填，填写取消原因便于追踪（如客户变更需求）"
+        />
+      </template>
+      <template #footer>
+        <el-button :disabled="cancelSubmitting" @click="cancelDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="cancelSubmitting" :disabled="!cancelPreview" @click="confirmCancelOrder">
+          确认取消
+        </el-button>
       </template>
     </el-dialog>
 
@@ -459,6 +531,45 @@ type PreviewResponse = {
   occupied_qty: number
   available_qty: number
   can_approve: boolean
+}
+
+type DealerOrderCancelPreview = {
+  order_no: string
+  status: string
+  cancellable: boolean
+  blockers: string[]
+  warnings: string[]
+  contracts: string[]
+  sales_orders: string[]
+  machines: {
+    total: number
+    stock: number
+    production: number
+    serials: string[]
+  }
+  shipped_machines: string[]
+  lines: number
+}
+
+type DealerOrderCancelResult = {
+  // 取消执行器输出：机台流水号 / 合同号 / 销售订单号均为数组（兼容旧版数字计数）。
+  released_serials?: number | string[]
+  stock?: number
+  production?: number
+  contracts?: number | string[]
+  sales_orders?: number | string[]
+  dealer_lines?: number
+  cloud_event?: string | Record<string, any>
+}
+
+type DealerOrderCancelResponse = {
+  message?: string
+  warning?: string
+  status?: string
+  approval_pending?: boolean
+  instance_no?: string
+  preview?: DealerOrderCancelPreview
+  result?: DealerOrderCancelResult
 }
 
 type CloudSyncStatus = {
@@ -636,6 +747,15 @@ const isFactoryPending = (row: DealerOrder) => Number(row.factory_pending || 0) 
 const canApprove = (row: DealerOrder) => isFactoryPending(row) || row.status === 'pending'
 const canReject = (row: DealerOrder) => (isFactoryPending(row) ? hasFactoryRemark(row) : ['pending', 'approved'].includes(row.status))
 const canConvertDealerOrder = (row: DealerOrder) => String(row.status || '').trim() === 'approved' && !isFactoryPending(row)
+// 已通过 / 已转合同 / 部分配货 / 已配货的订单可取消；待审核、已取消、已完成等状态不显示可用取消。
+const canCancelDealerOrder = (row: DealerOrder) => {
+  // 表格行是「订单 + 明细」合并行：取消针对整单，状态取订单级 _order，新备注审核中则行级也要看。
+  const target = (row as DealerOrderTableRow)._order || row
+  const status = String(target.status || '').trim()
+  return ['approved', 'contracted', 'partial_allocated', 'allocated'].includes(status)
+    && !isFactoryPending(target)
+    && !isFactoryPending(row)
+}
 
 // 待审核显示"预览并审批"，其它状态一律只读查看合同附件。
 const reviewButtonLabel = (row: DealerOrder) => {
@@ -1131,6 +1251,126 @@ const rejectOrder = async (row: DealerOrder) => {
   }
 }
 
+// ===== 经销商订单取消（一键释放配货 / 取消合同与销售订单 / 回传小程序） =====
+const cancelDialogVisible = ref(false)
+const cancelPreviewLoading = ref(false)
+const cancelSubmitting = ref(false)
+const cancelPreview = ref<DealerOrderCancelPreview | null>(null)
+const cancelReason = ref('')
+
+const cancelSerialRows = computed(() => (cancelPreview.value?.machines?.serials || [])
+  .map((item) => String(item || '').trim())
+  .filter(Boolean))
+
+// 流水号过多时只展示前 10 个，其余折叠在「查看全部流水号」里。
+const cancelSerialsSummary = computed(() => {
+  const rows = cancelSerialRows.value
+  if (!rows.length) return '-'
+  if (rows.length <= 10) return rows.join('、')
+  return `${rows.slice(0, 10).join('、')} 等 ${rows.length} 台`
+})
+
+const cancelListText = (items?: string[]) => {
+  const list = (items || []).map((item) => String(item || '').trim()).filter(Boolean)
+  return list.length ? list.join('、') : '-'
+}
+
+// 后端取消执行器的 released_serials / contracts / sales_orders 都是数组，兼容数字计数写法。
+const countOf = (value: number | string[] | undefined) => (Array.isArray(value) ? value.length : Number(value || 0))
+
+const buildCancelBlockerText = (data: DealerOrderCancelPreview) => {
+  const segments: string[] = []
+  const blockers = (data.blockers || []).map((item) => String(item || '').trim()).filter(Boolean)
+  blockers.forEach((item, index) => segments.push(`${index + 1}. ${item}`))
+  const shipped = (data.shipped_machines || []).map((item) => String(item || '').trim()).filter(Boolean)
+  // 后端 blockers 里通常已带已出库明细与「发货复核→退换货处理」指引，避免重复拼接。
+  const shippedHintIncluded = blockers.some((item) => item.includes('退换货') || item.includes('已出库') || item.includes('已发货'))
+  if (shipped.length && !shippedHintIncluded) {
+    segments.push(`已出库机台流水号：${shipped.join('、')}`)
+    segments.push('请到「发货复核 → 退换货处理」完成已出库机台的退换货后再取消订单')
+  }
+  if (!segments.length) segments.push('该订单当前不可取消')
+  return segments.join('；')
+}
+
+const openCancelDialog = async (row: DealerOrder) => {
+  const target = (row as DealerOrderTableRow)._order || row
+  const orderNo = String(target.order_no || '').trim()
+  if (!orderNo || !canCancelDealerOrder(target)) {
+    ElMessage.warning('当前订单状态不支持取消，仅已通过 / 已转合同 / 部分配货 / 已配货且无待审核新备注的订单可取消')
+    return
+  }
+  if (cancelPreviewLoading.value) return
+  cancelPreviewLoading.value = true
+  try {
+    const data = await apiGet<DealerOrderCancelPreview>(`/dealer-orders/${encodeURIComponent(orderNo)}/cancel-preview`)
+    if (!data.cancellable) {
+      await ElMessageBox.alert(buildCancelBlockerText(data), '该订单暂时无法取消', {
+        type: 'warning',
+        confirmButtonText: '知道了',
+      }).catch(() => {})
+      return
+    }
+    cancelPreview.value = data
+    cancelReason.value = ''
+    cancelDialogVisible.value = true
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '读取取消影响失败')
+  } finally {
+    cancelPreviewLoading.value = false
+  }
+}
+
+const confirmCancelOrder = async () => {
+  const data = cancelPreview.value
+  if (!data || cancelSubmitting.value) return
+  cancelSubmitting.value = true
+  try {
+    const res = await apiPost<DealerOrderCancelResponse>(`/dealer-orders/${encodeURIComponent(data.order_no)}/cancel`, {
+      reason: cancelReason.value.trim(),
+    })
+    if (res.approval_pending) {
+      ElMessage.info('已提交取消审批，审批通过后自动释放配货')
+    } else if (String(res.status || '') !== 'cancelled') {
+      // 执行异常/实例未自动执行：后端已标记流程异常并释放对象锁，但业务数据未变。
+      ElMessage.warning(res.message || '取消未完成：流程执行异常，请联系管理员在审批中心重试或作废后重新发起')
+    } else {
+      const result = res.result || {}
+      // released_serials / contracts / sales_orders 均为数组，取长度作为数量；兼容旧版数字计数。
+      const released = countOf(result.released_serials)
+      const contractCount = countOf(result.contracts)
+      const salesOrderCount = countOf(result.sales_orders)
+      const parts: string[] = []
+      if (released > 0) parts.push(`已释放 ${released} 台机台`)
+      if (contractCount > 0) parts.push(`取消 ${contractCount} 个合同`)
+      if (salesOrderCount > 0) parts.push(`取消 ${salesOrderCount} 个销售订单`)
+      parts.push('已回传小程序')
+      ElMessage.success(parts.length > 1 ? parts.join('，') : res.message || '订单已取消，已回传小程序')
+    }
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '取消订单失败')
+    return
+  } finally {
+    cancelSubmitting.value = false
+  }
+
+  cancelDialogVisible.value = false
+  cancelPreview.value = null
+  window.dispatchEvent(new CustomEvent('dealer-orders-updated'))
+  try {
+    await loadOrders()
+    if (drawerOpen.value && selectedOrderNo.value) {
+      try {
+        await loadPreview(selectedOrderNo.value)
+      } catch {
+        preview.value = null
+      }
+    }
+  } catch {
+    ElMessage.warning('订单已取消，但列表刷新失败，请手动刷新')
+  }
+}
+
 type MessageResponse = {
   message?: string
   warning?: string
@@ -1482,5 +1722,57 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
+}
+
+.cancel-grid {
+  row-gap: 8px;
+}
+
+.cancel-serial-summary {
+  padding: 8px 10px;
+  border: 1px solid var(--color-gray-200);
+  border-radius: var(--radius-sm);
+  background: var(--color-gray-50);
+  color: var(--color-gray-800);
+  word-break: break-word;
+}
+
+.cancel-serial-collapse {
+  margin-top: 4px;
+  --el-collapse-header-height: 32px;
+}
+
+.cancel-serial-list {
+  max-height: 140px;
+  overflow-y: auto;
+  color: var(--color-gray-700);
+  word-break: break-word;
+}
+
+.cancel-warnings {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-sm);
+  background: #fffbeb;
+  color: #b45309;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.cancel-danger-hint {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cancel-reason-label {
+  margin-top: 14px;
 }
 </style>

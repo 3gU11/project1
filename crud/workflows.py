@@ -248,6 +248,7 @@ def seed_phase1_models() -> None:
         ('allocation-recall', '撤回配货', '配货流程', '逆向', '自动通过', '配货单', '整单', 0),
         ('shipment-recall', '发货撤回', '发货流程', '逆向', '自动通过', '发货单', '整单', 0),
         ('customer-finished-recall', '客户成品核销发货撤回', '客户成品流程', '逆向', '需要审批', '客户成品', '整单', 0),
+        ('dealer-order-cancel', '取消经销商订单', '订单流程', '逆向', '自动通过', '经销商订单', '整单', 0),
     ]
     with get_engine().begin() as conn:
         for key, name, category, direction, processing, obj, scope, required in models:
@@ -267,6 +268,98 @@ def seed_phase1_models() -> None:
                     'nodes': json.dumps({'phase': 1, 'runtime_enabled': False}, ensure_ascii=False),
                 })
             conn.execute(text("UPDATE workflow_models SET current_version=1 WHERE id=:id"), {'id': row['id']})
+
+
+DEALER_ORDER_CANCEL_WORKFLOW_KEY = 'dealer-order-cancel'
+
+
+def dealer_order_cancel_default_snapshot() -> dict:
+    """经销商订单取消的默认流程图：发起→执行→通知入库员→结束。
+
+    默认图里没有审批节点，所以是自动通过；管理员在流程模型编辑器加审批节点后，
+    运行时按图里的审批节点自动要求审批（create_reverse_instance 以图为唯一依据）。
+    """
+    return {
+        'nodes': [
+            {'id': 'start', 'type': 'start', 'label': '发起', 'x': 35, 'y': 120},
+            {'id': 'execute', 'type': 'execute', 'label': '取消订单', 'x': 220, 'y': 120,
+             'action': 'cancel_dealer_order', 'targetState': '已取消'},
+            {'id': 'notify', 'type': 'notify', 'label': '通知入库员', 'x': 405, 'y': 120,
+             'notifyRoles': ['Inbound']},
+            {'id': 'end', 'type': 'end', 'label': '结束', 'x': 590, 'y': 120},
+        ],
+        'edges': [
+            {'source': 'start', 'target': 'execute'},
+            {'source': 'execute', 'target': 'notify'},
+            {'source': 'notify', 'target': 'end'},
+        ],
+    }
+
+
+def _snapshot_has_graph(raw) -> bool:
+    try:
+        snapshot = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (TypeError, ValueError):
+        return False
+    nodes = snapshot.get('nodes') if isinstance(snapshot, dict) else None
+    return isinstance(nodes, list) and bool(nodes)
+
+
+def ensure_dealer_order_cancel_model() -> dict:
+    """幂等补齐「取消经销商订单」模型和默认无审批图；已有自定义图不覆盖。
+
+    启动时在 migrate_phase1_workflow_metadata() 末尾调用，保证不依赖人工配置即可
+    从小程序/审核页发起取消；任何一步重复执行都只补齐缺失部分。
+    """
+    ensure_workflow_tables()
+    default_snapshot = dealer_order_cancel_default_snapshot()
+    with get_engine().begin() as conn:
+        model = conn.execute(text("SELECT id, current_version FROM workflow_models WHERE workflow_key=:key"),
+                             {'key': DEALER_ORDER_CANCEL_WORKFLOW_KEY}).mappings().first()
+        created_model = False
+        if not model:
+            conn.execute(text("""INSERT INTO workflow_models
+                (workflow_key,name,category_key,direction,processing_type,business_object,execution_scope,is_required,status)
+                VALUES (:key,:name,:category,:direction,:processing,:object,:scope,0,'已发布')"""), {
+                'key': DEALER_ORDER_CANCEL_WORKFLOW_KEY, 'name': '取消经销商订单',
+                'category': '订单流程', 'direction': '逆向', 'processing': '自动通过',
+                'object': '经销商订单', 'scope': '整单',
+            })
+            model = conn.execute(text("SELECT id, current_version FROM workflow_models WHERE workflow_key=:key"),
+                                 {'key': DEALER_ORDER_CANCEL_WORKFLOW_KEY}).mappings().first()
+            created_model = True
+        current_version = int(model['current_version'] or 0)
+        published = None
+        if current_version:
+            published = conn.execute(text("""SELECT id, node_snapshot FROM workflow_model_versions
+                WHERE model_id=:id AND version_no=:version AND status='已发布' LIMIT 1"""),
+                {'id': model['id'], 'version': current_version}).mappings().first()
+        if not published:
+            # 从未发布过：补一张默认图并发布，否则 create_reverse_instance 找不到可用模型。
+            next_version = int(conn.execute(text('SELECT COALESCE(MAX(version_no),0)+1 FROM workflow_model_versions WHERE model_id=:id'),
+                                            {'id': model['id']}).scalar() or 1)
+            conn.execute(text("""INSERT INTO workflow_model_versions
+                (model_id,version_no,status,runtime_enabled,node_snapshot)
+                VALUES (:id,:version,'已发布',1,:snapshot)"""),
+                {'id': model['id'], 'version': next_version, 'snapshot': _json(default_snapshot)})
+            conn.execute(text("""UPDATE workflow_models SET current_version=:version,status='已发布',
+                processing_type='自动通过' WHERE id=:id"""), {'version': next_version, 'id': model['id']})
+            return {'workflow_key': DEALER_ORDER_CANCEL_WORKFLOW_KEY, 'model_id': model['id'],
+                    'version': next_version, 'created_model': created_model,
+                    'graph': 'default', 'updated': True}
+        if _snapshot_has_graph(published.get('node_snapshot')):
+            # 已有模型图（可能被改成需要审批），保留用户配置。
+            return {'workflow_key': DEALER_ORDER_CANCEL_WORKFLOW_KEY, 'model_id': model['id'],
+                    'version': current_version, 'created_model': created_model,
+                    'graph': 'custom', 'updated': False}
+        # seed 阶段生成的占位快照没有 nodes，补默认图（保持版本号不变）。
+        conn.execute(text("""UPDATE workflow_model_versions SET node_snapshot=:snapshot, runtime_enabled=1
+            WHERE id=:id"""), {'id': published['id'], 'snapshot': _json(default_snapshot)})
+        conn.execute(text("""UPDATE workflow_models SET status='已发布', processing_type='自动通过'
+            WHERE id=:id"""), {'id': model['id']})
+        return {'workflow_key': DEALER_ORDER_CANCEL_WORKFLOW_KEY, 'model_id': model['id'],
+                'version': current_version, 'created_model': created_model,
+                'graph': 'default', 'updated': True}
 
 
 def migrate_phase1_workflow_metadata() -> None:
@@ -370,6 +463,8 @@ def migrate_phase1_workflow_metadata() -> None:
             }
             conn.execute(text("UPDATE workflow_model_versions SET node_snapshot=:snapshot WHERE id=:id"),
                          {'id': row['id'], 'snapshot': _json(snapshot)})
+    # 最后一步：保证「取消经销商订单」模型可用（幂等，已有自定义图时只读不覆盖）。
+    ensure_dealer_order_cancel_model()
 
 
 
@@ -545,6 +640,9 @@ REVERSE_WORKFLOW_KEYS = set(FORWARD_ENTRY_ACTIONS) | {
     'customer-order-shipped',
     'contract-cancel', 'model-dict-delete', 'order-delete',
     'allocation-recall', 'shipment-recall', 'customer-finished-recall',
+    # 经销商订单取消：配货/发货阶段客户取消时整单撤回，默认自动通过，
+    # 需要审批时由流程模型编辑器给模型图加审批节点。
+    'dealer-order-cancel',
 }
 
 # 这两条撤回默认自动通过；是否审批由流程模型图的节点决定，可在模型编辑器里改。
@@ -564,6 +662,8 @@ REVERSE_WORKFLOW_RULES = {
     'shipment-recall': {'approval': 'automatic', 'derived_task': 'conditional-reinbound'},
     # 发货撤回及客户成品核销撤回均自动通过；需要回库时只派生重入库通知。
     'customer-finished-recall': {'approval': 'required', 'derived_task': 'conditional-reinbound'},
+    # 经销商订单取消默认自动通过；退回待入库的机台派生重入库任务。
+    'dealer-order-cancel': {'approval': 'automatic', 'derived_task': 'conditional-reinbound'},
 }
 
 
@@ -961,6 +1061,7 @@ WORKFLOW_ACTIONS = {
     'disable_model': 'execute_model_dict_delete',
     'cancel_contract': 'execute_contract_cancel',
     'cancel_contract_reinbound': 'execute_contract_cancel',
+    'cancel_dealer_order': 'execute_dealer_order_cancel',
     'create_shipment_recall': 'create_and_execute_shipment_recall',
 }
 
@@ -974,6 +1075,7 @@ REVERSE_WORKFLOW_ACTIONS = {
     'order-delete': {'delete_order', 'delete_order_reinbound'},
     'model-dict-delete': {'disable_model'},
     'contract-cancel': {'cancel_contract', 'cancel_contract_reinbound'},
+    'dealer-order-cancel': {'cancel_dealer_order'},
 }
 
 # 编辑器渲染用的白名单目录。前端不再维护自己的一份动作/字段清单，
@@ -1515,6 +1617,66 @@ def execute_allocation_recall(instance_no: str, worker_id: str):
     # 提交之后再清缓存，避免读线程用旧数据把缓存又填满。
     _clear_order_planning_caches()
     return result_payload
+
+
+def execute_dealer_order_cancel(instance_no: str, worker_id: str):
+    """执行经销商订单取消：流程状态机 + 执行租约 + 业务级联 + 收尾。
+
+    库存/合同/订单/云回传的级联释放由 crud.dealer_order_cancel.execute_dealer_order_cancel
+    在同一个事务连接上完成；本执行器只做流程侧校验、调用级联和逆向收尾，
+    避免在流程框架里出现第二份库存释放实现。
+    """
+    ensure_workflow_tables()
+    with get_engine().begin() as conn:
+        instance = conn.execute(text("""SELECT * FROM workflow_instances
+            WHERE instance_no=:no FOR UPDATE"""), {'no': instance_no}).mappings().first()
+        if not instance or instance['workflow_key'] != DEALER_ORDER_CANCEL_WORKFLOW_KEY:
+            raise ValueError('流程不存在或不是取消经销商订单流程')
+        if instance['status'] != '执行中':
+            raise ValueError(f'流程当前状态为{instance["status"]}，不能执行')
+        lease = conn.execute(text("""SELECT * FROM workflow_execution_attempts
+            WHERE instance_id=:id AND worker_id=:worker AND status='执行中'
+              AND lease_expires_at > CURRENT_TIMESTAMP(6)
+            ORDER BY id DESC LIMIT 1 FOR UPDATE"""), {'id': instance['id'], 'worker': worker_id}).mappings().first()
+        if not lease:
+            raise ValueError('执行租约不存在或已过期')
+        _assert_lease_alive(conn, lease)
+        order_no = str(instance['business_id'] or '').strip()
+        if not order_no:
+            raise ValueError('取消经销商订单流程缺少经销商订单号')
+        # 发起时快照的机台明细只用于留痕；真正释放/回库的机台以级联执行结果为准。
+        items = conn.execute(text("""SELECT object_type, object_id FROM workflow_instance_items
+            WHERE instance_id=:id ORDER BY object_type, object_id FOR UPDATE"""),
+            {'id': instance['id']}).mappings().all()
+        snapshot_serials = [str(item['object_id']).strip() for item in items
+                            if item['object_type'] == '机台' and str(item['object_id']).strip()]
+        raw_before = instance.get('before_state_snapshot')
+        try:
+            before_state = json.loads(raw_before) if isinstance(raw_before, str) else (raw_before or {})
+        except (TypeError, ValueError):
+            before_state = {}
+        reason = str((before_state or {}).get('reason') or '')
+        # 级联实现与执行器同名，必须别名导入，否则会递归调用自己。
+        from crud.dealer_order_cancel import execute_dealer_order_cancel as _cascade
+        summary = _cascade(conn, order_no, worker_id, reason) or {}
+        released_serials = [str(serial).strip() for serial in (summary.get('released_serials') or [])
+                            if str(serial).strip()]
+        final_status = _finish_reverse_execution(
+            conn, instance, lease, worker_id,
+            {'workflow_key': DEALER_ORDER_CANCEL_WORKFLOW_KEY, 'business_id': order_no,
+             'snapshot_serials': snapshot_serials, 'released_serials': released_serials,
+             'operation': 'dealer-order-cancel'},
+            force_reinbound=True, reinbound_object_ids=released_serials)
+    # 提交之后再清缓存，避免读线程用旧数据把缓存又填满。
+    _clear_order_planning_caches()
+    try:
+        import crud.inventory
+        if hasattr(crud.inventory.get_data, 'cache_clear'):
+            crud.inventory.get_data.cache_clear()
+    except Exception:
+        pass
+    return {**summary, 'cascade_status': summary.get('status'), 'instance_no': instance_no,
+            'status': final_status or '已完成'}
 
 
 def _shipment_recall_eligible(machine):
@@ -2133,6 +2295,7 @@ def _finish_reverse_execution(conn, instance, lease, worker_id, payload, force_r
                  {'id': instance['id'], 'event_type': event_type,
                   'key': f"{instance['instance_no']}:completed",
                   'payload': _json({**payload, 'derived_tasks': derived_tasks})})
+    return final_status
 
 
 def forward_workflow_enabled(workflow_key: str) -> bool:

@@ -14,6 +14,7 @@ from crud.workflows import (ensure_workflow_tables, list_instances, list_models,
                             execute_model_dict_delete, claim_outbox_events,
                             complete_outbox_event, fail_outbox_event,
                             execute_contract_cancel, transfer_reverse_approval,
+                            execute_dealer_order_cancel,
                             requeue_outbox_event, reclaim_expired_execution_leases, publish_workflow_model,
                             duplicate_workflow_model, set_workflow_model_enabled, delete_workflow_draft,
                             workflow_editor_catalog, close_stale_reverse_instances)
@@ -45,6 +46,7 @@ def _action_executor(action: str):
         'disable_model': execute_model_dict_delete,
         'cancel_contract': execute_contract_cancel,
         'cancel_contract_reinbound': execute_contract_cancel,
+        'cancel_dealer_order': execute_dealer_order_cancel,
         'create_shipment_recall': create_and_execute_shipment_recall,
     })
     if action not in executors:
@@ -91,6 +93,7 @@ REVERSE_WORKFLOW_PERMISSIONS = {
     'customer-finished-recall': 'QUERY',
     'customer-order-shipped': 'QUERY',
     'customer-machine-plan': 'QUERY',
+    'dealer-order-cancel': 'DEALER_ORDER_REVIEW',
 }
 
 

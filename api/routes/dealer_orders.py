@@ -10,6 +10,7 @@ from sqlalchemy import bindparam, text
 
 from api.routes.auth import require_permissions
 from crud.audit_logs import append_audit_log
+from crud.local_contract_drafts import INVALID_PARTY_NAMES, resolve_party_name
 from crud.cloud_attachments import (
     find_local_order_attachment,
     list_local_order_attachments,
@@ -60,6 +61,10 @@ class RejectPayload(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class DealerOrderCancelPayload(BaseModel):
+    reason: str = Field(default="", max_length=1000)
+
+
 class AllocatePayload(BaseModel):
     allocated_qty: int = Field(default=1, ge=1)
     v7_order_no: str = Field(default="", max_length=128)
@@ -107,6 +112,18 @@ class CompletedCloudSyncPayload(BaseModel):
 
 def _operator(ctx: dict) -> str:
     return str(ctx.get("name") or ctx.get("username") or "system").strip()
+
+
+def _dealer_cancel_contract_nos(values: Any) -> list[str]:
+    """取消订单的合同号列表：兼容字符串和 {"contract_no": ...} 两种形态。"""
+    numbers: list[str] = []
+    for value in values or []:
+        if isinstance(value, dict):
+            value = value.get("contract_no") or value.get("contractNo") or value.get("合同号") or ""
+        number = str(value or "").strip()
+        if number:
+            numbers.append(number)
+    return numbers
 
 
 def _bridge_disabled_message() -> str | None:
@@ -457,6 +474,79 @@ def preview_order(order_no: str):
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"读取订单校验失败: {exc}")
+
+
+@router.get("/{order_no}/cancel-preview")
+def preview_dealer_order_cancel_route(order_no: str):
+    """取消前的影响预览：机台、合同、销售订单和阻塞项，审核页弹窗直接展示。"""
+    try:
+        # 懒 import：取消级联内核由独立模块承载，避免路由层启动时耦合它的依赖。
+        from crud.dealer_order_cancel import preview_dealer_order_cancel
+        return preview_dealer_order_cancel(order_no)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logging.getLogger(__name__).exception("dealer order cancel preview failed order=%s", order_no)
+        raise HTTPException(status_code=500, detail=f"读取取消影响预览失败: {exc}")
+
+
+@router.post("/{order_no}/cancel")
+def cancel_dealer_order_route(order_no: str, payload: DealerOrderCancelPayload, request: Request,
+                              ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    """取消经销商订单：走逆向审批流程框架，默认自动通过并立即释放配货库存。
+
+    审批策略由「取消经销商订单」流程模型的图决定：默认图没有审批节点=自动通过；
+    管理员在流程模型编辑器加审批节点后，这里只提交申请，审批通过时才执行释放。
+    """
+    operator = _operator(ctx)
+    try:
+        from crud.dealer_order_cancel import cancel_dealer_order
+        result = cancel_dealer_order(order_no, operator, payload.reason, ctx.get("role", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logging.getLogger(__name__).exception("dealer order cancel failed order=%s", order_no)
+        raise HTTPException(status_code=500, detail=f"取消经销商订单失败: {exc}")
+    result = result if isinstance(result, dict) else {}
+    preview = result.get("preview") if isinstance(result.get("preview"), dict) else {}
+    execution = result.get("result") if isinstance(result.get("result"), dict) else None
+    instance_no = str(result.get("instance_no") or "").strip()
+    approval_pending = bool(result.get("approval_pending"))
+    released_serials = [str(sn).strip() for sn in ((execution or {}).get("released_serials") or [])
+                        if str(sn).strip()]
+    contracts = _dealer_cancel_contract_nos((execution or {}).get("contracts"))
+    if approval_pending or not execution:
+        # 还没执行：影响范围取预览里的机台/合同，只有执行后才叫“释放”。
+        preview_machines = preview.get("machines") if isinstance(preview.get("machines"), dict) else {}
+        affected = [str(sn).strip() for sn in (preview_machines.get("serials") or []) if str(sn).strip()]
+        contracts = contracts or _dealer_cancel_contract_nos(preview.get("contracts"))
+        count, count_label = len(affected), "影响机台"
+    else:
+        count, count_label = len(released_serials), "释放机台"
+    contracts_text = "、".join(contracts) if contracts else "无"
+    if approval_pending:
+        content = (f"经销商订单取消申请已提交审批：{order_no}；实例：{instance_no}；"
+                   f"{count_label}：{count}；合同：{contracts_text}；原因：{payload.reason}")
+    else:
+        content = (f"经销商订单取消：{order_no}；实例：{instance_no}；"
+                   f"{count_label}：{count}；合同：{contracts_text}；原因：{payload.reason}")
+    append_audit_log(
+        module="经销商订单",
+        action_type="取消订单",
+        biz_type="订单",
+        content=content,
+        user_id=ctx.get("username"),
+        username=operator,
+    )
+    message = result.get("message") or ("取消申请已提交审批" if approval_pending else "经销商订单已取消")
+    return {
+        "message": message,
+        "status": result.get("status") or "",
+        "approval_pending": approval_pending,
+        "instance_no": instance_no,
+        "preview": preview,
+        "result": execution,
+    }
 
 
 @router.post("/{order_no}/approve")
@@ -912,8 +1002,11 @@ def convert_to_contract(
         _assert_models_in_dictionary(model_names)
 
         customer = str(payload.customer_name or "").strip() or str(items[0].get("customer_name") or "").strip()
-        # 合同「代理商」历史口径是大区经理，不能回退到客户联系人 contact_name。
-        agent = str(payload.agent_name or "").strip() or str(items[0].get("regional_manager_name") or "").strip()
+        # 合同「代理商」= 订单上记录的大区经理（一个订单只对应一位，大区多经理也不歧义）；
+        # 前端手填值优先，但注销占位名（「已删除人员」）当作未填，也绝不回退客户联系人。
+        manual_agent = str(payload.agent_name or "").strip()
+        agent = "" if manual_agent in INVALID_PARTY_NAMES else manual_agent
+        agent = agent or resolve_party_name(items[0])
         delivery_date = str(payload.delivery_date or "").strip() or str(items[0].get("delivery_date") or "").strip()
         total_note = str(payload.contract_note or "").strip()
 
