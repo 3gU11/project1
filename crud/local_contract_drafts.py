@@ -31,6 +31,8 @@ MAX_FILE_NAME_PREFIX = 80
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     # —— 订单头 ——
     "dealer_name": ("dealerName", "dealer_name", "agentName", "agent_name", "经销商", "需方", "代理商"),
+    # 合同编号在转合同/归档时由系统写入；办事处取订单提交时的办事处名称
+    "office_name": ("officeName", "office_name", "办事处", "办事处名称"),
     "signed_date": ("signedDate", "signed_date", "submitTime", "submit_time",
                     "createdAt", "created_at", "签订时间", "下单时间", "提交时间"),
     # —— 备注与交货条款 ——
@@ -69,7 +71,7 @@ ITEM_ALIASES: dict[str, tuple[str, ...]] = {
 
 # 字段在订货合同里的出现顺序（与模板从上到下一致，前端「编辑字段」按这个顺序展示）。
 # 明细行 item*_* 插在订单头之后，由 ITEM_FIELDS 展开。
-HEAD_FIELDS = ("dealer_name", "signed_date")
+HEAD_FIELDS = ("dealer_name", "office_name", "signed_date")
 TERMS_FIELDS = ("remark", "delivery_date", "settlement_terms")
 BUYER_FIELDS = ("buyer_name", "buyer_address", "contact_name", "contact_phone")
 EXTRA_FIELDS = ("special_requirements",)
@@ -81,7 +83,7 @@ OBSOLETE_KEYS = frozenset({
     "supplier_name", "contract_no", "signing_place", "total_upper", "accessories",
 })
 OBSOLETE_PATTERNS = (
-    re.compile(r'^office_(name|branch|contact|phone)$'),
+    re.compile(r'^office_(branch|contact|phone)$'),
     re.compile(r'^item\d+_(tax|brand)$'),
 )
 # 旧版「订货合同」明细列（单价金额、牌号），升级时不能当成新的单价说明带过去
@@ -639,12 +641,17 @@ def order_form_file_name(order_no: str, customer_name: str = "") -> str:
     return f"{prefix[:MAX_FILE_NAME_PREFIX].rstrip(' .')}-订货单.docx"
 
 
-def latest_document(order_no: str, customer_name: str = "") -> tuple[bytes, str] | None:
+def latest_document(
+    order_no: str,
+    customer_name: str = "",
+    field_overrides: dict[str, str] | None = None,
+) -> tuple[bytes, str] | None:
     """返回经销商订单最新一版可归档的订货单（docx 字节, 建议文件名）。
 
     转合同时用它把"系统生成的订货单"一起挂到合同附件里，避免合同只剩人工上传的文件。
-    优先复用已生成并可能已审批的预览；没有预览时按当前字段重新渲染（旧草稿字段已在 get() 里升级）。
-    建议文件名前缀用云端回传的客户名称（customer_name），没有时退回订单号。
+    优先复用已生成并可能已审批的预览；传 field_overrides（如本次生成的合同号）时按草稿字段
+    重新渲染，保证归档附件里写入合同号。没有预览时同样按当前字段重新渲染（旧草稿字段已在
+    get() 里升级）。建议文件名前缀用云端回传的客户名称（customer_name），没有时退回订单号。
     找不到任何草稿时返回 None，由调用方决定是否跳过。
     """
     cleaned_order_no = str(order_no or '').strip()
@@ -666,11 +673,13 @@ def latest_document(order_no: str, customer_name: str = "") -> tuple[bytes, str]
             text("SELECT preview FROM v8_contract_drafts WHERE id=:id"),
             {"id": str(row["id"])},
         ).scalar()
-    if preview:
+    if preview and not field_overrides:
         content = bytes(preview)
     else:
         draft = get(str(row["id"]))
         if not draft:
             return None
-        content, _ = render_order_form(draft['fields'])
+        fields = dict(draft['fields'])
+        fields.update({str(key): str(value or '') for key, value in (field_overrides or {}).items()})
+        content, _ = render_order_form(fields)
     return content, order_form_file_name(cleaned_order_no, customer_name)

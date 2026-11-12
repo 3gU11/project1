@@ -603,22 +603,18 @@ def _attach_order_form_to_contracts(
     from core.file_manager import contract_file_exists, save_contract_file
     from crud.local_contract_drafts import latest_document
 
-    try:
-        document = latest_document(order_no, customer)
-    except Exception:
-        logging.getLogger(__name__).exception("dealer order %s order form document unavailable", order_no)
-        return []
-    if not document:
-        logging.getLogger(__name__).info("dealer order %s has no contract draft, skip attaching order form", order_no)
-        return []
-
-    content, file_name = document
     saved: list[str] = []
     for raw_contract_id in contract_ids or []:
         contract_id = str(raw_contract_id or "").strip()
         if not contract_id:
             continue
         try:
+            # 逐张合同重新渲染：把本次生成的合同号写入附件抬头，办事处沿用草稿字段。
+            document = latest_document(order_no, customer, {"contract_no": contract_id})
+            if not document:
+                logging.getLogger(__name__).info("dealer order %s has no contract draft, skip attaching order form", order_no)
+                return saved
+            content, file_name = document
             if contract_file_exists(contract_id, file_name):
                 continue
             buffer = io.BytesIO(content)

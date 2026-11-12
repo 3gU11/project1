@@ -225,6 +225,7 @@ const labels: Record<string, string> = {
 
 const fieldLabels: Record<string, string> = {
   dealer_name: '需方',
+  office_name: '办事处',
   signed_date: '签订时间',
   item1_product: '第1行 产品名称',
   item1_spec: '第1行 规格型号',

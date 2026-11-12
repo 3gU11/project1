@@ -40,7 +40,7 @@ FIXED_SUPPLIER_SIGNATURE = {
 
 # 段落级书签 -> 模板正文（{key} 由 _placeholder 决定是否保留为占位符）
 PARAGRAPH_TEXTS = {
-    "ct_supplier_header": f"供方：{FIXED_SUPPLIER}\u3000\u3000\u3000\u3000合同编号：",
+    "ct_supplier_header": f"供方：{FIXED_SUPPLIER}\u3000\u3000合同编号：{{contract_no}}\u3000\u3000办事处：{{office_name}}",
     "ct_buyer_header": "需方：{dealer_name}\u3000\u3000\u3000\u3000签订地点：",
     "ct_signed_date": "一、产品名称、商标、型号、数量、金额、供货时间及数量"
                       "\u3000\u3000 签订时间：{signed_date}",
@@ -118,7 +118,8 @@ def build(target: Path = DEFAULT_OUTPUT, placeholders: bool = True) -> Path:
                 continue
             text = PARAGRAPH_TEXTS[name].format(
                 **{key: _placeholder(key, placeholders) for key in ("dealer_name", "signed_date",
-                                                                   "delivery_date", "settlement_terms")}
+                                                                   "delivery_date", "settlement_terms",
+                                                                   "contract_no", "office_name")}
             )
             _set_paragraph_text(paragraph, text)
             break

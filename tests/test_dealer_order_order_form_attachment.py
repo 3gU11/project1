@@ -32,6 +32,34 @@ def test_attach_order_form_saves_once_per_contract_and_dedups():
     assert saved == [('HT-1', b'PK-test-docx', 'DO-2-订货单.docx', '客户甲', 'boss', False)]
 
 
+def test_attach_order_form_renders_each_contract_with_its_contract_no():
+    """每张新合同的订货单附件都要写入自己的合同号。"""
+    calls = []
+    saved = []
+
+    def fake_latest_document(order_no, customer_name='', field_overrides=None):
+        calls.append((order_no, customer_name, dict(field_overrides or {})))
+        contract_no = str((field_overrides or {}).get('contract_no') or '')
+        return f'PK-{contract_no}'.encode(), 'DO-5-订货单.docx'
+
+    def fake_save(buffer, customer, contract_id, operator, convert_to_docx=True):
+        saved.append((contract_id, buffer.getvalue()))
+        return True, '上传成功'
+
+    with (
+        patch('crud.local_contract_drafts.latest_document', side_effect=fake_latest_document),
+        patch('core.file_manager.contract_file_exists', return_value=False),
+        patch('core.file_manager.save_contract_file', side_effect=fake_save),
+    ):
+        attached = dealer_orders._attach_order_form_to_contracts(
+            'DO-5', ['HT-A', 'HT-B'], '客户甲', 'boss'
+        )
+
+    assert attached == ['HT-A', 'HT-B']
+    assert [item['contract_no'] for _, _, item in calls] == ['HT-A', 'HT-B']
+    assert saved == [('HT-A', b'PK-HT-A'), ('HT-B', b'PK-HT-B')]
+
+
 def test_attach_order_form_does_not_break_conversion_on_failure():
     document = (b'PK-test-docx', 'DO-3-订货单.docx')
     with (

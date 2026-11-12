@@ -40,10 +40,11 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('2', fields['item1_qty'])
         # 订单没有采集的商业条款留空，等审批人补，不能编造
         self.assertEqual('', fields['settlement_terms'])
-        # 供方、税票、办事处信息已改由模板固定或不再打印，字段集里不存在
-        for removed in ('supplier_name', 'office_name', 'office_branch', 'office_contact',
+        # 供方、税票信息已改由模板固定或不再打印；办事处名称保留用于合同抬头
+        for removed in ('supplier_name', 'office_branch', 'office_contact',
                         'office_phone', 'item1_tax'):
             self.assertNotIn(removed, fields)
+        self.assertEqual('', fields['office_name'])
         # 产品名称按纸质合同默认填满：空行也写成「2: 线切割机床」
         self.assertEqual('2: 线切割机床', fields['item2_product'])
         self.assertEqual('', fields['item2_spec'])
@@ -130,15 +131,16 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('宁波舒勒精密机械有限公司', fields['buyer_name'])
         self.assertEqual('余姚模具城', fields['buyer_address'])
 
-    def test_office_and_tax_fields_are_not_mapped_any_more(self):
-        """办事处信息不再进合同；税票改由单价列表达。"""
+    def test_office_name_is_mapped_and_other_office_fields_are_dropped(self):
+        """办事处名称进合同抬头；办事处联系人/电话/分办仍不再进字段集。"""
         fields = drafts.map_order_to_contract({
             'orderNo': 'ORD-O1', 'customerName': '客户甲',
             'officeName': '浙江办', 'officeBranch': '余姚办',
             'officeContact': '俞文涛', 'officePhone': '13003767856',
             'items': [{'productCode': 'A-1', 'quantity': 1, 'taxIncluded': '不含税'}],
         })
-        for key in ('office_name', 'office_branch', 'office_contact', 'office_phone', 'item1_tax'):
+        self.assertEqual('浙江办', fields['office_name'])
+        for key in ('office_branch', 'office_contact', 'office_phone', 'item1_tax'):
             self.assertNotIn(key, fields)
         self.assertFalse({'office_name', 'office_branch', 'office_contact', 'office_phone'}
                          & set(drafts.missing_required(fields)))
@@ -166,7 +168,7 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual(drafts.DEFAULT_PRODUCT, '线切割机床')
 
     def test_obsolete_fields_are_dropped_and_preview_is_invalidated(self):
-        """旧草稿里的办事处/税票/供方等废弃键读取时丢弃，旧预览随之作废。"""
+        """旧草稿里的办事处联系人/税票/供方等废弃键读取时丢弃；办事处名称保留。"""
         row = drafts.create_from_order({
             'orderNo': 'ORD-O5', 'customerName': '客户甲', 'dealerName': '经销商甲',
             'signedDate': '2026-10-24', 'regionalManagerName': '朱宸',
@@ -182,7 +184,8 @@ class LocalContractDraftTests(unittest.TestCase):
                          {'f': json.dumps(legacy, ensure_ascii=False), 'hash': 'b' * 64, 'id': row['id']})
 
         healed = drafts.get(row['id'])
-        for key in ('office_name', 'office_branch', 'office_contact', 'office_phone',
+        self.assertEqual('浙江办', healed['fields']['office_name'])
+        for key in ('office_branch', 'office_contact', 'office_phone',
                     'supplier_name', 'item1_tax', 'item1_brand', 'contract_no'):
             self.assertNotIn(key, healed['fields'])
         # 旧版金额列不会污染新的单价说明，单价按机型默认「含税」
@@ -269,10 +272,11 @@ class LocalContractDraftTests(unittest.TestCase):
             '2026 年 11 月（具体等客户通知）', '预付定金肆万元，安装调试合格付清',
             '宁波舒勒精密机械有限公司', '余姚模具城', '吴元国', '13905844257',
             '收货信息直接写办事处信息',
+            '合同编号：', '办事处：浙江办',
         ):
             self.assertIn(expected, text)
-        # 办事处信息不再印到合同上
-        for removed in ('浙江办', '余姚办', '俞文涛', '13003767856', '昆山瑞钧机械科技有限公司'):
+        # 办事处联系人/分办不再印到合同上，只保留办事处名称
+        for removed in ('余姚办', '俞文涛', '13003767856', '昆山瑞钧机械科技有限公司'):
             self.assertNotIn(removed, text)
 
     def test_same_model_batch_lines_are_merged_with_summed_quantity(self):
@@ -609,8 +613,8 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertEqual('2026 年 11 月', fields['delivery_date'])
         self.assertEqual('FR-400XS(PRO)', fields['item1_spec'])
         self.assertEqual('5', fields['item1_qty'])
-        # 办事处信息已经不在合同字段集里，中文别名也不会再带出
-        self.assertNotIn('office_name', fields)
+        # 办事处名称在合同字段集里；其它办事处信息不再带出
+        self.assertEqual('', fields['office_name'])
 
     def test_extra_item_rows_are_added_when_order_has_more_models(self):
         from contract_bridge.renderer import render_order_form
@@ -707,6 +711,25 @@ class LocalContractDraftTests(unittest.TestCase):
 
         self.assertIsNone(drafts.latest_document('ORD-NONE'))
         self.assertIsNone(drafts.latest_document(''))
+
+    def test_latest_document_override_writes_contract_no_and_office(self):
+        """转合同归档时按本次合同号重新渲染附件，同时带出订单办事处。"""
+        base = {
+            'orderNo': 'ORD-DOC3', 'customerName': '客户甲', 'dealerName': '经销商甲',
+            'officeName': '厦门办事处', 'signedDate': '2026-11-12',
+            'items': [{'productCode': 'FR-400G', 'quantity': 3}],
+        }
+        created = drafts.create_from_order(base)
+        drafts.prepare(created['id'])
+
+        content, file_name = drafts.latest_document(
+            'ORD-DOC3', '客户甲', {'contract_no': 'HT202611120001'}
+        )
+        text = document_text(content)
+        self.assertEqual('客户甲-订货单.docx', file_name)
+        self.assertIn('合同编号：HT202611120001', text)
+        self.assertIn('办事处：厦门办事处', text)
+        self.assertNotIn('{{', text)
 
     def test_order_form_file_name_uses_customer_name_prefix(self):
         """订货单附件文件名：客户名称优先，非法字符剔除，空值退回订单号。"""
