@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from sqlalchemy import bindparam, text
 from database import get_engine
-from contract_bridge.renderer import render_order_form
+from contract_bridge.renderer import order_form_template_hash, render_order_form
 
 # 「瑞钧机械办事处订货合同」必填项：这三项都能从订单直接推导，缺了说明订单数据本身有问题
 REQUIRED = ("dealer_name", "signed_date", "buyer_name")
@@ -499,11 +499,15 @@ def get(draft_id: str) -> dict[str, Any] | None:
         fields = _normalize_stored_fields(
             dict(_upgrade_legacy_fields(stored_fields, snapshot)), snapshot
         )
-        if fields != stored_fields and result.get("state") == 'preview_ready':
-            # 映射规则升级后（税票默认值/加高标记/明细合并）旧预览已经过期：回到「待生成预览」，
-            # 下次打开会按新字段重新渲染，避免审批人对着旧版附件审批归档。
-            result["state"] = 'submitted'
-            result["preview_hash"] = None
+        if result.get("state") == 'preview_ready':
+            # 映射规则升级（税票默认值/加高标记/明细合并）或合同模板本身改过（如供方银行信息）
+            # 都会让旧预览过期：回到「待生成预览」，下次打开按新规则/新模板重新渲染，
+            # 避免审批人对着旧版附件审批归档。
+            stored_template = str(result.get("template_hash") or "")
+            template_changed = bool(stored_template) and stored_template != order_form_template_hash()
+            if fields != stored_fields or template_changed:
+                result["state"] = 'submitted'
+                result["preview_hash"] = None
         result["fields"] = fields
     result["missing_fields"] = missing_required(result["fields"])
     return result

@@ -66,8 +66,9 @@ CHANNELS: tuple[dict[str, Any], ...] = (
         "key": "status-callback",
         "label": "订单状态回调",
         "direction": "V8 → 云端",
-        "interval_seconds": None,
-        "interval_env": None,
+        # 事件驱动为主，但对账任务按周期补发兜底；周期展示为对账心跳周期。
+        "interval_seconds": 600,
+        "interval_env": "CLOUD_STATUS_RECONCILE_INTERVAL_SECONDS",
         "event_types": (
             "dealer_order_reviewed",
             "dealer_order_contracted",
@@ -75,8 +76,8 @@ CHANNELS: tuple[dict[str, Any], ...] = (
             "dealer_order_cancelled",
             "dealer_order_completed",
         ),
-        "manual_action": None,
-        "description": "订单状态变更时事件驱动回传",
+        "manual_action": "reconcile-order-status",
+        "description": "订单状态变更时即时回传；按设定周期对账补发遗漏事件",
     },
 )
 
@@ -180,24 +181,26 @@ def compute_channel_state(
     failed: int = 0,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """按云端同一套口径计算通道状态：ok / late / down / unknown / idle / pending / failed。"""
+    """按云端同一套口径计算通道状态：ok / late / down / unknown / idle / pending / failed。
+
+    失败/待发送优先于周期心跳：对账任务会周期性记录 status-callback 的成功心跳，
+    不能因为「心跳正常」就把积压的失败事件显示成正常。
+    """
     current = now or datetime.now()
     expected_next: datetime | None = None
     overdue_seconds = 0
-    if interval_seconds is None:
-        if failed > 0:
-            state = "failed"
-        elif pending > 0:
-            state = "pending"
-        elif last_success_at is None:
-            state = "idle"
-        else:
-            state = "ok"
+    if interval_seconds is not None and last_success_at is not None:
+        expected_next = last_success_at + timedelta(seconds=interval_seconds)
+        overdue_seconds = max(0, int((current - expected_next).total_seconds()))
+    if failed > 0:
+        state = "failed"
+    elif pending > 0:
+        state = "pending"
+    elif interval_seconds is None:
+        state = "idle" if last_success_at is None else "ok"
     elif last_success_at is None:
         state = "unknown"
     else:
-        expected_next = last_success_at + timedelta(seconds=interval_seconds)
-        overdue_seconds = max(0, int((current - expected_next).total_seconds()))
         grace = max(60, min(interval_seconds // 5, 1800))
         if overdue_seconds <= 0:
             state = "ok"
@@ -255,7 +258,7 @@ def _count_events(event_types: tuple[str, ...]) -> tuple[int, int]:
                     """
                     SELECT
                       SUM(CASE WHEN status IN ('pending', 'processing') THEN 1 ELSE 0 END) AS pending,
-                      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+                      SUM(CASE WHEN status IN ('failed', 'rejected') THEN 1 ELSE 0 END) AS failed
                     FROM cloud_sync_outbox
                     WHERE event_type IN :event_types
                     """

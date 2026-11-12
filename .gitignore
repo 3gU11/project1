@@ -10,6 +10,10 @@ frontend/dist/
 .env
 server/.env
 .env.local
+# 本机联调/回滚用的 env 备份（含密钥，禁止入库）
+.env.bak-*
+.env.local.bak-*
+.env.*.bak-*
 
 # Local runtime state and generated reports
 *.out.log

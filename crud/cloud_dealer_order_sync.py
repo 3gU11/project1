@@ -411,6 +411,19 @@ def _iter_cloud_items(order: dict[str, Any]) -> list[dict[str, Any]]:
     return [order]
 
 
+def _normalize_timestamp(value: Any) -> str:
+    return _clean(value).replace("T", " ")[:19]
+
+
+def _latest_cloud_updated_at(order: dict[str, Any]) -> str:
+    """云端订单最近一次变更时间（订单头 + 行取最大值），用于判断「驳回后重新申请」。"""
+    values = [_normalize_timestamp(_pick(order, "updated_at", "updatedAt"))]
+    for item in _iter_cloud_items(order):
+        values.append(_normalize_timestamp(_pick(item, "updated_at", "updatedAt")))
+    values = [value for value in values if value]
+    return max(values) if values else ""
+
+
 def _fetch_cloud_dealer_orders_by_status(status: str, page_size: int = 100, max_pages: int = 20) -> list[dict[str, Any]]:
     base_url, _ = _cloud_config()
     status = _normalize_status(status)
@@ -752,7 +765,7 @@ def reconcile_local_dealer_order_statuses_to_cloud(limit: int = 200, *, trigger:
                 """
                 SELECT order_no, status, MAX(reviewed_by) AS reviewer,
                        MAX(review_note) AS note, MAX(contract_no) AS contract_no,
-                       MAX(v7_order_no) AS v7_order_no
+                       MAX(v7_order_no) AS v7_order_no, MAX(reviewed_at) AS reviewed_at
                 FROM dealer_orders
                 WHERE status IN ('pending','approved','rejected','contracted',
                                  'partial_allocated','allocated','completed','complete')
@@ -779,6 +792,14 @@ def reconcile_local_dealer_order_statuses_to_cloud(limit: int = 200, *, trigger:
             if cloud_statuses == {target}:
                 skipped += 1
                 continue
+            # 云端在本地驳回之后被重新申请（云端已回到 pending 且更新时间晚于本地驳回时间）：
+            # 以云端为准，不能把上一轮的 rejected 再推回去，否则用户永远看到「重新申请后还是驳回」。
+            if target == "rejected" and cloud_statuses == {"pending"}:
+                cloud_updated = _latest_cloud_updated_at(cloud)
+                reviewed_at = _normalize_timestamp(row.get("reviewed_at"))
+                if cloud_updated and reviewed_at and cloud_updated > reviewed_at:
+                    skipped += 1
+                    continue
             key = f"v8-reconcile-{order_no}-{target}"
             if target in {"pending", "approved", "rejected"}:
                 result = push_cloud_review(order_no, target, reviewer=_clean(row.get("reviewer")) or "system", note=_clean(row.get("note")), idempotency_key=key)
@@ -1487,12 +1508,34 @@ def sync_cloud_dealer_orders(
 
             if existing:
                 local_status = _clean(existing.get("status"))
+                cloud_status = _clean(payload["status"])
+                # 云端「驳回后重新申请」：订单在云端回到待审核（pending），本地镜像必须跟随重置，
+                # 否则 _status_rank 会保留本地 rejected，周期对账又把 rejected 推回云端，状态永远改不回来。
+                reapplied = local_status in {"rejected", "regional_rejected"} and cloud_status == "pending"
                 is_completed = local_status in {"complete", "completed"}
                 extra_changed = (
                     _clean(existing.get("extra_remark")) != payload["extra_remark"]
                     or _as_int(existing.get("ERMQ")) != payload["ERMQ"]
                 )
-                if _status_rank(local_status) > _status_rank(payload["status"]):
+                if reapplied:
+                    payload["status"] = cloud_status
+                    payload["approved_qty"] = 0
+                    payload["allocated_qty"] = 0
+                    payload["factory_pending"] = 0
+                    # 重新申请视为上一轮审核结束：清空本地驳回/合同等结论，按云端新内容重新审核。
+                    for field in (
+                        "reviewed_at",
+                        "reviewed_by",
+                        "review_note",
+                        "contract_no",
+                        "v7_order_no",
+                        "factory_reviewed_at",
+                        "factory_reviewed_by",
+                        "extra_remark_reviewed_at",
+                        "extra_remark_reviewed_by",
+                    ):
+                        payload[field] = None if field.endswith("_at") else ""
+                elif _status_rank(local_status) > _status_rank(payload["status"]):
                     payload["status"] = local_status
                     payload["approved_qty"] = max(_as_int(existing.get("approved_qty")), payload["approved_qty"])
                     payload["allocated_qty"] = max(_as_int(existing.get("allocated_qty")), payload["allocated_qty"])
@@ -1501,11 +1544,11 @@ def sync_cloud_dealer_orders(
                     payload["extra_remark"] = _clean(existing.get("extra_remark"))
                     payload["ERMQ"] = _as_int(existing.get("ERMQ"))
                     payload["factory_pending"] = _as_int(existing.get("factory_pending"))
-                elif extra_changed:
+                elif extra_changed and not reapplied:
                     payload["factory_pending"] = 1
                     pending_order_nos.add(order_no)
                 for field in ("customer_name", "delivery_address", "office_name", "office_contact", "office_phone"):
-                    if existing.get(field) and not payload.get(field):
+                    if not reapplied and existing.get(field) and not payload.get(field):
                         payload[field] = existing.get(field)
                 for field in (
                     "reviewed_at",
@@ -1519,7 +1562,7 @@ def sync_cloud_dealer_orders(
                     "extra_remark_reviewed_at",
                     "extra_remark_reviewed_by",
                 ):
-                    if existing.get(field) and not payload.get(field):
+                    if not reapplied and existing.get(field) and not payload.get(field):
                         payload[field] = existing.get(field)
                 if existing.get("source") and payload.get("source") == "wechat":
                     payload["source"] = existing.get("source")

@@ -22,6 +22,7 @@ class V8SyncStartupWiringTests(unittest.TestCase):
             await main_module.on_startup()
             task = getattr(main_module.app.state, "v8_sync_task", None)
             self.assertIsNotNone(task)
+            self.assertIsNotNone(getattr(main_module.app.state, "cloud_status_reconcile_task", None))
             for _ in range(3):
                 await asyncio.sleep(0)
             self.assertEqual(startup_result, main_module.app.state.v8_sync_startup_result)
@@ -34,6 +35,10 @@ class V8SyncStartupWiringTests(unittest.TestCase):
             patch("database.init_mysql_tables_v2", return_value={"initialized": False}),
             patch("crud.cloud_sync_outbox.ensure_cloud_sync_outbox_table"),
             patch("crud.cloud_sync_outbox.cloud_sync_worker_loop", new=AsyncMock(side_effect=_idle_loop)),
+            patch(
+                "crud.cloud_sync_outbox.cloud_status_reconcile_loop",
+                new=AsyncMock(side_effect=_idle_loop),
+            ),
             patch(
                 "crud.cloud_dealer_order_sync.cloud_pull_worker_loop",
                 new=AsyncMock(side_effect=_idle_loop),

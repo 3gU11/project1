@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, qr_decode, notifications, workflows
+from api.routes import inventory, users, auth, planning, logs, traceability, model_dictionary, roles, sandbox, dealer_orders, reports, repair_identity, repair_catalog, repair_component_replacements, repair_machine_components, qr_decode, notifications, workflows
 
 logger = logging.getLogger(__name__)
 from api.routes import contract_drafts
@@ -102,6 +102,11 @@ async def on_startup():
         except Exception as e:
             logger.warning("cloud sync worker not started: %s", e)
         try:
+            from crud.cloud_sync_outbox import cloud_status_reconcile_loop
+            app.state.cloud_status_reconcile_task = asyncio.create_task(cloud_status_reconcile_loop())
+        except Exception as e:
+            logger.warning("cloud status reconcile worker not started: %s", e)
+        try:
             from crud.cloud_dealer_order_sync import cloud_pull_worker_loop
             app.state.cloud_pull_worker_task = asyncio.create_task(cloud_pull_worker_loop())
         except Exception as e:
@@ -164,6 +169,14 @@ async def on_shutdown():
         task.cancel()
         try:
             await task
+        except asyncio.CancelledError:
+            pass
+
+    reconcile_task = getattr(app.state, "cloud_status_reconcile_task", None)
+    if reconcile_task:
+        reconcile_task.cancel()
+        try:
+            await reconcile_task
         except asyncio.CancelledError:
             pass
 
@@ -287,6 +300,7 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(repair_identity.router, prefix="/api/v1/repair-identity", tags=["RepairIdentity"])
 app.include_router(repair_catalog.router, prefix="/api/v1/repair-model-components", tags=["RepairCatalog"])
 app.include_router(repair_component_replacements.router, prefix="/api/v1/repair-component-replacements", tags=["RepairComponentReplacement"])
+app.include_router(repair_machine_components.router, prefix="/api/v1/repair-machine-components", tags=["RepairMachineComponents"])
 app.include_router(qr_decode.router, prefix="/internal/qr", tags=["InternalQR"])
 
 # Register sandbox WS directly on app (bypasses router-level HTTP dependencies)

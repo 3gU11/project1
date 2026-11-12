@@ -37,6 +37,7 @@ from crud.cloud_dealer_order_sync import (
     sync_wechat_batch_summary_to_cloud,
 )
 from crud.cloud_sync_outbox import (
+    cloud_bridge_enabled,
     get_cloud_sync_event_status,
     get_cloud_sync_status,
     process_due_cloud_sync_events,
@@ -45,6 +46,7 @@ from crud.cloud_sync_outbox import (
 from crud.sync_channels import (
     get_sync_channels_status,
     record_channel_failure,
+    record_channel_success,
 )
 
 router = APIRouter(dependencies=[Depends(require_permissions("DEALER_ORDER_REVIEW"))])
@@ -105,6 +107,22 @@ class CompletedCloudSyncPayload(BaseModel):
 
 def _operator(ctx: dict) -> str:
     return str(ctx.get("name") or ctx.get("username") or "system").strip()
+
+
+def _bridge_disabled_message() -> str | None:
+    """本地停用云端桥时返回原因；用于拦截所有手动同步入口。"""
+    if cloud_bridge_enabled():
+        return None
+    return (
+        "本机已停用云端桥（CLOUD_SYNC_ENABLED=false 或 V8_DEMO_MODE=1），"
+        "不会访问生产环境；如需恢复同步请修改 .env 并重启后端"
+    )
+
+
+def _reject_if_bridge_disabled() -> None:
+    message = _bridge_disabled_message()
+    if message:
+        raise HTTPException(status_code=409, detail=message)
 
 
 # 云端没有行备注时会把「订单备注」复制到每一行明细；加高只能看明细自己的
@@ -171,6 +189,7 @@ def sync_order_attachments(
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
     """立即从云端拉取该订单的合同附件；日常由拉单 worker 自动完成。"""
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_cloud_order_attachments([{"order_no": order_no, "updated_at": ""}])
@@ -226,6 +245,7 @@ def sync_cloud_orders(
     request: Request,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_cloud_dealer_orders(
@@ -258,6 +278,7 @@ def sync_wechat_batch_summary(
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
     """立即推送一次库存/机型快照（与 5 分钟心跳、库存变化触发共用同一实现）。"""
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_wechat_batch_summary_to_cloud(trigger="manual")
@@ -291,6 +312,7 @@ def cloud_sync_status(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVI
 
 @router.post("/cloud-sync-retry")
 def cloud_sync_retry(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW"))):
+    _reject_if_bridge_disabled()
     try:
         queued = retry_failed_cloud_sync_events()
         processed = process_due_cloud_sync_events(limit=20)
@@ -305,6 +327,7 @@ def sync_completed_cloud_orders(
     request: Request,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         result = sync_completed_dealer_orders_to_cloud(limit=payload.limit, trigger="manual")
@@ -336,12 +359,54 @@ def sync_channels(ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")
         raise HTTPException(status_code=500, detail=f"读取同步通道状态失败: {exc}")
 
 
+@router.post("/reconcile-order-status")
+def reconcile_order_status(
+    request: Request,
+    ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
+):
+    """立即执行一次订单状态回传对账（同步通道「立即对账」按钮）。
+
+    把「本地状态已领先、但最近一次成功回传仍是旧状态」的订单重新入队，
+    并立即处理已排队事件；用于状态漂移/事件丢失时人工兜底。
+    """
+    _reject_if_bridge_disabled()
+    operator = _operator(ctx)
+    try:
+        from crud.cloud_sync_outbox import (
+            reconcile_dealer_order_statuses,
+            reconcile_limit,
+            reconcile_window_days,
+        )
+
+        summary = reconcile_dealer_order_statuses(
+            reconcile_limit(), trigger="manual", window_days=reconcile_window_days()
+        )
+        processed = process_due_cloud_sync_events(limit=20) if summary.get("enqueued") else {}
+        append_audit_log(
+            module="经销商订单",
+            action_type="订单状态对账",
+            biz_type="订单",
+            content=(
+                f"手动触发订单状态回传对账：扫描 {summary.get('scanned')} 单，"
+                f"补发 {summary.get('enqueued')} 单（窗口 {summary.get('window_days')} 天）"
+            ),
+            user_id=ctx.get("username"),
+            username=operator,
+        )
+        record_channel_success("status-callback", "manual")
+        return {**summary, "processed": processed}
+    except Exception as exc:
+        record_channel_failure("status-callback", exc)
+        raise HTTPException(status_code=500, detail=f"订单状态对账失败: {exc}")
+
+
 @router.post("/sync-machine-snapshot")
 def sync_machine_snapshot(
     request: Request,
     ctx: dict = Depends(require_permissions("DEALER_ORDER_REVIEW")),
 ):
     """立即生成并上传一次机台快照（日常由 v8_sync 每日调度自动完成）。"""
+    _reject_if_bridge_disabled()
     operator = _operator(ctx)
     try:
         from v8_sync.scheduler import run_daily
@@ -509,6 +574,9 @@ def mark_allocated(order_no: str, payload: AllocatePayload, request: Request, ct
 def _sync_cloud_attachments_for_order(order_no: str) -> dict[str, Any]:
     """转合同后把云端上传的合同附件拉取到本地合同目录；失败只记日志。"""
     import logging
+
+    if not cloud_bridge_enabled():
+        return {}
 
     try:
         return sync_cloud_order_attachments([{"order_no": order_no, "updated_at": ""}])

@@ -78,6 +78,37 @@ class SyncChannelRouteTests(unittest.TestCase):
         self.assertEqual("synced", body["event_status"]["status"])
         self.assertEqual("机台快照已上传", body["message"])
 
+    def test_manual_reconcile_order_status_runs_once_and_records_heartbeat(self):
+        """「立即对账」按钮：按配置窗口/上限补发，并立即处理已排队事件。"""
+        summary = {
+            "trigger": "manual",
+            "scanned": 3,
+            "enqueued": 1,
+            "skipped": 2,
+            "window_days": 7,
+            "limit": 500,
+            "events": [{"order_no": "DO-R1", "event_type": "dealer_order_contracted", "status": "contracted"}],
+        }
+        with (
+            patch("crud.cloud_sync_outbox.reconcile_dealer_order_statuses", return_value=summary) as reconcile_mock,
+            patch("crud.cloud_sync_outbox.reconcile_limit", return_value=500),
+            patch("crud.cloud_sync_outbox.reconcile_window_days", return_value=7),
+            patch.object(dealer_orders, "process_due_cloud_sync_events", return_value={"processed": 1}) as process_mock,
+            patch.object(dealer_orders, "append_audit_log") as audit_mock,
+            patch.object(dealer_orders, "record_channel_success") as heartbeat_mock,
+        ):
+            response = self.client.post("/api/v1/dealer-orders/reconcile-order-status")
+
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertEqual(3, body["scanned"])
+        self.assertEqual(1, body["enqueued"])
+        self.assertEqual({"processed": 1}, body["processed"])
+        reconcile_mock.assert_called_once_with(500, trigger="manual", window_days=7)
+        process_mock.assert_called_once_with(limit=20)
+        audit_mock.assert_called_once()
+        heartbeat_mock.assert_called_once_with("status-callback", "manual")
+
 
 if __name__ == "__main__":
     unittest.main()

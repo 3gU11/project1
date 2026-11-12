@@ -255,10 +255,10 @@ class LocalContractDraftTests(unittest.TestCase):
         self.assertNotIn('{{', text)
         # 纸质合同固定内容（红框值）直接印在成品上
         for expected in (
-            '瑞钧机械办事处订货合同', '昆山瑞钧机械科技有限公司',
+            '瑞钧机械办事处订货合同', '苏州瑞钧智能科技有限公司',
             '（底价）', '含税', '需方负责安装调试、培训及售后服务',
             '机械精度、电气部分保修一年',
-            '中国工商银行昆山北门分理处', '1102 2320 0900 0027 757',
+            '中国农业银行股份有限公司常熟沙家浜支行', '10521201040014767',
             '0512-57175508', '0512-57175608',
         ):
             self.assertIn(expected, text)
@@ -272,7 +272,7 @@ class LocalContractDraftTests(unittest.TestCase):
         ):
             self.assertIn(expected, text)
         # 办事处信息不再印到合同上
-        for removed in ('浙江办', '余姚办', '俞文涛', '13003767856', '苏州瑞钧智能科技有限公司'):
+        for removed in ('浙江办', '余姚办', '俞文涛', '13003767856', '昆山瑞钧机械科技有限公司'):
             self.assertNotIn(removed, text)
 
     def test_same_model_batch_lines_are_merged_with_summed_quantity(self):
@@ -369,6 +369,28 @@ class LocalContractDraftTests(unittest.TestCase):
         prepared = drafts.prepare(row['id'])
         self.assertEqual('preview_ready', prepared['state'])
         # prepare 已把规整后的字段落库，之后不会再判为过期
+        self.assertEqual('preview_ready', drafts.get(row['id'])['state'])
+
+    def test_preview_is_regenerated_after_template_change(self):
+        """合同模板本身改过（如供方银行信息）时，换模板前生成的旧预览要作废重生成。"""
+        row = drafts.create_from_order({'orderNo': 'ORD-M6', 'dealerName': '经销商甲',
+                                        'customerName': '客户甲',
+                                        'items': [{'model': 'FH-300C', 'quantity': 1}]})
+        prepared = drafts.prepare(row['id'])
+        self.assertEqual('preview_ready', prepared['state'])
+        self.assertIsNotNone(prepared['preview_hash'])
+
+        # 模拟这次换模板之前生成的预览：字段没变，只有模板摘要对不上
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE v8_contract_drafts SET template_hash=:hash WHERE id=:id"),
+                         {'hash': 'b' * 64, 'id': row['id']})
+
+        refreshed = drafts.get(row['id'])
+        self.assertEqual('submitted', refreshed['state'])
+        self.assertIsNone(refreshed['preview_hash'])
+
+        # 重新生成后模板摘要落库，不会再被判为过期
+        self.assertEqual('preview_ready', drafts.prepare(row['id'])['state'])
         self.assertEqual('preview_ready', drafts.get(row['id'])['state'])
 
     def test_manual_item_quantity_edit_is_not_overwritten(self):
@@ -476,7 +498,7 @@ class LocalContractDraftTests(unittest.TestCase):
         text = document_text(blob)
         self.assertNotIn('{{', text)
         self.assertEqual(64, len(template_hash))
-        for expected in ('昆山瑞钧机械科技有限公司', '陈利春', '宁波舒勒精密机械有限公司',
+        for expected in ('苏州瑞钧智能科技有限公司', '陈利春', '宁波舒勒精密机械有限公司',
                          'FR-500XS(PRO)', '余姚模具城', '标配'):
             self.assertIn(expected, text)
 

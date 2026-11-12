@@ -317,19 +317,25 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="channelsDialogVisible" title="同步通道" width="980px" @closed="stopChannelsAutoRefresh">
+    <el-dialog
+      v-model="channelsDialogVisible"
+      title="同步通道"
+      width="min(1280px, 96vw)"
+      class="sync-channels-dialog"
+      @closed="stopChannelsAutoRefresh"
+    >
       <div class="channels-hint">
         与云端「同步监控 → V8 桥接上传」同一套通道口径；云端监控仍是最终判据，这里展示本地最近成功/失败与待发送事件。
         <span v-if="channelsServerTime">（本地时间 {{ channelsServerTime }}）</span>
       </div>
       <el-table v-loading="channelsLoading" :data="syncChannels" size="small" border>
-        <el-table-column prop="label" label="同步通道" min-width="150">
+        <el-table-column prop="label" label="同步通道" min-width="220">
           <template #default="scope">
             <div>{{ scope.row.label }}</div>
             <div class="channel-desc">{{ scope.row.description }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="direction" label="方向" width="150" />
+        <el-table-column prop="direction" label="方向" width="160" />
         <el-table-column prop="interval_label" label="设定周期" width="90" align="center" />
         <el-table-column label="最近成功" width="170">
           <template #default="scope">
@@ -340,13 +346,13 @@
         <el-table-column prop="expected_next_at" label="预计下次" width="170">
           <template #default="scope">{{ scope.row.expected_next_at || '—' }}</template>
         </el-table-column>
-        <el-table-column label="偏差" width="110" align="center">
+        <el-table-column label="偏差" width="100" align="center">
           <template #default="scope">
             <span v-if="scope.row.overdue_seconds > 0" class="channel-overdue">超期 {{ formatOverdue(scope.row.overdue_seconds) }}</span>
             <span v-else>未超期</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110" align="center">
+        <el-table-column label="状态" width="100" align="center">
           <template #default="scope">
             <el-tag :type="channelStateTagType(scope.row.state)" size="small">{{ scope.row.state_label }}</el-tag>
             <span v-if="scope.row.failed > 0" class="channel-failed">失败 {{ scope.row.failed }}</span>
@@ -359,7 +365,7 @@
               size="small"
               :loading="channelActionLoading === scope.row.manual_action"
               @click="runChannelAction(scope.row.manual_action)"
-            >立即同步</el-button>
+            >{{ scope.row.manual_action === 'reconcile-order-status' ? '立即对账' : '立即同步' }}</el-button>
             <span v-else class="channel-desc">自动触发</span>
           </template>
         </el-table-column>
@@ -910,6 +916,26 @@ const syncMachineSnapshot = async () => {
   }
 }
 
+const reconcileOrderStatus = async () => {
+  try {
+    const res = await apiPost<{ scanned?: number; enqueued?: number; window_days?: number }>(
+      '/dealer-orders/reconcile-order-status',
+      {},
+      { timeout: 60_000 },
+    )
+    const scanned = res?.scanned ?? 0
+    const enqueued = res?.enqueued ?? 0
+    if (enqueued > 0) {
+      ElMessage.success(`对账完成：扫描 ${scanned} 单，补发 ${enqueued} 单并已立即推送`)
+    } else {
+      ElMessage.success(`对账完成：扫描 ${scanned} 单，云端状态均已一致`)
+    }
+    if (channelsDialogVisible.value) void loadSyncChannels()
+  } catch (err: any) {
+    ElMessage.error(getApiErrorMessage(err) || '订单状态对账失败')
+  }
+}
+
 let channelsTimer: any = null
 
 const loadSyncChannels = async () => {
@@ -947,6 +973,7 @@ const runChannelAction = async (action: string) => {
     if (action === 'pull-orders') await syncCloudOrders()
     else if (action === 'push-inventory') await syncCloudInventory()
     else if (action === 'push-machines') await syncMachineSnapshot()
+    else if (action === 'reconcile-order-status') await reconcileOrderStatus()
   } finally {
     channelActionLoading.value = ''
     if (channelsDialogVisible.value) void loadSyncChannels()
