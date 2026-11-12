@@ -82,6 +82,7 @@ server/.gopath-build/
 # ===== 历史排查留下的临时分析文件 =====
 *diff*.txt
 *trace*.txt
+scratch_*.vue
 missing_contracts_*.png
 dealer_orders_before_*.sql
 
