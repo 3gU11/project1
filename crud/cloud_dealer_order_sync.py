@@ -496,6 +496,19 @@ def fetch_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max
     return orders
 
 
+def _factory_auth_headers(secret: str) -> dict[str, str]:
+    """统一 Spring 服务（help 云端）要求的工厂同步静态认证头。
+
+    help 云端把 v8-status 回写路由到 aftercare 统一服务，该接口除 HMAC 外还校验
+    ``X-V7-API-KEY`` 与 ``X-V8-Sync-Secret``；缺失会 401，导致审核结果永远回传失败。
+    """
+    headers = {"X-V8-Sync-Secret": secret}
+    api_key = (os.getenv("V7_API_KEY") or _read_dotenv_value("V7_API_KEY")).strip()
+    if api_key:
+        headers["X-V7-API-KEY"] = api_key
+    return headers
+
+
 def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
     base_url, _ = _cloud_config()
     order_no = _clean(order_no)
@@ -511,6 +524,7 @@ def _post_cloud_order(order_no: str, path_suffix: str, payload: dict[str, Any], 
     headers = {
         "Content-Type": "application/json",
         "Idempotency-Key": idempotency_key,
+        **_factory_auth_headers(secret),
         **signed_headers(secret, "POST", path, body, idempotency_key=idempotency_key),
     }
     response = client.post(
