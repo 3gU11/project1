@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from sqlalchemy import create_engine, event, text
 
@@ -64,7 +66,7 @@ _DEALER_ORDER_COLUMNS = [
 ]
 
 
-def _make_engine(**values):
+def _make_engine(outbox_events=None, **values):
     engine = create_engine("sqlite://")
 
     @event.listens_for(engine, "connect")
@@ -82,6 +84,15 @@ def _make_engine(**values):
                 + ")"
             )
         )
+        # 「驳回是否已成功回传云端」需要查 outbox；默认建空表，避免测试因缺表走到保守分支。
+        conn.execute(
+            text(
+                "CREATE TABLE cloud_sync_outbox ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT, event_type TEXT, "
+                "biz_key TEXT, payload_json TEXT, status TEXT, retry_count INTEGER DEFAULT 0, "
+                "last_error TEXT, next_retry_at TEXT, updated_at TEXT, synced_at TEXT)"
+            )
+        )
         columns = ["order_no", "line_no", *_DEALER_ORDER_COLUMNS]
         row = {name: None for name in columns}
         row.update({"order_no": ORDER_NO, "line_no": 1, **values})
@@ -93,6 +104,15 @@ def _make_engine(**values):
             ),
             row,
         )
+        for outbox_event in outbox_events or []:
+            conn.execute(
+                text(
+                    "INSERT INTO cloud_sync_outbox "
+                    "(event_id, event_type, biz_key, payload_json, status, retry_count) "
+                    "VALUES (:event_id, :event_type, :biz_key, :payload_json, :status, :retry_count)"
+                ),
+                outbox_event,
+            )
     return engine
 
 
@@ -130,8 +150,25 @@ def _cloud_pending_order():
     }
 
 
+def _review_outbox_event(status, *, event_status="synced"):
+    """构造一条 dealer_order_reviewed 回写事件，用于证明驳回是否已成功送达云端。"""
+    return {
+        "event_id": f"evt-{status}-{event_status}",
+        "event_type": "dealer_order_reviewed",
+        "biz_key": ORDER_NO,
+        "payload_json": json.dumps(
+            {"order_no": ORDER_NO, "status": status, "reviewer": "系统管理员", "note": "驳回原因"},
+            ensure_ascii=False,
+        ),
+        "status": event_status,
+        "retry_count": 3 if event_status == "failed" else 0,
+    }
+
+
 def test_cloud_reapply_pending_resets_local_rejected(monkeypatch):
     engine = _make_engine(
+        # 真正的“经销商重新申请”前提：上一轮驳回已经成功回传云端（synced）。
+        outbox_events=[_review_outbox_event("rejected", event_status="synced")],
         status="rejected",
         customer_name="旧客户",
         model="DK7745",
@@ -160,6 +197,64 @@ def test_cloud_reapply_pending_resets_local_rejected(monkeypatch):
     assert int(row["factory_pending"] or 0) == 0
     assert row["customer_name"] == "重新申请后的客户"
     assert row["delivery_address"] == "浙江省宁波市新地址 8 号"
+
+
+@pytest.mark.parametrize("event_status", ["failed", "pending", "processing"])
+def test_stale_cloud_pending_keeps_rejected_while_rejection_not_delivered(monkeypatch, event_status):
+    """驳回回写尚未成功（404 重试/在途）时，云端 pending 是陈旧状态，不能当成“重新申请”重置本地。"""
+    engine = _make_engine(
+        outbox_events=[_review_outbox_event("rejected", event_status=event_status)],
+        status="rejected",
+        customer_name="旧客户",
+        model="DK7745",
+        quantity="1",
+        reviewed_at="2026-11-09 16:01:31",
+        reviewed_by="系统管理员",
+        review_note="不发",
+        contract_no="",
+        approved_qty="0",
+        allocated_qty="0",
+        factory_pending="0",
+    )
+    _patch_sync(monkeypatch, engine, [_cloud_pending_order()])
+
+    sync.sync_cloud_dealer_orders(status="pending")
+
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT * FROM dealer_orders WHERE order_no=:no"), {"no": ORDER_NO}).mappings().one()
+    assert row["status"] == "rejected"
+    assert row["reviewed_at"] == "2026-11-09 16:01:31"
+    assert row["reviewed_by"] == "系统管理员"
+    assert row["review_note"] == "不发"
+    # 云端的新内容仍然要合并进来，只是不能清掉本地审核结论。
+    assert row["customer_name"] == "重新申请后的客户"
+
+
+def test_stale_cloud_pending_keeps_rejected_without_review_history(monkeypatch):
+    """没有任何回传记录时无法证明驳回已送达云端，保守保留本地驳回状态。"""
+    engine = _make_engine(
+        outbox_events=[],
+        status="rejected",
+        customer_name="旧客户",
+        model="DK7745",
+        quantity="1",
+        reviewed_at="2026-11-09 16:01:31",
+        reviewed_by="系统管理员",
+        review_note="不发",
+        contract_no="",
+        approved_qty="0",
+        allocated_qty="0",
+        factory_pending="0",
+    )
+    _patch_sync(monkeypatch, engine, [_cloud_pending_order()])
+
+    sync.sync_cloud_dealer_orders(status="pending")
+
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT * FROM dealer_orders WHERE order_no=:no"), {"no": ORDER_NO}).mappings().one()
+    assert row["status"] == "rejected"
+    assert row["reviewed_at"] == "2026-11-09 16:01:31"
+    assert row["reviewed_by"] == "系统管理员"
 
 
 def test_reconcile_does_not_push_rejected_when_cloud_reapplied_after_review(monkeypatch):

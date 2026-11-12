@@ -1458,6 +1458,44 @@ def _prune_cloud_deleted_local_orders(conn: Any, cloud_order_nos: set[str]) -> d
     return {"orders": len(stale_order_nos), "lines": int(deleted_lines or 0)}
 
 
+def _rejection_review_delivered(conn: Any, order_no: str) -> bool:
+    """本地驳回是否已成功回传到云端。
+
+    云端把订单重新置回 pending（经销商重新申请）只可能发生在上一轮驳回已经
+    送达云端之后；如果最近一次驳回回写仍在 pending/processing/failed（例如云端
+    返回 404 一直在重试），云端此时的 pending 只是「驳回还没送达」的陈旧状态，
+    不能当成经销商重新申请，否则会把本地合法驳回静默打回待审核。
+    """
+    try:
+        row = conn.execute(
+            text(
+                """
+                SELECT status, payload_json
+                FROM cloud_sync_outbox
+                WHERE biz_key = :order_no
+                  AND event_type = 'dealer_order_reviewed'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {"order_no": order_no},
+        ).mappings().first()
+    except Exception as exc:  # 表缺失/旧库兼容：无法证明已送达，保守保留本地审核结论
+        logger.warning("check rejected review delivery failed order=%s: %s", order_no, exc)
+        return False
+    if not row:
+        return False
+    try:
+        payload = json.loads(row.get("payload_json") or "{}")
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    if _clean(payload.get("status")) not in {"rejected", "regional_rejected"}:
+        return False
+    return _clean(row.get("status")) == "synced"
+
+
 def sync_cloud_dealer_orders(
     status: str = "pending",
     page_size: int = 100,
@@ -1526,7 +1564,12 @@ def sync_cloud_dealer_orders(
                 cloud_status = _clean(payload["status"])
                 # 云端「驳回后重新申请」：订单在云端回到待审核（pending），本地镜像必须跟随重置，
                 # 否则 _status_rank 会保留本地 rejected，周期对账又把 rejected 推回云端，状态永远改不回来。
-                reapplied = local_status in {"rejected", "regional_rejected"} and cloud_status == "pending"
+                # 但「本地 rejected + 云端 pending」也可能是驳回回写失败（404/重试中）导致的陈旧云端状态，
+                # 必须确认最近一次驳回已成功送达云端，才允许按经销商重新申请重置本地状态。
+                reapplied = cloud_status == "pending" and (
+                    local_status == "regional_rejected"
+                    or (local_status == "rejected" and _rejection_review_delivered(conn, order_no))
+                )
                 is_completed = local_status in {"complete", "completed"}
                 extra_changed = (
                     _clean(existing.get("extra_remark")) != payload["extra_remark"]
