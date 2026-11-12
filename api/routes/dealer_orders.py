@@ -916,7 +916,8 @@ def convert_to_contract(
         _assert_models_in_dictionary(model_names)
 
         customer = str(payload.customer_name or "").strip() or str(items[0].get("customer_name") or "").strip()
-        agent = str(payload.agent_name or "").strip() or str(items[0].get("contact_name") or "").strip()
+        # 合同「代理商」历史口径是大区经理，不能回退到客户联系人 contact_name。
+        agent = str(payload.agent_name or "").strip() or str(items[0].get("regional_manager_name") or "").strip()
         delivery_date = str(payload.delivery_date or "").strip() or str(items[0].get("delivery_date") or "").strip()
         total_note = str(payload.contract_note or "").strip()
 

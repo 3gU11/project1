@@ -302,6 +302,30 @@ def test_convert_endpoint_generates_contract_no_when_missing(monkeypatch):
     assert calls["marked"][0][1]["contract_no"] == "HT202610280009"
 
 
+def test_convert_agent_falls_back_to_regional_manager_not_customer_contact(monkeypatch):
+    """代理商为空时按大区经理回退，不能把客户联系人填进合同「代理商」。"""
+    calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    order_items = _order_items()
+    order_items[0]["regional_manager_name"] = "大区陈"
+    order_items[0]["contact_name"] = "客户熊"
+    monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: order_items)
+    payload = _payload()
+    payload.agent_name = ""
+
+    routes.convert_to_contract(
+        "DO-TEST-AGENT",
+        payload,
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"name": "tester", "username": "tester"},
+    )
+
+    rows = calls["contracts"][0]["add_list"]
+    assert rows and all(row["代理商"] == "大区陈" for row in rows)
+    assert all(row["代理商"] != "客户熊" for row in rows)
+
+
 def test_convert_endpoint_rolls_back_contract_when_create_fails(monkeypatch):
     calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
     _patch_convert_endpoint(monkeypatch, calls=calls)

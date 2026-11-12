@@ -707,7 +707,8 @@ const openConvertDialog = async (order: DealerOrder) => {
   convertForm.contractNo = ''
   convertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   convertForm.customer = String(order.customer_name || '').trim()
-  convertForm.agent = String(order.contact_name || '').trim()
+  // 「代理商」取大区经理（历史合同口径）；客户联系人 contact_name 不能拿来填代理商。
+  convertForm.agent = String(order.regional_manager_name || '').trim()
   convertForm.items = rows
   convertForm.contractNote = String(order.review_note || order.regional_review_note || '').trim()
   convertForm.sourceOrderNo = String(order.order_no || '').trim()

@@ -714,6 +714,7 @@ type DealerOrderLine = {
 type DealerOrder = {
   order_no: string
   customer_name?: string
+  regional_manager_name?: string
   contact_name?: string
   delivery_date?: string
   model?: string
@@ -953,7 +954,8 @@ const openDealerOrderConvertDialog = async (order: DealerOrder) => {
   dealerConvertForm.contractNo = ''
   dealerConvertForm.deliveryDate = String(order.delivery_date || '').slice(0, 10) || todayYmd()
   dealerConvertForm.customer = String(order.customer_name || '').trim()
-  dealerConvertForm.agent = String(order.contact_name || '').trim()
+  // 「代理商」取大区经理（历史合同口径）；客户联系人 contact_name 不能拿来填代理商。
+  dealerConvertForm.agent = String(order.regional_manager_name || '').trim()
   dealerConvertForm.items = rows
   dealerConvertForm.contractNote = String(order.review_note || '').trim()
   dealerConvertForm.sourceOrderNo = String(order.order_no || '').trim()
