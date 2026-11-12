@@ -326,6 +326,54 @@ def test_convert_agent_falls_back_to_regional_manager_not_customer_contact(monke
     assert all(row["代理商"] != "客户熊" for row in rows)
 
 
+def test_convert_agent_treats_deleted_manager_placeholder_as_blank(monkeypatch):
+    """大区经理被注销后姓名变成「已删除人员」，不能印进合同的「代理商」。"""
+    calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    order_items = _order_items()
+    order_items[0]["regional_manager_name"] = "已删除人员"
+    order_items[0]["dealer_name"] = "经销商公司甲"
+    order_items[0]["contact_name"] = "客户熊"
+    monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: order_items)
+    payload = _payload()
+    payload.agent_name = "已删除人员"
+
+    routes.convert_to_contract(
+        "DO-TEST-AGENT-DELETED",
+        payload,
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"name": "tester", "username": "tester"},
+    )
+
+    rows = calls["contracts"][0]["add_list"]
+    assert rows and all(row["代理商"] == "经销商公司甲" for row in rows)
+    assert all(row["代理商"] != "客户熊" for row in rows)
+
+
+def test_convert_agent_uses_the_manager_recorded_on_the_order(monkeypatch):
+    """同一个大区有多个经理时，代理商只取订单上记录的经理，不按大区挑人。"""
+    calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
+    _patch_convert_endpoint(monkeypatch, calls=calls)
+    order_items = _order_items()
+    order_items[0]["regional_manager_name"] = "经理乙"
+    order_items[0]["dealer_name"] = "经销商公司甲"
+    monkeypatch.setattr(routes, "validate_dealer_order_convertible", lambda order_no: order_items)
+    payload = _payload()
+    payload.agent_name = ""
+
+    routes.convert_to_contract(
+        "DO-TEST-AGENT-MULTI",
+        payload,
+        request=None,
+        background_tasks=_FakeBackgroundTasks(),
+        ctx={"name": "tester", "username": "tester"},
+    )
+
+    rows = calls["contracts"][0]["add_list"]
+    assert rows and all(row["代理商"] == "经理乙" for row in rows)
+
+
 def test_convert_endpoint_rolls_back_contract_when_create_fails(monkeypatch):
     calls = {"contracts": [], "marked": [], "audit": [], "rollback_contracts": []}
     _patch_convert_endpoint(monkeypatch, calls=calls)

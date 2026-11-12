@@ -136,6 +136,29 @@ def _value(obj: dict[str, Any], *names: str) -> str:
     return _lookup(obj, tuple(names))
 
 
+# 人员被注销后，门户会把姓名改成「已删除人员」；这类占位值不能写进合同（需方/代理商）。
+INVALID_PARTY_NAMES = frozenset({"已删除人员", "已删除", "已注销", "已停用", "-", "—", "无"})
+
+
+def resolve_party_name(order: dict[str, Any] | None) -> str:
+    """合同「需方 / 代理商」的取值：订单上的大区经理 > 经销商公司名 > 空。
+
+    一个经销商订单只记录一位大区经理：经销商下单时是该经销商归属的大区经理，
+    大区经理本人下单时就是提交人。所以同一个大区出现多个经理也不会产生歧义，
+    不按大区去「挑一位经理」，也绝不回退到客户联系人 contact_name。
+    人员注销后门户把姓名改成「已删除人员」，这种占位值视为无效，退回经销商公司名。
+    """
+    if not isinstance(order, dict):
+        return ""
+    manager = _lookup(order, ("regionalManagerName", "regional_manager_name",
+                              "regionalManager", "regional_manager"))
+    dealer = _lookup(order, ("dealerName", "dealer_name"))
+    for candidate in (manager, dealer):
+        if candidate and candidate not in INVALID_PARTY_NAMES:
+            return candidate
+    return ""
+
+
 def _item_is_heightened(item: dict[str, Any]) -> bool:
     """判断一条明细是不是加高机型。
 
@@ -283,7 +306,8 @@ def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
     值一律按订货合同栏位顺序输出（订单头 → 明细行 → 备注条款 → 购货方信息 →
     其他特殊要求），前端「编辑字段」按这个顺序展示。
     明细按「规格型号 + 是否加高」合并同型号的批次行，数量相加；加高机型在规格型号后标「（加高）」。
-    购货单位名称取客户名（customerName）；需方取大区经理，缺省时退回经销商名。
+    购货单位名称取客户名（customerName）；需方取订单上记录的大区经理（resolve_party_name），
+    缺省时退回经销商公司名。
     供方、牌号、单价说明、服务责任、其它约定、供方签署栏是纸质合同的固定值，写在模板里，
     这里不产出；其余字段缺值留空，由审批人补齐，不编造商业条款。
     """
@@ -292,10 +316,9 @@ def map_order_to_contract(order: dict[str, Any]) -> dict[str, str]:
     fields: dict[str, str] = {}
     for name in HEAD_FIELDS:
         fields[name] = _lookup(order, FIELD_ALIASES[name])
-    # 自动生成的合同附件中「需方」必须是大区经理，而不是经销商公司名。
-    regional_manager = _lookup(order, ("regionalManagerName", "regional_manager_name", "regionalManager", "regional_manager"))
-    if regional_manager:
-        fields["dealer_name"] = regional_manager
+    # 自动生成的合同附件中「需方」= 订单上记录的大区经理（见 resolve_party_name），
+    # 没有经理才退回经销商公司名；客户联系人永远不参与需方取值。
+    fields["dealer_name"] = resolve_party_name(order) or fields["dealer_name"]
     fields["signed_date"] = _format_signed_date(fields["signed_date"])
     item_rows = min(max(len(items), BASE_ITEM_ROWS), MAX_ITEM_ROWS)
     for index in range(1, item_rows + 1):
@@ -343,28 +366,33 @@ def ensure_table() -> None:
             conn.execute(text("ALTER TABLE v8_contract_drafts ADD COLUMN reviewed_at DATETIME NULL"))
 
 def _enrich_regional_manager(order_no: str, snapshot: dict[str, Any]) -> dict[str, Any]:
-    """云端快照没有大区经理时，用本地订单行补上，保证合同附件「需方」不为空。"""
+    """云端快照没有可用的大区经理时，用本地订单行补上，保证合同附件「需方」不为空。
+
+    快照里的经理可能是注销占位名（「已删除人员」），这种值不算数，继续用本地订单行找有效姓名。
+    """
     enriched = dict(snapshot) if isinstance(snapshot, dict) else {}
-    if _lookup(enriched, ("regionalManagerName", "regional_manager_name")):
+    current = _lookup(enriched, ("regionalManagerName", "regional_manager_name"))
+    if current and current not in INVALID_PARTY_NAMES:
         return enriched
     order_no = str(order_no or "").strip()
     if not order_no:
         return enriched
     try:
         with get_engine().connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 text(
                     "SELECT regional_manager_name FROM dealer_orders "
-                    "WHERE order_no=:order_no AND COALESCE(TRIM(regional_manager_name),'')<>'' "
-                    "ORDER BY line_no LIMIT 1"
+                    "WHERE order_no=:order_no ORDER BY line_no"
                 ),
                 {"order_no": order_no},
-            ).first()
+            ).fetchall()
     except Exception:
         return enriched
-    manager = str(row[0] or "").strip() if row else ""
-    if manager:
-        enriched["regionalManagerName"] = manager
+    for row in rows:
+        manager = str(row[0] or "").strip()
+        if manager and manager not in INVALID_PARTY_NAMES:
+            enriched["regionalManagerName"] = manager
+            break
     return enriched
 
 
@@ -461,12 +489,20 @@ def _normalize_stored_fields(fields: dict[str, Any],
     if signed_date:
         fields["signed_date"] = _format_signed_date(signed_date)
     if isinstance(snapshot, dict) and snapshot:
-        regional_manager = _lookup(snapshot, ("regionalManagerName", "regional_manager_name"))
-        # 旧草稿的「需方」存的是经销商名，升级成当前规则的大区经理；审批人手工改过的保留。
-        stored_dealer = _lookup(snapshot, ("dealerName", "dealer_name"))
-        current_dealer = str(fields.get("dealer_name") or "").strip()
-        if regional_manager and (not current_dealer or current_dealer == stored_dealer):
-            fields["dealer_name"] = regional_manager
+        # 「需方」按当前规则重算（订单大区经理 > 经销商公司名）。旧规则把经销商名或
+        # 客户联系人写成需方的存量草稿在这里纠正；审批人手工改过的值保留。
+        resolved_buyer = resolve_party_name(snapshot)
+        stale_buyers = {
+            _lookup(snapshot, ("dealerName", "dealer_name")),
+            _lookup(snapshot, ("contactName", "contact_name")),
+        } - {""}
+        current_buyer = str(fields.get("dealer_name") or "").strip()
+        if resolved_buyer and (
+            not current_buyer
+            or current_buyer in stale_buyers
+            or current_buyer in INVALID_PARTY_NAMES
+        ):
+            fields["dealer_name"] = resolved_buyer
         stored_rows = _stored_item_rows(fields)
         derived = map_order_to_contract(snapshot)
         derived_rows = _stored_item_rows(derived)

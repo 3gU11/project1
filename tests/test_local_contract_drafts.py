@@ -104,6 +104,46 @@ class LocalContractDraftTests(unittest.TestCase):
         healed = drafts.get(row['id'])
         self.assertEqual('审批人手工填的需方', healed['fields']['dealer_name'])
 
+    def test_buyer_uses_order_regional_manager_when_region_has_multiple_managers(self):
+        """同一个大区有多个经理时，需方只认订单上记录的那位经理，不按大区挑人。
+
+        经销商下单时订单记录的是该经销商归属的大区经理，大区经理本人下单时就是提交人，
+        所以一个订单只会有一位经理；客户联系人不能参与需方取值。
+        """
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-MM1', 'dealerName': '经销商公司甲',
+            'regionalManagerName': '经理乙', 'customerName': '客户甲',
+            'contactName': '客户联系人丙', 'contactPhone': '13900000000',
+            'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        self.assertEqual('经理乙', fields['dealer_name'])
+        self.assertEqual('客户甲', fields['buyer_name'])
+
+    def test_buyer_ignores_deleted_manager_placeholder(self):
+        """大区经理被注销后门户把姓名改成「已删除人员」，需方退回经销商公司名。"""
+        fields = drafts.map_order_to_contract({
+            'orderNo': 'ORD-MM2', 'dealerName': '经销商公司甲',
+            'regionalManagerName': '已删除人员', 'customerName': '客户甲',
+            'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        self.assertEqual('经销商公司甲', fields['dealer_name'])
+
+    def test_pending_draft_with_customer_contact_as_buyer_is_healed(self):
+        """旧规则把客户联系人写成需方的存量草稿，读取时纠正成大区经理。"""
+        row = drafts.create_from_order({
+            'orderNo': 'ORD-MM3', 'dealerName': '经销商公司甲',
+            'regionalManagerName': '经理乙', 'customerName': '客户甲',
+            'contactName': '客户联系人丙',
+            'items': [{'productCode': 'A-1', 'quantity': 1}],
+        })
+        stored = dict(row['fields'], dealer_name='客户联系人丙')
+        with self.engine.begin() as conn:
+            conn.execute(text("UPDATE v8_contract_drafts SET fields_json=:f WHERE id=:id"),
+                         {'f': json.dumps(stored, ensure_ascii=False), 'id': row['id']})
+
+        healed = drafts.get(row['id'])
+        self.assertEqual('经理乙', healed['fields']['dealer_name'])
+
     def test_delivery_and_settlement_follow_cloud_form_labels(self):
         """云端表单的「期望交期」「结算方式及期限」要能带出到对应栏位。"""
         fields = drafts.map_order_to_contract({
