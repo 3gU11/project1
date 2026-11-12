@@ -1,51 +1,93 @@
+# ===== Python =====
 __pycache__/
 *.py[cod]
-*.log
+*.egg-info/
+.pytest_cache/
+.venv/
+.venv*/
+venv/
 
+# ===== Node / 前端依赖与缓存 =====
 node_modules/
-frontend/node_modules/
-server/node_modules/
-frontend/dist/
+.vite/
+.vue-global-types/
+# 注意：frontend/dist 为随版本发布的构建产物，需纳入版本库，切勿忽略
 
+# ===== 环境变量与密钥 =====
 .env
-server/.env
 .env.local
-# 本机联调/回滚用的 env 备份（含密钥，禁止入库）
+server/.env
 .env.bak-*
 .env.local.bak-*
 .env.*.bak-*
 
-# Local runtime state and generated reports
+# ===== 日志 =====
+*.log
 *.out.log
 *.err.log
+
+# ===== 本机运行状态与测试产物 =====
+.fullstack.pids.json
 test-results/
 tmp-playwright-output/
-# 本地跑 vue-tsc / 前端测试时生成的临时缓存目录
+.playwright-cli/
+.tmp-e2e/
+.tmp-smoke/
+.tmp-wf/
 frontend/.tmp-tsc/
 frontend/.tmp-vitest/
-.tmp-smoke/
-.tmp-e2e/
-.tmp-wf/
-.fullstack.pids.json
+pytest_out.txt
+compile_error.txt
+
+# ===== 数据、备份与数据库转储 =====
 backups/
-artifacts/
 data/contracts/
 data/*/
+data_repair_backups/
+machine_archives/
+artifacts/
 server/data/
 server/logs/
-server/*.exe
-server/*.exe.bak*
+*.bak
+*.bak-*
+*.dump
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.db
+rjfinshed.sql
+
+# ===== 客户合同、业务表格与中间数据 =====
+合同/
+*.xlsx
+*.xls
+*.ndjson
+excel_in_sql_*.csv
+excel_rows_before_*.csv
+
+# ===== 可执行文件与二进制产物 =====
+*.exe
+*.exe~
 launcher.exe
 launcher.exe~
-*.xlsx
+server/*.exe
+server/*.exe.bak*
 
-.vite/
-.vue-global-types/
-
-server/.gocache-build/
-server/.gomodcache-build/
+# ===== Go 构建缓存 =====
+server/.gocache*/
+server/.gomodcache*/
+server/.gotestcache*/
 server/.gopath-build/
 
-machine_archives/
+# ===== 历史排查留下的临时分析文件 =====
+*diff*.txt
+*trace*.txt
+missing_contracts_*.png
+dealer_orders_before_*.sql
 
-scripts/
+# ===== 工具与临时目录 =====
+.workbuddy-ai/
+.codex_tmp_spreadsheet/
+*.tmp
+tmp-*
+tmp_*
