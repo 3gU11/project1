@@ -57,7 +57,7 @@ def _read_dotenv_value(key: str) -> str:
 def _attachment_base_url() -> str:
     """附件接口所在服务地址。
 
-    售后云端把订单附件接口部署在售后域名（默认 ruijuncare.rjzkapp.com），
+    售后云端把订单附件接口部署在售后域名（默认 ruijunhelp.rjzkapp.com），
     与订货桥接的 WECHAT_CLOUD_API_BASE 可能不是同一台服务，因此单独提供覆盖项。
     """
     return (
@@ -65,7 +65,7 @@ def _attachment_base_url() -> str:
         or _read_dotenv_value("CLOUD_ATTACHMENT_API_BASE")
         or os.getenv("WECHAT_CLOUD_API_BASE")
         or _read_dotenv_value("WECHAT_CLOUD_API_BASE")
-        or "https://ruijuncare.rjzkapp.com"
+        or "https://ruijunhelp.rjzkapp.com"
     ).strip().rstrip("/")
 
 
