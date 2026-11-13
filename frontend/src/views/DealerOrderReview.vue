@@ -70,7 +70,7 @@
     >
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="statusMeta(row).type">{{ statusMeta(row).text }}</el-tag>
+          <el-tag :type="rowStatusMeta(row).type">{{ rowStatusMeta(row).text }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="dealer_name" label="经销商" width="90" show-overflow-tooltip />
@@ -733,14 +733,15 @@ const orderRowGroups = computed(() => {
   return groups
 })
 
-/** 订单级列：同一订单只显示一次（经销商、客户名、操作），其余列保留行级明细。 */
-const MERGED_ORDER_COLUMN_PROPS = new Set(['dealer_name', 'customer_name'])
+/** 订单级列：同一订单只显示一次（状态、经销商、客户名、操作），其余列保留行级明细。 */
+const MERGED_ORDER_COLUMN_PROPS = new Set(['status', 'dealer_name', 'customer_name'])
 const isMergedOrderColumn = (column: any) =>
   MERGED_ORDER_COLUMN_PROPS.has(String(column?.property || '')) || column?.label === '操作'
 
 /**
  * el-table 合并单元格：同一订单的第一行返回 [行数, 1]，其余行返回 [0, 0] 隐藏。
- * 操作列合并后整单只有一组按钮，避免同一订单重复出现审核 / 转合同 / 取消入口。
+ * 状态 / 经销商 / 客户名合并后整单只显示一次；操作列合并后整单只有一组按钮，
+ * 避免同一订单重复出现审核 / 转合同 / 取消入口。
  */
 const mergeOrderCells = ({ row, column, rowIndex }: { row: DealerOrderTableRow; column: any; rowIndex: number }) => {
   if (!isMergedOrderColumn(column)) return
@@ -766,6 +767,20 @@ const statusMeta = (rowOrStatus: DealerOrder | string) => {
     completed: { text: '已完成', type: 'success' },
   }
   return map[status] || { text: status || '-', type: 'info' }
+}
+
+/**
+ * 合并后的状态单元格取整个订单的状态：
+ * 任一行有新备注待审（factory_pending）就整单提示「新备注审核中」，避免合并后漏掉行级提示。
+ */
+const rowStatusMeta = (row: DealerOrderTableRow) => {
+  const group = orderRowGroups.value.get(row._row_key)
+  const rowsInGroup = group ? tableRows.value.slice(group.start, group.start + group.span) : [row]
+  const anyFactoryPending = rowsInGroup.some(
+    (item) => Number(item.factory_pending || 0) === 1 && !['complete', 'completed'].includes(String(item.status || '')),
+  )
+  if (anyFactoryPending) return { text: '新备注审核中', type: 'warning' as const }
+  return statusMeta(String(rowsInGroup[0]?.status || row.status || ''))
 }
 
 const displayBatch = (batchNo?: string, inventoryType?: string) => {
