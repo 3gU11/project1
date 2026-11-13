@@ -59,6 +59,7 @@
     <el-table
       v-loading="loading"
       :data="tableRows"
+      :span-method="mergeOrderCells"
       row-key="_row_key"
       border
       stripe
@@ -672,8 +673,23 @@ const rowPriority = (row: DealerOrder) => {
   return statusRank(status)
 }
 
-const tableRows = computed<DealerOrderTableRow[]>(() => {
-  const rows = orders.value.flatMap((order) => {
+/**
+ * 先按「订单」排序，再展开订单下的机型明细行。
+ * 这样同一订单的多行一定连续，才能把经销商 / 客户名 / 操作等订单级单元格合并。
+ */
+const sortedOrders = computed<DealerOrder[]>(() =>
+  [...orders.value].sort((a, b) => {
+    const priorityDiff = rowPriority(a) - rowPriority(b)
+    if (priorityDiff !== 0) return priorityDiff
+    const bTime = String(b.updated_at || b.created_at || '')
+    const aTime = String(a.updated_at || a.created_at || '')
+    if (bTime !== aTime) return bTime.localeCompare(aTime)
+    return String(b.order_no || '').localeCompare(String(a.order_no || ''))
+  }),
+)
+
+const tableRows = computed<DealerOrderTableRow[]>(() =>
+  sortedOrders.value.flatMap((order) => {
     const items = order.items?.length ? order.items : [order]
     return items.map((item, index) => {
       const rowNotes = resolveDealerOrderRowNotes(items.length, item, order)
@@ -694,17 +710,45 @@ const tableRows = computed<DealerOrderTableRow[]>(() => {
         _row_key: `${order.order_no}-${item.line_no || index + 1}`,
       }
     })
-  })
-  rows.sort((a, b) => {
-    const priorityDiff = rowPriority(a) - rowPriority(b)
-    if (priorityDiff !== 0) return priorityDiff
-    const bTime = String(b.updated_at || b.created_at || '')
-    const aTime = String(a.updated_at || a.created_at || '')
-    if (bTime !== aTime) return bTime.localeCompare(aTime)
-    return String(b.order_no || '').localeCompare(String(a.order_no || ''))
-  })
-  return rows
+  }),
+)
+
+/**
+ * 同一订单在表格中占用的连续行组（订单 → 起始行 + 行数），供单元格合并使用。
+ */
+const orderRowGroups = computed(() => {
+  const groups = new Map<string, { start: number; span: number }>()
+  const rows = tableRows.value
+  let index = 0
+  while (index < rows.length) {
+    const orderNo = String(rows[index].order_no || '')
+    let end = index + 1
+    while (end < rows.length && String(rows[end].order_no || '') === orderNo) end += 1
+    // 组内每一行都登记同一组信息：合并判断时用 rowIndex === start 区分首行。
+    for (let cursor = index; cursor < end; cursor += 1) {
+      groups.set(rows[cursor]._row_key, { start: index, span: end - index })
+    }
+    index = end
+  }
+  return groups
 })
+
+/** 订单级列：同一订单只显示一次（经销商、客户名、操作），其余列保留行级明细。 */
+const MERGED_ORDER_COLUMN_PROPS = new Set(['dealer_name', 'customer_name'])
+const isMergedOrderColumn = (column: any) =>
+  MERGED_ORDER_COLUMN_PROPS.has(String(column?.property || '')) || column?.label === '操作'
+
+/**
+ * el-table 合并单元格：同一订单的第一行返回 [行数, 1]，其余行返回 [0, 0] 隐藏。
+ * 操作列合并后整单只有一组按钮，避免同一订单重复出现审核 / 转合同 / 取消入口。
+ */
+const mergeOrderCells = ({ row, column, rowIndex }: { row: DealerOrderTableRow; column: any; rowIndex: number }) => {
+  if (!isMergedOrderColumn(column)) return
+  const group = orderRowGroups.value.get(row._row_key)
+  if (!group || group.span <= 1) return
+  if (rowIndex !== group.start) return [0, 0]
+  return [group.span, 1]
+}
 
 const statusMeta = (rowOrStatus: DealerOrder | string) => {
   const status = typeof rowOrStatus === 'string' ? rowOrStatus : rowOrStatus.status
