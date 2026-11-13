@@ -461,6 +461,7 @@ def fetch_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max
     orders: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, int]] = set()
     status_results: dict[str, list[dict[str, Any]]] = {}
+    fetch_errors: list[tuple[str, Exception]] = []
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
             pool.submit(_fetch_cloud_dealer_orders_by_status, s, page_size, max_pages): s
@@ -473,6 +474,16 @@ def fetch_cloud_dealer_orders(status: str = "pending", page_size: int = 100, max
             except Exception as exc:
                 logger.warning("cloud fetch status=%s failed: %s", s, exc)
                 status_results[s] = []
+                fetch_errors.append((s, exc))
+    # 全状态失败不能静默返回 []：上层「立即拉取订单」会把空结果当成拉取成功，
+    # 用户看不到云端不可达（如 [WinError 10061]），定时拉单也会误记 last_success_at。
+    # 只要有一个状态成功仍返回部分结果（网络抖动时尽量同步）；全部失败才抛错。
+    if fetch_errors and len(fetch_errors) == len(futures):
+        detail = " | ".join(f"{status}: {exc}" for status, exc in fetch_errors[:3])
+        raise RuntimeError(
+            f"cloud order fetch failed for all statuses "
+            f"({len(fetch_errors)}/{len(futures)}): {detail}"
+        ) from fetch_errors[0][1]
     # Deduplicate in original status order
     for read_status in CLOUD_READ_STATUSES:
         for order in status_results.get(read_status, []):
