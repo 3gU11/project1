@@ -134,7 +134,7 @@
 
     <el-dialog v-model="pendingUploadsVisible" title="交付信息上传（待处理）" width="980px">
       <el-alert
-        title="小程序只上传附件。请打开附件预览，根据合同填写购货单位/地址/机台号，并手动选择机台；系统只把合同关联到所选机台，不自动发货。"
+        title="小程序只上传附件。系统会尝试识别合同里的购货单位/地址/机台号（可点「重新识别附件」），请打开附件预览核对后填写并手动选择机台；系统只把合同关联到所选机台，不自动发货。"
         type="info"
         :closable="false"
         show-icon
@@ -175,6 +175,9 @@
       <div class="toolbar process-search">
         <el-button @click="previewPendingUpload(processUpload)">打开附件预览</el-button>
         <el-button @click="downloadPendingUpload(processUpload)">下载附件</el-button>
+        <el-button type="success" plain :loading="recognizeBusy" @click="recognizeProcessUpload"
+          >重新识别附件</el-button
+        >
       </div>
       <el-form label-width="110px" class="action-form">
         <el-form-item label="购货单位">
@@ -272,6 +275,7 @@ const pendingUploadCount = ref(0);
 const processVisible = ref(false);
 const processUpload = ref<any>(null);
 const processBusy = ref(false);
+const recognizeBusy = ref(false);
 const machineKeyword = ref("");
 const machineSearching = ref(false);
 const machineCandidates = ref<any[]>([]);
@@ -453,6 +457,52 @@ const openProcessUpload = (row: any) => {
   machineKeyword.value = firstMachineNo ? firstMachineNo.trim() : "";
   machineCandidates.value = [];
   selectedMachines.value = [];
+};
+/** 重新识别附件：把合同里的购货单位/地址（及机台号）识别出来填入表单，供操作人员核对。 */
+const recognizeProcessUpload = async () => {
+  const row = processUpload.value;
+  if (!row || recognizeBusy.value) return;
+  recognizeBusy.value = true;
+  try {
+    const response = await apiPost<any>(
+      `/inventory/delivery-info-uploads/${row.id}/recognize`,
+    );
+    const data = response?.data || {};
+    const buyerName = String(data.buyerName || "").trim();
+    const buyerAddress = String(data.buyerAddress || "").trim();
+    const machineNos = String(data.machineNos || "").trim();
+    if (buyerName) {
+      processBuyerName.value = buyerName;
+      row.buyer_name = buyerName;
+    }
+    if (buyerAddress) {
+      processBuyerAddress.value = buyerAddress;
+      row.buyer_address = buyerAddress;
+    }
+    if (machineNos && !processMachineNos.value.trim()) {
+      processMachineNos.value = machineNos;
+      row.machine_nos = machineNos;
+      const firstMachineNo = machineNos
+        .split(/[、,，\s/]+/)
+        .find((item: string) => item.trim());
+      if (firstMachineNo && !machineKeyword.value.trim()) {
+        machineKeyword.value = firstMachineNo.trim();
+      }
+    }
+    if (buyerName || buyerAddress) {
+      ElMessage.success("已识别附件并填入购货单位/地址，请对照附件核对");
+    } else {
+      ElMessage.warning("未识别到购货单位/地址，请打开附件预览手动填写");
+    }
+    const warnings = Array.isArray(data.warnings)
+      ? data.warnings.filter((item: unknown) => typeof item === "string" && item.trim())
+      : [];
+    if (warnings.length) ElMessage.warning(warnings.slice(0, 3).join("；"));
+  } catch (error) {
+    ElMessage.error(getApiErrorMessage(error) || "附件识别失败，请稍后重试");
+  } finally {
+    recognizeBusy.value = false;
+  }
 };
 const searchProcessMachines = async () => {
   machineSearching.value = true;

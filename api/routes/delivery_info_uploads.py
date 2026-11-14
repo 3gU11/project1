@@ -1,10 +1,11 @@
 """交付信息上传（待处理）：V8 侧接收、查看、手动选择机台处理。
 
-业务口径（2026-11-10）：
-- 东莞回传合同只含机台编号与客户信息，上传时不绑定订单/机台；
+业务口径（2026-11-14）：
+- 东莞回传合同含机台编号、购货单位名称/个人姓名与地址，上传时不绑定订单/机台；
 - 先进入本模块的待处理队列（文件保存在 data/delivery-info-pending/...）；
-- V8 操作人员查看附件后，手动选择机台 -> 系统把合同归档到订单总合同槽，
-  并记录“该上传处理了哪些机台”，客户成品列表据此显示交付信息已上传；
+- 上传后自动识别购货单位/地址/机台号并预填，V8 操作人员核对附件、
+  手动选择机台 -> 系统把合同归档到订单总合同槽，并记录“该上传处理了哪些机台”，
+  客户成品列表据此显示交付信息已上传；
 - 本模块不做自动发货，出货仍走现有确认出货/订单规划流程。
 """
 
@@ -340,9 +341,9 @@ def recognize_delivery_info_upload_endpoint(
     upload_id: int,
     current_user: dict = Depends(require_permissions("QUERY")),
 ):
-    """重新识别交付信息附件的东莞机台号并回填 machine_nos。
+    """重新识别交付信息附件的机台号、购货单位/个人姓名与地址并回填。
 
-    - 待处理（pending）记录：识别成功且得到机台号时回填；
+    - 待处理（pending）记录：识别成功且得到值时回填（只填空值）；
     - 已处理（processed）记录：只返回识别结果，不回填（避免改动已归档合同关联）；
     - 附件缺失、OCR 未启动、PDF 损坏等只返回 warnings，不报错。
     """
@@ -354,15 +355,23 @@ def recognize_delivery_info_upload_endpoint(
             "machine_nos": [],
             "raw_numbers": [],
             "machines": [],
+            "buyer_name": "",
+            "buyer_address": "",
             "method": "",
             "warnings": [f"识别失败：{exc}"],
             "machine_nos_text": "",
             "persisted": False,
         }
+    buyer_name = _clean(recognized.get("buyer_name")) or _clean(row.get("buyer_name"))
+    buyer_address = _clean(recognized.get("buyer_address")) or _clean(row.get("buyer_address"))
     data = {
         "uploadId": str(upload_id),
         "fileName": _clean(row.get("file_name")),
         "status": _clean(row.get("status")),
+        "buyer_name": buyer_name,
+        "buyerName": buyer_name,
+        "buyer_address": buyer_address,
+        "buyerAddress": buyer_address,
         "machine_nos": recognized.get("machine_nos") or [],
         "machineNos": _clean(recognized.get("machine_nos_text")),
         "raw_numbers": recognized.get("raw_numbers") or [],

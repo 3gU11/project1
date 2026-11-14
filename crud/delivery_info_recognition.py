@@ -1,11 +1,14 @@
-"""交付信息（东莞回传合同）附件机台号自动识别。
+"""交付信息（东莞回传合同）附件自动识别。
 
-业务口径（2026-11-11）：
-- 东莞回传的订货合同只含机台编号（如 ``9608306``）与客户信息；
+业务口径（2026-11-14）：
+- 东莞回传的订货合同含机台编号（如 ``9608306``）、购货单位名称/个人姓名与地址；
 - V8 内部机台流水号形如 ``96-08-306``，两边去掉非数字后可以比对；
 - 合同附件里还有电话（11 位）、价格（125000）、日期（202610）等干扰数字，
   因此不能"看到数字就当机台号"，必须与 V8 东莞机台流水号归一化比对后才算命中；
-- 识别只回填 ``delivery_info_uploads.machine_nos`` 给操作人员参考，
+- 购货单位/地址只取自合同的「购货单位名称/个人姓名」「地址」栏位，
+  不会把合同抬头的「需方」（经销商）或签署栏的「单位地址」误当成购货单位；
+- 识别结果只回填 ``delivery_info_uploads`` 的 ``buyer_name``/``buyer_address``/
+  ``machine_nos``，给 V8 操作人员预填参考，操作人员对照附件核对后手动处理；
   不自动绑定订单/机台，也不触发发货。
 
 文件支持：
@@ -60,6 +63,22 @@ _MACHINE_SELECT_SQL = (
     "`占用订单号` AS order_no, `状态` AS status, `Location_Code` AS location_code "
     "FROM finished_goods_data WHERE "
 )
+
+# 购货方详细资料：合同固定栏位（「购货单位名称/个人姓名」与「地址」）。
+# 先匹配完整栏位名，再退回到「购货单位」；「个人姓名」单独出现时也认。
+_BUYER_NAME_LABEL_RE = re.compile(r"购货单位名称(?:[/／、]个人姓名)?|购货单位(?!地址)|个人姓名")
+_ADDRESS_LABEL_RE = re.compile(r"地址")
+# 地址/名称取值的结束标志：购货方资料后面的栏位或合同条款。
+_BUYER_STOP_RE = re.compile(
+    r"联系人|联系电话|联系方式|其他特殊要求|特殊要求|备注|合计"
+    r"|交（提）货|交\(提\)货|需方|供方|单位名称|开户银行"
+)
+# 值两端的标点/分隔符（OCR 常把表格线、冒号一起识别进来）。
+_FIELD_EDGE_CHARS = "：:／/、,，;；.。·| \t\r\n"
+MAX_BUYER_NAME_CHARS = 80
+MAX_BUYER_ADDRESS_CHARS = 160
+# OCR 文本块按视觉行重排时，两行文本框纵向重叠超过较矮者高度的比例即视为同一行。
+_ROW_MIN_OVERLAP_RATIO = 0.2
 
 
 def _clean(value: object) -> str:
@@ -191,6 +210,148 @@ def match_machine_numbers(
     }
 
 
+def _item_box(item: Mapping[str, Any]) -> tuple[float, float, float, float] | None:
+    """取 OCR 文本块的外接矩形 (left, top, right, bottom)；无坐标返回 None。"""
+    box = item.get("box") or []
+    try:
+        xs = [float(point[0]) for point in box]
+        ys = [float(point[1]) for point in box]
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not xs or not ys:
+        return None
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def build_ocr_text_rows(items: Sequence[Mapping[str, Any]] | None) -> str:
+    """把 OCR 文本块按视觉行重排成文本。
+
+    OCR 服务的 raw_text 按 ``round(y / 60)`` 分行，字号小或单元格换行时，
+    同一行的值可能被排到下一行（例如地址尾部的「37米左右」跑到「联系电话」之后）。
+    这里按文本框纵向重叠聚类成行、行内按横坐标排序，恢复表格的阅读顺序。
+    """
+    entries: list[dict[str, Any]] = []
+    for item in items or []:
+        text = _clean(item.get("text"))
+        box = _item_box(item)
+        if not text or box is None:
+            continue
+        left, top, right, bottom = box
+        entries.append(
+            {
+                "text": text,
+                "left": left,
+                "top": top,
+                "bottom": bottom,
+                "height": max(bottom - top, 1.0),
+            }
+        )
+    if not entries:
+        return ""
+    entries.sort(key=lambda entry: (entry["top"], entry["left"]))
+    rows: list[dict[str, Any]] = []
+    for entry in entries:
+        target = None
+        for row in rows:
+            overlap = min(row["bottom"], entry["bottom"]) - max(row["top"], entry["top"])
+            if overlap > _ROW_MIN_OVERLAP_RATIO * min(row["height"], entry["height"]):
+                target = row
+                break
+        if target is None:
+            rows.append(
+                {
+                    "top": entry["top"],
+                    "bottom": entry["bottom"],
+                    "height": entry["height"],
+                    "items": [entry],
+                }
+            )
+            continue
+        target["items"].append(entry)
+        target["top"] = min(target["top"], entry["top"])
+        target["bottom"] = max(target["bottom"], entry["bottom"])
+        target["height"] = max(target["height"], target["bottom"] - target["top"])
+    rows.sort(key=lambda row: row["top"])
+    return "\n".join(
+        " ".join(token["text"] for token in sorted(row["items"], key=lambda token: (token["left"], token["top"])))
+        for row in rows
+    )
+
+
+def _compact_text(value: object) -> str:
+    """去掉全部空白，把 PDF 文本层拆成多块的中文名称/地址拼回连续文本。"""
+    return re.sub(r"\s+", "", str(value or ""))
+
+
+def _clean_field_value(raw: object, max_chars: int) -> str:
+    value = _compact_text(raw).strip(_FIELD_EDGE_CHARS)
+    if len(value) > max_chars:
+        value = value[:max_chars].rstrip(_FIELD_EDGE_CHARS)
+    return value
+
+
+def _looks_like_text_value(value: str, *, min_chars: int) -> bool:
+    if len(value) < min_chars or value.isdigit():
+        return False
+    return len(re.findall(r"[\u4e00-\u9fff]", value)) >= 2
+
+
+def _complete_truncated_company_name(name: str, warnings: list[str]) -> str:
+    """OCR 把「有限公司」的「司」漏在单元格第二行时补全，并提示操作人员核对。"""
+    if name.endswith("有限公"):
+        warnings.append(f"购货单位名称疑似截断（{name}），已补全为「{name}司」，请对照附件核对")
+        return name + "司"
+    return name
+
+
+def extract_buyer_info(
+    text: str,
+    items: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """从合同文本中提取「购货单位名称/个人姓名」与「地址」。
+
+    - 有 OCR 文本块坐标时先按视觉行重排再取值（修复表格多列串行）；
+    - 名称取「购货单位名称/个人姓名」之后、到「地址」栏位之前的值；
+    - 地址取「地址」之后、到「联系人」等其他栏位之前的值；
+    - 找不到对应栏位时返回空字符串与 warning，不抛异常。
+    """
+    result: dict[str, Any] = {"buyer_name": "", "buyer_address": "", "warnings": []}
+    warnings: list[str] = result["warnings"]
+    source = build_ocr_text_rows(items) or text
+    compact = _compact_text(source)
+    if not compact:
+        return result
+
+    name_match = _BUYER_NAME_LABEL_RE.search(compact)
+    if name_match is None:
+        warnings.append("合同文本中未找到「购货单位名称/个人姓名」栏位")
+        return result
+
+    address_match = _ADDRESS_LABEL_RE.search(compact, name_match.end())
+    if address_match is None:
+        stop_match = _BUYER_STOP_RE.search(compact, name_match.end())
+        name_region = compact[name_match.end() : stop_match.start() if stop_match else len(compact)]
+        address_region = ""
+        warnings.append("合同文本中未找到「地址」栏位")
+    else:
+        name_region = compact[name_match.end() : address_match.start()]
+        stop_match = _BUYER_STOP_RE.search(compact, address_match.end())
+        address_region = compact[address_match.end() : stop_match.start() if stop_match else len(compact)]
+
+    buyer_name = _clean_field_value(name_region, MAX_BUYER_NAME_CHARS)
+    if _looks_like_text_value(buyer_name, min_chars=2):
+        result["buyer_name"] = _complete_truncated_company_name(buyer_name, warnings)
+    elif buyer_name:
+        warnings.append(f"购货单位名称不像有效值（{buyer_name}），已忽略")
+
+    buyer_address = _clean_field_value(address_region, MAX_BUYER_ADDRESS_CHARS)
+    if _looks_like_text_value(buyer_address, min_chars=4):
+        result["buyer_address"] = buyer_address
+    elif buyer_address:
+        warnings.append(f"地址不像有效值（{buyer_address}），已忽略")
+    return result
+
+
 def _extract_pdf_text(file_path: str, warnings: list[str]) -> tuple[str, str]:
     try:
         from pypdf import PdfReader
@@ -241,8 +402,8 @@ def _extract_pdf_text(file_path: str, warnings: list[str]) -> tuple[str, str]:
                 ocr_text = _ocr_image(temp_path, warnings, deadline)
             finally:
                 _remove_temp(temp_path)
-            if ocr_text:
-                ocr_texts.append(ocr_text)
+            if ocr_text["text"]:
+                ocr_texts.append(ocr_text["text"])
     if not ocr_texts:
         warnings.append("PDF 页内图片 OCR 未取得文本")
         return "", "pdf-ocr"
@@ -283,8 +444,11 @@ def _remove_temp(temp_path: str) -> None:
         pass
 
 
-def _post_ocr(image_path: str, timeout: float) -> str:
-    """调用本机 OCR 服务，返回 raw_text（测试会 monkeypatch 该函数）。"""
+def _post_ocr(image_path: str, timeout: float) -> dict[str, Any]:
+    """调用本机 OCR 服务，返回 ``{"text": raw_text, "items": 文本块坐标}``。
+
+    测试会 monkeypatch 该函数；文本块坐标用于把表格多列的值按视觉行重排。
+    """
     payload = json.dumps({"image_path": image_path}, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         OCR_SERVICE_URL,
@@ -297,22 +461,27 @@ def _post_ocr(image_path: str, timeout: float) -> str:
     data = json.loads(body)
     if not data.get("success", False):
         raise RuntimeError(_clean(data.get("error")) or "OCR 服务返回失败")
-    return _clean(data.get("raw_text"))
+    return {"text": _clean(data.get("raw_text")), "items": data.get("items") or []}
 
 
-def _ocr_image(image_path: str, warnings: list[str], deadline: float | None = None) -> str:
+def _ocr_image(image_path: str, warnings: list[str], deadline: float | None = None) -> dict[str, Any]:
+    """识别单张图片，返回 ``{"text": ..., "items": [...]}``；失败只记 warning。"""
     remaining = OCR_TOTAL_BUDGET_SECONDS if deadline is None else deadline - time.monotonic()
     if remaining <= 0.5:
         warnings.append("OCR 总时长预算已用尽，跳过图片识别")
-        return ""
+        return {"text": "", "items": []}
     timeout = max(1.0, min(OCR_TIMEOUT_SECONDS, remaining))
     try:
-        return _post_ocr(image_path, timeout)
+        result = _post_ocr(image_path, timeout)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         warnings.append(f"OCR 服务不可用（{type(exc).__name__}）：{exc}")
+        return {"text": "", "items": []}
     except Exception as exc:
         warnings.append(f"OCR 识别失败：{exc}")
-    return ""
+        return {"text": "", "items": []}
+    if isinstance(result, str):  # 兼容只返回文本的旧实现/测试桩
+        return {"text": _clean(result), "items": []}
+    return {"text": _clean(result.get("text")), "items": result.get("items") or []}
 
 
 def _extract_docx_text(file_path: str, warnings: list[str]) -> tuple[str, str]:
@@ -330,23 +499,25 @@ def _extract_docx_text(file_path: str, warnings: list[str]) -> tuple[str, str]:
         return "", ""
 
 
-def _extract_text(file_path: str, warnings: list[str]) -> tuple[str, str]:
+def _extract_text(file_path: str, warnings: list[str]) -> tuple[str, str, list[dict[str, Any]]]:
+    """返回 ``(文本, 识别方式, OCR 文本块坐标)``；非图片路径的坐标为空。"""
     extension = os.path.splitext(file_path)[1].lower()
     if extension == ".pdf":
-        return _extract_pdf_text(file_path, warnings)
+        return _extract_pdf_text(file_path, warnings) + ([],)
     if extension in {".jpg", ".jpeg", ".png"}:
-        return _ocr_image(file_path, warnings), "ocr"
+        ocr = _ocr_image(file_path, warnings)
+        return ocr["text"], "ocr", list(ocr["items"])
     if extension == ".docx":
-        return _extract_docx_text(file_path, warnings)
+        return _extract_docx_text(file_path, warnings) + ([],)
     if extension == ".doc":
         warnings.append("暂不支持 .doc（Word 97-2003），请另存为 .docx 或 PDF 后重新上传")
-        return "", ""
+        return "", "", []
     warnings.append(f"不支持的文件类型：{extension or '未知'}")
-    return "", ""
+    return "", "", []
 
 
 def recognize_delivery_info_file(file_path: str) -> dict[str, Any]:
-    """识别交付信息附件中的东莞机台号（任何异常都只记 warning，不抛出）。"""
+    """识别交付信息附件中的东莞机台号、购货单位/个人姓名与地址（异常只记 warning）。"""
     result: dict[str, Any] = {
         "text": "",
         "method": "",
@@ -354,6 +525,8 @@ def recognize_delivery_info_file(file_path: str) -> dict[str, Any]:
         "raw_numbers": [],
         "machines": [],
         "candidates": [],
+        "buyer_name": "",
+        "buyer_address": "",
         "warnings": [],
     }
     warnings: list[str] = result["warnings"]
@@ -362,11 +535,12 @@ def recognize_delivery_info_file(file_path: str) -> dict[str, Any]:
         warnings.append(f"交付信息附件不存在：{path or '(空路径)'}")
         return result
 
+    items: list[dict[str, Any]] = []
     try:
-        text, method = _extract_text(path, warnings)
+        text, method, items = _extract_text(path, warnings)
     except Exception as exc:  # 兜底：解析层不允许把异常抛给业务
         warnings.append(f"附件解析失败：{exc}")
-        text, method = "", ""
+        text, method, items = "", "", []
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS]
         warnings.append(f"附件文本过长，仅使用前 {MAX_TEXT_CHARS} 个字符识别机台号")
@@ -384,6 +558,20 @@ def recognize_delivery_info_file(file_path: str) -> dict[str, Any]:
     result["candidates"] = matched["candidates"]
     if not result["machine_nos"] and not result["raw_numbers"]:
         warnings.append("未识别到 V8 东莞机台号")
+
+    try:
+        buyer = extract_buyer_info(text, items)
+    except Exception as exc:  # 购货单位识别同样不允许把异常抛给业务
+        warnings.append(f"购货单位/地址识别失败：{exc}")
+        buyer = {"buyer_name": "", "buyer_address": "", "warnings": []}
+    result["buyer_name"] = buyer["buyer_name"]
+    result["buyer_address"] = buyer["buyer_address"]
+    warnings.extend(buyer["warnings"])
+    if text.strip():
+        if not result["buyer_name"]:
+            warnings.append("未识别到购货单位名称/个人姓名")
+        if not result["buyer_address"]:
+            warnings.append("未识别到购货单位地址")
     return result
 
 
@@ -400,7 +588,8 @@ def _fetch_upload_row(upload_id: int) -> dict[str, Any] | None:
     with get_engine().connect() as conn:
         row = conn.execute(
             text(
-                "SELECT `id`, `file_path`, `file_name`, `status`, `machine_nos` "
+                "SELECT `id`, `file_path`, `file_name`, `status`, `machine_nos`, "
+                "`buyer_name`, `buyer_address` "
                 "FROM delivery_info_uploads WHERE id=:id LIMIT 1"
             ),
             {"id": upload_id},
@@ -408,11 +597,29 @@ def _fetch_upload_row(upload_id: int) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def _save_upload_machine_nos(upload_id: int, machine_nos_text: str) -> None:
+def _save_upload_recognition(
+    upload_id: int,
+    *,
+    machine_nos_text: str = "",
+    buyer_name: str = "",
+    buyer_address: str = "",
+) -> None:
+    """回填识别结果；只填空值，不覆盖操作人员/小程序已填的内容。"""
     with get_engine().begin() as conn:
         conn.execute(
-            text("UPDATE delivery_info_uploads SET `machine_nos`=:value WHERE `id`=:id"),
-            {"value": machine_nos_text[:2000], "id": upload_id},
+            text(
+                "UPDATE delivery_info_uploads SET "
+                "`machine_nos`=COALESCE(NULLIF(:machine_nos, ''), `machine_nos`), "
+                "`buyer_name`=COALESCE(NULLIF(:buyer_name, ''), `buyer_name`), "
+                "`buyer_address`=COALESCE(NULLIF(:buyer_address, ''), `buyer_address`) "
+                "WHERE `id`=:id"
+            ),
+            {
+                "machine_nos": machine_nos_text[:2000],
+                "buyer_name": buyer_name[:200],
+                "buyer_address": buyer_address[:500],
+                "id": upload_id,
+            },
         )
 
 
@@ -422,11 +629,13 @@ def recognize_delivery_info_upload(
     file_path: str | None = None,
     persist: bool = True,
 ) -> dict[str, Any]:
-    """按上传记录重新识别并回填 ``delivery_info_uploads.machine_nos``。
+    """按上传记录重新识别并回填购货单位/地址/机台号。
 
+    - 购货单位名称/个人姓名、地址取自合同「购货方详细资料」栏位；
     - 命中内部流水号时回填 ``96-08-306``（多个用 ``、`` 分隔）；
     - 未命中时回填 7 位 raw 数字，便于人工核对；
-    - ``status=processed`` 的记录只返回识别结果、不回填（已处理合同不再改机台号）；
+    - 只填空值，不覆盖上传时已填的购货单位/地址/机台号；
+    - ``status=processed`` 的记录只返回识别结果、不回填（已处理合同不再改）；
     - 附件不存在、库不可用、OCR 失败等只返回 warning，不抛错。
     """
     result: dict[str, Any] = {
@@ -438,6 +647,8 @@ def recognize_delivery_info_upload(
         "raw_numbers": [],
         "machines": [],
         "candidates": [],
+        "buyer_name": "",
+        "buyer_address": "",
         "warnings": [],
         "machine_nos_text": "",
         "persisted": False,
@@ -471,20 +682,27 @@ def recognize_delivery_info_upload(
             "raw_numbers": recognized["raw_numbers"],
             "machines": recognized["machines"],
             "candidates": recognized["candidates"],
+            "buyer_name": recognized.get("buyer_name") or "",
+            "buyer_address": recognized.get("buyer_address") or "",
         }
     )
     warnings.extend(recognized["warnings"])
     machine_nos_text = "、".join(result["machine_nos"]) or "、".join(result["raw_numbers"])
     result["machine_nos_text"] = machine_nos_text
 
-    if not persist or not machine_nos_text:
+    if not persist or not (machine_nos_text or result["buyer_name"] or result["buyer_address"]):
         return result
     if result["status"] == "processed":
-        warnings.append("该记录已处理，仅返回识别结果，未回填机台号")
+        warnings.append("该记录已处理，仅返回识别结果，未回填购货单位/地址/机台号")
         return result
     try:
-        _save_upload_machine_nos(upload_id, machine_nos_text)
+        _save_upload_recognition(
+            upload_id,
+            machine_nos_text=machine_nos_text,
+            buyer_name=result["buyer_name"],
+            buyer_address=result["buyer_address"],
+        )
         result["persisted"] = True
     except Exception as exc:
-        warnings.append(f"回填机台号失败：{exc}")
+        warnings.append(f"回填识别结果失败：{exc}")
     return result

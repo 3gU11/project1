@@ -247,6 +247,8 @@ def _empty_recognition(warning: str = "") -> dict:
         "raw_numbers": [],
         "machines": [],
         "candidates": [],
+        "buyer_name": "",
+        "buyer_address": "",
         "warnings": [warning] if warning else [],
         "machine_nos_text": "",
         "persisted": False,
@@ -254,7 +256,7 @@ def _empty_recognition(warning: str = "") -> dict:
 
 
 async def _auto_recognize_delivery_info(saved: dict) -> dict:
-    """保存待处理记录后自动识别合同机台号；任何失败只 warning，不影响上传成功。"""
+    """保存待处理记录后自动识别合同购货单位/地址/机台号；失败只 warning，不影响上传成功。"""
     upload_id = _clean(saved.get("uploadId"))
     file_path = _clean(saved.get("filePath"))
     if not upload_id or not file_path:
@@ -314,20 +316,25 @@ async def push_delivery_info_upload(
         contract_no=contract_no,
         uploader=uploader_name,
     )
-    # 小程序未传机台号时，保存后自动识别合同附件里的东莞机台号并回填。
+    # 小程序未传机台号/购货单位/地址时，保存后自动识别合同附件并回填；只补缺失项。
     final_machine_nos = _clean(machine_nos)
+    final_buyer_name = _clean(buyer_name)
+    final_buyer_address = _clean(buyer_address)
     recognition = None
-    if not final_machine_nos:
+    if not final_machine_nos or not final_buyer_name or not final_buyer_address:
         recognition = await _auto_recognize_delivery_info(saved)
-        final_machine_nos = _clean(recognition.get("machine_nos_text")) or final_machine_nos
+        if not final_machine_nos:
+            final_machine_nos = _clean(recognition.get("machine_nos_text"))
+        final_buyer_name = final_buyer_name or _clean(recognition.get("buyer_name"))
+        final_buyer_address = final_buyer_address or _clean(recognition.get("buyer_address"))
     return {
         "ok": True,
         "uploadId": saved["uploadId"],
         "fileName": saved["fileName"],
         "status": "pending",
         "customerName": _clean(customer_name),
-        "buyerName": _clean(buyer_name),
-        "buyerAddress": _clean(buyer_address),
+        "buyerName": final_buyer_name,
+        "buyerAddress": final_buyer_address,
         "machineNos": final_machine_nos,
         "contractNo": _clean(contract_no),
         "recognition": recognition,

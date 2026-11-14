@@ -53,6 +53,39 @@ CONTRACT_TEXT = (
     "供方电话 13925851671 电话：0512-57175508\n"
 )
 
+# 真实合同 PDF 文本层里「购货方详细资料」的排版：名称/地址值被空格拆开。
+CONTRACT_BUYER_TEXT = (
+    "购货方详细资料\n"
+    "购货单位名称/个人姓名 东莞市锦宏精密五金制造有限公 司 地址 东莞市大塘路与西三横路交叉口正东方向 37米左右\n"
+    "联系人姓名 陈生 联系电话 13825752665\n"
+    "其他特殊要求 备注\n"
+)
+
+# 手机截图 OCR 的 raw_text：每个文本块一行，地址尾部「37米左右」排到了「联系电话」之后。
+OCR_BUYER_TEXT = (
+    "购货方详细资料\n"
+    "购货单位名称/个人姓名\n"
+    "东莞市锦宏精密五金制造有限公\n"
+    "地址\n"
+    "东莞市大塘路与西三横路交叉口正东方向\n"
+    "联系人姓名\n"
+    "陈生\n"
+    "联系电话\n"
+    "37米左右\n"
+    "13825752665\n"
+)
+
+# 同一张截图的 OCR 文本块坐标（与 OCR 服务返回结构一致，box 为四角点）。
+OCR_BUYER_ITEMS = [
+    {"text": "购货单位名称/个人姓名", "box": [[73, 1031], [302, 1031], [302, 1054], [73, 1054]]},
+    {"text": "东莞市锦宏精密五金制造有限公", "box": [[377, 1021], [558, 1021], [558, 1041], [377, 1041]]},
+    {"text": "地址", "box": [[659, 1028], [709, 1028], [709, 1057], [659, 1057]]},
+    {"text": "东莞市大塘路与西三横路交叉口正东方向", "box": [[820, 1021], [1078, 1021], [1078, 1041], [820, 1041]]},
+    {"text": "37米左右", "box": [[901, 1048], [981, 1048], [981, 1067], [901, 1067]]},
+    {"text": "联系人姓名", "box": [[126, 1091], [240, 1091], [240, 1112], [126, 1112]]},
+    {"text": "陈生", "box": [[455, 1091], [495, 1091], [495, 1112], [455, 1112]]},
+]
+
 
 def _build_text_pdf(text: str) -> bytes:
     """生成 pypdf 能提取文本层的最小单页 PDF（测试内自带，不依赖外部样例）。"""
@@ -142,6 +175,48 @@ class RecognitionCandidateTests(unittest.TestCase):
         self.assertEqual([], matched["raw_numbers"])
 
 
+class RecognitionBuyerTests(unittest.TestCase):
+    """购货单位名称/个人姓名与地址提取：只取购货方详细资料栏位，不受需方影响。"""
+
+    def test_pdf_text_buyer_fields(self):
+        buyer = recognition.extract_buyer_info(CONTRACT_BUYER_TEXT)
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", buyer["buyer_name"])
+        self.assertEqual("东莞市大塘路与西三横路交叉口正东方向37米左右", buyer["buyer_address"])
+        self.assertEqual([], buyer["warnings"])
+
+    def test_ocr_items_row_rebuild_recovers_wrapped_address_tail(self):
+        buyer = recognition.extract_buyer_info(OCR_BUYER_TEXT, OCR_BUYER_ITEMS)
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", buyer["buyer_name"])
+        self.assertEqual("东莞市大塘路与西三横路交叉口正东方向37米左右", buyer["buyer_address"])
+        self.assertTrue(any("截断" in item for item in buyer["warnings"]))
+
+    def test_ocr_raw_text_without_items_still_extracts_base_address(self):
+        buyer = recognition.extract_buyer_info(OCR_BUYER_TEXT)
+        self.assertEqual("东莞市大塘路与西三横路交叉口正东方向", buyer["buyer_address"])
+
+    def test_individual_name_is_kept_verbatim(self):
+        buyer = recognition.extract_buyer_info(
+            "购货单位名称/个人姓名 张三 地址 广东省深圳市南山区科技园1号 联系人姓名 李四"
+        )
+        self.assertEqual("张三", buyer["buyer_name"])
+        self.assertEqual("广东省深圳市南山区科技园1号", buyer["buyer_address"])
+
+    def test_no_buyer_label_returns_empty(self):
+        buyer = recognition.extract_buyer_info(
+            "需方：东莞宏轩机械设备有限公司 单位地址：广东东莞市南城区 法定代表人：卢振彪"
+        )
+        self.assertEqual("", buyer["buyer_name"])
+        self.assertEqual("", buyer["buyer_address"])
+        self.assertTrue(buyer["warnings"])
+
+    def test_truncated_suffix_only_completed_when_obvious(self):
+        buyer = recognition.extract_buyer_info("购货单位名称/个人姓名 东莞市锦宏精密五金制造有限公 地址 东莞市大塘路")
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", buyer["buyer_name"])
+        self.assertTrue(any("截断" in item for item in buyer["warnings"]))
+        buyer = recognition.extract_buyer_info("购货单位名称/个人姓名 张三 地址 东莞市大塘路")
+        self.assertEqual("张三", buyer["buyer_name"])
+
+
 class RecognitionFileTests(unittest.TestCase):
     """PDF/图片/.doc 等文件识别路径（OCR 服务用 monkeypatch 模拟）。"""
 
@@ -177,11 +252,32 @@ class RecognitionFileTests(unittest.TestCase):
         image_path = self._write("contract.png", b"\x89PNG\r\n\x1a\nfake-image")
         with (
             patch.object(recognition, "_load_dongguan_machines", return_value=FAKE_MACHINES),
-            patch.object(recognition, "_post_ocr", return_value="FR-400XS(PRO) 9608306/202610"),
+            patch.object(
+                recognition,
+                "_post_ocr",
+                return_value={"text": "FR-400XS(PRO) 9608306/202610", "items": []},
+            ),
         ):
             result = recognition.recognize_delivery_info_file(image_path)
         self.assertEqual("ocr", result["method"])
         self.assertEqual(["96-08-306"], result["machine_nos"])
+        self.assertEqual("", result["buyer_name"])
+
+    def test_file_recognition_returns_buyer_fields(self):
+        pdf_path = self._write("contract-buyer.pdf", b"%PDF-1.4 stub")
+        with (
+            patch.object(recognition, "_load_dongguan_machines", return_value=FAKE_MACHINES),
+            patch.object(
+                recognition,
+                "_extract_text",
+                return_value=(CONTRACT_BUYER_TEXT, "pdf-text", []),
+            ),
+        ):
+            result = recognition.recognize_delivery_info_file(pdf_path)
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", result["buyer_name"])
+        self.assertEqual(
+            "东莞市大塘路与西三横路交叉口正东方向37米左右", result["buyer_address"]
+        )
 
     def test_ocr_failure_only_warns(self):
         image_path = self._write("contract.jpg", b"fake-jpg")
@@ -223,7 +319,14 @@ class RecognitionUploadTests(unittest.TestCase):
         with open(self.file_path, "wb") as handle:
             handle.write(_build_text_pdf("FR-400XS(PRO) 9608306/202610"))
 
-    def _recognized(self, *, machine_nos=None, raw_numbers=None):
+    def _recognized(
+        self,
+        *,
+        machine_nos=None,
+        raw_numbers=None,
+        buyer_name="东莞市锦宏精密五金制造有限公司",
+        buyer_address="东莞市大塘路与西三横路交叉口正东方向37米左右",
+    ):
         return {
             "text": "9608306",
             "method": "pdf-text",
@@ -231,6 +334,8 @@ class RecognitionUploadTests(unittest.TestCase):
             "raw_numbers": raw_numbers or [],
             "machines": [{"serial_no": "96-08-306"}] if machine_nos is None else [],
             "candidates": [],
+            "buyer_name": buyer_name,
+            "buyer_address": buyer_address,
             "warnings": [],
         }
 
@@ -238,12 +343,18 @@ class RecognitionUploadTests(unittest.TestCase):
         with (
             patch.object(recognition, "_fetch_upload_row", return_value={"status": "pending", "file_path": ""}),
             patch.object(recognition, "recognize_delivery_info_file", return_value=self._recognized()),
-            patch.object(recognition, "_save_upload_machine_nos") as save_mock,
+            patch.object(recognition, "_save_upload_recognition") as save_mock,
         ):
             result = recognition.recognize_delivery_info_upload(88, file_path=self.file_path)
-        save_mock.assert_called_once_with(88, "96-08-306")
+        save_mock.assert_called_once_with(
+            88,
+            machine_nos_text="96-08-306",
+            buyer_name="东莞市锦宏精密五金制造有限公司",
+            buyer_address="东莞市大塘路与西三横路交叉口正东方向37米左右",
+        )
         self.assertTrue(result["persisted"])
         self.assertEqual("96-08-306", result["machine_nos_text"])
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", result["buyer_name"])
         self.assertEqual("pending", result["status"])
 
     def test_pending_upload_persists_raw_numbers_when_no_machine_matched(self):
@@ -254,27 +365,45 @@ class RecognitionUploadTests(unittest.TestCase):
             "raw_numbers": ["9608399"],
             "machines": [],
             "candidates": [],
+            "buyer_name": "",
+            "buyer_address": "",
             "warnings": [],
         }
         with (
             patch.object(recognition, "_fetch_upload_row", return_value={"status": "pending", "file_path": ""}),
             patch.object(recognition, "recognize_delivery_info_file", return_value=recognized),
-            patch.object(recognition, "_save_upload_machine_nos") as save_mock,
+            patch.object(recognition, "_save_upload_recognition") as save_mock,
         ):
             result = recognition.recognize_delivery_info_upload(89, file_path=self.file_path)
-        save_mock.assert_called_once_with(89, "9608399")
+        save_mock.assert_called_once_with(
+            89, machine_nos_text="9608399", buyer_name="", buyer_address=""
+        )
+        self.assertTrue(result["persisted"])
+
+    def test_pending_upload_persists_buyer_fields_without_machine_nos(self):
+        recognized = self._recognized(machine_nos=[], buyer_name="张三", buyer_address="广东省深圳市南山区")
+        with (
+            patch.object(recognition, "_fetch_upload_row", return_value={"status": "pending", "file_path": ""}),
+            patch.object(recognition, "recognize_delivery_info_file", return_value=recognized),
+            patch.object(recognition, "_save_upload_recognition") as save_mock,
+        ):
+            result = recognition.recognize_delivery_info_upload(93, file_path=self.file_path)
+        save_mock.assert_called_once_with(
+            93, machine_nos_text="", buyer_name="张三", buyer_address="广东省深圳市南山区"
+        )
         self.assertTrue(result["persisted"])
 
     def test_processed_upload_does_not_persist(self):
         with (
             patch.object(recognition, "_fetch_upload_row", return_value={"status": "processed", "file_path": ""}),
             patch.object(recognition, "recognize_delivery_info_file", return_value=self._recognized()),
-            patch.object(recognition, "_save_upload_machine_nos") as save_mock,
+            patch.object(recognition, "_save_upload_recognition") as save_mock,
         ):
             result = recognition.recognize_delivery_info_upload(90, file_path=self.file_path)
         save_mock.assert_not_called()
         self.assertFalse(result["persisted"])
         self.assertEqual(["96-08-306"], result["machine_nos"])
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", result["buyer_name"])
         self.assertTrue(any("已处理" in item for item in result["warnings"]))
 
     def test_missing_upload_record_returns_warning(self):
@@ -304,12 +433,23 @@ class RecognitionRouteTests(unittest.TestCase):
             "machine_nos": ["96-08-306"],
             "raw_numbers": [],
             "machines": [{"serial_no": "96-08-306", "机型": "FR-400XS(PRO)"}],
+            "buyer_name": "东莞市锦宏精密五金制造有限公司",
+            "buyer_address": "东莞市大塘路与西三横路交叉口正东方向37米左右",
             "warnings": [],
             "machine_nos_text": "96-08-306",
             "persisted": True,
         }
         with (
-            patch.object(delivery_info_uploads, "_upload_row", return_value={"file_name": "锦宏下单表.pdf", "status": "pending"}),
+            patch.object(
+                delivery_info_uploads,
+                "_upload_row",
+                return_value={
+                    "file_name": "锦宏下单表.pdf",
+                    "status": "pending",
+                    "buyer_name": "",
+                    "buyer_address": "",
+                },
+            ),
             patch.object(delivery_info_uploads, "recognize_delivery_info_upload", return_value=recognized),
         ):
             payload = delivery_info_uploads.recognize_delivery_info_upload_endpoint(
@@ -323,6 +463,14 @@ class RecognitionRouteTests(unittest.TestCase):
         self.assertEqual("pdf-text", data["method"])
         self.assertTrue(data["persisted"])
         self.assertEqual("锦宏下单表.pdf", data["fileName"])
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", data["buyer_name"])
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", data["buyerName"])
+        self.assertEqual(
+            "东莞市大塘路与西三横路交叉口正东方向37米左右", data["buyer_address"]
+        )
+        self.assertEqual(
+            "东莞市大塘路与西三横路交叉口正东方向37米左右", data["buyerAddress"]
+        )
 
     def test_recognize_endpoint_tolerates_recognition_exception(self):
         with (
@@ -360,7 +508,15 @@ class DeliveryInfoUploadAutoRecognitionTests(unittest.TestCase):
             item.start()
             self.addCleanup(item.stop)
 
-    def _post(self, *, client_upload_id="DI-1", machine_nos="", content=b"%PDF-1.4 delivery info"):
+    def _post(
+        self,
+        *,
+        client_upload_id="DI-1",
+        machine_nos="",
+        buyer_name="东莞市锦宏精密五金制造有限公司",
+        buyer_address="",
+        content=b"%PDF-1.4 delivery info",
+    ):
         timestamp = int(time.time())
         file_sha = hashlib.sha256(content).hexdigest()
         message = "\n".join([self.KEY_ID, str(timestamp), client_upload_id, file_sha])
@@ -370,7 +526,8 @@ class DeliveryInfoUploadAutoRecognitionTests(unittest.TestCase):
             data={
                 "client_upload_id": client_upload_id,
                 "customer_name": "东莞市锦宏精密五金制造有限公司",
-                "buyer_name": "东莞市锦宏精密五金制造有限公司",
+                "buyer_name": buyer_name,
+                "buyer_address": buyer_address,
                 "machine_nos": machine_nos,
                 "uploader_name": "售后小程序-交付信息上传",
             },
@@ -396,6 +553,8 @@ class DeliveryInfoUploadAutoRecognitionTests(unittest.TestCase):
             "machine_nos": ["96-08-306"],
             "raw_numbers": [],
             "machines": [{"serial_no": "96-08-306", "机型": "FR-400XS(PRO)"}],
+            "buyer_name": "",
+            "buyer_address": "东莞市大塘路与西三横路交叉口正东方向37米左右",
             "warnings": [],
             "machine_nos_text": "96-08-306",
             "persisted": True,
@@ -413,6 +572,10 @@ class DeliveryInfoUploadAutoRecognitionTests(unittest.TestCase):
         body = response.json()
         self.assertEqual("96-08-306", body["machineNos"])
         self.assertEqual(["96-08-306"], body["recognition"]["machine_nos"])
+        self.assertEqual("东莞市锦宏精密五金制造有限公司", body["buyerName"])
+        self.assertEqual(
+            "东莞市大塘路与西三横路交叉口正东方向37米左右", body["buyerAddress"]
+        )
         recognize_mock.assert_called_once()
         self.assertEqual(88, recognize_mock.call_args.args[0])
 
@@ -421,12 +584,31 @@ class DeliveryInfoUploadAutoRecognitionTests(unittest.TestCase):
             patch.object(customer_contracts, "store_pending_delivery_info", return_value=self._stored()),
             patch.object(customer_contracts, "recognize_delivery_info_upload") as recognize_mock,
         ):
-            response = self._post(machine_nos="9608306/202610")
+            response = self._post(
+                machine_nos="9608306/202610",
+                buyer_address="东莞市大塘路与西三横路交叉口正东方向37米左右",
+            )
         self.assertEqual(200, response.status_code, response.text)
         body = response.json()
         self.assertEqual("9608306/202610", body["machineNos"])
         self.assertIsNone(body["recognition"])
         recognize_mock.assert_not_called()
+
+    def test_upload_with_machine_nos_still_recognizes_missing_address(self):
+        with (
+            patch.object(customer_contracts, "store_pending_delivery_info", return_value=self._stored()),
+            patch.object(
+                customer_contracts, "recognize_delivery_info_upload", return_value=self._recognized()
+            ) as recognize_mock,
+        ):
+            response = self._post(machine_nos="9608306/202610")
+        self.assertEqual(200, response.status_code, response.text)
+        body = response.json()
+        self.assertEqual("9608306/202610", body["machineNos"])
+        self.assertEqual(
+            "东莞市大塘路与西三横路交叉口正东方向37米左右", body["buyerAddress"]
+        )
+        recognize_mock.assert_called_once()
 
     def test_upload_succeeds_when_recognition_fails(self):
         with (
