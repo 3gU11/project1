@@ -1,38 +1,113 @@
 <template>
   <div class="page">
     <h1>🏢 客户成品管理</h1>
-    <h2>东莞机台</h2>
-    <p class="hint">
-      默认展示全部状态的东莞现货机台，实际状态和库位以各行显示为准。订单状态跟随关联的原销售订单。
-    </p>
-    <div class="toolbar">
-      <el-input
-        v-model="keyword"
-        placeholder="搜索流水号、机型、订单或合同"
-        clearable
-        @keyup.enter="searchMachines"
-        @clear="searchMachines"
-      />
-      <el-select
-        v-model="machineStatus"
-        placeholder="全部机台状态"
-        clearable
-        style="min-width: 180px"
-        @change="searchMachines"
-      >
-        <el-option
-          v-for="status in machineStatuses"
-          :key="status"
-          :label="status"
-          :value="status"
+    <el-tabs v-model="activeTab" class="customer-tabs">
+      <el-tab-pane name="delivery">
+        <template #label>
+          <span>交付信息处理<span v-if="pendingUploadCount" class="tab-count">{{ pendingUploadCount }}</span></span>
+        </template>
+        <p class="hint">
+          小程序上传的交付信息都在这里处理。系统会尝试识别合同中的购货单位、地址和机台号，请打开附件核对后填写并选择机台。
+        </p>
+        <div class="delivery-toolbar">
+          <el-select
+            v-model="deliveryStatus"
+            placeholder="全部状态"
+            style="width: 150px"
+            @change="loadDeliveryUploads"
+          >
+            <el-option label="待处理" value="pending" />
+            <el-option label="已处理" value="processed" />
+            <el-option label="全部" value="" />
+          </el-select>
+          <el-input
+            v-model="deliveryKeyword"
+            placeholder="搜索附件、机台号、购货单位或地址"
+            clearable
+          />
+          <el-button type="primary" :loading="deliveryLoading" @click="loadDeliveryUploads"
+            >刷新</el-button
+          >
+          <span class="delivery-count">待处理 <strong>{{ pendingUploadCount }}</strong> 份</span>
+        </div>
+        <el-alert
+          v-if="deliveryError"
+          :title="deliveryError"
+          type="error"
+          :closable="false"
+          show-icon
         />
-      </el-select>
-      <el-button type="primary" :loading="loading" @click="searchMachines"
-        >查询 / 刷新</el-button
-      ><el-button @click="openPendingUploads"
-        >交付信息待处理<template v-if="pendingUploadCount">（{{ pendingUploadCount }}）</template></el-button
-      >
-    </div>
+        <el-table
+          class="delivery-uploads-table"
+          :data="filteredDeliveryUploads"
+          border
+          stripe
+          v-loading="deliveryLoading"
+        >
+          <el-table-column prop="id" label="#" width="70" />
+          <el-table-column prop="file_name" label="附件" min-width="190" />
+          <el-table-column prop="machine_nos" label="识别/合同机台号" min-width="170" />
+          <el-table-column prop="buyer_name" label="购货单位" min-width="170" show-overflow-tooltip />
+          <el-table-column prop="buyer_address" label="地址" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="uploader" label="上传人" width="130" />
+          <el-table-column prop="uploaded_at" label="上传时间" width="170" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'processed' ? 'success' : 'warning'">
+                {{ row.status === "processed" ? "已处理" : "待处理" }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="270" fixed="right">
+            <template #default="{ row }">
+              <el-button link @click="previewPendingUpload(row)">预览附件</el-button>
+              <el-button link @click="downloadPendingUpload(row)">下载</el-button>
+              <el-button
+                v-if="row.status !== 'processed'"
+                link
+                type="primary"
+                @click="openProcessUpload(row)"
+                >处理</el-button
+              >
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty
+          v-if="!deliveryLoading && !filteredDeliveryUploads.length"
+          description="暂无交付信息"
+        />
+      </el-tab-pane>
+      <el-tab-pane label="机台与出货" name="machines">
+        <h2>东莞机台</h2>
+        <p class="hint">
+          默认展示全部状态的东莞现货机台，实际状态和库位以各行显示为准。订单状态跟随关联的原销售订单。
+        </p>
+        <div class="toolbar">
+          <el-input
+            v-model="keyword"
+            placeholder="搜索流水号、机型、订单或合同"
+            clearable
+            @keyup.enter="searchMachines"
+            @clear="searchMachines"
+          />
+          <el-select
+            v-model="machineStatus"
+            placeholder="全部机台状态"
+            clearable
+            style="min-width: 180px"
+            @change="searchMachines"
+          >
+            <el-option
+              v-for="status in machineStatuses"
+              :key="status"
+              :label="status"
+              :value="status"
+            />
+          </el-select>
+          <el-button type="primary" :loading="loading" @click="searchMachines"
+            >查询 / 刷新</el-button
+          >
+        </div>
     <el-alert
       v-if="machineError"
       :title="machineError"
@@ -91,6 +166,8 @@
       layout="total, prev, pager, next"
       @current-change="load"
     />
+      </el-tab-pane>
+    </el-tabs>
     <el-dialog v-model="fileVisible" :title="fileTitle" width="700px"
       ><el-descriptions v-if="contractRow" :column="2" border size="small" class="contract-info">
         <el-descriptions-item label="流水号">{{ contractRow["流水号"] }}</el-descriptions-item>
@@ -131,41 +208,6 @@
       >
       <template #footer><el-button @click="fileVisible = false">关闭</el-button><el-button type="primary" :loading="shippingBusy" @click="confirmCustomerShipping">确认出货</el-button></template>
     /></el-dialog>
-
-    <el-dialog v-model="pendingUploadsVisible" title="交付信息上传（待处理）" width="980px">
-      <el-alert
-        title="小程序只上传附件。系统会尝试识别合同里的购货单位/地址/机台号（可点「重新识别附件」），请打开附件预览核对后填写并手动选择机台；系统只把合同关联到所选机台，不自动发货。"
-        type="info"
-        :closable="false"
-        show-icon
-        class="delivery-info-alert"
-      />
-      <el-table
-        :data="pendingUploads"
-        border
-        stripe
-        v-loading="pendingUploadsLoading"
-        max-height="420"
-      >
-        <el-table-column prop="id" label="#" width="70" />
-        <el-table-column prop="file_name" label="附件" min-width="200" />
-        <el-table-column prop="machine_nos" label="识别/合同机台号" min-width="170" />
-        <el-table-column prop="uploader" label="上传人" width="130" />
-        <el-table-column prop="uploaded_at" label="上传时间" width="170" />
-        <el-table-column label="操作" width="220">
-          <template #default="{ row }">
-            <el-button link @click="previewPendingUpload(row)">预览附件</el-button>
-            <el-button link @click="downloadPendingUpload(row)">下载</el-button>
-            <el-button link type="primary" @click="openProcessUpload(row)">处理</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!pendingUploadsLoading && !pendingUploads.length" description="暂无待处理的交付信息" />
-      <template #footer>
-        <el-button @click="pendingUploadsVisible = false">关闭</el-button>
-        <el-button :loading="pendingUploadsLoading" @click="loadPendingUploads">刷新</el-button>
-      </template>
-    </el-dialog>
 
     <el-dialog v-model="processVisible" title="处理交付信息：查看合同、填写信息并选择机台" width="980px">
       <el-descriptions v-if="processUpload" :column="2" border size="small" class="contract-info">
@@ -267,11 +309,23 @@ const machinePageSize = 50;
 const machineTotal = ref(0);
 const machineError = ref("");
 let machineRequest = 0;
-// 交付信息上传（待处理）：V8 操作人员查看附件后手动选择机台处理。
-const pendingUploads = ref<any[]>([]);
-const pendingUploadsLoading = ref(false);
-const pendingUploadsVisible = ref(false);
+// 交付信息处理：默认主视图；机台列表保留在第二个 Tab。
+const activeTab = ref("delivery");
+const deliveryUploads = ref<any[]>([]);
+const deliveryLoading = ref(false);
+const deliveryError = ref("");
+const deliveryStatus = ref("pending");
+const deliveryKeyword = ref("");
 const pendingUploadCount = ref(0);
+const filteredDeliveryUploads = computed(() => {
+  const search = deliveryKeyword.value.trim().toLowerCase();
+  if (!search) return deliveryUploads.value;
+  return deliveryUploads.value.filter((row) =>
+    [row.file_name, row.machine_nos, row.buyer_name, row.buyer_address, row.uploader]
+      .map((value) => String(value || "").toLowerCase())
+      .some((value) => value.includes(search)),
+  );
+});
 const processVisible = ref(false);
 const processUpload = ref<any>(null);
 const processBusy = ref(false);
@@ -385,23 +439,36 @@ const confirmCustomerShipping = async () => {
     shippingBusy.value = false;
   }
 };
-const loadPendingUploads = async () => {
-  pendingUploadsLoading.value = true;
+const loadDeliveryUploads = async () => {
+  deliveryLoading.value = true;
+  deliveryError.value = "";
+  try {
+    const response = await apiGet<any>("/inventory/delivery-info-uploads", {
+      params: { status: deliveryStatus.value || undefined, limit: 100 },
+    });
+    deliveryUploads.value = response.data || [];
+    if (deliveryStatus.value !== "processed") {
+      pendingUploadCount.value = deliveryUploads.value.filter(
+        (row) => row.status !== "processed",
+      ).length;
+    }
+  } catch (error) {
+    deliveryUploads.value = [];
+    deliveryError.value =
+      getApiErrorMessage(error) || "交付信息加载失败，请重试";
+  } finally {
+    deliveryLoading.value = false;
+  }
+};
+const loadPendingCount = async () => {
   try {
     const response = await apiGet<any>("/inventory/delivery-info-uploads", {
       params: { status: "pending", limit: 100 },
     });
-    pendingUploads.value = response.data || [];
-    pendingUploadCount.value = pendingUploads.value.length;
-  } catch (error) {
+    pendingUploadCount.value = (response.data || []).length;
+  } catch {
     pendingUploadCount.value = 0;
-  } finally {
-    pendingUploadsLoading.value = false;
   }
-};
-const openPendingUploads = () => {
-  pendingUploadsVisible.value = true;
-  void loadPendingUploads();
 };
 const downloadPendingUpload = async (row: any) => {
   try {
@@ -541,7 +608,7 @@ const confirmProcessUpload = async () => {
     });
     ElMessage.success("交付信息已处理，合同已关联到所选机台");
     clearProcessSelection();
-    await Promise.all([load(), loadPendingUploads()]);
+    await Promise.all([load(), loadDeliveryUploads(), loadPendingCount()]);
   } catch (error) {
     ElMessage.error(getApiErrorMessage(error) || "处理失败，请重试");
   } finally {
@@ -550,7 +617,8 @@ const confirmProcessUpload = async () => {
 };
 onMounted(() => {
   void load();
-  void loadPendingUploads();
+  void loadDeliveryUploads();
+  void loadPendingCount();
 });
 </script>
 <style scoped>
@@ -563,6 +631,43 @@ onMounted(() => {
 .hint {
   color: #606266;
   line-height: 1.6;
+}
+.customer-tabs {
+  margin-top: 8px;
+}
+.tab-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: #eaf2ff;
+  color: #1a5fa6;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+.delivery-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.delivery-toolbar .el-input {
+  max-width: 360px;
+}
+.delivery-count {
+  margin-left: auto;
+  color: #606266;
+  font-size: 13px;
+}
+.delivery-count strong {
+  color: #e6a23c;
+  font-size: 16px;
+}
+.delivery-uploads-table {
+  margin-top: 8px;
 }
 .el-pagination {
   margin-top: 16px;
@@ -594,5 +699,3 @@ onMounted(() => {
 .contract-section-title { margin: 16px 0 8px; font-size: 14px; }
 .upload-scope { width: 180px; margin: 12px 0 4px; }
 </style>
-
-
