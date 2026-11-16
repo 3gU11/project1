@@ -77,10 +77,10 @@
           description="暂无交付信息"
         />
       </el-tab-pane>
-      <el-tab-pane label="机台与出货" name="machines">
+      <el-tab-pane label="机台清单" name="machines">
         <h2>东莞机台</h2>
         <p class="hint">
-          默认展示全部状态的东莞现货机台，实际状态和库位以各行显示为准。订单状态跟随关联的原销售订单。
+          用于核对进入客户成品的机台与交付信息状态；确认出货请到「发货复核」处理。
         </p>
         <div class="toolbar">
           <el-input
@@ -90,20 +90,6 @@
             @keyup.enter="searchMachines"
             @clear="searchMachines"
           />
-          <el-select
-            v-model="machineStatus"
-            placeholder="全部机台状态"
-            clearable
-            style="min-width: 180px"
-            @change="searchMachines"
-          >
-            <el-option
-              v-for="status in machineStatuses"
-              :key="status"
-              :label="status"
-              :value="status"
-            />
-          </el-select>
           <el-button type="primary" :loading="loading" @click="searchMachines"
             >查询 / 刷新</el-button
           >
@@ -138,27 +124,8 @@
             {{ row.delivery_info_file_name }}
           </div>
         </template>
-      </el-table-column><el-table-column prop="Location_Code" label="库位" /><el-table-column
-        label="订单状态"
-        min-width="130"
-      >
-        <template #default="{ row }"
-          ><el-tag
-            :type="row.order_status_label === '已完成' ? 'success' : 'primary'"
-            >{{ row.order_status_label || "状态暂不可用" }}</el-tag
-          ></template
-        >
       </el-table-column>
-      <el-table-column
-        prop="状态"
-        label="机台状态"
-        min-width="150"
-      /><el-table-column label="操作" width="120"
-        ><template #default="{ row }"
-          ><el-button link type="primary" @click="openContract(row)">确认出货</el-button></template
-        ></el-table-column
-      ></el-table
-    >
+    </el-table>
     <el-pagination
       v-model:current-page="machinePage"
       :page-size="machinePageSize"
@@ -168,47 +135,6 @@
     />
       </el-tab-pane>
     </el-tabs>
-    <el-dialog v-model="fileVisible" :title="fileTitle" width="700px"
-      ><el-descriptions v-if="contractRow" :column="2" border size="small" class="contract-info">
-        <el-descriptions-item label="流水号">{{ contractRow["流水号"] }}</el-descriptions-item>
-        <el-descriptions-item label="机型">{{ contractRow["机型"] }}</el-descriptions-item>
-        <el-descriptions-item label="原销售订单">{{ contractRow["占用订单号"] || "—" }}</el-descriptions-item>
-        <el-descriptions-item label="当前状态">{{ contractRow["状态"] || "—" }}</el-descriptions-item>
-      </el-descriptions>
-      <el-alert
-        v-if="contractRow"
-        :title="
-          contractRow.delivery_info_uploaded
-            ? `交付信息：已上传${contractRow.delivery_info_file_name ? '（' + contractRow.delivery_info_file_name + '）' : ''}`
-            : '交付信息：未上传（东莞回传订货合同）'
-        "
-        :type="contractRow.delivery_info_uploaded ? 'success' : 'warning'"
-        :closable="false"
-        show-icon
-        class="delivery-info-alert"
-      />
-      <template v-if="contractRow">
-        <h3 class="contract-section-title">工厂发往东莞仓库总合同</h3>
-        <div v-for="f in orderFiles" :key="`order-${f.file_name}`" class="file">{{ f.file_name }}</div>
-        <el-empty v-if="!orderFiles.length" description="暂无订单总合同附件" />
-        <h3 class="contract-section-title">当前机台东莞出货合同</h3>
-        <div v-for="f in machineFiles" :key="`machine-${f.file_name}`" class="file">{{ f.file_name }}</div>
-        <el-empty v-if="!machineFiles.length" description="暂无当前机台合同附件" />
-        <el-select v-model="uploadScope" class="upload-scope" placeholder="选择附件归属">
-          <el-option label="订单总合同" value="order" />
-          <el-option label="当前机台小合同" value="machine" />
-        </el-select>
-      </template>
-      ><el-upload
-        drag
-        :auto-upload="false"
-        :show-file-list="false"
-        :on-change="uploadFile"
-        ><div>拖入文件或点击上传</div></el-upload
-      >
-      <template #footer><el-button @click="fileVisible = false">关闭</el-button><el-button type="primary" :loading="shippingBusy" @click="confirmCustomerShipping">确认出货</el-button></template>
-    /></el-dialog>
-
     <el-dialog v-model="processVisible" title="处理交付信息：查看合同、填写信息并选择机台" width="980px">
       <el-descriptions v-if="processUpload" :column="2" border size="small" class="contract-info">
         <el-descriptions-item label="附件">{{ processUpload.file_name }}</el-descriptions-item>
@@ -293,17 +219,7 @@ import { ElMessage } from "element-plus";
 import { apiDownloadBlob, apiGet, apiGetBlobUrl, apiPost, getApiErrorMessage } from "../utils/request";
 const keyword = ref(""),
   rows = ref<any[]>([]),
-  loading = ref(false),
-  fileVisible = ref(false),
-  fileTitle = ref(""),
-  orderFiles = ref<any[]>([]),
-  machineFiles = ref<any[]>([]),
-  fileRow = ref<any>(),
-  contractRow = ref<any>(),
-  shippingBusy = ref(false);
-const uploadScope = ref<"order" | "machine">("machine");
-const machineStatus = ref("");
-const machineStatuses = ref<string[]>([]);
+  loading = ref(false);
 const machinePage = ref(1);
 const machinePageSize = 50;
 const machineTotal = ref(0);
@@ -351,12 +267,10 @@ const load = async () => {
     const response = await apiGet<{
       data: any[];
       total: number;
-      statuses: string[];
     }>("/inventory/customer-finished-goods", {
       params: {
         customer: "东莞",
         keyword: keyword.value,
-        machine_status: machineStatus.value,
         skip: (machinePage.value - 1) * machinePageSize,
         limit: machinePageSize,
       },
@@ -364,7 +278,6 @@ const load = async () => {
     if (requestId !== machineRequest) return;
     rows.value = response.data || [];
     machineTotal.value = response.total || 0;
-    machineStatuses.value = response.statuses || [];
   } catch (error) {
     if (requestId !== machineRequest) return;
     rows.value = [];
@@ -380,65 +293,6 @@ const searchMachines = () => {
   void load();
 };
 
-const openContract = async (r: any) => {
-  fileRow.value = r;
-  contractRow.value = r;
-  uploadScope.value = "machine";
-  fileTitle.value = "确认出货：" + r["流水号"];
-  const orderContract = String(r["合同号"] || r["占用订单号"] || "").trim();
-  const [orderResult, machineResult] = await Promise.all([
-    orderContract ? apiGet<any>("/planning/contract/" + encodeURIComponent(orderContract) + "/files") : Promise.resolve({ data: [] }),
-    apiGet<any>("/planning/contract/" + encodeURIComponent(machineContractId(r)) + "/files"),
-  ]);
-  orderFiles.value = orderResult.data || [];
-  machineFiles.value = machineResult.data || [];
-  fileVisible.value = true;
-};
-const machineContractId = (r: any) => `DG-SHIPPING-${String(r["占用订单号"] || "ORDER").trim()}-${String(r["流水号"] || "MACHINE").trim()}`;
-const uploadFile = async (u: any) => {
-  const fd = new FormData();
-  fd.append("file", u.raw);
-  await apiPost(
-    "/planning/contract/" +
-      encodeURIComponent(uploadScope.value === "order"
-        ? String(fileRow.value["合同号"] || fileRow.value["占用订单号"] || "ORDER").trim()
-        : machineContractId(fileRow.value)) +
-      "/files",
-    fd,
-    {
-      params: {
-        customer_name: "东莞",
-        uploader_name: "Web",
-      },
-      headers: { "Content-Type": "multipart/form-data" },
-    },
-  );
-  ElMessage.success("附件上传成功");
-  openContract(fileRow.value);
-};
-const confirmCustomerShipping = async () => {
-  const row = contractRow.value;
-  if (!row || shippingBusy.value) return;
-  const serialNo = String(row["流水号"] || "").trim();
-  const orderNo = String(row["占用订单号"] || "").trim();
-  if (!serialNo || !orderNo) {
-    ElMessage.error("机台缺少流水号或原销售订单，无法确认出货");
-    return;
-  }
-  shippingBusy.value = true;
-  try {
-    const workflowResponse = await apiPost("/inventory/shipping/confirm", { serial_nos: [serialNo], expected_order_no: orderNo }, { timeout: 120000 });
-    if ((workflowResponse as any)?.approval_pending) { ElMessage.info((workflowResponse as any).message); window.dispatchEvent(new Event('workflow-pending-updated')); return }
-
-    ElMessage.success("确认出货成功");
-    fileVisible.value = false;
-    await load();
-  } catch (error) {
-    ElMessage.error(getApiErrorMessage(error) || "确认出货失败，请刷新后重试");
-  } finally {
-    shippingBusy.value = false;
-  }
-};
 const loadDeliveryUploads = async () => {
   deliveryLoading.value = true;
   deliveryError.value = "";
@@ -682,7 +536,6 @@ onMounted(() => {
   border-bottom: 1px solid #eee;
 }
 .contract-info { margin-bottom: 16px; }
-.delivery-info-alert { margin-bottom: 16px; }
 .process-search { margin-top: 14px; }
 .delivery-info-preview {
   width: 100%;
