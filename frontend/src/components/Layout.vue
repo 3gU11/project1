@@ -24,30 +24,41 @@
           v-for="section in menuSections"
           :key="section.key"
           class="menu-group"
-          :class="{ 'workflow-group': section.key === 'workflow' }"
+          :class="{ 'workflow-group': section.key === 'workflow', 'is-collapsed': isSectionCollapsed(section.key) }"
         >
-          <div class="group-title">{{ section.icon }} {{ section.title }}</div>
           <button
-            v-for="item in section.items"
-            :key="item.path"
             type="button"
-            class="menu-btn"
-            :class="{ active: isActive(item.path) }"
-            @mouseenter="preloadRoute(item.path)"
-            @click="go(item.path)"
+            class="group-title group-toggle"
+            :aria-expanded="!isSectionCollapsed(section.key)"
+            :title="isSectionCollapsed(section.key) ? '展开' : '折叠'"
+            @click="toggleSection(section.key)"
           >
-            {{ item.label }}
-            <span
-              v-if="item.path === '/dealer-orders' && dealerPendingCount > 0"
-              class="menu-badge"
-              >{{ dealerPendingCount }}</span
-            >
-            <span
-              v-if="(item.path === '/approval-center' || item.path === '/workflow/models') && workflowPendingCount > 0"
-              class="menu-badge"
-              >{{ workflowPendingCount > 99 ? '99+' : workflowPendingCount }}</span
-            >
+            <span class="group-label">{{ section.icon }} {{ section.title }}</span>
+            <span class="group-caret">{{ isSectionCollapsed(section.key) ? '▸' : '▾' }}</span>
           </button>
+          <div v-show="!isSectionCollapsed(section.key)" class="group-items">
+            <button
+              v-for="item in section.items"
+              :key="item.path"
+              type="button"
+              class="menu-btn"
+              :class="{ active: isActive(item.path) }"
+              @mouseenter="preloadRoute(item.path)"
+              @click="go(item.path)"
+            >
+              {{ item.label }}
+              <span
+                v-if="item.path === '/dealer-orders' && dealerPendingCount > 0"
+                class="menu-badge"
+                >{{ dealerPendingCount }}</span
+              >
+              <span
+                v-if="(item.path === '/approval-center' || item.path === '/workflow/models') && workflowPendingCount > 0"
+                class="menu-badge"
+                >{{ workflowPendingCount > 99 ? '99+' : workflowPendingCount }}</span
+              >
+            </button>
+          </div>
         </div>
       </template>
     </aside>
@@ -74,6 +85,30 @@ const userStore = useUserStore()
 const modelDictionaryStore = useModelDictionaryStore()
 const router = useRouter()
 const sidebarCollapsed = ref(false)
+const SIDEBAR_SECTIONS_KEY = 'v8.sidebar.collapsedSections'
+const readCollapsedSections = (): string[] => {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_SECTIONS_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.map(String) : []
+  } catch {
+    return []
+  }
+}
+const collapsedSections = ref<string[]>(readCollapsedSections())
+const isSectionCollapsed = (key: string) => collapsedSections.value.includes(key)
+const toggleSection = (key: string) => {
+  if (isSectionCollapsed(key)) {
+    collapsedSections.value = collapsedSections.value.filter((item) => item !== key)
+  } else {
+    collapsedSections.value = [...collapsedSections.value, key]
+  }
+  try {
+    window.localStorage.setItem(SIDEBAR_SECTIONS_KEY, JSON.stringify(collapsedSections.value))
+  } catch {
+    // 隐私模式下存储不可用时忽略，仅当前会话生效。
+  }
+}
 const isMobile = ref(false)
 const mobileMenuOpen = ref(false)
 let warmupHandle: number | null = null
@@ -373,10 +408,33 @@ watch(() => userStore.isAuthenticated, (newVal) => {
   padding-top: 12px;
 }
 .group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #6b7280;
+  font-family: inherit;
   font-size: 15px;
   margin-bottom: 10px;
   font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.group-title:hover {
+  color: #374151;
+}
+.group-caret {
+  flex: none;
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1;
+}
+.group-items {
+  display: block;
 }
 .menu-item {
   display: block;
