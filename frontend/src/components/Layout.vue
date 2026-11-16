@@ -189,8 +189,14 @@ const handleOrdersUpdated = (e?: Event) => {
 }
 
 const visibleMenus = computed(() => {
+  const onHome = router.currentRoute.value.path === '/'
   return getAccessibleMenus(userStore.userInfo?.permissions, userStore.userInfo?.role).filter((m) => {
     if (m.path.startsWith('/workflow/') || m.path === '/approval-center') return false
+    if (onHome) {
+      // 在首页时，侧边栏仅保留高频入口
+      const allowedInHome = ['/users', '/warehouse-dashboard', '/logs', '/traceability', '/model-dictionary', '/production-kanban', '/dealer-orders']
+      return allowedInHome.includes(m.path)
+    }
     return true
   })
 })
