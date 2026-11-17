@@ -101,7 +101,7 @@
       <el-table-column label="操作" width="360" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
-            <el-button size="small" type="success" :disabled="!canApprove(row)" @click.stop="openContractReview(row)">
+            <el-button size="small" type="success" :disabled="!canViewContract(row)" @click.stop="openContractReview(row)">
               {{ reviewButtonLabel(row) }}
             </el-button>
             <el-button size="small" type="danger" :disabled="!canReject(row)" @click.stop="rejectOrder(row)">驳回</el-button>
@@ -218,7 +218,7 @@
         <div class="note-box">{{ selectedOrder.review_note || '-' }}</div>
 
         <div class="drawer-actions">
-          <el-button :disabled="!canApprove(selectedOrder)" @click="openContractReview(selectedOrder)">
+          <el-button :disabled="!canViewContract(selectedOrder)" @click="openContractReview(selectedOrder)">
             {{ reviewButtonLabel(selectedOrder) }}
           </el-button>
           <el-button type="danger" :disabled="!canReject(selectedOrder)" @click="rejectOrder(selectedOrder)">驳回</el-button>
@@ -815,6 +815,8 @@ const canCancelDealerOrder = (row: DealerOrder) => {
     && !isFactoryPending(target)
     && !isFactoryPending(row)
 }
+// 合同附件是只读资料：待审核走"预览并审批"，其它状态（已通过/已转合同/已驳回等）也要能打开只读查看。
+const canViewContract = (row: DealerOrder) => !!String(row.order_no || '').trim()
 
 // 待审核显示"预览并审批"，其它状态一律只读查看合同附件。
 const reviewButtonLabel = (row: DealerOrder) => {

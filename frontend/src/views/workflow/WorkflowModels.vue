@@ -19,13 +19,13 @@
       </el-select>
     </div>
 
-    <section v-for="group in filteredGroups" :key="group.title" class="model-group">
+    <section v-for="group in pagedGroups" :key="group.title" class="model-group">
       <button class="group-head" type="button" @click="toggleGroup(group.title)">
         <span class="group-title"><span class="chevron" :class="{ expanded: isExpanded(group.title) }">›</span><strong>{{ group.title }}</strong></span>
-        <span class="group-count">{{ group.items.length }} 个流程</span>
+        <span class="group-count">{{ group.total }} 个流程</span>
       </button>
       <div v-if="isExpanded(group.title)" class="table-wrap">
-        <el-table v-loading="loading" :data="group.items" stripe>
+        <el-table v-loading="loading" :data="group.rows" stripe>
           <el-table-column prop="name" label="流程名称" min-width="180" />
           <el-table-column label="方向" width="90">
             <template #default="{ row }"><el-tag :type="row.direction === '逆向' ? 'warning' : 'success'" effect="plain">{{ row.direction }}</el-tag></template>
@@ -58,6 +58,15 @@
             </template>
           </el-table-column>
         </el-table>
+        <div v-if="group.total > PAGE_SIZE" class="group-pager">
+          <el-pagination
+            :current-page="group.page"
+            :page-size="PAGE_SIZE"
+            :total="group.total"
+            layout="total, prev, pager, next"
+            @current-change="(value: number) => setGroupPage(group.title, value)"
+          />
+        </div>
       </div>
     </section>
     <el-empty v-if="filteredGroups.length === 0" description="没有匹配的流程模型" />
@@ -745,6 +754,16 @@ onBeforeUnmount(() => {
 
 const categories = ['合同流程', '订单流程', '发货流程', '库存流程', '配货流程', '客户成品流程', '基础资料流程', '数据清理流程']
 const filteredGroups = computed(() => categories.map(category => ({ title: category, items: models.value.filter(item => item.category === category && (!direction.value || item.direction === direction.value) && (!mode.value || item.mode === mode.value) && (!keyword.value || `${item.name}${item.key}${item.object}`.toLowerCase().includes(keyword.value.toLowerCase()))) })).filter(group => group.items.length))
+// 每个流程分组单独分页，每页最多 10 条；筛选条件变化时回到第一页。
+const PAGE_SIZE = 10
+const groupPages = ref<Record<string, number>>({})
+const groupPageNo = (title: string, count: number) => Math.min(groupPages.value[title] || 1, Math.max(1, Math.ceil(count / PAGE_SIZE)))
+const setGroupPage = (title: string, page: number) => { groupPages.value = { ...groupPages.value, [title]: page } }
+const pagedGroups = computed(() => filteredGroups.value.map(group => {
+  const page = groupPageNo(group.title, group.items.length)
+  return { title: group.title, total: group.items.length, page, rows: group.items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) }
+}))
+watch([keyword, direction, mode], () => { groupPages.value = {} })
 const isExpanded = (title: string) => expanded.value.has(title)
 const toggleGroup = (title: string) => { const next = new Set(expanded.value); next.has(title) ? next.delete(title) : next.add(title); expanded.value = next }
 const statusType = (status: Model['status']) => status === '已发布' ? 'success' : status === '已停用' ? 'info' : 'warning'
@@ -864,6 +883,7 @@ const openHistory = async (row: Model) => {
 
 <style scoped>
 .workflow-page{padding:28px;max-width:1500px}.page-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}h1{margin:0 0 8px;font-size:24px;color:#1f2937}.workflow-badge{vertical-align:top;margin-left:8px}.intro{margin:0;color:#64748b}.toolbar{display:flex;gap:12px;margin-bottom:20px}.search-input{width:320px}.filter-select{width:160px}.model-group{margin-bottom:18px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;overflow:hidden}.group-head{display:flex;justify-content:space-between;align-items:center;width:100%;padding:14px 18px;border:0;background:#f8fafc;color:#1f2937;cursor:pointer;text-align:left}.group-head:hover{background:#f1f5f9}.group-title{display:flex;align-items:center;gap:8px}.group-count{font-size:13px;color:#94a3b8}.chevron{display:inline-block;font-size:22px;line-height:12px;transform:rotate(0deg);transition:transform .15s}.chevron.expanded{transform:rotate(90deg)}.table-wrap{border-top:1px solid #e5e7eb}.approval-mode{color:#d97706}.auto-mode{color:#059669}.version{display:block;color:#94a3b8;font-size:12px;margin-top:2px}.designer{display:grid;grid-template-columns:170px 1fr 240px;gap:12px;min-height:560px}.node-palette,.node-properties{border:1px solid #e5e7eb;padding:14px;background:#f8fafc}.palette-node{padding:10px;margin-top:8px;background:#fff;border:1px solid #dbe3ee;border-radius:6px;cursor:grab}.node-icon{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;margin-right:7px;border-radius:50%;background:#e0ecff;color:#2563eb}.palette-tip,.edge-help{font-size:12px;color:#64748b;line-height:1.6}.designer-canvas{border:1px solid #dbe3ee;overflow:auto}.canvas-toolbar{height:42px;padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e5e7eb;color:#64748b;font-size:12px}.canvas-board{position:relative;min-width:760px;height:510px;background-color:#fff;background-image:radial-gradient(#d7dee8 1px,transparent 1px);background-size:18px 18px}.canvas-board.preview{background-color:#f8fafc}.flow-node{position:absolute;width:110px;min-height:58px;padding:8px;border:2px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;box-shadow:0 2px 6px #00000012}.flow-node.selected{border-color:#2563eb;box-shadow:0 0 0 2px #93c5fd}.flow-node b,.flow-node small{display:block}.flow-node small{color:#64748b;font-size:11px}.canvas-empty{padding:220px;text-align:center;color:#94a3b8}.node-properties{background:#fff}.edge-help{margin-top:18px}.edge-help .el-tag{margin:3px}
+.group-pager{display:flex;justify-content:flex-end;padding:10px 12px;border-top:1px solid #eef2f7}
 @media (max-width:900px){.workflow-page{padding:16px}.toolbar{flex-wrap:wrap}.search-input{width:100%}.filter-select{flex:1;min-width:140px}.table-wrap{overflow-x:auto}}
  .flow-edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}.flow-node{z-index:1}.canvas-board.preview .flow-node{cursor:default}.preview-properties{pointer-events:none;opacity:.75}.field-help{display:block;color:#64748b;font-size:11px;line-height:1.5}
 .history-toolbar{display:flex;align-items:center;gap:14px;margin-bottom:12px}.history-meta{color:#64748b;font-size:13px}.history-board-wrap{border:0;overflow:visible}.history-board{min-width:0}
