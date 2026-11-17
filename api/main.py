@@ -1,8 +1,11 @@
 from pathlib import Path
 import asyncio
+import faulthandler
 import logging
 import os
 import re
+import subprocess
+import sys
 import time
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -60,6 +63,51 @@ def _install_log_redaction() -> None:
 
 _install_log_redaction()
 
+# 第三方 C 扩展（pandas / numpy / OCR 等）一旦发生访问违例，Python 层拿不到任何
+# 异常，整个 uvicorn 进程会被 Windows 直接结束，日志里连 traceback 都没有，表现
+# 就是「后端毫无征兆地关掉」。打开 faulthandler 后，崩溃瞬间会先往 stderr 输出一份
+# Python 调用栈，至少能定位到是哪个请求 / 后台任务触发的。
+try:
+    faulthandler.enable()
+except (AttributeError, OSError):  # pragma: no cover - 老版本解释器兜底
+    logger.warning("faulthandler unavailable; native crashes will not be logged")
+
+
+def _pandas_native_healthy() -> bool:
+    """用子进程探测 pandas 原生 datetime 模块是否可用。
+
+    当 pandas 的 C 扩展与解释器/元数据不匹配时（例如 3.x 二进制被标成 2.2.3），
+    第一次调用 ``pd.to_datetime`` 就会触发 0xC0000005 访问违例，进程直接被系统
+    杀掉。这种崩溃无法在进程内捕获，只能在启动时用子进程试一次，把隐患提前暴露
+    到启动日志里。
+    """
+    if os.getenv("V8_PANDAS_SELFCHECK", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return True
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", "import pandas as pd; pd.to_datetime('2024-01-01')"],
+            capture_output=True,
+            timeout=120,
+        )
+    except Exception as exc:  # 自检本身失败不应阻挡启动
+        logger.warning("pandas native self-check could not run: %s", exc)
+        return True
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        logger.critical(
+            "pandas 原生扩展自检失败(exit=%s)：任何 pd.to_datetime 调用都会让整个后端进程"
+            "被系统直接终止（访问违例 0xC0000005），日志里不会留下 traceback。"
+            "请重装与当前 Python 匹配的 pandas："
+            "`%s -m pip install --force-reinstall --only-binary=:all: pandas==2.3.3`。"
+            " 自检输出：%s",
+            proc.returncode,
+            sys.executable,
+            detail[-1000:] or "(空)",
+        )
+        return False
+    return True
+
+
 app = FastAPI(
     title="V8betaVer1.0 API",
     description="FastAPI layer for the Finished Goods Management System",
@@ -70,6 +118,7 @@ app = FastAPI(
 @app.on_event("startup")
 async def on_startup():
     _install_log_redaction()
+    _pandas_native_healthy()
     try:
         from contract_bridge.worker import worker_loop
         app.state.contract_bridge_task = asyncio.create_task(worker_loop())

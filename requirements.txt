@@ -2,7 +2,10 @@ fastapi==0.115.12
 uvicorn==0.34.0
 python-multipart==0.0.20
 SQLAlchemy==2.0.51
-pandas==2.2.3
+# pandas 2.2.3 没有 cp314 轮子；Python 3.14 环境上强装会出现原生 datetime
+# 模块与解释器不匹配，任何 pd.to_datetime 调用都会以 0xC0000005 访问违例
+# 直接把整个后端进程带走（无 traceback）。2.3.3 起提供 cp314 win_amd64 轮子。
+pandas==2.3.3
 openpyxl==3.1.5
 Pillow==12.3.0
 mammoth==1.12.0
