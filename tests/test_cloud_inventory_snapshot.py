@@ -70,7 +70,8 @@ def test_heightened_only_recognized_from_remark_and_legacy_batch_marker():
 
     for text in (sql, source):
         assert "TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'" in text
-        assert "LIKE '%附加%'" in text
+        # 批次号里的「附加」只表示附加机台/特殊机型，不等于加高；V8 库存页也不按该标记判加高。
+        assert "LIKE '%附加%'" not in text
         # 不从机型名判断加高（加高只出现在备注里，机型必须是字典值）
         assert "TRIM(COALESCE(`机型`, '')) LIKE '%加高%'" not in text
     assert "OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'" in source
@@ -118,6 +119,29 @@ def test_special_heightened_height_uses_default_height_rule():
     assert sync.is_special_heightened("FR-8060XS(PRO)", "Z轴加高至650")
     # “加高4轴”是配置描述，不是高度
     assert not sync.is_special_heightened("FR-8060XS(PRO)", "加高4轴")
+
+
+def test_extra_batch_marker_is_not_heightened():
+    sync = __import__("crud.cloud_dealer_order_sync", fromlist=["x"])
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE finished_goods_data ("
+                "`批次号` TEXT, `机型` TEXT, `状态` TEXT, `预计入库时间` TEXT, `合同备注` TEXT)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO finished_goods_data "
+                "(`批次号`, `机型`, `状态`, `预计入库时间`, `合同备注`) VALUES "
+                "('06-15附加', 'FL-1180XS(PRO)', '库存中（大机型区域08）', NULL, '')"
+            )
+        )
+        pending, stock = sync._special_heightened_units(connection)
+    # 「附加」批次不是加高，没有被特殊加高统计命中。
+    assert pending == {}
+    assert stock == {}
 
 
 def test_special_heightened_units_are_stripped_from_cloud_snapshot_rows():

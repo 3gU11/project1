@@ -133,8 +133,7 @@ BEGIN
           `预计入库时间` AS `source_expected_inbound_time`,
           TRIM(`机型`) AS `base_model`,
           (
-            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+            TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
           ) AS `is_high`
@@ -206,8 +205,7 @@ BEGIN
           TRIM(COALESCE(`批次号`, '')) AS `source_batch_no`,
           TRIM(`机型`) AS `base_model`,
           (
-            TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-            OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+            TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
             OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
           ) AS `is_high`
@@ -282,8 +280,7 @@ BEGIN
         `预计入库时间` AS `source_expected_inbound_time`,
         TRIM(`机型`) AS `base_model`,
         (
-          TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-          OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+          TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
         ) AS `is_high`
@@ -313,8 +310,7 @@ BEGIN
         TRIM(COALESCE(`批次号`, '')) AS `source_batch_no`,
         TRIM(`机型`) AS `base_model`,
         (
-          TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-          OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+          TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
           OR TRIM(COALESCE(`订单备注`, '')) LIKE '%加高%'
         ) AS `is_high`
