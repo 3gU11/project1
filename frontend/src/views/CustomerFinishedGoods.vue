@@ -58,7 +58,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="270" fixed="right">
+          <el-table-column label="操作" width="320" fixed="right">
             <template #default="{ row }">
               <el-button link @click="previewPendingUpload(row)">预览附件</el-button>
               <el-button link @click="downloadPendingUpload(row)">下载</el-button>
@@ -68,6 +68,15 @@
                 type="primary"
                 @click="openProcessUpload(row)"
                 >处理</el-button
+              >
+              <el-button
+                v-if="row.status === 'pending'"
+                link
+                type="danger"
+                :loading="deletingUploadId === row.id"
+                :disabled="deletingUploadId !== null"
+                @click="deletePendingUpload(row)"
+                >删除</el-button
               >
             </template>
           </el-table-column>
@@ -215,8 +224,8 @@
 </template>
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { ElMessage } from "element-plus";
-import { apiDownloadBlob, apiGet, apiGetBlobUrl, apiPost, getApiErrorMessage } from "../utils/request";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { apiDelete, apiDownloadBlob, apiGet, apiGetBlobUrl, apiPost, getApiErrorMessage } from "../utils/request";
 const keyword = ref(""),
   rows = ref<any[]>([]),
   loading = ref(false);
@@ -234,6 +243,7 @@ const deliveryError = ref("");
 const deliveryStatus = ref("pending");
 const deliveryKeyword = ref("");
 const pendingUploadCount = ref(0);
+const deletingUploadId = ref<number | string | null>(null);
 const filteredDeliveryUploads = computed(() => {
   const search = deliveryKeyword.value.trim().toLowerCase();
   if (!search) return deliveryUploads.value;
@@ -340,6 +350,34 @@ const downloadPendingUpload = async (row: any) => {
     );
   } catch (error) {
     ElMessage.error(getApiErrorMessage(error) || "附件下载失败");
+  }
+};
+const deletePendingUpload = async (row: any) => {
+  if (deletingUploadId.value !== null) return;
+  try {
+    await ElMessageBox.confirm(
+      `确定删除附件「${row.file_name || "交付信息附件"}」及其待处理记录吗？删除后无法恢复，请通知上传方重新上传。`,
+      "删除交付信息",
+      { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "取消" },
+    );
+  } catch {
+    return;
+  }
+  deletingUploadId.value = row.id;
+  try {
+    const result = await apiDelete<{ warnings?: string[] }>(
+      `/inventory/delivery-info-uploads/${row.id}`,
+    );
+    if (processUpload.value?.id === row.id) clearProcessSelection();
+    closePreview();
+    if (result.warnings?.length) ElMessage.warning(result.warnings.join("；"));
+    else ElMessage.success("交付信息已删除，请通知上传方重新上传");
+    await loadDeliveryUploads();
+    await loadPendingCount();
+  } catch (error) {
+    ElMessage.error(getApiErrorMessage(error) || "交付信息删除失败，请重试");
+  } finally {
+    deletingUploadId.value = null;
   }
 };
 /** 在线预览合同附件：操作人员对照合同填写购货单位/地址/机台号。 */

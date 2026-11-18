@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import shutil
@@ -21,7 +22,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, column, literal_column, select, table, text
 
 from api.routes.auth import get_current_user_context, require_permissions
 from config import BASE_DIR
@@ -30,6 +31,7 @@ from crud.delivery_info_recognition import recognize_delivery_info_upload
 from database import get_engine
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"}
@@ -225,6 +227,62 @@ class ProcessDeliveryInfoPayload(BaseModel):
     machine_nos: str = ""
 
 
+def _locked_upload_row(conn, upload_id: int) -> dict:
+    row = conn.execute(
+        select(literal_column("*"))
+        .select_from(table("delivery_info_uploads"))
+        .where(column("id") == upload_id)
+        .with_for_update()
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="交付信息上传记录不存在")
+    return dict(row)
+
+
+@router.delete("/delivery-info-uploads/{upload_id}")
+def delete_delivery_info_upload(
+    upload_id: int,
+    current_user: dict = Depends(require_permissions("SHIP_CONFIRM")),
+):
+    """删除不明的待处理上传；与处理操作锁定同一记录，避免删除已归档合同。"""
+    ensure_delivery_info_tables()
+    with get_engine().begin() as conn:
+        row = _locked_upload_row(conn, upload_id)
+        if _clean(row.get("status")) != "pending":
+            raise HTTPException(status_code=409, detail="仅可删除待处理的交付信息，已处理记录不能删除")
+        file_path = _clean(row.get("file_path"))
+        abs_path = os.path.realpath(os.path.join(BASE_DIR, file_path)) if file_path else ""
+        pending_root = os.path.realpath(PENDING_ROOT)
+        if abs_path:
+            try:
+                within_pending = os.path.normcase(os.path.commonpath([pending_root, abs_path])) == os.path.normcase(pending_root)
+            except ValueError:
+                within_pending = False
+            if not within_pending or abs_path == pending_root:
+                raise HTTPException(status_code=409, detail="附件路径异常，无法删除，请联系管理员")
+        conn.execute(text("DELETE FROM delivery_info_upload_machines WHERE upload_id=:id"), {"id": upload_id})
+        conn.execute(text("DELETE FROM delivery_info_uploads WHERE id=:id"), {"id": upload_id})
+    warnings = []
+    if abs_path:
+        try:
+            os.remove(abs_path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.exception("交付信息上传 #%s 已删除，待处理附件清理失败", upload_id)
+            warnings.append("记录已删除，但附件文件清理失败，请联系管理员清理")
+    try:
+        append_audit_log(
+            module="客户成品", action_type="删除交付信息上传", biz_type="交付信息",
+            content=f"删除待处理上传 #{upload_id}；附件：{_clean(row.get('file_name'))}",
+            user_id=_clean(current_user.get("username")),
+            username=_clean(current_user.get("name") or current_user.get("username") or "System"),
+        )
+    except Exception:
+        logger.exception("交付信息上传 #%s 删除操作日志写入失败", upload_id)
+    return {"uploadId": str(upload_id), "deleted": True, "warnings": warnings}
+
+
 @router.post("/delivery-info-uploads/{upload_id}/process")
 def process_delivery_info_upload(
     upload_id: int,
@@ -232,14 +290,14 @@ def process_delivery_info_upload(
     current_user: dict = Depends(require_permissions("SHIP_CONFIRM")),
 ):
     """手动选择机台处理：合同归档到订单总合同槽，并记录本次处理的机台。"""
-    row = _upload_row(upload_id)
-    if _clean(row.get("status")) == "processed":
-        raise HTTPException(status_code=409, detail="该交付信息已处理")
     serials = sorted({_clean(sn) for sn in payload.serial_nos if _clean(sn)})
     if not serials:
         raise HTTPException(status_code=422, detail="请选择机台")
     ensure_delivery_info_tables()
     with get_engine().begin() as conn:
+        row = _locked_upload_row(conn, upload_id)
+        if _clean(row.get("status")) != "pending":
+            raise HTTPException(status_code=409, detail="该交付信息已处理")
         machines = conn.execute(
             text("SELECT * FROM finished_goods_data WHERE `流水号` IN :sns")
             .bindparams(bindparam("sns", expanding=True)),
