@@ -27,4 +27,7 @@ if (-not $python) {
   $python = (Get-Command python.exe -ErrorAction Stop).Source
 }
 
+& $python (Join-Path $root 'scripts\check_delivery_dependencies.py')
+if ($LASTEXITCODE -ne 0) { throw 'Delivery attachment dependency check failed. Install the packages shown above before starting.' }
+
 & $python -m uvicorn api.main:app --host $env:UVICORN_HOST --port $env:UVICORN_PORT --log-level $env:UVICORN_LOG_LEVEL

@@ -284,6 +284,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $frontendDir 'package.json'))) { Fai
 
 $PythonExe = Resolve-PythonExe -requested $PythonExe -repoRoot $root
 Log "Python: $PythonExe"
+if (-not $DryRun) {
+  & $PythonExe (Join-Path $root 'scripts\check_delivery_dependencies.py')
+  if ($LASTEXITCODE -ne 0) { Fail 'Delivery attachment dependency check failed. Install the packages shown above before starting.' 1 }
+}
 
 $goCmd = Resolve-CommandSource 'go.exe'
 if (-not $goCmd) { $goCmd = Resolve-CommandSource 'go' }
