@@ -1499,7 +1499,22 @@ def transfer_reverse_approval(instance_no: str, operator_id: str, new_assignee_i
 
 def acquire_execution_lease(instance_no: str, worker_id: str, lease_seconds: int = 60):
     """Atomically acquire or renew an execution lease for an approved instance."""
+    from sqlalchemy.exc import OperationalError
+    from time import sleep
+
     ensure_workflow_tables()
+    for attempt in range(3):
+        try:
+            return _acquire_execution_lease_once(instance_no, worker_id, lease_seconds)
+        except OperationalError as exc:
+            # Retry only a confirmed deadlock after the entire transaction rolled back.
+            # Never replay the business command or retry an ambiguous commit failure.
+            if not exc.orig.args or exc.orig.args[0] != 1213 or attempt == 2:
+                raise
+            sleep(0.05 * (attempt + 1))
+
+
+def _acquire_execution_lease_once(instance_no: str, worker_id: str, lease_seconds: int):
     token = uuid.uuid4().hex
     with get_engine().begin() as conn:
         row = conn.execute(text('SELECT * FROM workflow_instances WHERE instance_no=:no FOR UPDATE'), {'no': instance_no}).mappings().first()
@@ -1507,9 +1522,12 @@ def acquire_execution_lease(instance_no: str, worker_id: str, lease_seconds: int
             raise ValueError('流程不存在')
         if row['status'] not in ('已通过', '执行异常', '重试中'):
             raise ValueError(f'流程当前状态为{row["status"]}，不能执行')
+        # The locked parent instance serializes lease creation for this instance.
+        # Locking an absent child row takes a next-key/gap lock in InnoDB's
+        # REPEATABLE READ: concurrent first leases can block each other's INSERT.
         active = conn.execute(text("""SELECT * FROM workflow_execution_attempts
             WHERE instance_id=:id AND status='执行中' AND lease_expires_at > CURRENT_TIMESTAMP(6)
-            ORDER BY id DESC LIMIT 1 FOR UPDATE"""), {'id': row['id']}).mappings().first()
+            ORDER BY id DESC LIMIT 1"""), {'id': row['id']}).mappings().first()
         if active:
             raise ValueError('流程已有有效执行租约')
         latest = conn.execute(text('SELECT COALESCE(MAX(attempt_no),0) FROM workflow_execution_attempts WHERE instance_id=:id'), {'id': row['id']}).scalar()
