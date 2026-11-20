@@ -1925,9 +1925,12 @@ def mark_execution_failure(instance_no: str, worker_id: str, error: str):
         if not instance or instance['status'] not in ('执行中', '已通过'):
             return False
         before_status = str(instance['status'])
+        # The instance row lock above already serializes this instance's lease
+        # transactions; a locking read on the (possibly absent) attempt row only
+        # adds a gap lock that can deadlock with a concurrent lease INSERT.
         attempt = conn.execute(text("""SELECT id FROM workflow_execution_attempts
             WHERE instance_id=:id AND worker_id=:worker AND status='执行中'
-            ORDER BY id DESC LIMIT 1 FOR UPDATE"""),
+            ORDER BY id DESC LIMIT 1"""),
                                 {'id': instance['id'], 'worker': worker_id}).mappings().first()
         if attempt:
             conn.execute(text("""UPDATE workflow_execution_attempts
@@ -1949,6 +1952,45 @@ def mark_execution_failure(instance_no: str, worker_id: str, error: str):
             VALUES (:id,'执行异常',:worker,:before,'执行异常',:detail)"""),
                      {'id': instance['id'], 'worker': worker_id, 'before': before_status,
                       'detail': _json({'error': message})})
+        return True
+
+
+def release_unstarted_instance(instance_no: str, operator_id: str, error: str) -> bool:
+    """Fail an approved instance that never acquired an execution lease.
+
+    ``create_reverse_instance`` commits the instance and its object lock before
+    ``acquire_execution_lease`` runs. If lease acquisition dies on the database
+    (for example a deadlock that survives all retries), rolling back that second
+    transaction leaves the instance in "已通过" *and* keeps the machine locked,
+    so every later submission for the same machine is rejected. This cleanup
+    closes only such never-started instances; it must not touch an instance
+    another worker has already leased.
+    """
+    ensure_workflow_tables()
+    message = (error or '执行租约获取失败')[:1000]
+    with get_engine().begin() as conn:
+        instance = conn.execute(text('SELECT * FROM workflow_instances WHERE instance_no=:no FOR UPDATE'),
+                                 {'no': instance_no}).mappings().first()
+        if not instance or instance['status'] != '已通过':
+            return False
+        active = conn.execute(text("""SELECT 1 FROM workflow_execution_attempts
+            WHERE instance_id=:id AND status='执行中' AND lease_expires_at > CURRENT_TIMESTAMP(6)
+            LIMIT 1"""), {'id': instance['id']}).scalar()
+        if active:
+            return False
+        changed = conn.execute(text("""UPDATE workflow_instances
+            SET status='执行异常', result='失败', failure_reason=:error
+            WHERE id=:id AND status='已通过'"""),
+                                {'id': instance['id'], 'error': message})
+        if not changed.rowcount:
+            return False
+        conn.execute(text("""UPDATE workflow_object_locks SET lock_status='已释放', released_at=CURRENT_TIMESTAMP
+            WHERE instance_id=:id AND lock_status='占用中'"""), {'id': instance['id']})
+        conn.execute(text("""INSERT INTO workflow_audit_logs
+            (instance_id,action,operator_id,before_state,after_state,detail)
+            VALUES (:id,'执行异常',:worker,'已通过','执行异常',:detail)"""),
+                     {'id': instance['id'], 'worker': operator_id,
+                      'detail': _json({'error': message, 'stage': 'lease'})})
         return True
 
 

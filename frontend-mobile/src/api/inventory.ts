@@ -10,8 +10,10 @@ export const inventoryApi = {
   getInventory(params?: any) {
     return request.get('/inventory/', { params })
   },
-  inboundToSlot(data: { serial_no: string; slot_code: string; is_transfer?: boolean }) {
-    return request.post('/inventory/inbound-to-slot', data)
+  inboundToSlot(data: { serial_no: string; slot_code: string; is_transfer?: boolean }, requestId?: string) {
+    return request.post('/inventory/inbound-to-slot', data, requestId
+      ? { headers: { 'X-Request-ID': requestId } }
+      : undefined)
   },
   getLayout() {
     return request.get('/inventory/layout/default')

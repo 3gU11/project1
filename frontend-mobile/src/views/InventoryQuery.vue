@@ -412,13 +412,22 @@ const confirmInbound = async (slotCode?: string) => {
   submitting.value = true
   try {
     const serialNos = [...selectedSerialNos.value]
-    const promises = serialNos.map(sn =>
-      inventoryApi.inboundToSlot({
-        serial_no: sn,
-        slot_code: finalSlotCode
-      })
-    )
-    const results = await Promise.allSettled(promises)
+    // 一次入库多台时必须逐台提交：并发提交会让后端对同一批新实例同时抢执行租约，
+    // 在 InnoDB 间隙锁下触发 1213 死锁。串行提交与 PC 端入库保持一致，
+    // batchId 让同一轮提交的每台机台都有稳定的幂等键。
+    const batchId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const results: PromiseSettledResult<unknown>[] = []
+    for (const sn of serialNos) {
+      try {
+        const value = await inventoryApi.inboundToSlot(
+          { serial_no: sn, slot_code: finalSlotCode },
+          `mobile-inbound:${batchId}:${sn}`,
+        )
+        results.push({ status: 'fulfilled', value })
+      } catch (reason) {
+        results.push({ status: 'rejected', reason })
+      }
+    }
     const summary = summarizeBatchResults(serialNos, results)
     await load()
     selectedSerialNos.value = summary.failedSerialNos

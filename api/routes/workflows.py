@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import bindparam, text
+from sqlalchemy.exc import OperationalError
 from database import get_engine
 
 from api.routes.auth import get_current_user_context, require_roles
@@ -17,7 +18,8 @@ from crud.workflows import (ensure_workflow_tables, list_instances, list_models,
                             execute_dealer_order_cancel,
                             requeue_outbox_event, reclaim_expired_execution_leases, publish_workflow_model,
                             duplicate_workflow_model, set_workflow_model_enabled, delete_workflow_draft,
-                            workflow_editor_catalog, close_stale_reverse_instances)
+                            workflow_editor_catalog, close_stale_reverse_instances,
+                            release_unstarted_instance)
 from crud.workflows import REVERSE_WORKFLOW_RULES
 from crud.workflows import workflow_action_for_instance, dispatch_pending_model_notifications
 
@@ -350,7 +352,17 @@ def submit_reverse_instance(payload: ReverseCreateRequest,
         )
         execution_result = None
         if row.get('status') in {'已通过', '执行异常', '重试中'}:
-            acquire_execution_lease(row['instance_no'], ctx['username'])
+            try:
+                acquire_execution_lease(row['instance_no'], ctx['username'])
+            except OperationalError as exc:
+                # 实例和对象锁已在建实例事务中提交；租约事务回滚后若不做清理，
+                # 实例会永久停在“已通过”并占用机台，入库员重试只会得到冲突错误。
+                try:
+                    release_unstarted_instance(row['instance_no'], ctx['username'], str(exc))
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception('failed to release unstarted workflow instance')
+                raise
             auto_execution_started = True
             action = workflow_action_for_instance(row['instance_no'])
             execution_result = _action_executor(action)(row['instance_no'], ctx['username'])

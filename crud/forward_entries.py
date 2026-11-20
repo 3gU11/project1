@@ -104,7 +104,12 @@ def execute_forward_entry(instance_no, worker_id):
             raise ValueError('执行租约不存在')
         lease = dict(lease)
         _assert_lease_alive(conn, lease)
-        receipt = conn.execute(text('SELECT * FROM workflow_business_receipts WHERE instance_id=:id FOR UPDATE'), {'id': row['id']}).mappings().first()
+        # The instance row is already locked FOR UPDATE by the only lease holder,
+        # so a locking read here is unnecessary. On a brand-new instance the
+        # absent row made InnoDB take a next-key lock on the primary key's
+        # supremum in REPEATABLE READ; concurrent executions then deadlocked
+        # when they both tried to INSERT the receipt (1213).
+        receipt = conn.execute(text('SELECT * FROM workflow_business_receipts WHERE instance_id=:id'), {'id': row['id']}).mappings().first()
         if receipt:
             if receipt['status'] != '成功':
                 raise ValueError('上次业务执行未确认完成，为避免重复操作，请先核查业务结果后处理；不会自动重复执行')
