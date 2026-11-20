@@ -114,7 +114,7 @@ def _special_heightened_units(conn) -> tuple[dict[tuple, int], dict[tuple, int]]
             target = stock
         else:
             continue
-        is_heightened = "加高" in remarks or "加高" in batch_no or "附加" in batch_no
+        is_heightened = "加高" in remarks or "加高" in batch_no
         if not is_heightened or not is_special_heightened(model, remarks):
             continue
         target[key] = target.get(key, 0) + 1
@@ -1001,8 +1001,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       `预计入库时间` AS source_expected_inbound_time,
                       TRIM(`机型`) AS base_model,
                       (
-                        TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-                        OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                        TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
                         OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
                         {order_remark_high_clause}
                       ) AS is_high
@@ -1032,8 +1031,7 @@ def refresh_local_wechat_batch_summary() -> dict[str, Any]:
                       TRIM(COALESCE(`批次号`, '')) AS source_batch_no,
                       TRIM(`机型`) AS base_model,
                       (
-                        TRIM(COALESCE(`批次号`, '')) LIKE '%附加%'
-                        OR TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
+                        TRIM(COALESCE(`批次号`, '')) LIKE '%加高%'
                         OR TRIM(COALESCE(`合同备注`, '')) LIKE '%加高%'
                         {order_remark_high_clause}
                       ) AS is_high

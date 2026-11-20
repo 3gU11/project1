@@ -98,7 +98,7 @@
       <el-table-column prop="remark" label="原备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="extra_remark" label="附加备注" min-width="120" show-overflow-tooltip />
       <el-table-column prop="ERMQ" label="需改数量" width="80" align="center" />
-      <el-table-column label="操作" width="360" align="center" fixed="right">
+      <el-table-column label="操作" width="420" align="center" fixed="right">
         <template #default="{ row }">
           <div class="op-buttons">
             <el-button size="small" type="success" :disabled="!canViewContract(row)" @click.stop="openContractReview(row)">
@@ -1783,6 +1783,18 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
+}
+
+/* 四个操作按钮并排时避免文字被截断：去掉 Element Plus 相邻按钮默认的 12px 左边距，
+   统一用 gap 控制间距，并允许按钮内文字不换行。 */
+.op-buttons :deep(.el-button) {
+  padding-left: 9px;
+  padding-right: 9px;
+  white-space: nowrap;
+}
+
+.op-buttons :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .cancel-grid {
